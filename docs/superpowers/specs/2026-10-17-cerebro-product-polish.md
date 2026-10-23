@@ -1,6 +1,9 @@
 # Cerebro product polish M84 through M90
 
-**Draft for owner review · 2026-10-17. No product implementation is included.**
+**Design specification · 2026-10-17. Implementation subsequently authorized by the owner.**
+This document preserves the reference-based direction and acceptance contract. Actual changes,
+verification and remaining visual/native acceptance are recorded in the
+[implementation record](../plans/2026-10-17-m84-m90-implementation-record.md).
 
 Cerebro should feel like one carefully designed workspace when moving from a page to a
 record, database, board, conversation or file. Keep the Macro-inspired shell and use Morrow's
@@ -173,6 +176,6 @@ switch views without losing their context; and understand a failure without open
 The app looks related across all surfaces, but reading, working with data and talking to the
 assistant retain the proportions each activity needs.
 
-Approve or revise the proposed decisions and the first page/table compositions before
-implementation begins. The immediate implementation candidate is **M84 plus M85's title
-spike and one completed record page**, followed by a screenshot review before wider rollout.
+The owner subsequently authorized the complete M84–M90 sequence after a baseline commit.
+The [implementation record](../plans/2026-10-17-m84-m90-implementation-record.md) distinguishes
+implemented behavior, inspected specimens, automated verification and outstanding acceptance.

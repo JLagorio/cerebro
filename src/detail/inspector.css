@@ -1,0 +1,623 @@
+/* The page's side panel (DocSidePanel): one panel at a time, the page's full
+   height (components/pageFrame.css), over one scrolling body. Details is a
+   stack of folding sections (InspectorSection), each under a hairline, ending
+   with the page's Info; Comments and History are one list each, under a
+   title.
+
+   Calm by design (owner, 2026-10-18 — "the right side panel is disgusting";
+   then "still looks like shit" — the references are Tolaria's Properties
+   panel and Macro's side panel): one text size a step below the page,
+   sections ruled apart with a quiet header each, labels and values on one
+   grid (properties, a page's facts, an agent's), values drawn as chips where
+   they are choices or links, single-line rows elsewhere, acts drawn as rows
+   (InspectorAction), and no sentence a tooltip could say instead. */
+.cb-inspector {
+  /* The panel is read in passing, so its UI text is one step smaller than
+     the page's. Both spellings: CSS reads --fs-ui, Tailwind's text-ui reads
+     --text-ui, and each is resolved where it is declared. */
+  --fs-ui: 13px;
+  --lh-ui: 18px;
+  --text-ui: 13px;
+  --text-ui--line-height: 18px;
+  /* PropertyRow's label column and row pitch, narrowed for a 300px panel. */
+  --property-label-w: 100px;
+  --property-row-h: 30px;
+  /* Also contains its width, so its content never widens the frame's
+     column: only the toolbar's actions above it can (pageFrame.css). */
+  container: inspector / inline-size;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-app);
+  border-left: 1px solid var(--border-subtle);
+  color: var(--n-800);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+
+/* Folded beside a narrow page, it opens as a drawer over the column (M52). */
+.cb-inspector[data-overlay] {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  z-index: 20;
+  box-shadow: var(--shadow-lg);
+  outline: none;
+}
+
+/* ---- Title: Comments and History say which panel they are ---- */
+
+.cb-inspector-title {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 16px 10px;
+  border-bottom: 1px solid var(--n-100);
+}
+
+.cb-inspector-title h2 {
+  margin: 0;
+  color: var(--n-900);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.cb-inspector-title-count {
+  color: var(--text-meta);
+  font: 500 12px/16px var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Body ---- */
+
+.cb-inspector-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0 max(24px, var(--assistant-scroll-clearance, 0px));
+}
+
+/* A panel chosen in place of another on the same page (DocSidePanel's
+   `data-switched`) fades in as a page does: its title, then what it holds,
+   the first few sections each a step after the one above. The panel it
+   opened on came in with the panel itself, and moving to another page with
+   it open replays nothing. A fade, not a rise: a section that moved would
+   hold any menu opened in it meanwhile (`position: fixed` measures against a
+   moving parent). */
+.cb-inspector[data-switched] > .cb-inspector-title,
+.cb-inspector[data-switched] > .cb-inspector-body > * {
+  animation: cb-fade-in var(--motion-enter) backwards;
+}
+
+.cb-inspector[data-switched] > .cb-inspector-body > :nth-child(2) {
+  animation-delay: var(--dur-stagger);
+}
+
+.cb-inspector[data-switched] > .cb-inspector-body > :nth-child(3) {
+  animation-delay: calc(var(--dur-stagger) * 2);
+}
+
+.cb-inspector[data-switched] > .cb-inspector-body > :nth-child(4) {
+  animation-delay: calc(var(--dur-stagger) * 3);
+}
+
+.cb-inspector[data-switched] > .cb-inspector-body > :nth-child(n + 5) {
+  animation-delay: calc(var(--dur-stagger) * 4);
+}
+
+/* Comments and History: one pane each. Its 16px gutter is the sections' own,
+   so every panel shares one text edge. */
+.cb-inspector-pane {
+  padding: 12px 16px 8px;
+}
+
+/* Loaded, a pane's list fades in under its title rather than appearing
+   whole a beat after it. */
+.cb-inspector-pane > [data-testid='comments-panel'],
+.cb-inspector-pane > [data-testid='page-history'] {
+  animation: cb-fade-in var(--motion-enter) backwards;
+}
+
+/* History was drawn for hosts with no gutter of their own: its day labels
+   and notes inset 6px beside rows whose rule sits on the edge. Here the pane
+   is the gutter, so they land on it; the rows keep their own inset from that
+   rule. Scoped by `data-pane`, never reaching other hosts. */
+.cb-inspector-pane[data-pane='history']
+  [data-testid='page-history']
+  > p:not([data-testid='page-history-outside']),
+.cb-inspector-pane[data-pane='history']
+  :is(
+    [data-testid='page-history-day'],
+    [data-testid='page-history-more'],
+    [data-testid='page-history-seam']
+  ) {
+  padding-inline: 0;
+}
+
+/* Comments' Post, Reply and Comment: a quiet fill, not the app's primary
+   button — black in light, white in dark — which shouted from every card
+   and, disabled at 45%, still drew a grey slab under each empty box. */
+.cb-inspector-pane[data-pane='comments'] .cb-btn-primary {
+  background: var(--n-100);
+  color: var(--n-800);
+}
+
+.cb-inspector-pane[data-pane='comments'] .cb-btn-primary:hover:not([disabled]) {
+  background: var(--n-200);
+}
+
+.cb-inspector-pane[data-pane='comments'] .cb-btn-primary:active:not([disabled]) {
+  background: var(--n-300);
+}
+
+.cb-inspector-pane[data-pane='comments'] .cb-btn-primary[disabled] {
+  background: transparent;
+  color: var(--n-400);
+  opacity: 1;
+}
+
+/* ---- Sections: a hairline apart, a quiet header, the chevron on approach ---- */
+
+/* Every section draws the rule above it and sits 1px up, so the rest read as
+   one ruled sheet. The first draws none: the panel's head is open space,
+   the way Notion's properties start under its toolbar. */
+.cb-inspector-section {
+  margin-top: -1px;
+  padding: 4px 0 14px;
+  border-top: 1px solid var(--n-100);
+}
+
+.cb-inspector-body > .cb-inspector-section:first-child {
+  border-top-color: transparent;
+}
+
+.cb-inspector-section[data-open='false'],
+.cb-inspector-section[data-empty] {
+  padding-bottom: 4px;
+}
+
+.cb-inspector-section-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  margin: 0;
+  padding: 0 10px;
+}
+
+.cb-inspector-section-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--n-500);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--motion-hover),
+    color var(--motion-hover);
+}
+
+.cb-inspector-section-toggle:not([data-static]):hover {
+  background: var(--n-50);
+  color: var(--n-800);
+}
+
+.cb-inspector-section-toggle[data-static] {
+  cursor: default;
+}
+
+.cb-inspector-section-toggle:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 0;
+}
+
+.cb-inspector-section-label {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cb-inspector-section-count {
+  flex: none;
+  color: var(--n-400);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* What the section holds in a few words, at the header's end. */
+.cb-inspector-section-summary {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--n-400);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hidden at rest so a stack of sections reads as one sheet; shown on
+   approach, on focus, and always on a folded section, which must say it
+   holds more. The fold turns on the movement timing, which reduced motion
+   collapses (M46.2). */
+.cb-inspector-section-chevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--n-400);
+  opacity: 0;
+  transition:
+    opacity var(--motion-hover),
+    transform var(--motion-move);
+}
+
+.cb-inspector-section-summary + .cb-inspector-section-chevron {
+  margin-left: 0;
+}
+
+.cb-inspector-section-head:hover .cb-inspector-section-chevron,
+.cb-inspector-section-toggle:focus-visible .cb-inspector-section-chevron,
+.cb-inspector-section-toggle[aria-expanded='false'] .cb-inspector-section-chevron {
+  opacity: 1;
+}
+
+.cb-inspector-section-toggle[aria-expanded='false'] .cb-inspector-section-chevron {
+  transform: rotate(-90deg);
+}
+
+.cb-inspector-section-body {
+  padding: 0 16px;
+}
+
+/* Unfolded by hand, what it holds fades in under its header — a fade, so a
+   property opened in it at once is measured where it stays; a section that
+   was simply open when the panel came is simply there. */
+.cb-inspector-section[data-unfolded] > .cb-inspector-section-body:not([hidden]) {
+  animation: cb-fade-in var(--motion-enter) backwards;
+}
+
+/* The rows a "Show more" adds arrive under the ones already there. */
+.cb-inspector [data-testid='doc-link-row'][data-more] {
+  --rise: -4px;
+  animation: cb-rise-in var(--motion-enter) backwards;
+}
+
+/* ---- Facts: a label and a value on the property grid ---- */
+
+/* A page's Info and an agent's facts. The label sits on the text edge; the
+   value lands where a property's value text does (PropertyRow: the label
+   column, its 4px gap and the value's 6px padding, less the row's 6px pull). */
+.cb-inspector-facts {
+  display: grid;
+  grid-template-columns: calc(var(--property-label-w, 120px) - 2px) minmax(0, 1fr);
+  margin: 0;
+}
+
+.cb-inspector-facts dt,
+.cb-inspector-facts dd {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 28px;
+  margin: 0;
+}
+
+.cb-inspector-facts dt {
+  color: var(--n-500);
+}
+
+.cb-inspector-facts dd {
+  padding-left: 6px;
+  color: var(--n-800);
+}
+
+.cb-inspector-facts dd > * {
+  min-width: 0;
+}
+
+/* ---- Parts (InspectorParts.tsx) ---- */
+
+/* A group's label inside a section: one step quieter than the section's. */
+.cb-inspector-subhead {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 14px 0 4px;
+  color: var(--n-400);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.cb-inspector-subhead:first-child {
+  margin-top: 0;
+}
+
+.cb-inspector-subhead-count {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Acts as rows: icon, label and, for a keymap command, its keys. The hover
+   wash bleeds 8px past the text edge so the label lines up with the rows
+   above it. */
+.cb-inspector-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 6px -8px 0;
+}
+
+.cb-inspector-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--n-600);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--motion-hover),
+    color var(--motion-hover);
+}
+
+.cb-inspector-action:hover {
+  background: var(--n-50);
+  color: var(--n-900);
+}
+
+.cb-inspector-action:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+.cb-inspector-action:disabled {
+  background: transparent;
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.cb-inspector-action-icon {
+  flex: none;
+  color: var(--n-400);
+  transition: color var(--motion-hover);
+}
+
+.cb-inspector-action:hover .cb-inspector-action-icon {
+  color: var(--n-600);
+}
+
+.cb-inspector-action-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cb-inspector-action-keys {
+  display: inline-flex;
+  flex: none;
+}
+
+/* An ask of the assistant or of Knowledge: the AI's colour on its glyph, so a
+   stack of acts reads apart from the rows of content above it. */
+.cb-inspector-action[data-tone='ai'] .cb-inspector-action-icon,
+.cb-inspector-action[data-tone='ai']:hover .cb-inspector-action-icon {
+  color: var(--synapse-500);
+}
+
+.cb-inspector-action[data-tone='ai']:disabled .cb-inspector-action-icon {
+  color: var(--text-disabled);
+}
+
+/* The act a section exists for (Mark organized): full ink, a green mark. */
+.cb-inspector-action[data-tone='primary'] {
+  color: var(--n-900);
+  font-weight: 500;
+}
+
+.cb-inspector-action[data-tone='primary'] .cb-inspector-action-icon {
+  color: var(--success-500);
+}
+
+/* An ask (InspectorAsk, M91.14) is the Suggestion element drawn as an act
+   row: the row above, over the suggestion's own starter-row look. Its glyph
+   and label are the suggestion's label, laid out as an act's are. */
+.cb-inspector-action.cb-ai-suggestion {
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: var(--n-600);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  transition:
+    background var(--motion-hover),
+    color var(--motion-hover);
+}
+
+.cb-inspector-action.cb-ai-suggestion:hover {
+  background: var(--n-50);
+  color: var(--n-900);
+}
+
+.cb-inspector-action.cb-ai-suggestion:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+.cb-inspector-action.cb-ai-suggestion:disabled {
+  background: transparent;
+  color: var(--text-disabled);
+  opacity: 1;
+}
+
+.cb-inspector-action > .cb-ai-suggestion-text {
+  flex: 1;
+}
+
+.cb-inspector-action .cb-ai-suggestion-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* ---- Values ---- */
+
+/* A choice (select, status) is a chip: its option's tint, its ink, its dot.
+   FieldEditor hands the swatch over as variables on a single value. */
+.cb-inspector [data-testid='option-values'][data-single] {
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  background: var(--option-tint);
+  color: var(--option-ink);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.cb-inspector [data-testid='option-values'][data-single] > span:first-child {
+  width: 6px;
+  height: 6px;
+  margin: 0;
+}
+
+/* A link to another record is a chip of its own line: the record's type
+   glyph and title on a quiet fill (Tolaria's relationship rows). */
+.cb-inspector [data-testid='relation-chips'] {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+}
+
+.cb-inspector [data-testid='relation-chip'] {
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  background: var(--n-50);
+  color: var(--n-800);
+  line-height: 24px;
+}
+
+.cb-inspector [data-testid='relation-chip'] > svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+
+/* A value's chevron said "this opens a list" on every row; a column of them
+   was noise. The value is the target (pointer, focus ring), as in Tolaria and
+   Notion, so the panel draws none. */
+.cb-inspector
+  [data-testid='property-row']
+  :is(
+    [data-testid='option-chevron'],
+    [data-testid='person-chevron'],
+    [data-testid='relation-chevron']
+  ) {
+  display: none;
+}
+
+/* A chip is 22-24px; the value cell holding one narrows its padding so the
+   row keeps its pitch rather than growing past it. Text values keep theirs,
+   so their first line stays on the label's. */
+.cb-inspector
+  [data-testid='property-row']
+  [data-cell-primary]:has([data-single], [data-testid='relation-chip']) {
+  padding-block: 4px;
+}
+
+/* A loose key's text field (DocProperties): text like the values around it
+   until the pointer finds it, and the field's own ring on focus. Its text
+   lands where the other values' does (6px into the column). Specific enough
+   to outrank Input's injected sheet, which may load after this one. */
+.cb-inspector .cb-input.cb-inspector-input {
+  padding: 0 5px;
+  border-color: transparent;
+  border-radius: var(--r-xs);
+  background: transparent;
+  box-shadow: none;
+}
+
+.cb-inspector .cb-input.cb-inspector-input:hover {
+  background: var(--n-50);
+}
+
+.cb-inspector .cb-input.cb-inspector-input:focus-within {
+  border-color: var(--border-focus);
+  background: var(--n-0);
+  box-shadow: var(--ring);
+}
+
+/* A laid-out type's heading strip in the inspector (the Inbox's Organize
+   section): the page's one-line byline becomes rows on the property grid, so
+   its fields line up with the Type row above them and the stack below. */
+.cb-inspector .cb-heading-properties {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  margin-bottom: 0;
+}
+
+.cb-inspector .cb-heading-property {
+  gap: 0;
+  min-height: var(--property-row-h);
+}
+
+/* PropertyRow's label cell: its 6px padding inside the column, pulled 6px
+   left so the glyph sits on the section's text edge. */
+.cb-inspector .cb-heading-property-label {
+  gap: 6px;
+  width: var(--property-label-w);
+  max-width: none;
+  margin-left: -6px;
+  padding-inline: 6px;
+  color: var(--n-500);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+
+/* The strip's 13px glyph, centred in the row's 18px icon slot. */
+.cb-inspector .cb-heading-property-label > svg {
+  flex: none;
+  margin-inline: 2.5px;
+  color: var(--n-400);
+}
+
+.cb-inspector .cb-heading-property-value {
+  flex: 1;
+  max-width: none;
+  margin-left: 4px;
+}
+
+/* View details: the list's own last row, like the hidden-properties toggle. */
+.cb-inspector .cb-heading-details {
+  align-self: flex-start;
+  margin-left: -8px;
+  padding-inline: 8px;
+}

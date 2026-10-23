@@ -19,24 +19,32 @@ import { flushSync } from 'react-dom';
  * only labels something can wait, and should — every flush is a render in
  * the middle of the frame.
  */
-export function useMeasuredWidth({ beforePaint = false }: { beforePaint?: boolean } = {}): [
-  (el: HTMLElement | null) => (() => void) | undefined,
-  number | null,
-] {
+export function useMeasuredWidth({
+  beforePaint = false,
+  box = 'content',
+}: {
+  beforePaint?: boolean;
+  /** `border` measures padding and border too: the room a box takes, as when
+   *  a page fits its side panel to the toolbar actions above it. */
+  box?: 'content' | 'border';
+} = {}): [(el: HTMLElement | null) => (() => void) | undefined, number | null] {
   const [width, setWidth] = useState<number | null>(null);
   const ref = useCallback(
     (el: HTMLElement | null) => {
       if (el === null) return undefined;
       const observer = new ResizeObserver(([first]) => {
-        const next = first?.contentRect.width ?? 0;
+        const next =
+          box === 'border'
+            ? (first?.borderBoxSize?.[0]?.inlineSize ?? el.getBoundingClientRect().width)
+            : (first?.contentRect.width ?? 0);
         const update = () => setWidth(next > 0 ? Math.round(next) : null);
         if (beforePaint) flushSync(update);
         else update();
       });
-      observer.observe(el);
+      observer.observe(el, box === 'border' ? { box: 'border-box' } : undefined);
       return () => observer.disconnect();
     },
-    [beforePaint],
+    [beforePaint, box],
   );
   return [ref, width];
 }

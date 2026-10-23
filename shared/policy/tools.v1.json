@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "artifact_version": 32,
-  "rule_version": "tools/2026-10-15",
+  "artifact_version": 33,
+  "rule_version": "tools/2026-10-22",
   "server": "cerebro",
   "tokens": {
     "concept_types": {
@@ -194,7 +194,11 @@
       "renderer": "step",
       "fold": {
         "one": "read the vault overview",
-        "many": "read the vault overview {n} times"
+        "many": "read the vault overview {n} times",
+        "running": {
+          "one": "reading the vault overview",
+          "many": "reading the vault overview {n} times"
+        }
       },
       "icon": "compass",
       "always_load": true,
@@ -223,7 +227,11 @@
       "renderer": "step",
       "fold": {
         "one": "searched notes",
-        "many": "searched notes {n} times"
+        "many": "searched notes {n} times",
+        "running": {
+          "one": "searching notes",
+          "many": "searching notes {n} times"
+        }
       },
       "icon": "search",
       "always_load": true,
@@ -276,7 +284,11 @@
       "renderer": "step",
       "fold": {
         "one": "listed notes",
-        "many": "listed notes {n} times"
+        "many": "listed notes {n} times",
+        "running": {
+          "one": "listing notes",
+          "many": "listing notes {n} times"
+        }
       },
       "icon": "list-filter",
       "always_load": false,
@@ -332,7 +344,11 @@
       "renderer": "step",
       "fold": {
         "one": "read activity",
-        "many": "read activity {n} times"
+        "many": "read activity {n} times",
+        "running": {
+          "one": "reading activity",
+          "many": "reading activity {n} times"
+        }
       },
       "icon": "history",
       "always_load": false,
@@ -380,7 +396,11 @@
       "renderer": "step",
       "fold": {
         "one": "described a database",
-        "many": "described {n} databases"
+        "many": "described {n} databases",
+        "running": {
+          "one": "describing a database",
+          "many": "describing {n} databases"
+        }
       },
       "icon": "table-properties",
       "always_load": false,
@@ -415,7 +435,11 @@
       "renderer": "step",
       "fold": {
         "one": "queried records",
-        "many": "queried records {n} times"
+        "many": "queried records {n} times",
+        "running": {
+          "one": "querying records",
+          "many": "querying records {n} times"
+        }
       },
       "icon": "funnel",
       "always_load": false,
@@ -482,7 +506,11 @@
       "renderer": "step",
       "fold": {
         "one": "checked the agenda",
-        "many": "checked the agenda {n} times"
+        "many": "checked the agenda {n} times",
+        "running": {
+          "one": "checking the agenda",
+          "many": "checking the agenda {n} times"
+        }
       },
       "icon": "calendar-range",
       "always_load": false,
@@ -534,7 +562,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a note",
-        "many": "read {n} notes"
+        "many": "read {n} notes",
+        "running": {
+          "one": "reading a note",
+          "many": "reading {n} notes"
+        }
       },
       "icon": "file-text",
       "always_load": true,
@@ -573,7 +605,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a document",
-        "many": "read {n} documents"
+        "many": "read {n} documents",
+        "running": {
+          "one": "reading a document",
+          "many": "reading {n} documents"
+        }
       },
       "icon": "file-search",
       "always_load": false,
@@ -639,7 +675,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a sheet",
-        "many": "read sheets {n} times"
+        "many": "read sheets {n} times",
+        "running": {
+          "one": "reading a sheet",
+          "many": "reading sheets {n} times"
+        }
       },
       "icon": "sheet",
       "always_load": false,
@@ -689,7 +729,11 @@
       "renderer": "step",
       "fold": {
         "one": "calculated on a sheet",
-        "many": "calculated on sheets {n} times"
+        "many": "calculated on sheets {n} times",
+        "running": {
+          "one": "calculating on a sheet",
+          "many": "calculating on sheets {n} times"
+        }
       },
       "icon": "calculator",
       "always_load": false,
@@ -784,7 +828,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a whiteboard",
-        "many": "read whiteboards {n} times"
+        "many": "read whiteboards {n} times",
+        "running": {
+          "one": "reading a whiteboard",
+          "many": "reading whiteboards {n} times"
+        }
       },
       "icon": "shapes",
       "always_load": false,
@@ -834,7 +882,11 @@
       "renderer": "step",
       "fold": {
         "one": "read what Knowledge holds",
-        "many": "read Knowledge {n} times"
+        "many": "read Knowledge {n} times",
+        "running": {
+          "one": "reading what Knowledge holds",
+          "many": "reading Knowledge {n} times"
+        }
       },
       "icon": "library",
       "always_load": true,
@@ -1029,7 +1081,11 @@
       "renderer": "step",
       "fold": {
         "one": "listed the Inbox",
-        "many": "listed the Inbox {n} times"
+        "many": "listed the Inbox {n} times",
+        "running": {
+          "one": "listing the Inbox",
+          "many": "listing the Inbox {n} times"
+        }
       },
       "icon": "inbox",
       "always_load": false,
@@ -1095,6 +1151,11 @@
       "exempt": "writes no file; it books one later run of the calling agent itself, in the runtime database, under that agent's own grant",
       "renderer": "step",
       "fold": null,
+      "phrases": {
+        "running": "booking a follow-up",
+        "done": "booked a follow-up",
+        "failed": "failed to book a follow-up"
+      },
       "icon": "alarm-clock",
       "always_load": false,
       "confirmable": false,
@@ -1136,6 +1197,11 @@
       "exempt": null,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "creating a note",
+        "done": "created a note",
+        "failed": "failed to create a note"
+      },
       "icon": "file-plus",
       "always_load": false,
       "confirmable": true,
@@ -1194,6 +1260,11 @@
       "exempt": null,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "updating note properties",
+        "done": "updated note properties",
+        "failed": "failed to update note properties"
+      },
       "icon": "list",
       "always_load": false,
       "confirmable": true,
@@ -1238,6 +1309,11 @@
       "exempt": null,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "setting record fields",
+        "done": "set record fields",
+        "failed": "failed to set record fields"
+      },
       "icon": "list-checks",
       "always_load": false,
       "confirmable": true,
@@ -1289,6 +1365,11 @@
       "exempt": null,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "appending to a note",
+        "done": "appended to a note",
+        "failed": "failed to append to a note"
+      },
       "icon": "file-pen",
       "always_load": false,
       "confirmable": true,
@@ -1332,6 +1413,11 @@
       "exempt": null,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "editing a note",
+        "done": "edited a note",
+        "failed": "failed to edit a note"
+      },
       "icon": "replace",
       "always_load": false,
       "confirmable": true,
@@ -1397,6 +1483,11 @@
       "exempt": null,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "editing a sheet",
+        "done": "edited a sheet",
+        "failed": "failed to edit a sheet"
+      },
       "icon": "table-properties",
       "always_load": false,
       "confirmable": true,
@@ -1479,6 +1570,11 @@
       "exempt": null,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "creating a whiteboard",
+        "done": "created a whiteboard",
+        "failed": "failed to create a whiteboard"
+      },
       "icon": "square-plus",
       "always_load": false,
       "confirmable": true,
@@ -1599,6 +1695,11 @@
       "exempt": null,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "editing a whiteboard",
+        "done": "edited a whiteboard",
+        "failed": "failed to edit a whiteboard"
+      },
       "icon": "pen-tool",
       "always_load": false,
       "confirmable": true,
@@ -1718,6 +1819,11 @@
       "exempt": null,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "importing a Notion page",
+        "done": "imported a Notion page",
+        "failed": "failed to import a Notion page"
+      },
       "icon": "file-down",
       "always_load": false,
       "confirmable": false,
@@ -1760,6 +1866,11 @@
       "exempt": null,
       "renderer": "step",
       "fold": null,
+      "phrases": {
+        "running": "commenting on a note",
+        "done": "commented on a note",
+        "failed": "failed to comment on a note"
+      },
       "icon": "message-square-plus",
       "always_load": false,
       "confirmable": false,
@@ -1809,6 +1920,11 @@
       "exempt": null,
       "renderer": "step",
       "fold": null,
+      "phrases": {
+        "running": "replying to a comment",
+        "done": "replied to a comment",
+        "failed": "failed to reply to a comment"
+      },
       "icon": "message-square-reply",
       "always_load": false,
       "confirmable": false,
@@ -1855,6 +1971,11 @@
       "exempt": null,
       "renderer": "step",
       "fold": null,
+      "phrases": {
+        "running": "resolving a comment thread",
+        "done": "resolved a comment thread",
+        "failed": "failed to resolve a comment thread"
+      },
       "icon": "circle-check",
       "always_load": false,
       "confirmable": false,
@@ -1900,6 +2021,11 @@
       "exempt": "records findings into knowledge/ through the ledger; replacing a concept needs read access to it (M49.4)",
       "renderer": "concept",
       "fold": null,
+      "phrases": {
+        "running": "writing a concept",
+        "done": "wrote a concept",
+        "failed": "failed to write a concept"
+      },
       "icon": "brain",
       "always_load": false,
       "confirmable": false,
@@ -2004,6 +2130,11 @@
       "exempt": "stamps one concept's stale_after through the ledger; needs read access to it (M49.7)",
       "renderer": "concept",
       "fold": null,
+      "phrases": {
+        "running": "rechecking a concept",
+        "done": "rechecked a concept",
+        "failed": "failed to recheck a concept"
+      },
       "icon": "calendar-check",
       "always_load": false,
       "confirmable": false,
@@ -2045,6 +2176,11 @@
       "exempt": "sources/ is the agent's own corpus, not the user's records",
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "caching a source",
+        "done": "cached a source",
+        "failed": "failed to cache a source"
+      },
       "icon": "download",
       "always_load": false,
       "confirmable": false,
@@ -2161,6 +2297,11 @@
       "exempt": "shows a card; the user decides",
       "renderer": "step",
       "fold": null,
+      "phrases": {
+        "running": "proposing a filing",
+        "done": "proposed a filing",
+        "failed": "failed to propose a filing"
+      },
       "icon": "wand-sparkles",
       "always_load": false,
       "confirmable": false,
@@ -2211,6 +2352,11 @@
       "exempt": null,
       "renderer": "view",
       "fold": null,
+      "phrases": {
+        "running": "suggesting a view",
+        "done": "suggested a view",
+        "failed": "failed to suggest a view"
+      },
       "icon": "layout-grid",
       "always_load": false,
       "confirmable": false,
@@ -2268,6 +2414,11 @@
       "exempt": "moves the UI, changes nothing on disk",
       "renderer": "step",
       "fold": null,
+      "phrases": {
+        "running": "opening a note",
+        "done": "opened a note",
+        "failed": "failed to open a note"
+      },
       "icon": "eye",
       "always_load": false,
       "confirmable": false,
@@ -2300,6 +2451,11 @@
       "exempt": "moves the UI, changes nothing on disk",
       "renderer": "step",
       "fold": null,
+      "phrases": {
+        "running": "moving the app",
+        "done": "moved the app",
+        "failed": "failed to move the app"
+      },
       "icon": "compass",
       "always_load": false,
       "confirmable": false,
@@ -2313,6 +2469,7 @@
             "enum": [
               "inbox",
               "home",
+              "pages",
               "my_work",
               "studio",
               "history",
@@ -2401,6 +2558,11 @@
       "writes": true,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "writing a file",
+        "done": "wrote a file",
+        "failed": "failed to write a file"
+      },
       "icon": "pencil"
     },
     {
@@ -2410,6 +2572,11 @@
       "writes": true,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "editing a file",
+        "done": "edited a file",
+        "failed": "failed to edit a file"
+      },
       "icon": "file-pen"
     },
     {
@@ -2419,6 +2586,11 @@
       "writes": true,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "editing a file",
+        "done": "edited a file",
+        "failed": "failed to edit a file"
+      },
       "icon": "file-pen"
     },
     {
@@ -2428,6 +2600,11 @@
       "writes": true,
       "renderer": "change",
       "fold": null,
+      "phrases": {
+        "running": "editing a notebook",
+        "done": "edited a notebook",
+        "failed": "failed to edit a notebook"
+      },
       "icon": "notebook-pen"
     },
     {
@@ -2437,6 +2614,11 @@
       "writes": false,
       "renderer": "step",
       "fold": null,
+      "phrases": {
+        "running": "running a command",
+        "done": "ran a command",
+        "failed": "failed to run a command"
+      },
       "icon": "terminal"
     },
     {
@@ -2447,7 +2629,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a file",
-        "many": "read {n} files"
+        "many": "read {n} files",
+        "running": {
+          "one": "reading a file",
+          "many": "reading {n} files"
+        }
       },
       "icon": "file-text"
     },
@@ -2459,7 +2645,11 @@
       "renderer": "step",
       "fold": {
         "one": "listed files",
-        "many": "listed files {n} times"
+        "many": "listed files {n} times",
+        "running": {
+          "one": "listing files",
+          "many": "listing files {n} times"
+        }
       },
       "icon": "folder-open"
     },
@@ -2471,7 +2661,11 @@
       "renderer": "step",
       "fold": {
         "one": "searched files",
-        "many": "searched files {n} times"
+        "many": "searched files {n} times",
+        "running": {
+          "one": "searching files",
+          "many": "searching files {n} times"
+        }
       },
       "icon": "search"
     },
@@ -2482,6 +2676,11 @@
       "writes": false,
       "renderer": "step",
       "fold": null,
+      "phrases": {
+        "running": "fetching a page",
+        "done": "fetched a page",
+        "failed": "failed to fetch a page"
+      },
       "icon": "globe"
     },
     {
@@ -2491,14 +2690,22 @@
       "writes": false,
       "renderer": "step",
       "fold": null,
+      "phrases": {
+        "running": "searching the web",
+        "done": "searched the web",
+        "failed": "failed to search the web"
+      },
       "icon": "globe"
     },
     {
-      "name": "Task",
+      "name": "Agent",
+      "aliases": [
+        "Task"
+      ],
       "family": "delegate",
       "subject": "description",
       "writes": false,
-      "renderer": "step",
+      "renderer": "subagent",
       "fold": null,
       "icon": "bot"
     },
@@ -2509,6 +2716,11 @@
       "writes": false,
       "renderer": "step",
       "fold": null,
+      "phrases": {
+        "running": "asking you a question",
+        "done": "asked you a question",
+        "failed": "failed to ask you a question"
+      },
       "icon": "message-circle-question-mark"
     },
     {
@@ -2519,6 +2731,295 @@
       "renderer": "step",
       "fold": null,
       "icon": "clipboard-check"
+    },
+    {
+      "name": "EnterPlanMode",
+      "family": "plan",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "clipboard-list"
+    },
+    {
+      "name": "TodoWrite",
+      "family": "todo",
+      "subject": null,
+      "writes": false,
+      "renderer": "todo",
+      "fold": null,
+      "phrases": {
+        "running": "updating the plan",
+        "done": "updated the plan",
+        "failed": "failed to update the plan"
+      },
+      "icon": "list-todo"
+    },
+    {
+      "name": "TaskCreate",
+      "family": "task_list",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "list-plus"
+    },
+    {
+      "name": "TaskGet",
+      "family": "task_list",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "list-checks"
+    },
+    {
+      "name": "TaskList",
+      "family": "task_list",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "list"
+    },
+    {
+      "name": "TaskUpdate",
+      "family": "task_list",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "clipboard-pen"
+    },
+    {
+      "name": "TaskOutput",
+      "family": "background",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "scroll-text"
+    },
+    {
+      "name": "TaskStop",
+      "family": "background",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "circle-stop"
+    },
+    {
+      "name": "SendMessage",
+      "family": "cross_session",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "send"
+    },
+    {
+      "name": "ListAgents",
+      "family": "cross_session",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "users"
+    },
+    {
+      "name": "CronCreate",
+      "family": "schedule",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "calendar-plus"
+    },
+    {
+      "name": "CronDelete",
+      "family": "schedule",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "calendar-x"
+    },
+    {
+      "name": "CronList",
+      "family": "schedule",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "calendar-clock"
+    },
+    {
+      "name": "ScheduleWakeup",
+      "family": "schedule",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "alarm-clock"
+    },
+    {
+      "name": "RemoteTrigger",
+      "family": "schedule",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "radio-tower"
+    },
+    {
+      "name": "Artifact",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "app-window"
+    },
+    {
+      "name": "PushNotification",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "bell"
+    },
+    {
+      "name": "DesignSync",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "palette"
+    },
+    {
+      "name": "ReportFindings",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "flag"
+    },
+    {
+      "name": "Workflow",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "workflow"
+    },
+    {
+      "name": "EnterWorktree",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "git-branch-plus"
+    },
+    {
+      "name": "ExitWorktree",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "git-merge"
+    },
+    {
+      "name": "SendUserMessage",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "message-square"
+    },
+    {
+      "name": "REPL",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "square-terminal"
+    },
+    {
+      "name": "ListMcpResourcesTool",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "library"
+    },
+    {
+      "name": "ReadMcpResourceTool",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "book-open"
+    },
+    {
+      "name": "ReadMcpResourceDirTool",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "folder-tree"
+    },
+    {
+      "name": "LSP",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "braces"
+    },
+    {
+      "name": "Monitor",
+      "family": "outside",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "activity"
+    },
+    {
+      "name": "Skill",
+      "family": "skill",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "sparkles"
+    },
+    {
+      "name": "ToolSearch",
+      "family": "meta",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "phrases": {
+        "running": "finding tools",
+        "done": "found tools",
+        "failed": "failed to find tools"
+      },
+      "icon": "search-code"
     }
   ],
   "never_call": {

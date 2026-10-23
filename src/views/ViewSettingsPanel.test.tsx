@@ -5,9 +5,15 @@ import type { ColumnDef } from '@/engine/columns';
 import { buildSchema } from '@/engine/schema';
 import type { GroupSpec, ListDefinition, Presentation } from '@/engine/types';
 import { MAX_SORT_KEYS } from '@/engine/views';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { ViewSettingsPanel } from './ViewSettingsPanel';
 
 afterEach(cleanup);
+
+/** Picks `value` from the settings select named `name` — by its caption, or by
+ * its own label where a row has no caption. */
+const choose = (name: string, value: string) =>
+  chooseOption(screen.getByRole('button', { name }), { value });
 
 const fields: ColumnDef[] = [
   { name: 'status', kind: 'status' },
@@ -194,7 +200,7 @@ describe('card settings (M16.29)', () => {
   it('writes one card-size key, whichever card layout set it', () => {
     const { nextPresentation } = setup({ type: 'gallery' });
     openCards();
-    fireEvent.change(screen.getByDisplayValue('Medium'), { target: { value: 'large' } });
+    choose('Card size', 'large');
     expect(nextPresentation().cardSize).toBe('large');
     expect(nextPresentation().gallery).toBeUndefined();
   });
@@ -367,21 +373,19 @@ describe('chart controls (M44.2)', () => {
       hiddenG: ['active'],
     });
     openChart();
-    fireEvent.change(screen.getByDisplayValue('Bar'), { target: { value: 'number' } });
+    choose('Chart type', 'number');
     expect(nextPresentation().chart).toEqual({ kind: 'number' });
   });
 
   it('stores a band sort, and Declared order deletes it', () => {
     const first = chartSetup();
     openChart();
-    fireEvent.change(screen.getByDisplayValue('Declared order'), {
-      target: { value: 'value-desc' },
-    });
+    choose('Sort', 'value-desc');
     expect(first.nextPresentation().chart).toEqual({ sort: 'value-desc' });
     cleanup();
     const second = chartSetup({ sort: 'value-desc' });
     openChart();
-    fireEvent.change(screen.getByDisplayValue('Biggest first'), { target: { value: NONE } });
+    choose('Sort', NONE);
     expect(second.nextPresentation().chart).toBeUndefined();
   });
 
@@ -389,7 +393,7 @@ describe('chart controls (M44.2)', () => {
     const first = chartSetup();
     openChart();
     expect(screen.queryByRole('switch', { name: 'Shade by value' })).toBeNull();
-    fireEvent.change(screen.getByDisplayValue('By option colour'), { target: { value: 'blue' } });
+    choose('Palette', 'blue');
     expect(first.nextPresentation().chart).toEqual({ palette: 'blue' });
     cleanup();
     const second = chartSetup({ palette: 'blue' });
@@ -445,8 +449,20 @@ describe('chart controls (M44.2)', () => {
       hiddenG: ['low'],
     });
     openChart();
-    fireEvent.change(screen.getByDisplayValue('Bar'), { target: { value: 'donut' } });
+    choose('Chart type', 'donut');
     expect(nextPresentation().chart).toEqual({ kind: 'donut' });
+  });
+
+  /** Sum and Average ask for a number property; the ask is the select's
+   * placeholder, so no "nothing" row can be stored as a measure. */
+  it('a sum asks for its property, and a pick stores it', () => {
+    const { nextPresentation } = chartSetup({ agg: 'sum' });
+    openChart();
+    const of = screen.getByRole('button', { name: 'Of property' });
+    expect(of.textContent).toBe('Choose a number property…');
+    expect(optionLabels(of)).toEqual(['Estimate']);
+    chooseOption(of, 'Estimate');
+    expect(nextPresentation().chart).toEqual({ agg: 'sum', value: 'estimate' });
   });
 
   /** The old patch rebuilt from a four-key allowlist, so a hand-edited
@@ -475,12 +491,12 @@ describe('chart axis pickers (M44.3)', () => {
   it('the X axis select stores xField, and the View grouping sentinel deletes it', () => {
     const first = chartSetup();
     openChart();
-    fireEvent.change(screen.getByDisplayValue('View grouping'), { target: { value: 'priority' } });
+    choose('X axis', 'priority');
     expect(first.nextPresentation().chart).toEqual({ xField: 'priority' });
     cleanup();
     const second = chartSetup({ xField: 'priority' });
     openChart();
-    fireEvent.change(screen.getByDisplayValue('Priority'), { target: { value: NONE } });
+    choose('X axis', NONE);
     expect(second.nextPresentation().chart).toBeUndefined();
   });
 
@@ -489,7 +505,7 @@ describe('chart axis pickers (M44.3)', () => {
   it('the Group by select stores groupBy, and appears only for bar and line', () => {
     const first = chartSetup();
     openChart();
-    fireEvent.change(screen.getByDisplayValue('None'), { target: { value: 'priority' } });
+    choose('Group by', 'priority');
     expect(first.nextPresentation().chart).toEqual({ groupBy: 'priority' });
     cleanup();
     chartSetup({ kind: 'donut' });
@@ -523,7 +539,7 @@ describe('chart axis pickers (M44.3)', () => {
     const extra: ColumnDef[] = [{ name: 'team', kind: 'select' }];
     const first = chartSetup({ groupBy: 'team', hidden: ['todo'], hiddenG: ['a'] }, extra);
     openChart();
-    fireEvent.change(screen.getByDisplayValue('View grouping'), { target: { value: 'priority' } });
+    choose('X axis', 'priority');
     expect(first.nextPresentation().chart).toEqual({
       xField: 'priority',
       groupBy: 'team',
@@ -535,7 +551,7 @@ describe('chart axis pickers (M44.3)', () => {
       extra,
     );
     openChart();
-    fireEvent.change(screen.getByDisplayValue('Status'), { target: { value: 'team' } });
+    choose('Group by', 'team');
     expect(second.nextPresentation().chart).toEqual({
       xField: 'priority',
       groupBy: 'team',
@@ -553,7 +569,7 @@ describe('chart axis pickers (M44.3)', () => {
       extra,
     );
     openChart();
-    fireEvent.change(screen.getByDisplayValue('Priority'), { target: { value: 'status' } });
+    choose('X axis', 'status');
     expect(first.nextPresentation().chart).toEqual({
       xField: 'status',
       groupBy: 'team',
@@ -562,7 +578,7 @@ describe('chart axis pickers (M44.3)', () => {
     cleanup();
     const second = chartSetup({ groupBy: 'priority', hidden: ['todo'], hiddenG: ['low'] });
     openChart();
-    fireEvent.change(screen.getByDisplayValue('Priority'), { target: { value: NONE } });
+    choose('Group by', NONE);
     expect(second.nextPresentation().chart).toEqual({ hidden: ['todo'] });
   });
 
@@ -616,6 +632,44 @@ describe('sort page (M16.26)', () => {
     expect(screen.queryByText('Add a sort…')).toBeNull();
     expect(screen.getByText(new RegExp(`${MAX_SORT_KEYS} keys is the maximum`))).toBeTruthy();
   });
+
+  /** "Add a sort…" is the select's placeholder, not a row in it: the list
+   * holds only real keys, and every pick appends one. */
+  it('Add a sort appends the picked key ascending', () => {
+    const { nextPresentation } = setup(twoKeys);
+    fireEvent.click(screen.getByTestId('view-settings-sort'));
+    const add = screen.getByRole('button', { name: 'Add a sort' });
+    expect(add.textContent).toBe('Add a sort…');
+    expect(optionLabels(add)).not.toContain('Add a sort…');
+    chooseOption(add, 'Last modified');
+    expect(nextPresentation().sort).toEqual([...twoKeys.sort, { field: 'modifiedAt', dir: 'asc' }]);
+  });
+
+  it('a key’s own select re-points it and keeps its direction', () => {
+    const { nextPresentation } = setup(twoKeys);
+    fireEvent.click(screen.getByTestId('view-settings-sort'));
+    choose('Sort 2 property', 'title');
+    expect(nextPresentation().sort).toEqual([
+      { field: 'status', dir: 'asc' },
+      { field: 'title', dir: 'desc' },
+    ]);
+  });
+});
+
+describe('group page (M9.7)', () => {
+  it('Add a level appends a property level, and the level’s select re-points it', () => {
+    const first = setup();
+    fireEvent.click(screen.getByTestId('view-settings-group'));
+    const add = screen.getByRole('button', { name: 'Add a level' });
+    expect(add.textContent).toBe('Add a level…');
+    chooseOption(add, { value: 'property:priority' });
+    expect(first.nextPresentation().group).toEqual([{ field: 'priority' }]);
+    cleanup();
+    const second = setup({ group: [{ field: 'priority', dir: 'desc' }] });
+    fireEvent.click(screen.getByTestId('view-settings-group'));
+    choose('Group 1 property', 'property:status');
+    expect(second.nextPresentation().group).toEqual([{ field: 'status' }]);
+  });
 });
 
 /**
@@ -630,7 +684,7 @@ describe('sort page (M16.26)', () => {
 describe('the root page on a canvas (M29.46)', () => {
   it('does not offer Properties on a whiteboard, which draws no columns', () => {
     setup({ type: 'whiteboard' });
-    expect(screen.queryByText('Properties')).toBeNull();
+    expect(screen.queryByText('Manage properties')).toBeNull();
   });
 
   /** Filter, Sort and Load limit stay: they decide which records the canvas
@@ -644,7 +698,7 @@ describe('the root page on a canvas (M29.46)', () => {
 
   it('still offers Properties on a table', () => {
     setup({ type: 'table' });
-    expect(screen.getByText('Properties')).toBeTruthy();
+    expect(screen.getByText('Manage properties')).toBeTruthy();
   });
 });
 
@@ -711,9 +765,10 @@ describe('calendar span (M61.8)', () => {
   it('choosing Day writes calendarSpan day', () => {
     const { nextPresentation } = setup({ type: 'calendar', dateField: 'due' });
     fireEvent.click(screen.getByTestId('view-settings-date axis'));
-    const select = screen.getByTestId('view-calendar-span') as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(['month', 'week', 'day']);
-    fireEvent.change(select, { target: { value: 'day' } });
+    const select = screen.getByTestId('view-calendar-span');
+    expect(screen.getByRole('button', { name: 'Show calendar as' })).toBe(select);
+    expect(optionLabels(select)).toEqual(['Month', 'Week', 'Day']);
+    chooseOption(select, 'Day');
     expect(nextPresentation().calendarSpan).toBe('day');
   });
 });
@@ -724,9 +779,9 @@ describe('date grouping controls (M61.3)', () => {
     fireEvent.click(screen.getByTestId('view-settings-group'));
     expect(screen.getByText('Dates')).toBeTruthy();
     const select = screen.getByTestId('group-date-bucket-0');
-    expect((select as HTMLSelectElement).value).toBe('relative');
+    expect(select.getAttribute('data-value')).toBe('relative');
     expect(screen.queryByTestId('group-date-bucket-1')).toBeNull();
-    fireEvent.change(select, { target: { value: 'month' } });
+    chooseOption(select, { value: 'month' });
     expect(nextPresentation().group).toEqual([
       { field: 'due', dateBucket: 'month' },
       { field: 'status' },
@@ -737,7 +792,7 @@ describe('date grouping controls (M61.3)', () => {
       group: [{ field: 'due', dateBucket: 'week', dir: 'desc', hideEmpty: true }],
     });
     fireEvent.click(screen.getByTestId('view-settings-group'));
-    fireEvent.change(screen.getByTestId('group-date-bucket-0'), { target: { value: 'relative' } });
+    chooseOption(screen.getByTestId('group-date-bucket-0'), 'Relative');
     expect(nextPresentation().group).toEqual([{ field: 'due', dir: 'desc', hideEmpty: true }]);
   });
 });

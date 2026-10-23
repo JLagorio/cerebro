@@ -1,0 +1,65 @@
+/* A sheet's question about its selected cells (SheetAsk, M91.14): the
+   Prompt Input's anatomy in the DS field's dress — the question on a line of
+   its own, Ask quiet at its end — rather than the assistant's pill. Named
+   with the element's class beside ours, so the order the two stylesheets
+   load in never decides which wins. */
+.cb-sheet-ask-field.cb-ai-prompt-input {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 0;
+  padding: 6px 4px 4px 10px;
+  border: 1px solid var(--n-300);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  transition:
+    border-color var(--motion-hover),
+    box-shadow var(--motion-hover);
+}
+.cb-sheet-ask-field.cb-ai-prompt-input:hover {
+  border-color: var(--n-400);
+}
+.cb-sheet-ask-field.cb-ai-prompt-input:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-sheet-ask-field .cb-ai-prompt-input-body {
+  flex: none;
+}
+.cb-sheet-ask-field .cb-ai-prompt-input-textarea {
+  min-height: 20px;
+  max-height: 120px;
+  padding-right: 6px;
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+.cb-sheet-ask-field .cb-ai-prompt-input-footer {
+  justify-content: flex-end;
+  margin-left: 0;
+}
+
+/* Ask, as the DS small ghost button says it. */
+.cb-sheet-ask-field .cb-sheet-ask-submit {
+  width: auto;
+  height: var(--control-h-sm);
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--n-600);
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.cb-sheet-ask-field .cb-sheet-ask-submit:hover:not(:disabled),
+.cb-sheet-ask-field .cb-sheet-ask-submit:active:not(:disabled) {
+  background: var(--n-50);
+  color: var(--n-800);
+  scale: 1;
+}
+.cb-sheet-ask-field .cb-sheet-ask-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

@@ -1,6 +1,17 @@
 import { Fragment, useMemo, type CSSProperties, type ReactNode } from 'react';
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockContent,
+  CodeBlockCopyButton,
+  type CodeTheme,
+} from '@/components/ai/CodeBlock';
+import { InlineCitation } from '@/components/ai/InlineCitation';
+import { Arrival, useDrawn } from '@/components/ui/motion';
 import { PAGE_PREVIEW_GROUP, PagePreview } from '@/components/PagePreview';
 import { HoverCard } from '@/components/ui/HoverCard';
+import { Icon } from '@/components/ui/Icon';
+import { httpUrl } from '@/engine/ai/sources';
 import type { Entry } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -25,25 +36,39 @@ import { useVaultStore } from '@/stores/vaultStore';
  * normal case rather than an error: an unclosed `**` or `[[` renders as the
  * characters typed so far, an unclosed fence is code to the end, and nothing
  * here throws on partial input. Nothing reaches the DOM as HTML.
+ *
+ * Drawn with the AI elements (M91.13): a fence is a Code Block, highlighted
+ * for the theme its caller passes (the panel's; a fence with no language, or
+ * no theme, is plain); a link is the reply's own link, its Inline Citation
+ * card added on hover and focus, and only an http(s) address is ever an href
+ * (CV-16); a task list's items say whether each is done, in words, and
+ * nothing here ticks them.
  */
 
 type Inline =
   | string
   | { kind: 'code'; text: string }
   | { kind: 'wikilink'; target: string; alias: string | undefined }
-  /** `href` is null when the scheme is not one we will open. */
+  /** `href` is null when the address is not an http(s) one we will open. */
   | { kind: 'link'; href: string | null; children: Inline[] }
   | { kind: 'em' | 'strong' | 'del'; children: Inline[] };
 
 type Align = 'left' | 'center' | 'right' | null;
 
+/** A list item: its blocks, and whether a task list's box was ticked. */
+interface ListItem {
+  blocks: Block[];
+  task: 'todo' | 'done' | null;
+}
+
 type Block =
   | { kind: 'paragraph'; inline: Inline[] }
   | { kind: 'heading'; level: 1 | 2 | 3; inline: Inline[] }
-  | { kind: 'code'; text: string }
+  /** `language` is the fence's info string's first word, or null. */
+  | { kind: 'code'; text: string; language: string | null }
   | { kind: 'rule' }
   | { kind: 'quote'; blocks: Block[] }
-  | { kind: 'list'; ordered: boolean; start: number; items: Block[][] }
+  | { kind: 'list'; ordered: boolean; start: number; items: ListItem[] }
   | { kind: 'table'; align: Align[]; head: Inline[][]; rows: Inline[][][] };
 
 // --- Inline ---------------------------------------------------------------
@@ -66,8 +91,6 @@ const SPACE = /\s/u;
 const PUNCTUATION = /[\p{P}\p{S}]/u;
 /** ASCII punctuation: what a backslash escapes. */
 const ESCAPABLE = /[!-/:-@[-`{-~]/;
-/** The schemes a reply may link to; any other link renders as its label. */
-const SAFE_HREF = /^(?:https?:\/\/|mailto:)/i;
 
 const isDelimiter = (token: Token): token is Delimiter =>
   typeof token !== 'string' && token.kind === 'delimiter';
@@ -139,7 +162,9 @@ function linkAt(text: string, at: number): { node: Inline; end: number } | null 
   return {
     node: {
       kind: 'link',
-      href: SAFE_HREF.test(destination) ? destination : null,
+      // The shell's link guard opens http(s) only (CV-16): any other link,
+      // mailto included, renders as its label.
+      href: httpUrl(destination),
       // A link cannot hold another link.
       children: parseInline(text.slice(at + 1, close), false),
     },
@@ -271,7 +296,9 @@ function parseInline(text: string, links = true): Inline[] {
 
 // --- Blocks ---------------------------------------------------------------
 
-const FENCE = /^( {0,3})(`{3,}|~{3,})[^`]*$/;
+const FENCE = /^( {0,3})(`{3,}|~{3,})([^`]*)$/;
+/** A task list item's box, ticked or not, at the start of its first line. */
+const TASK = /^\[([ xX])\][ \t]+/;
 const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
 const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const QUOTE = /^ {0,3}> ?/;
@@ -370,11 +397,13 @@ function listAt(lines: string[], start: number, depth: number): [Block, number] 
       ? item
       : null;
   };
-  const items: Block[][] = [];
+  const items: ListItem[] = [];
   let i = start;
   for (let item = sibling(lines[i]); item !== null; item = sibling(lines[i])) {
     const content = item[1].length + item[2].length + 1;
-    const body = [item[3] ?? ''];
+    const first = item[3] ?? '';
+    const box = TASK.exec(first);
+    const body = [box === null ? first : first.slice(box[0].length)];
     i += 1;
     while (i < lines.length) {
       if (isBlank(lines[i])) {
@@ -390,7 +419,10 @@ function listAt(lines: string[], start: number, depth: number): [Block, number] 
         break;
       }
     }
-    items.push(blocksOf(body, depth + 1));
+    items.push({
+      blocks: blocksOf(body, depth + 1),
+      task: box === null ? null : box[1] === ' ' ? 'todo' : 'done',
+    });
     // Items a blank line apart are still one list: a loose list reads the
     // same in a chat column, and a numbered one keeps counting.
     let next = i;
@@ -423,7 +455,12 @@ function blocksOf(lines: string[], depth: number): Block[] {
         i += 1;
       }
       i += 1; // the closing fence — or the end of a reply still streaming
-      blocks.push({ kind: 'code', text: code.join('\n') });
+      const language = fence[3].trim().split(/\s+/)[0] ?? '';
+      blocks.push({
+        kind: 'code',
+        text: code.join('\n'),
+        language: language === '' ? null : language,
+      });
       continue;
     }
 
@@ -497,6 +534,25 @@ function parseBlocks(text: string): Block[] {
 interface RenderContext {
   entries: Entry[];
   onOpen: (target: string) => void;
+  /** The theme a fence is highlighted for; left out, fences are plain. */
+  theme?: CodeTheme;
+}
+
+/** What inline nodes say, as plain text: a link's label, for its card. */
+function plainText(nodes: Inline[], entries: Entry[]): string {
+  return nodes
+    .map((node) => {
+      if (typeof node === 'string') return node;
+      switch (node.kind) {
+        case 'code':
+          return node.text;
+        case 'wikilink':
+          return node.alias ?? resolveTarget(node.target, entries)?.title ?? node.target;
+        default:
+          return plainText(node.children, entries);
+      }
+    })
+    .join('');
 }
 
 const WIKILINK =
@@ -571,17 +627,31 @@ function renderInline(nodes: Inline[], ctx: RenderContext, inLink = false): Reac
       case 'link': {
         const label = renderInline(node.children, ctx, true);
         if (node.href === null) return <Fragment key={i}>{label}</Fragment>;
+        const named = plainText(node.children, ctx.entries).trim();
+        // The reply's own link stays the way in, its name and role as they
+        // were; the citation's card, naming where it goes, is the extra.
         return (
-          <a
+          <InlineCitation
             key={i}
-            href={node.href}
-            title={node.href}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="text-cortex-600 underline decoration-cortex-200 underline-offset-2 hover:decoration-cortex-500"
+            group={PAGE_PREVIEW_GROUP}
+            sources={[
+              {
+                kind: 'url',
+                url: node.href,
+                ...(named === '' || named === node.href ? {} : { title: named }),
+                via: 'text',
+              },
+            ]}
           >
-            {label}
-          </a>
+            <a
+              href={node.href}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-cortex-600 underline decoration-cortex-200 underline-offset-2 hover:decoration-cortex-500"
+            >
+              {label}
+            </a>
+          </InlineCitation>
         );
       }
       default: {
@@ -607,12 +677,16 @@ function renderBlocks(blocks: Block[], ctx: RenderContext): ReactNode[] {
       }
       case 'code':
         return (
-          <pre
-            key={i}
-            className="overflow-x-auto rounded-md border border-n-200 bg-n-25 px-2.5 py-2 text-xs leading-[17px] text-n-800 [font-family:var(--font-mono)]"
-          >
-            <code>{block.text}</code>
-          </pre>
+          <CodeBlock key={i} data-language={block.language ?? undefined}>
+            <CodeBlockActions>
+              <CodeBlockCopyButton value={block.text} label="Copy the code" />
+            </CodeBlockActions>
+            {block.language !== null && ctx.theme !== undefined ? (
+              <CodeBlockContent code={block.text} language={block.language} theme={ctx.theme} />
+            ) : (
+              <CodeBlockContent>{block.text}</CodeBlockContent>
+            )}
+          </CodeBlock>
         );
       case 'rule':
         return <hr key={i} className="border-0 border-t border-solid border-n-200" />;
@@ -626,11 +700,25 @@ function renderBlocks(blocks: Block[], ctx: RenderContext): ReactNode[] {
           </blockquote>
         );
       case 'list': {
-        const items = block.items.map((item, n) => (
-          <li key={n} className="space-y-1">
-            {renderBlocks(item, ctx)}
-          </li>
-        ));
+        const items = block.items.map((item, n) =>
+          item.task === null ? (
+            <li key={n} className="space-y-1">
+              {renderBlocks(item.blocks, ctx)}
+            </li>
+          ) : (
+            // A task list's box is the reply's word about the task, not a
+            // control: it says done or to do, and nothing here ticks it.
+            <li key={n} data-task={item.task} className="flex list-none items-start gap-1.5">
+              <span aria-hidden="true" className="mt-[0.2em] flex flex-none text-n-500">
+                <Icon name={item.task === 'done' ? 'square-check' : 'square'} size={14} />
+              </span>
+              <div className="min-w-0 flex-1 space-y-1">
+                <span className="sr-only">{item.task === 'done' ? 'Done: ' : 'To do: '}</span>
+                {renderBlocks(item.blocks, ctx)}
+              </div>
+            </li>
+          ),
+        );
         const marks = 'space-y-1 pl-5 marker:text-n-500';
         return block.ordered ? (
           <ol key={i} start={block.start} className={`${marks} list-decimal`}>
@@ -681,11 +769,39 @@ function renderBlocks(blocks: Block[], ctx: RenderContext): ReactNode[] {
   });
 }
 
-/** An assistant reply, rendered: blocks, inline marks, and `[[wikilinks]]` made real. */
-export function MessageText({ text, onOpen }: { text: string; onOpen: (target: string) => void }) {
+/**
+ * An assistant reply, rendered: blocks, inline marks, and `[[wikilinks]]` made
+ * real. `arrive` is the conversation's word that the reply is being written
+ * while it watches: a block the stream adds after the reply is drawn comes in
+ * once, as activepieces' and ChatGPT's do (components/ui/motion.ts,
+ * chat-turn.css). A block keeps its place by index as the text grows, so one
+ * already shown never arrives again, even when more text turns its paragraph
+ * into a list.
+ */
+export function MessageText({
+  text,
+  onOpen,
+  arrive = false,
+  theme,
+}: {
+  text: string;
+  onOpen: (target: string) => void;
+  arrive?: boolean;
+  /** The theme a fence is highlighted for, the caller's (CV-64): left out,
+   *  a fence is drawn plain. */
+  theme?: CodeTheme;
+}) {
   const entries = useVaultStore((s) => s.entries);
   const blocks = useMemo(() => parseBlocks(text), [text]);
+  const drawn = useDrawn();
+  const late = arrive && drawn;
   return (
-    <div className="cb-message-markdown space-y-2">{renderBlocks(blocks, { entries, onOpen })}</div>
+    <div className="cb-message-markdown space-y-2">
+      {renderBlocks(blocks, { entries, onOpen, theme }).map((block, i) => (
+        <Arrival key={i} when={late}>
+          {block}
+        </Arrival>
+      ))}
+    </div>
   );
 }

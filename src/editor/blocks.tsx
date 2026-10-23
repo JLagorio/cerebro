@@ -11,7 +11,16 @@ import {
 } from '@/lib/remoteImages';
 import { createReactBlockSpec, useEditorChange } from '@blocknote/react';
 import { ColumnGutter } from './ColumnGutter';
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from '@/components/ai/PromptInput';
+import { aiBlockRun } from '@/agent/elements/writingAsk';
 import { Icon } from '@/components/ui/Icon';
+import { Popover } from '@/components/ui/Popover';
+import { MenuItem, MenuSurface } from '@/components/ui/Menu';
 import { ConnectedPageCard } from '@/components/PageCard';
 import { MermaidBlockView } from '@/mermaid/MermaidBlockView';
 import { ConnectedDatabaseBlock } from '@/views/DatabaseBlockView';
@@ -31,6 +40,7 @@ import {
   openColumnMarker,
   openListMarker,
 } from '@/engine/pageColumns';
+import { useAiBlockRunning } from './aiBlockRuns';
 import { formatAiMarker } from './markdown';
 import { SubPageList } from './SubPageList';
 
@@ -197,14 +207,18 @@ const CALLOUT_STYLE: Record<CalloutKind, { icon: string; bg: string; border: str
 
 function CalloutView({
   kind,
-  onCycleKind,
+  onPickKind,
+  editable,
   contentRef,
 }: {
   kind: CalloutKind;
-  onCycleKind: () => void;
+  onPickKind: (kind: CalloutKind) => void;
+  editable: boolean;
   contentRef: (node: HTMLElement | null) => void;
 }) {
   const style = CALLOUT_STYLE[kind] ?? CALLOUT_STYLE.info;
+  const [picking, setPicking] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
   return (
     <div
       data-testid="callout-block"
@@ -213,15 +227,41 @@ function CalloutView({
       style={{ background: style.bg, borderLeft: `3px solid ${style.border}` }}
     >
       <button
+        ref={anchor}
         type="button"
-        title={`${kind} — click to change`}
+        title={`Callout type: ${kind}`}
         aria-label={`Callout type: ${kind}`}
         contentEditable={false}
-        onClick={onCycleKind}
+        onClick={() => setPicking((value) => !value)}
+        disabled={!editable}
+        aria-haspopup="menu"
+        aria-expanded={picking}
         className="mt-px flex-none cursor-pointer border-0 bg-transparent p-0"
       >
         <Icon name={style.icon} size={16} color={style.fg} />
       </button>
+      {picking && editable && (
+        <Popover
+          anchorRef={anchor}
+          onClose={() => setPicking(false)}
+          role="menu"
+          ariaLabel="Callout type"
+        >
+          <MenuSurface width={180}>
+            {CALLOUT_KINDS.map((choice) => (
+              <MenuItem
+                key={choice}
+                icon={CALLOUT_STYLE[choice].icon}
+                label={choice.charAt(0).toUpperCase() + choice.slice(1)}
+                onSelect={() => {
+                  setPicking(false);
+                  onPickKind(choice);
+                }}
+              />
+            ))}
+          </MenuSurface>
+        </Popover>
+      )}
       <div className="min-w-0 flex-1 text-md leading-[1.5]" ref={contentRef} />
     </div>
   );
@@ -237,10 +277,9 @@ export const CalloutBlock = createReactBlockSpec(
     render: (props) => (
       <CalloutView
         kind={(props.block.props.kind as CalloutKind) ?? 'info'}
-        onCycleKind={() => {
-          const current = props.block.props.kind as CalloutKind;
-          const next = CALLOUT_KINDS[(CALLOUT_KINDS.indexOf(current) + 1) % CALLOUT_KINDS.length];
-          props.editor.updateBlock(props.block, { props: { kind: next } } as never);
+        editable={props.editor.isEditable}
+        onPickKind={(kind) => {
+          props.editor.updateBlock(props.block, { props: { kind } } as never);
         }}
         contentRef={props.contentRef}
       />
@@ -438,8 +477,17 @@ export const SheetBlock = createReactBlockSpec(
  * directive container whose contents are ordinary markdown (markdown.ts). The
  * `generated` prop records when it was last answered, so "this was written by
  * the assistant on Tuesday" is visible rather than implied.
+ *
+ * ## Its elements (M91.14)
+ *
+ * The question is a Prompt Input at the block's size, its run button the
+ * input's submit: Enter asks, as the button does. A question is one line, as
+ * the field it replaced held it, so Shift+Enter adds nothing and a pasted
+ * line break is a space. While the editor writes the answer the button says
+ * so under the AI light, and neither it nor the question can be changed:
+ * the answer lands with the question it was asked. Exported for its test.
  */
-function AiBlockView({
+export function AiBlockView({
   prompt,
   generated,
   running,
@@ -456,7 +504,7 @@ function AiBlockView({
   const [draft, setDraft] = useState(prompt);
   // The question as it stood when the field opened: what Escape puts back.
   const before = useRef(prompt);
-  const field = useRef<HTMLInputElement | null>(null);
+  const field = useRef<HTMLTextAreaElement | null>(null);
   // Set by a click on the question, so the field it opens takes the caret.
   // MEASURED without it, in Chromium: the click opened the field, focus fell
   // to the page body, and what was typed next went nowhere.
@@ -464,86 +512,145 @@ function AiBlockView({
   useEffect(() => {
     if (!editing || !focusWhenOpen.current) return;
     focusWhenOpen.current = false;
+    const at = field.current?.value.length ?? 0;
     field.current?.focus();
+    // At the question's end, where the input it replaced put the caret: a
+    // textarea takes it at its start, and inside the editor End does not
+    // move it (MEASURED in Chromium, M91.14).
+    field.current?.setSelectionRange(at, at);
   }, [editing]);
+  const run = aiBlockRun(generated, running);
+  const ask = () => {
+    if (running) return;
+    if (editing) {
+      if (draft.trim() === '') return;
+      setEditing(false);
+    }
+    onRun();
+  };
   return (
     <div
       data-testid="ai-block"
-      className="my-1 w-full rounded-lg border border-synapse-200 bg-synapse-50 px-3 py-2"
+      aria-busy={running || undefined}
+      className="cb-ai-block my-1 w-full rounded-lg border border-synapse-200 bg-synapse-50 px-3 py-2"
     >
-      <div className="flex items-center gap-1.5">
+      <PromptInput onSubmit={ask} disabled={running}>
         <Icon name="sparkles" size={12} color="var(--synapse-500)" />
-        {editing ? (
-          // No autoFocus: a page that merely LOADS with an unasked block must
-          // not take the caret. The `/` insert focuses this field itself, and
-          // a click on the question through `focusWhenOpen`.
-          <input
-            ref={field}
-            data-testid="ai-block-prompt-input"
-            value={draft}
-            onChange={(e) => {
-              // Into the block as it is typed (M53.9), not when the field
-              // closes. Held here until a blur or Enter, the question was lost
-              // to any way off the page that did not blur the field first,
-              // and the unmount flush saved an empty `:::ai`. The block is
-              // re-rendered, not rebuilt, so this field keeps the caret.
-              setDraft(e.target.value);
-              onEditPrompt(e.target.value);
-            }}
-            onBlur={() => {
-              // An empty question stays open. Closed, it is a button with no
-              // label — nothing on screen to click to ask it.
-              if (draft.trim() !== '') setEditing(false);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                if (draft.trim() === '') return;
-                setEditing(false);
-                onRun();
-              }
-              if (e.key === 'Escape') {
-                // Out of the block too, since typing already put it there.
-                setDraft(before.current);
-                onEditPrompt(before.current);
-                if (before.current.trim() !== '') setEditing(false);
-              }
-            }}
-            aria-label="What should this block answer?"
-            placeholder="The open questions in this document…"
-            className="min-w-0 flex-1 rounded-xs border border-synapse-200 bg-n-0 px-1.5 py-0.5 text-xs outline-none"
-          />
-        ) : (
-          <button
-            type="button"
-            data-testid="ai-block-prompt"
-            onClick={() => {
-              setDraft(prompt);
-              before.current = prompt;
-              focusWhenOpen.current = true;
-              setEditing(true);
-            }}
-            className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-2xs text-synapse-700"
-          >
-            {prompt}
-          </button>
-        )}
-        <button
-          type="button"
+        <PromptInputBody>
+          {editing ? (
+            // No autoFocus: a page that merely LOADS with an unasked block must
+            // not take the caret. The `/` insert focuses this field itself, and
+            // a click on the question through `focusWhenOpen`.
+            <PromptInputTextarea
+              ref={field}
+              data-testid="ai-block-prompt-input"
+              value={draft}
+              onChange={(e) => {
+                // Into the block as it is typed (M53.9), not when the field
+                // closes. Held here until a blur or Enter, the question was lost
+                // to any way off the page that did not blur the field first,
+                // and the unmount flush saved an empty `:::ai`. The block is
+                // re-rendered, not rebuilt, so this field keeps the caret.
+                const value = e.target.value.replace(/\r?\n/g, ' ');
+                setDraft(value);
+                onEditPrompt(value);
+              }}
+              onBlur={() => {
+                // An empty question stays open. Closed, it is a button with no
+                // label — nothing on screen to click to ask it.
+                if (draft.trim() !== '') setEditing(false);
+              }}
+              onKeyDown={(e) => {
+                // One line: the Enter that asks is the field's own (PromptInput).
+                if (e.key === 'Enter' && e.shiftKey) e.preventDefault();
+                if (e.key === 'Escape') {
+                  // Out of the block too, since typing already put it there.
+                  setDraft(before.current);
+                  onEditPrompt(before.current);
+                  if (before.current.trim() !== '') setEditing(false);
+                }
+              }}
+              aria-label="What should this block answer?"
+              placeholder="The open questions in this document…"
+            />
+          ) : (
+            <button
+              type="button"
+              data-testid="ai-block-prompt"
+              disabled={running}
+              onClick={() => {
+                setDraft(prompt);
+                before.current = prompt;
+                focusWhenOpen.current = true;
+                setEditing(true);
+              }}
+              className="block w-full truncate border-0 bg-transparent p-0 text-left text-2xs text-synapse-700"
+            >
+              {prompt}
+            </button>
+          )}
+        </PromptInputBody>
+        <PromptInputSubmit
           data-testid="ai-block-run"
+          aria-label={run.label}
+          status={running ? 'streaming' : 'ready'}
           disabled={running || prompt.trim() === ''}
-          onClick={onRun}
-          className="flex-none rounded-xs border-0 bg-transparent px-1 py-0.5 text-2xs text-synapse-700 hover:bg-synapse-50 disabled:opacity-40"
         >
-          {running ? 'Working…' : generated === '' ? 'Answer' : 'Recompute'}
-        </button>
-      </div>
+          <span className={run.working ? 'cb-ai-shimmer' : undefined}>{run.label}</span>
+        </PromptInputSubmit>
+      </PromptInput>
       {generated !== '' && (
         <div className="mt-1 text-2xs text-n-400">
           Answered {generated} — edit the answer below, or ask again when the document moves on.
         </div>
       )}
     </div>
+  );
+}
+
+/** The block as the editor renders it: its props, and whether the editor is
+ *  writing its answer now (aiBlockRuns.ts). */
+function AiBlockRender({
+  block,
+  editor,
+}: {
+  block: { id: string; props: { prompt?: unknown; generated?: unknown } };
+  // Erased generics, as in markdown.ts: this reads and writes one block.
+  editor: BlockNoteEditor<any, any, any>;
+}) {
+  const running = useAiBlockRunning(editor, block.id);
+  return (
+    <AiBlockView
+      prompt={String(block.props.prompt ?? '')}
+      generated={String(block.props.generated ?? '')}
+      running={running}
+      onEditPrompt={(prompt) => {
+        // Only a changed question is written: an unchanged one would still
+        // be an edit to the document, and schedule a save for nothing.
+        // Compared with the LIVE block, for the reason `onRun` reads it.
+        const live = editor.getBlock(block.id);
+        if (live === undefined || live.props.prompt === prompt) return;
+        editor.updateBlock(live, { props: { prompt } } as never);
+      }}
+      onRun={() => {
+        // The run itself is wired by the editor, which owns the vault path
+        // and the agent IPC; the block owns the question and the answer.
+        // Kept apart so this file stays free of app state and can be
+        // rendered in a test with no store behind it.
+        //
+        // The question is read off the LIVE block: `block` is the render
+        // this closed over, older than the last write to the question until
+        // React renders again. MEASURED when Enter wrote the question and
+        // ran in one handler: a new block asked "", its old question, which
+        // the editor then declined to run.
+        const live = editor.getBlock(block.id);
+        window.dispatchEvent(
+          new CustomEvent('cerebro:ai-block-run', {
+            detail: { id: block.id, prompt: String(live?.props.prompt ?? '') },
+          }),
+        );
+      }}
+    />
   );
 }
 
@@ -559,39 +666,7 @@ export const AiBlock = createReactBlockSpec(
     content: 'none',
   },
   {
-    render: (props) => (
-      <AiBlockView
-        prompt={String(props.block.props.prompt ?? '')}
-        generated={String(props.block.props.generated ?? '')}
-        running={false}
-        onEditPrompt={(prompt) => {
-          // Only a changed question is written: an unchanged one would still
-          // be an edit to the document, and schedule a save for nothing.
-          // Compared with the LIVE block, for the reason `onRun` reads it.
-          const live = props.editor.getBlock(props.block.id);
-          if (live === undefined || live.props.prompt === prompt) return;
-          props.editor.updateBlock(live, { props: { prompt } } as never);
-        }}
-        onRun={() => {
-          // The run itself is wired by the editor, which owns the vault path
-          // and the agent IPC; the block owns the question and the answer.
-          // Kept apart so this file stays free of app state and can be
-          // rendered in a test with no store behind it.
-          //
-          // The question is read off the LIVE block: `props.block` is the
-          // render this closed over, older than the last write to the
-          // question until React renders again. MEASURED when Enter wrote
-          // the question and ran in one handler: a new block asked "", its
-          // old question, which the editor then declined to run.
-          const live = props.editor.getBlock(props.block.id);
-          window.dispatchEvent(
-            new CustomEvent('cerebro:ai-block-run', {
-              detail: { id: props.block.id, prompt: String(live?.props.prompt ?? '') },
-            }),
-          );
-        }}
-      />
-    ),
+    render: (props) => <AiBlockRender block={props.block} editor={props.editor} />,
     /**
      * What leaves the app when a selection crosses this block: its opening
      * line, the one markdown.ts writes to disk. Without it BlockNote falls

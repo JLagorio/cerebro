@@ -735,6 +735,33 @@ function rangeParts(raw: unknown): string[] | null {
 }
 
 /**
+ * A map, or a list holding one, that is not a date range: structure no field
+ * kind holds — provenance stamps such as `generated: {by, at}` and
+ * `verified: [{by, at}]`. Adoption neither declares nor converts it.
+ */
+export function isStructure(value: unknown): boolean {
+  const map = (v: unknown) =>
+    v !== null && typeof v === 'object' && !Array.isArray(v) && rangeParts(v) === null;
+  return Array.isArray(value) ? value.some((v) => v !== null && typeof v === 'object') : map(value);
+}
+
+/**
+ * A value as one line of text for a cell or a list: a map reads as its keys
+ * and values ("by claude-code · at 2026-07-28T16:42:00Z"), never as the
+ * "[object Object]" its `String()` gives.
+ */
+export function plainText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return value.map(plainText).join(', ');
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => `${key} ${plainText(item)}`)
+      .join(' · ');
+  }
+  return String(value);
+}
+
+/**
  * The adoption wizard's lenient converter (M12.6, engine/adopt.ts): the value
  * a record would store to fit a kind the wizard proposes, or null when the
  * old value has no reading in it, and the wizard then clears that key.
@@ -753,6 +780,11 @@ export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
   // text wrote garbage into every record of the type, and converted to a date
   // it silently cleared them.
   const range = rangeParts(raw);
+  // Any other map — a `generated: {by, at}` stamp, a `verified:` list of
+  // them — has no reading in any kind, and `String(…)` on it wrote that same
+  // garbage into the owner's record (2026-10-18). It is answered as it is:
+  // nothing to convert, and nothing to clear.
+  if (range === null && isStructure(raw)) return raw;
   const list =
     range !== null ? range : (Array.isArray(raw) ? raw : [raw]).map(String).filter((v) => v !== '');
   const first = list[0] ?? '';

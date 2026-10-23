@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import SERVER_INSTRUCTIONS from '../../shared/prompt/server-instructions.md?raw';
+import SUBAGENT_LINE from '../../shared/prompt/subagent-line.md?raw';
+import RESEARCHER_PROMPT from '../../shared/prompt/subagents/researcher.md?raw';
 import { buildSystemPrompt } from './systemPrompt';
 import { listSkills, skillPrompt } from '@/engine/skills';
 import { makeEntry } from '@/engine/testHelpers';
@@ -11,7 +13,10 @@ import {
   mentionedTools,
   type PromptGrant,
 } from '@/engine/toolGrant';
+import { PRODUCT_BRIEF } from '@/lib/productBrief';
+import { SUBAGENTS } from '@/lib/policy/subagents';
 import { SHELL_CEILINGS, WEB_CEILINGS } from '@/lib/policy/toolApproval';
+import { TOOLS } from '@/lib/policy/tools';
 import {
   addressedAgentPrompt,
   agentRunPrompt,
@@ -57,6 +62,15 @@ const SKILLS = listSkills(
     }),
   ),
 );
+
+/** Files the person attached (M91.17), one for each reader and one nothing
+ * opens, so every attachment line is composed. */
+const ATTACHMENTS = [
+  'attachments/brief.docx',
+  'attachments/plan.canvas',
+  'attachments/report.pdf',
+  'attachments/theme.mp3',
+];
 
 const SCOPES: (string[] | null)[] = [null, [], ['records/risks']];
 const TRIGGERS = [
@@ -142,7 +156,10 @@ function systemPrompts(
   return [
     {
       label: `panel buildSystemPrompt, ${axes}`,
-      text: buildSystemPrompt({ kind: 'inbox' }, { ...options, skills: SKILLS }),
+      text: buildSystemPrompt(
+        { kind: 'inbox' },
+        { ...options, skills: SKILLS, attachments: ATTACHMENTS },
+      ),
     },
     { label: `job buildSystemPrompt, ${axes}`, text: buildSystemPrompt({ kind: 'none' }, options) },
   ];
@@ -197,6 +214,8 @@ describe('no prompt names a tool its run lacks', () => {
       'cache_source',
       'update_frontmatter',
       'write_concept',
+      'read_document',
+      'read_canvas',
     ]) {
       expect(NAMED, tool).toContain(tool);
     }
@@ -379,6 +398,69 @@ describe('the server instructions', () => {
     // A JS string's length counts UTF-16 units, as the cap does.
     expect(served.length).toBeLessThanOrEqual(2048);
     expect(mentionedTools(SERVER_INSTRUCTIONS)).toEqual([]);
+  });
+});
+
+/**
+ * M91.2b — what a subagent hears. A subagent holds only the tools its
+ * definition names, narrowed to its run's grant, so the prose every one of
+ * them reads names no tool at all: neither one of cerebro's nor one of
+ * Claude Code's own, under any name it answers to.
+ */
+describe('the subagent prose (M91.2b)', () => {
+  /** Every name a Claude Code built-in answers to. */
+  const CLI_NAMES = TOOLS.cli_tools.flatMap((tool) => [tool.name, ...(tool.aliases ?? [])]);
+
+  /** The built-ins `text` names, each at word boundaries. */
+  const namesCli = (text: string): string[] =>
+    CLI_NAMES.filter((name) => new RegExp(`(?<![A-Za-z0-9_])${name}(?![A-Za-z0-9_])`).test(text));
+
+  it('names no tool in its line, its preset prompts or its preset sentences', () => {
+    // Not vacuous: a name counts at its word's edges, and only there.
+    expect(namesCli('then call WebFetch.')).toEqual(['WebFetch']);
+    expect(namesCli('Tasks and a readable Reader')).toEqual([]);
+    const texts: [string, string][] = [
+      ['subagent-line.md', SUBAGENT_LINE],
+      ['subagents/researcher.md', RESEARCHER_PROMPT],
+      ...SUBAGENTS.presets.map((preset): [string, string] => [preset.name, preset.description]),
+    ];
+    for (const [label, text] of texts) {
+      expect(mentionedTools(text), label).toEqual([]);
+      expect(namesCli(text), label).toEqual([]);
+    }
+  });
+
+  it('names no cerebro tool in the brief composed for every subagent', () => {
+    // Rust composes `--append-subagent-system-prompt` from these three,
+    // each trimmed, a blank line apart (src-tauri/src/agent/cli_agents.rs).
+    const composed = [PRODUCT_BRIEF, SERVER_INSTRUCTIONS.trim(), SUBAGENT_LINE.trim()].join('\n\n');
+    expect(mentionedTools(composed)).toEqual([]);
+  });
+});
+
+/**
+ * M91.17 — Claude Code's Read is the CLI's, not cerebro's, so it is checked
+ * by name, as the web tools are: the panel names it for an attached file
+ * only to a run that holds it.
+ */
+describe('the Read dimension (M91.17)', () => {
+  it('names Read only to a run that holds it, beside the files it opens', () => {
+    const tools = grantedTools(null);
+    for (const read of [true, false, undefined]) {
+      for (const attended of [true, false]) {
+        const grant: PromptGrant = {
+          tools,
+          shell: false,
+          attended,
+          ...(read === undefined ? {} : { read }),
+        };
+        for (const { label, text } of systemPrompts(grant, true, ['knowledge'])) {
+          const named = /\bRead tool\b/.test(text);
+          expect(named, label).toBe(read === true && label.startsWith('panel'));
+          if (named) expect(text, label).toContain('`attachments/report.pdf`: open it with');
+        }
+      }
+    }
   });
 });
 

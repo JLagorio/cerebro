@@ -47,14 +47,34 @@ afterEach(() => {
 });
 
 describe('useAppCommands (M65.1)', () => {
-  it('⌘K opens the palette and ⌘J toggles the assistant', () => {
+  it('⌘K opens the palette and ⌘J expands and minimizes the mounted assistant', () => {
     renderHook(() => useAppCommands());
     act(() => void runCommand('palette.open', APP));
     expect(useUiStore.getState().quickOpenVisible).toBe(true);
     act(() => void runCommand('assistant.toggle', APP));
     expect(useUiStore.getState().aiPanelOpen).toBe(true);
+    expect(useUiStore.getState().aiPanelPresentation).toBe('floating');
+    expect(useUiStore.getState().aiPanelMinimized).toBe(false);
     act(() => void runCommand('assistant.toggle', APP));
-    expect(useUiStore.getState().aiPanelOpen).toBe(false);
+    expect(useUiStore.getState().aiPanelOpen).toBe(true);
+    expect(useUiStore.getState().aiPanelMinimized).toBe(true);
+    act(() => void runCommand('assistant.toggle', APP));
+    expect(useUiStore.getState().aiPanelMinimized).toBe(false);
+  });
+
+  it('⌥⌘R opens the canvas with its details asked for, and asks to toggle them there (M92.1)', () => {
+    useUiStore.setState({ aiPanelPresentation: 'floating', chatRailRequest: null });
+    renderHook(() => useAppCommands());
+    act(() => void runCommand('assistant.rail', APP));
+    expect(useUiStore.getState()).toMatchObject({
+      aiPanelOpen: true,
+      aiPanelPresentation: 'canvas',
+      aiPanelMinimized: false,
+      chatRailRequest: 'open',
+    });
+    act(() => void useUiStore.getState().takeChatRailRequest());
+    act(() => void runCommand('assistant.rail', APP));
+    expect(useUiStore.getState().chatRailRequest).toBe('toggle');
   });
 
   it('a capture selects the note it made and opens the Inbox on it', async () => {

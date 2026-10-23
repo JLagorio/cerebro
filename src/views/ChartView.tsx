@@ -47,6 +47,8 @@ import type {
  */
 
 export interface ChartViewProps {
+  /** The host already supplies its frame and header. */
+  embedded?: boolean;
   /** Filtered and sorted by the caller. */
   entries: Entry[];
   presentation: Presentation;
@@ -1091,7 +1093,7 @@ const BLOCKED: Record<
   },
 };
 
-const ROOT_CLASSES = 'box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4';
+const ROOT_CLASSES = 'box-border min-h-0 min-w-0 flex-1 overflow-auto';
 
 /** How many records the drilldown lists before the remainder line takes over. */
 const DRILL_CAP = 9;
@@ -1324,6 +1326,7 @@ export function ChartView({
   onChartChange,
   viewFilters,
   onSaveView,
+  embedded = false,
 }: ChartViewProps) {
   const data = computeChart(entries, presentation, schema);
   const chart = presentation.chart;
@@ -1364,7 +1367,7 @@ export function ChartView({
       data-testid="chart-view"
       data-chart-kind={kind}
       data-chart-measure={data.measure}
-      className={ROOT_CLASSES}
+      className={`${ROOT_CLASSES} ${embedded ? 'bg-transparent p-3' : 'bg-n-25 px-4 py-4 @min-[720px]:px-6'}`}
     >
       {data.blocked !== null ? (
         <div data-testid="chart-empty" data-reason={data.blocked}>
@@ -1387,17 +1390,23 @@ export function ChartView({
       ) : kind === 'number' ? (
         // A number chart totals every visible row into one stat — there is no
         // axis to caption, so it skips the figcaption every other kind gets.
-        <figure className="m-0 rounded-xl border border-n-200 bg-n-0 p-4">
+        <figure className={`m-0 bg-n-0 ${embedded ? 'p-0' : 'rounded-lg border border-n-100 p-4'}`}>
           <div data-testid="chart-number" className="flex flex-col items-start gap-1 px-2 py-6">
-            <span className="text-[40px] font-semibold leading-none text-n-900">
+            <span className="text-[40px] font-semibold leading-none tabular-nums text-n-900">
               {data.totalDisplay}
             </span>
-            <span className="text-sm text-n-500">{data.measure}</span>
+            <span className="text-ui text-n-600">{data.measure}</span>
+            {notes.length > 0 && (
+              <span className="text-metadata text-n-600">{notes.join(' · ')}</span>
+            )}
           </div>
         </figure>
       ) : (
-        <figure ref={figureRef} className="relative m-0 rounded-xl border border-n-200 bg-n-0 p-4">
-          <figcaption data-testid="chart-caption" className="pb-3 text-sm font-semibold text-n-800">
+        <figure
+          ref={figureRef}
+          className={`relative m-0 bg-n-0 ${embedded ? 'p-0' : 'rounded-lg border border-n-100 p-4'}`}
+        >
+          <figcaption data-testid="chart-caption" className="pb-3 text-ui font-medium text-n-800">
             {data.measure}
             <span className="pl-1.5 font-normal text-n-500">by {data.axis}</span>
             {notes.length > 0 && (

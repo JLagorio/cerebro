@@ -15,11 +15,22 @@
 //! Since M60.8b `hidden_paths` names the vault folders the CLI's own readers
 //! and editors may not open (the Trash): every attended and unattended run's
 //! `--disallowedTools` carries a path rule per folder and tool.
+//! Since M91.1 every built-in a 2.1.250 init can list has a row, and a run
+//! holds only the built-ins its plan admits (`tools`, its `--tools`): the
+//! outward, cross-session, task-list, background, schedule and skill families
+//! are denied on every run, the subagent tool needs a gate (`needs_gate`),
+//! and ToolSearch, which only loads other tools, stays with every run.
+//! Since M91.2a the subagent tool reads its own ceiling, the Settings
+//! Subagents switch (`delegate`): off denies it, and on leaves it to the CLI
+//! where a gate sits. A record that narrows its tools without naming it, by
+//! either spelling, is denied it (`narrowed_out`), and a run that holds it
+//! names the agent types it may start and the built-in ones its argv denies
+//! (`agent_types`).
 //! A run's `plan`
-//! says which tools ride `--allowedTools` and `--disallowedTools`, which ones
-//! meet the ask gate (`agent::interaction`), and the permission mode; the
-//! gate's answer for one call is `host_answer` over that plan, and dispatch
-//! (`mcp.rs`) holds a confirmable write to the same decision.
+//! says which tools ride `--tools`, `--allowedTools` and `--disallowedTools`,
+//! which ones meet the ask gate (`agent::interaction`), and the permission
+//! mode; the gate's answer for one call is `host_answer` over that plan, and
+//! dispatch (`mcp.rs`) holds a confirmable write to the same decision.
 //!
 //! Six decisions, each with one carrier:
 //!
@@ -50,7 +61,7 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-use crate::policy::tools::ToolsManifest;
+use crate::policy::tools::{CliTool, ToolsManifest};
 
 /// The artifact, bound at compile time.
 pub const TOOL_APPROVAL_JSON: &str = include_str!("../../../shared/policy/tool-approval.v1.json");
@@ -93,6 +104,10 @@ pub const ASK_FIRST_AXIS: &str = "ask_first";
 /// The axis the web family's grid is read by (M57.7): the Settings web
 /// ceiling, off or on.
 pub const WEB_AXIS: &str = "web";
+
+/// The axis the subagent tool's grid is read by (M91.2a): the Settings
+/// Subagents switch, off or on.
+pub const DELEGATE_AXIS: &str = "delegate";
 
 /// How long a person's Allow of a write holds, waiting for its resume to
 /// make the call (`agent::interaction::take_write_approval`).
@@ -188,6 +203,61 @@ impl WebCeiling {
 }
 
 // ---------------------------------------------------------------------------
+// The delegate ceiling
+// ---------------------------------------------------------------------------
+
+/// The Settings Subagents switch (M91.2a): may a run hold Claude Code's
+/// subagent tool? Off or on, two states. A run's request carries it as
+/// `delegate: Option<DelegateCeiling>`, read by `of`. A value that is not
+/// "on" reads off, a boolean included, so a value this build does not know
+/// never widens access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DelegateCeiling {
+    #[default]
+    Off,
+    On,
+}
+
+impl DelegateCeiling {
+    /// Every value, in the artifact's order.
+    pub const ALL: [DelegateCeiling; 2] = [DelegateCeiling::Off, DelegateCeiling::On];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DelegateCeiling::Off => "off",
+            DelegateCeiling::On => "on",
+        }
+    }
+
+    /// A request's `delegate`, given its `attended`: absent is on for a
+    /// request a person watches, the switch's default, and off for every
+    /// other. Only a seated run can hold the tool anyway (`needs_gate`).
+    pub fn of(delegate: Option<DelegateCeiling>, attended: Option<bool>) -> Self {
+        delegate.unwrap_or(if attended == Some(true) {
+            DelegateCeiling::On
+        } else {
+            DelegateCeiling::Off
+        })
+    }
+
+    /// "on" exactly; anything else is off.
+    pub fn read(value: &Value) -> Self {
+        if value.as_str() == Some("on") {
+            DelegateCeiling::On
+        } else {
+            DelegateCeiling::Off
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for DelegateCeiling {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::read(&Value::deserialize(deserializer)?))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The artifact
 // ---------------------------------------------------------------------------
 
@@ -268,17 +338,45 @@ pub struct Card {
 pub struct Family {
     pub id: String,
     /// The ceiling its grid is read by: `none` (one value, `any`), `shell`,
-    /// `web` (M57.7) or `ask_first` (M57.4).
+    /// `web` (M57.7), `delegate` (M91.2a) or `ask_first` (M57.4).
     pub ceiling: String,
     /// An ask that survives here starts the run in `default` mode:
     /// `acceptEdits` would approve these tools with no host.
     pub needs_default_mode: bool,
+    /// Only a run with a gate a person can answer holds these (M91.1): on
+    /// any other run the decision is deny, whatever the cell says, so the
+    /// family never depends on a hook a run does not have. Absent is false.
+    #[serde(default)]
+    pub needs_gate: bool,
+    /// Its tools only load other tools' schemas (M91.1, ToolSearch), so
+    /// every run kind leaves them to the CLI, an internal run's deferred
+    /// Cerebro tools sitting behind them. Absent is false.
+    #[serde(default)]
+    pub loads_tools: bool,
+    /// What becomes of its tools when a record narrows its run's tools and
+    /// names none of them, by name or alias (M91.2a). Absent is `default`.
+    #[serde(default)]
+    pub narrowed_out: NarrowedOut,
     /// Run kind → ceiling value → decision.
     pub grid: BTreeMap<String, BTreeMap<String, Decision>>,
     /// What a card asking for it is titled; only a family that can ask.
     pub card: Option<Card>,
     /// What the model reads when it is refused; only a family that can be.
     pub message: Option<String>,
+}
+
+/// What a narrowing makes of a tool it leaves out (M91.2a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NarrowedOut {
+    /// The narrowing's own rule (M57.2): an ask, a queue and an allow that
+    /// acceptEdits would approve become deny, any other allow is left to
+    /// the CLI, and the rest stands.
+    #[default]
+    Default,
+    /// Deny, whatever the cell says: the record must name the tool to hold
+    /// it.
+    Deny,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -295,6 +393,9 @@ pub struct Messages {
     pub denied: String,
     pub unlisted: String,
     pub mode_mismatch: String,
+    /// The init gate's stop for a built-in the manifest has no row for
+    /// (M91.1); `{tool}` is its name.
+    pub unknown_tool: String,
     /// An ask-first page write in a run nobody watches (M57.4).
     pub ask_first_unattended: String,
     /// An ask-first page write that reached dispatch with no Allow.
@@ -336,7 +437,7 @@ pub struct QueueLimits {
 /// manifest CLI row whose path rule Claude Code applies (`Read` covers its
 /// readers, `Edit` its editors). Every attended and unattended run denies
 /// `Tool(./folder/**)` for each pair; an internal run is denied every CLI
-/// tool already.
+/// tool that opens a file already.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HiddenPaths {
@@ -375,6 +476,18 @@ pub struct AskFirstBlock {
     pub cases: Vec<AskFirstCase>,
 }
 
+/// The agent types of a run that holds a tool the delegate ceiling reads
+/// (M91.2a). `builtin` is Claude Code's own, pinned to the types a 2.1.250
+/// init lists, which such a run's argv denies by name; `allowed` is
+/// Cerebro's own, `subagents.v1.json`'s presets, which it may start. Each
+/// name rides argv inside `Agent(<name>)` (`is_agent_type`).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentTypes {
+    pub builtin: Vec<String>,
+    pub allowed: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolApproval {
@@ -398,10 +511,24 @@ pub struct ToolApproval {
     pub messages: Messages,
     pub ask_first: AskFirstBlock,
     pub queue_limits: QueueLimits,
+    /// What a run holding the subagent tool may start (M91.2a).
+    pub agent_types: AgentTypes,
 }
 
 fn refusal(subject: &str, field: &str, problem: impl std::fmt::Display) -> String {
     format!("{TOOL_APPROVAL_PATH}: {subject}: `{field}` {problem}")
+}
+
+/// An agent type's name as argv carries it inside `Agent(<name>)` and an
+/// init lists it (M91.2a): letters, digits, colons, dots, dashes and
+/// underscores, at least one, so no comma, parenthesis or space can split
+/// the rule or end it early. `subagents.v1.json`'s presets are held to it
+/// too.
+pub fn is_agent_type(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b':' | b'.' | b'-' | b'_'))
 }
 
 /// `N.N.N`, each part digits.
@@ -490,11 +617,19 @@ impl ToolApproval {
                 .map(|word| word.as_str().to_string())
                 .collect(),
         );
+        expected.insert(
+            DELEGATE_AXIS.to_string(),
+            DelegateCeiling::ALL
+                .iter()
+                .map(|word| word.as_str().to_string())
+                .collect(),
+        );
         if self.ceilings != expected {
             return Err(refusal(
                 "table",
                 "ceilings",
-                "must be none: [any], shell: [off, ask, on], ask_first: [yes, no] and web: [off, on]",
+                "must be none: [any], shell: [off, ask, on], ask_first: [yes, no], web: [off, on] \
+                 and delegate: [off, on]",
             ));
         }
         let kinds: Vec<&str> = self.run_kinds.iter().map(|k| k.id.as_str()).collect();
@@ -581,7 +716,45 @@ impl ToolApproval {
                 return Err(refusal("queue_limits", field, "must be at least 1"));
             }
         }
-        self.check_ask_first(manifest)
+        self.check_ask_first(manifest)?;
+        self.check_agent_types()
+    }
+
+    /// The agent types (M91.2a): each one a name argv carries whole, none
+    /// twice in its list, and none allowed that is one of Claude Code's
+    /// built-in types, which argv denies. `src/lib/policy/toolApproval.ts`
+    /// refuses the same names in the same words.
+    fn check_agent_types(&self) -> Result<(), String> {
+        let types = &self.agent_types;
+        for (field, names) in [
+            ("agent_types.builtin", &types.builtin),
+            ("agent_types.allowed", &types.allowed),
+        ] {
+            for (at, name) in names.iter().enumerate() {
+                let problem = if !is_agent_type(name) {
+                    Some("must be one or more letters, digits, colons, dots, dashes or underscores")
+                } else if names[..at].contains(name) {
+                    Some("is named twice")
+                } else {
+                    None
+                };
+                if let Some(problem) = problem {
+                    return Err(refusal(&format!("agent type {name:?}"), field, problem));
+                }
+            }
+        }
+        if let Some(name) = types
+            .allowed
+            .iter()
+            .find(|name| types.builtin.contains(name))
+        {
+            return Err(refusal(
+                &format!("agent type {name:?}"),
+                "agent_types.allowed",
+                "is one of Claude Code's built-in types, which argv denies",
+            ));
+        }
+        Ok(())
     }
 
     /// The hidden folders (M60.8b): each one hidden, vault-relative name whose
@@ -796,13 +969,40 @@ impl ToolApproval {
                 "must be shell: the family holds a tool that writes",
             ));
         }
-        if family.grid["internal"]
+        let cells = || family.grid.values().flat_map(|cells| cells.values());
+        if family.loads_tools {
+            // M91.1: a loader runs nothing itself, and an internal run's
+            // deferred Cerebro tools sit behind it, so every run keeps it.
+            if cells().any(|d| *d != Decision::Cli) {
+                return Err(refusal(
+                    subject,
+                    "grid",
+                    "must leave every run kind to the CLI: its tools only load other tools",
+                ));
+            }
+            // needs_gate would deny it wherever no gate sits, whatever the
+            // cells say, and narrowed_out deny wherever a record leaves it
+            // out (M91.2a).
+            if family.needs_gate {
+                return Err(refusal(
+                    subject,
+                    "needs_gate",
+                    "must be false: a family that loads tools stays with every run",
+                ));
+            }
+            if family.narrowed_out == NarrowedOut::Deny {
+                return Err(refusal(
+                    subject,
+                    "narrowed_out",
+                    "must be default: a family that loads tools stays with every run",
+                ));
+            }
+        } else if family.grid["internal"]
             .values()
             .any(|d| !matches!(d, Decision::Deny | Decision::Refuse))
         {
             return Err(refusal(subject, "grid.internal", "may only deny or refuse"));
         }
-        let cells = || family.grid.values().flat_map(|cells| cells.values());
         // M57.4c: only a page write can wait in Review; a CLI tool's call has
         // no door that could hold it.
         if family.id != self.ask_first.family && cells().any(|d| *d == Decision::Queue) {
@@ -962,6 +1162,9 @@ pub struct ApprovalInput<'a> {
     /// The web ceiling (M57.7). Read scope leaves it alone: a read limit
     /// bounds vault folders, not the outside world.
     pub web: WebCeiling,
+    /// The delegate ceiling (M91.2a), the Subagents switch. Read scope
+    /// leaves it alone too: a subagent reads under its run's own grant.
+    pub delegate: DelegateCeiling,
     /// Does the run's agent ask before its page writes (M57.4)?
     pub ask_first: bool,
     pub read_scoped: bool,
@@ -982,6 +1185,11 @@ pub struct ToolDecision {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RunApproval {
     pub permission_mode: String,
+    /// `--tools` (M91.1): the only built-ins the run holds at all, each CLI
+    /// row the plan allows, asks for or leaves to the CLI, by its name. A
+    /// built-in outside it, a row's or one Claude Code adds, does not exist
+    /// for the run.
+    pub tools: Vec<String>,
     /// `--allowedTools`.
     pub allowed: Vec<String>,
     /// `--disallowedTools`.
@@ -992,6 +1200,12 @@ pub struct RunApproval {
     pub refused: Vec<String>,
     /// Asks the run could not put to anyone, so it went without them.
     pub withheld: Vec<String>,
+    /// Claude Code's built-in agent types, which a run holding the subagent
+    /// tool denies by name (M91.2a); empty on a run without it.
+    pub denied_agent_types: Vec<String>,
+    /// The agent types a run holding the subagent tool may start, Cerebro's
+    /// own (M91.2a); empty on a run without it.
+    pub allowed_agent_types: Vec<String>,
     pub decisions: Vec<ToolDecision>,
 }
 
@@ -1002,9 +1216,10 @@ impl RunApproval {
     }
 
     /// The tool's decision and family, or None for a tool the manifest does
-    /// not list.
+    /// not list. A built-in answers by its row's name or an alias (M91.1).
     pub fn decision_of(&self, tool: &str) -> Option<&ToolDecision> {
-        self.decisions.iter().find(|row| row.tool == tool)
+        let name = crate::policy::tools::cli_tool(tool).map_or(tool, |row| row.name.as_str());
+        self.decisions.iter().find(|row| row.tool == name)
     }
 
     /// Does the run start in `default` mode for a reason the init must
@@ -1021,15 +1236,40 @@ fn named(narrowing: &[String], tool: &str) -> bool {
         .any(|entry| crate::agent::names_tool(entry, tool))
 }
 
+/// Does `narrowing` name the CLI row `tool`, by its name or an alias
+/// (M91.1)? A record written for `Task` still names the subagent row.
+fn names_row(narrowing: &[String], tool: &CliTool) -> bool {
+    named(narrowing, &tool.name) || tool.aliases.iter().any(|alias| named(narrowing, alias))
+}
+
+/// What a narrowing makes of `decision`, a tool of `family` it leaves out:
+/// deny where the family's `narrowed_out` says so (M91.2a); else an ask or
+/// a queue is denied, so is an allow acceptEdits would approve, any other
+/// allow is left to the CLI, and the rest stands.
+fn narrowed_out(family: &Family, decision: Decision) -> Decision {
+    match decision {
+        _ if family.narrowed_out == NarrowedOut::Deny => Decision::Deny,
+        Decision::Ask | Decision::Queue => Decision::Deny,
+        Decision::Allow if family.needs_default_mode => Decision::Deny,
+        Decision::Allow => Decision::Cli,
+        other => other,
+    }
+}
+
 /// The plan for one run, in this order: the grid's cell; the read scope's
-/// overrides; then a tool the record narrows out becomes deny if it would
-/// ask or sits in a family acceptEdits would approve (and an allow it
-/// narrows out elsewhere is left to the CLI); then, on a run that cannot
-/// ask, an ask becomes deny and joins `withheld`, and a refusal becomes
-/// deny. `allow` fills `allowed`, `deny` fills `disallowed`. An attended or
+/// overrides; then a tool the record narrows out becomes deny if its family
+/// says `narrowed_out` deny (M91.2a), would ask or sits in a family
+/// acceptEdits would approve (and an allow it narrows out elsewhere is left
+/// to the CLI); then, on a run that cannot ask, an ask becomes deny and
+/// joins `withheld`, a refusal becomes deny, and so does every tool of a
+/// family that needs a gate (M91.1). `allow` fills `allowed`, `deny` fills
+/// `disallowed`, and `allow`, `ask` and `cli` fill `tools`, the run's
+/// `--tools` (M91.1). A run that holds a tool the delegate ceiling reads
+/// names the agent types: the built-in ones its argv denies and Cerebro's
+/// own it may start (M91.2a). An attended or
 /// unattended run's `disallowed` then ends with the hidden folders' path
 /// rules (M60.8b), whatever its ceilings, read limit or narrowing; an
-/// internal run's needs none, since it is denied every CLI tool.
+/// internal run's needs none, since it holds no CLI tool that opens a file.
 ///
 /// The manifest's confirmable rows follow the CLI's (M57.4), by the same
 /// steps, read by `ask_first`. Only their asks reach argv: they leave
@@ -1047,14 +1287,18 @@ fn plan_in(table: &ToolApproval, manifest: &ToolsManifest, input: &ApprovalInput
     let can_ask = table.can_ask(input.kind);
     let mut approval = RunApproval {
         permission_mode: String::new(),
+        tools: Vec::new(),
         allowed: Vec::new(),
         disallowed: Vec::new(),
         asks: Vec::new(),
         refused: Vec::new(),
         withheld: Vec::new(),
+        denied_agent_types: Vec::new(),
+        allowed_agent_types: Vec::new(),
         decisions: Vec::new(),
     };
     let mut default_mode = false;
+    let mut starts_agents = false;
     for tool in &manifest.cli_tools {
         let Some(family) = tool.family.as_deref().and_then(|id| table.family(id)) else {
             continue;
@@ -1062,6 +1306,7 @@ fn plan_in(table: &ToolApproval, manifest: &ToolsManifest, input: &ApprovalInput
         let value = match family.ceiling.as_str() {
             "shell" => input.shell.as_str(),
             WEB_AXIS => input.web.as_str(),
+            DELEGATE_AXIS => input.delegate.as_str(),
             _ => "any",
         };
         let mut decision = family.grid[input.kind.as_str()][value];
@@ -1072,14 +1317,9 @@ fn plan_in(table: &ToolApproval, manifest: &ToolsManifest, input: &ApprovalInput
         }
         if input
             .narrowing
-            .is_some_and(|narrowing| !named(narrowing, &tool.name))
+            .is_some_and(|narrowing| !names_row(narrowing, tool))
         {
-            decision = match decision {
-                Decision::Ask | Decision::Queue => Decision::Deny,
-                Decision::Allow if family.needs_default_mode => Decision::Deny,
-                Decision::Allow => Decision::Cli,
-                other => other,
-            };
+            decision = narrowed_out(family, decision);
         }
         if !can_ask {
             decision = match decision {
@@ -1088,8 +1328,13 @@ fn plan_in(table: &ToolApproval, manifest: &ToolsManifest, input: &ApprovalInput
                     Decision::Deny
                 }
                 Decision::Refuse => Decision::Deny,
+                _ if family.needs_gate => Decision::Deny,
                 other => other,
             };
+        }
+        if matches!(decision, Decision::Allow | Decision::Ask | Decision::Cli) {
+            approval.tools.push(tool.name.clone());
+            starts_agents |= family.ceiling == DELEGATE_AXIS;
         }
         match decision {
             Decision::Allow => approval.allowed.push(tool.name.clone()),
@@ -1108,6 +1353,10 @@ fn plan_in(table: &ToolApproval, manifest: &ToolsManifest, input: &ApprovalInput
             family: family.id.clone(),
             decision,
         });
+    }
+    if starts_agents {
+        approval.denied_agent_types = table.agent_types.builtin.clone();
+        approval.allowed_agent_types = table.agent_types.allowed.clone();
     }
     if input.kind == RunKind::Unattended {
         approval.disallowed.extend(table.unattended_path_rules());
@@ -1129,14 +1378,11 @@ fn plan_in(table: &ToolApproval, manifest: &ToolsManifest, input: &ApprovalInput
                 .narrowing
                 .is_some_and(|narrowing| !named(narrowing, &tool))
             {
-                decision = match decision {
-                    Decision::Ask | Decision::Queue => Decision::Deny,
-                    Decision::Allow if family.needs_default_mode => Decision::Deny,
-                    Decision::Allow => Decision::Cli,
-                    other => other,
-                };
+                decision = narrowed_out(family, decision);
             }
-            if !can_ask && matches!(decision, Decision::Ask | Decision::Refuse) {
+            if !can_ask
+                && (family.needs_gate || matches!(decision, Decision::Ask | Decision::Refuse))
+            {
                 decision = Decision::Deny;
             }
             if decision == Decision::Ask {
@@ -1167,6 +1413,7 @@ pub fn plan_for(req: &crate::agent::AgentRequest, seated: bool) -> RunApproval {
         kind: RunKind::of(req, seated),
         shell: req.shell.unwrap_or_default(),
         web: WebCeiling::of(req.web),
+        delegate: DelegateCeiling::of(req.delegate, req.attended),
         ask_first: req.ask_first == Some(true),
         read_scoped: req.read_scope.is_some(),
         narrowing: req.allowed_tools.as_deref(),
@@ -1339,6 +1586,7 @@ pub fn confirmable_decision(kind: RunKind, ask_first: bool) -> Decision {
     let value = if ask_first { "yes" } else { "no" };
     match family.grid[kind.as_str()][value] {
         Decision::Ask | Decision::Refuse if !table.can_ask(kind) => Decision::Deny,
+        _ if family.needs_gate && !table.can_ask(kind) => Decision::Deny,
         decision => decision,
     }
 }
@@ -1656,6 +1904,31 @@ mod tests {
                 Box::new(|v| family(v, "web")["grid"]["internal"]["on"] = json!("allow")),
                 &["family web", "`grid.internal`"],
             ),
+            // M91.2a: the Subagents switch is off and on, and its family
+            // reads it.
+            (
+                Box::new(|v| {
+                    v["ceilings"].as_object_mut().unwrap().remove(DELEGATE_AXIS);
+                }),
+                &["table", "`ceilings`", "delegate: [off, on]"],
+            ),
+            (
+                Box::new(|v| v["ceilings"][DELEGATE_AXIS] = json!(["off", "ask", "on"])),
+                &["table", "`ceilings`", "delegate: [off, on]"],
+            ),
+            (
+                Box::new(|v| {
+                    family(v, "delegate")["grid"]["attended"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("on");
+                }),
+                &["family delegate", "`grid.attended`", "delegate value"],
+            ),
+            (
+                Box::new(|v| family(v, "delegate")["grid"]["internal"]["on"] = json!("cli")),
+                &["family delegate", "`grid.internal`"],
+            ),
         ]
     }
 
@@ -1760,7 +2033,7 @@ mod tests {
     fn a_cli_row_cannot_join_the_ask_first_family() {
         let mut raw: Value = serde_json::from_str(TOOLS_JSON).unwrap();
         for row in raw["cli_tools"].as_array_mut().unwrap() {
-            if row["name"] == "Task" {
+            if row["name"] == "Agent" {
                 row["family"] = json!("confirmable");
             }
         }
@@ -1822,11 +2095,14 @@ mod tests {
 
     // --- The grid's promises ---------------------------------------------
 
+    /// A run of `kind` at `shell`, the web off and the Subagents switch at
+    /// its default for a run a person watches, on.
     fn input(kind: RunKind, shell: ShellCeiling) -> ApprovalInput<'static> {
         ApprovalInput {
             kind,
             shell,
             web: WebCeiling::Off,
+            delegate: DelegateCeiling::On,
             ask_first: false,
             read_scoped: false,
             narrowing: None,
@@ -1851,6 +2127,14 @@ mod tests {
         }
     }
 
+    /// The CLI rows of a family that only loads other tools (M91.1).
+    fn loads_tools(tool: &CliTool) -> bool {
+        tool.family
+            .as_deref()
+            .and_then(|id| table().family(id))
+            .is_some_and(|family| family.loads_tools)
+    }
+
     #[test]
     fn no_internal_cell_allows_or_asks() {
         for shell in ShellCeiling::ALL {
@@ -1858,8 +2142,11 @@ mod tests {
             assert!(approval.allowed.is_empty() && approval.asks.is_empty());
             assert!(approval.refused.is_empty(), "an internal run has no gate");
             assert_eq!(approval.permission_mode, "default");
-            let all = crate::policy::tools::cli_names(|_| true);
-            assert_eq!(approval.disallowed, all, "every CLI row, in argv order");
+            // M91.1: every CLI row but ToolSearch, which loads the run's
+            // deferred Cerebro tools and runs nothing itself.
+            let acting = crate::policy::tools::cli_names(|tool| !loads_tools(tool));
+            assert_eq!(approval.disallowed, acting, "in argv order");
+            assert_eq!(approval.tools, ["ToolSearch"]);
         }
     }
 
@@ -1888,14 +2175,608 @@ mod tests {
     #[test]
     fn refuse_becomes_deny_on_a_run_that_cannot_ask() {
         let attended = plan(&input(RunKind::Attended, ShellCeiling::Off));
-        assert_eq!(attended.refused, ["ExitPlanMode"]);
+        assert_eq!(attended.refused, ["ExitPlanMode", "EnterPlanMode"]);
         assert!(!attended.disallowed.iter().any(|t| t == "ExitPlanMode"));
+        // M91.1: a refused tool is not one the run holds, so the gate's
+        // refusal is a second line behind --tools.
+        assert!(!attended.tools.iter().any(|t| t.ends_with("PlanMode")));
         let unattended = plan(&input(RunKind::Unattended, ShellCeiling::Off));
         assert!(unattended.refused.is_empty());
         assert!(unattended.disallowed.iter().any(|t| t == "ExitPlanMode"));
+        assert!(unattended.disallowed.iter().any(|t| t == "EnterPlanMode"));
         let internal = plan(&input(RunKind::Internal, ShellCeiling::Off));
         assert!(internal.refused.is_empty());
         assert!(internal.disallowed.iter().any(|t| t == "AskUserQuestion"));
+    }
+
+    // --- The built-ins a run holds (M91.1) ---------------------------------
+
+    /// Every input shape a run can be planned with, by kind.
+    fn every_input(kind: RunKind) -> Vec<ApprovalInput<'static>> {
+        let mut inputs = Vec::new();
+        for shell in ShellCeiling::ALL {
+            for web in WebCeiling::ALL {
+                for delegate in DelegateCeiling::ALL {
+                    for ask_first in [false, true] {
+                        for read_scoped in [false, true] {
+                            inputs.push(ApprovalInput {
+                                kind,
+                                shell,
+                                web,
+                                delegate,
+                                ask_first,
+                                read_scoped,
+                                narrowing: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        inputs
+    }
+
+    #[test]
+    fn tools_are_the_rows_a_plan_lets_run() {
+        let task = vec!["Task".to_string(), "get_note".to_string()];
+        let narrowed = vec!["Read".to_string()];
+        for kind in [RunKind::Attended, RunKind::Unattended, RunKind::Internal] {
+            let mut inputs = every_input(kind);
+            for narrowing in [&task, &narrowed] {
+                inputs.push(ApprovalInput {
+                    narrowing: Some(narrowing.as_slice()),
+                    ..input(kind, ShellCeiling::On)
+                });
+            }
+            for input in inputs {
+                let approval = plan(&input);
+                let admitted: Vec<&str> = approval
+                    .decisions
+                    .iter()
+                    .filter(|row| crate::policy::tools::cli_tool(&row.tool).is_some())
+                    .filter(|row| {
+                        matches!(
+                            row.decision,
+                            Decision::Allow | Decision::Ask | Decision::Cli
+                        )
+                    })
+                    .map(|row| row.tool.as_str())
+                    .collect();
+                assert_eq!(approval.tools, admitted, "{input:?}");
+                // A built-in is held or denied: --tools and --disallowedTools
+                // never share one, and nothing is held that is not a row.
+                for tool in &approval.tools {
+                    assert!(!approval.disallowed.contains(tool), "{tool} {input:?}");
+                    assert!(crate::policy::tools::cli_tool(tool).is_some(), "{tool}");
+                }
+                assert!(
+                    approval.tools.iter().all(|t| t != "Task"),
+                    "named by its row"
+                );
+                assert!(
+                    approval.tools.iter().any(|t| t == "ToolSearch"),
+                    "{input:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_outward_families_are_denied_on_every_run() {
+        const DENIED: [&str; 6] = [
+            "task_list",
+            "background",
+            "cross_session",
+            "schedule",
+            "outside",
+            "skill",
+        ];
+        let members: Vec<&str> = crate::policy::tools::cli_names(|tool| {
+            tool.family
+                .as_deref()
+                .is_some_and(|family| DENIED.contains(&family))
+        });
+        assert_eq!(members.len(), 28, "{members:?}");
+        for tool in ["SendMessage", "ListAgents", "Artifact", "Monitor", "Skill"] {
+            assert!(members.contains(&tool), "{tool}");
+        }
+        for kind in [RunKind::Attended, RunKind::Unattended, RunKind::Internal] {
+            for input in every_input(kind) {
+                let approval = plan(&input);
+                for tool in &members {
+                    assert!(approval.disallowed.iter().any(|t| t == tool), "{tool}");
+                    assert!(!approval.tools.iter().any(|t| t == tool), "{tool}");
+                    assert!(!approval.matcher().iter().any(|t| t == tool), "{tool}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_subagent_tool_needs_a_gate() {
+        let delegate = table().family("delegate").unwrap();
+        assert!(delegate.needs_gate && !delegate.loads_tools);
+        assert_eq!(delegate.ceiling, DELEGATE_AXIS);
+        for input in every_input(RunKind::Attended) {
+            let approval = plan(&input);
+            let held = input.delegate == DelegateCeiling::On;
+            assert_eq!(
+                approval.decision_of("Agent").unwrap().decision,
+                if held { Decision::Cli } else { Decision::Deny },
+                "{input:?}"
+            );
+            assert_eq!(approval.tools.iter().any(|t| t == "Agent"), held);
+            assert_eq!(approval.disallowed.iter().any(|t| t == "Agent"), !held);
+        }
+        for kind in [RunKind::Unattended, RunKind::Internal] {
+            for input in every_input(kind) {
+                let approval = plan(&input);
+                assert_eq!(
+                    approval.decision_of("Agent").unwrap().decision,
+                    Decision::Deny
+                );
+                assert!(approval.disallowed.iter().any(|t| t == "Agent"));
+                assert!(!approval.tools.iter().any(|t| t == "Agent"));
+                assert!(
+                    !approval.withheld.iter().any(|t| t == "Agent"),
+                    "denied, not withheld"
+                );
+            }
+        }
+        // The alias answers with the row's decision, and the host passes it
+        // where a gate sits and denies it where none does.
+        let attended = plan(&input(RunKind::Attended, ShellCeiling::Off));
+        assert_eq!(attended.decision_of("Task"), attended.decision_of("Agent"));
+        assert_eq!(
+            subject_of("Task", &json!({ "description": "Read the notes" })),
+            "Read the notes"
+        );
+        assert_eq!(
+            host_answer(&attended, |_, _| false, "Task", &json!({})),
+            HostAnswer::Pass
+        );
+        let unattended = plan(&input(RunKind::Unattended, ShellCeiling::Off));
+        assert_eq!(
+            host_answer(&unattended, |_, _| false, "Task", &json!({})),
+            HostAnswer::Deny {
+                message: messages().denied.clone()
+            }
+        );
+        // The flag, not the cell, keeps it from a run without a gate: a
+        // table whose unattended cell leaves it to the CLI still denies it,
+        // and holds it once the flag is dropped.
+        let mut raw: Value = serde_json::from_str(TOOL_APPROVAL_JSON).unwrap();
+        family(&mut raw, "delegate")["grid"]["unattended"]["on"] = json!("cli");
+        let flagged = parse(&raw.to_string(), manifest()).unwrap();
+        family(&mut raw, "delegate")
+            .as_object_mut()
+            .unwrap()
+            .remove("needs_gate");
+        let flagless = parse(&raw.to_string(), manifest()).unwrap();
+        let unattended = input(RunKind::Unattended, ShellCeiling::Off);
+        for (table, decision) in [(&flagged, Decision::Deny), (&flagless, Decision::Cli)] {
+            let approval = plan_in(table, manifest(), &unattended);
+            assert_eq!(approval.decision_of("Agent").unwrap().decision, decision);
+        }
+    }
+
+    // M91.2a: the Subagents switch is the subagent tool's own ceiling. Off
+    // denies it in argv on the one run kind that could hold it, whatever
+    // the shell, the web or a read limit say, and the host says the
+    // settings forbid it; on leaves it to the CLI there.
+    #[test]
+    fn subagents_follow_their_own_ceiling() {
+        for shell in ShellCeiling::ALL {
+            for read_scoped in [false, true] {
+                let at = |delegate| {
+                    plan(&ApprovalInput {
+                        delegate,
+                        read_scoped,
+                        ..input(RunKind::Attended, shell)
+                    })
+                };
+                let (off, on) = (at(DelegateCeiling::Off), at(DelegateCeiling::On));
+                let label = format!("{shell:?} read_scoped={read_scoped}");
+                assert!(off.disallowed.iter().any(|t| t == "Agent"), "{label}");
+                assert!(!off.tools.iter().any(|t| t == "Agent"), "{label}");
+                assert!(on.tools.iter().any(|t| t == "Agent"), "{label}");
+                assert!(!on.disallowed.iter().any(|t| t == "Agent"), "{label}");
+                // It never asks, so it moves neither the mode nor the gate.
+                assert_eq!(off.permission_mode, on.permission_mode, "{label}");
+                assert_eq!(off.matcher(), on.matcher(), "{label}");
+                assert!(!on.allowed.iter().any(|t| t == "Agent"), "{label}");
+                for spelling in ["Agent", "Task"] {
+                    assert_eq!(
+                        host_answer(&off, |_, _| false, spelling, &json!({})),
+                        HostAnswer::Deny {
+                            message: messages().denied.clone()
+                        },
+                        "{label}"
+                    );
+                    assert_eq!(
+                        host_answer(&on, |_, _| false, spelling, &json!({})),
+                        HostAnswer::Pass,
+                        "{label}"
+                    );
+                }
+                // Only the subagent tool moves with it.
+                let others = |approval: &RunApproval| -> Vec<ToolDecision> {
+                    approval
+                        .decisions
+                        .iter()
+                        .filter(|row| row.family != "delegate")
+                        .cloned()
+                        .collect()
+                };
+                assert_eq!(others(&off), others(&on), "{label}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_delegate_vocabulary_is_the_enum() {
+        let words: Vec<&str> = DelegateCeiling::ALL.iter().map(|c| c.as_str()).collect();
+        assert_eq!(table().ceilings[DELEGATE_AXIS], words);
+        for ceiling in DelegateCeiling::ALL {
+            assert_eq!(DelegateCeiling::read(&json!(ceiling.as_str())), ceiling);
+        }
+        for value in [
+            json!(true),
+            json!("ON"),
+            json!("ask"),
+            json!(1),
+            json!(null),
+        ] {
+            assert_eq!(
+                DelegateCeiling::read(&value),
+                DelegateCeiling::Off,
+                "{value}"
+            );
+        }
+        // Absent is the switch's default where a person watches, and off
+        // everywhere else; a value present is the value.
+        assert_eq!(DelegateCeiling::of(None, Some(true)), DelegateCeiling::On);
+        for attended in [Some(false), None] {
+            assert_eq!(DelegateCeiling::of(None, attended), DelegateCeiling::Off);
+        }
+        for attended in [Some(true), Some(false), None] {
+            for ceiling in DelegateCeiling::ALL {
+                assert_eq!(DelegateCeiling::of(Some(ceiling), attended), ceiling);
+            }
+        }
+    }
+
+    // M91.2a: a record that narrows its tools must name the subagent tool,
+    // by either spelling, to hold it: one that leaves it out is denied it in
+    // argv, where the narrowing's own rule would have left it to the CLI.
+    #[test]
+    fn a_narrowing_that_leaves_out_the_subagent_tool_denies_it() {
+        let plan_with = |names: &[&str]| {
+            let narrowing: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+            plan(&ApprovalInput {
+                narrowing: Some(&narrowing),
+                ..input(RunKind::Attended, ShellCeiling::On)
+            })
+        };
+        let leaving_out: [&[&str]; 4] =
+            [&["get_note"], &["Read", "Bash"], &[], &["Tasks", "agents"]];
+        for names in leaving_out {
+            let approval = plan_with(names);
+            assert_eq!(
+                approval.decision_of("Agent").unwrap().decision,
+                Decision::Deny,
+                "{names:?}"
+            );
+            assert!(approval.disallowed.iter().any(|t| t == "Agent"));
+            assert!(
+                approval.denied_agent_types.is_empty() && approval.allowed_agent_types.is_empty()
+            );
+        }
+        let naming: [&[&str]; 4] = [&["Agent"], &["Task"], &[" task ", "get_note"], &["AGENT"]];
+        for names in naming {
+            let approval = plan_with(names);
+            assert_eq!(
+                approval.decision_of("Agent").unwrap().decision,
+                Decision::Cli,
+                "{names:?}"
+            );
+            assert!(approval.tools.iter().any(|t| t == "Agent"), "{names:?}");
+        }
+        // Naming it never lifts the switch.
+        let named = vec!["Task".to_string()];
+        let off = plan(&ApprovalInput {
+            delegate: DelegateCeiling::Off,
+            narrowing: Some(&named),
+            ..input(RunKind::Attended, ShellCeiling::On)
+        });
+        assert_eq!(off.decision_of("Agent").unwrap().decision, Decision::Deny);
+        // The family's `narrowed_out`, not a branch on its name, denies it: a
+        // table without the field leaves a narrowed-out cli to the CLI.
+        let mut raw: Value = serde_json::from_str(TOOL_APPROVAL_JSON).unwrap();
+        family(&mut raw, "delegate")
+            .as_object_mut()
+            .unwrap()
+            .remove("narrowed_out");
+        let unflagged = parse(&raw.to_string(), manifest()).unwrap();
+        assert_eq!(
+            unflagged.family("delegate").unwrap().narrowed_out,
+            NarrowedOut::Default
+        );
+        let narrowing = vec!["get_note".to_string()];
+        let approval = plan_in(
+            &unflagged,
+            manifest(),
+            &ApprovalInput {
+                narrowing: Some(&narrowing),
+                ..input(RunKind::Attended, ShellCeiling::On)
+            },
+        );
+        assert_eq!(
+            approval.decision_of("Agent").unwrap().decision,
+            Decision::Cli
+        );
+    }
+
+    // M91.2a: `narrowed_out` is a family's, read the same way for the
+    // manifest's confirmable rows as for the CLI's.
+    #[test]
+    fn narrowed_out_reads_the_same_for_a_page_writer() {
+        let narrowing = vec!["get_note".to_string()];
+        let narrowed = ApprovalInput {
+            narrowing: Some(&narrowing),
+            ..input(RunKind::Attended, ShellCeiling::Off)
+        };
+        let create = |table: &ToolApproval| {
+            plan_in(table, manifest(), &narrowed)
+                .decision_of("mcp__cerebro__create_note")
+                .unwrap()
+                .decision
+        };
+        // Without ask-first a page writer is allowed, and a narrowing that
+        // leaves it out leaves it to the CLI...
+        assert_eq!(create(table()), Decision::Cli);
+        // ...unless its family says a narrowed-out tool is denied.
+        let mut raw: Value = serde_json::from_str(TOOL_APPROVAL_JSON).unwrap();
+        family(&mut raw, "confirmable")["narrowed_out"] = json!("deny");
+        let denying = parse(&raw.to_string(), manifest()).unwrap();
+        assert_eq!(create(&denying), Decision::Deny);
+    }
+
+    // M91.2a: a run that holds the subagent tool names the agent types: the
+    // built-in ones its argv denies by name and Cerebro's own it may start.
+    // Every other run names none.
+    #[test]
+    fn agent_types_ride_only_with_the_subagent_tool() {
+        let types = &table().agent_types;
+        assert_eq!(
+            types.builtin,
+            [
+                "claude",
+                "claude-code-guide",
+                "Explore",
+                "general-purpose",
+                "Plan",
+                "statusline-setup"
+            ]
+        );
+        assert_eq!(types.allowed, ["cerebro-researcher"]);
+        let task = vec!["Task".to_string()];
+        let read = vec!["Read".to_string()];
+        for kind in [RunKind::Attended, RunKind::Unattended, RunKind::Internal] {
+            let mut inputs = every_input(kind);
+            for narrowing in [&task, &read] {
+                inputs.push(ApprovalInput {
+                    narrowing: Some(narrowing.as_slice()),
+                    ..input(kind, ShellCeiling::On)
+                });
+            }
+            for input in inputs {
+                let approval = plan(&input);
+                let held = approval.tools.iter().any(|t| t == "Agent");
+                assert_eq!(
+                    held,
+                    kind == RunKind::Attended
+                        && input.delegate == DelegateCeiling::On
+                        && input.narrowing != Some(read.as_slice()),
+                    "{input:?}"
+                );
+                if held {
+                    assert_eq!(approval.denied_agent_types, types.builtin, "{input:?}");
+                    assert_eq!(approval.allowed_agent_types, types.allowed, "{input:?}");
+                } else {
+                    assert!(approval.denied_agent_types.is_empty(), "{input:?}");
+                    assert!(approval.allowed_agent_types.is_empty(), "{input:?}");
+                }
+            }
+        }
+    }
+
+    /// The agent types' refusals (M91.2a), one negative control each, in
+    /// the words `src/lib/policy/toolApproval.test.ts` expects too.
+    #[test]
+    fn a_bad_agent_type_refuses() {
+        let path = TOOL_APPROVAL_PATH;
+        let grammar = "must be one or more letters, digits, colons, dots, dashes or underscores";
+        for (list, name) in [
+            ("builtin", ""),
+            ("builtin", "general purpose"),
+            ("allowed", "cerebro,researcher"),
+            ("allowed", "Agent(Plan)"),
+            ("allowed", "notes/researcher"),
+            ("allowed", "é"),
+        ] {
+            let err = refused(|v| v["agent_types"][list] = json!([name]));
+            assert_eq!(
+                err,
+                format!("{path}: agent type {name:?}: `agent_types.{list}` {grammar}")
+            );
+        }
+        let err = refused(|v| v["agent_types"]["builtin"] = json!(["Plan", "Explore", "Plan"]));
+        assert_eq!(
+            err,
+            format!("{path}: agent type \"Plan\": `agent_types.builtin` is named twice")
+        );
+        let err = refused(|v| {
+            v["agent_types"]["allowed"] = json!(["cerebro-researcher", "cerebro-researcher"])
+        });
+        assert_eq!(
+            err,
+            format!(
+                "{path}: agent type \"cerebro-researcher\": `agent_types.allowed` is named twice"
+            )
+        );
+        let err =
+            refused(|v| v["agent_types"]["allowed"] = json!(["cerebro-researcher", "Explore"]));
+        assert_eq!(
+            err,
+            format!(
+                "{path}: agent type \"Explore\": `agent_types.allowed` is one of Claude Code's \
+                 built-in types, which argv denies"
+            )
+        );
+        // The block is required, holds exactly its two lists, and either may
+        // be empty: what an init lists that neither names is the init
+        // gate's to stop.
+        let err = refused(|v| {
+            v.as_object_mut().unwrap().remove("agent_types");
+        });
+        assert!(err.contains("missing field `agent_types`"), "{err}");
+        let err = refused(|v| v["agent_types"]["denied"] = json!([]));
+        assert!(err.contains("unknown field `denied`"), "{err}");
+        let err = refused(|v| v["agent_types"]["builtin"] = json!([1]));
+        assert!(err.contains("invalid type"), "{err}");
+        let mut raw: Value = serde_json::from_str(TOOL_APPROVAL_JSON).unwrap();
+        raw["agent_types"] = json!({ "builtin": [], "allowed": [] });
+        let none = parse(&raw.to_string(), manifest()).unwrap();
+        let approval = plan_in(
+            &none,
+            manifest(),
+            &input(RunKind::Attended, ShellCeiling::Off),
+        );
+        assert!(approval.tools.iter().any(|t| t == "Agent"));
+        assert!(approval.denied_agent_types.is_empty() && approval.allowed_agent_types.is_empty());
+        // The grammar, as argv needs it.
+        for name in ["claude-code-guide", "plugin:sub:name", "a.b_c-1"] {
+            assert!(is_agent_type(name), "{name}");
+        }
+        for name in ["", " a", "a b", "a,b", "a(b)", "a/b", "a\nb", "ä"] {
+            assert!(!is_agent_type(name), "{name:?}");
+        }
+    }
+
+    #[test]
+    fn narrowed_out_is_a_closed_word_and_a_loader_keeps_the_default() {
+        let err = refused(|v| family(v, "delegate")["narrowed_out"] = json!("cli"));
+        assert!(err.contains("unknown variant"), "{err}");
+        // serde_json reads a word from a string alone: a boolean is no value
+        // it expects.
+        let err = refused(|v| family(v, "delegate")["narrowed_out"] = json!(true));
+        assert!(err.contains("expected value"), "{err}");
+        let err = refused(|v| family(v, "meta")["narrowed_out"] = json!("deny"));
+        assert_eq!(
+            err,
+            format!(
+                "{TOOL_APPROVAL_PATH}: family meta: `narrowed_out` must be default: a family that \
+                 loads tools stays with every run"
+            )
+        );
+        // Default is a word too, and reads as absent.
+        let mut raw: Value = serde_json::from_str(TOOL_APPROVAL_JSON).unwrap();
+        family(&mut raw, "meta")["narrowed_out"] = json!("default");
+        assert_eq!(
+            parse(&raw.to_string(), manifest())
+                .unwrap()
+                .family("meta")
+                .unwrap()
+                .narrowed_out,
+            NarrowedOut::Default
+        );
+    }
+
+    #[test]
+    fn a_todo_list_is_kept_only_where_someone_watches() {
+        for input in every_input(RunKind::Attended) {
+            let approval = plan(&input);
+            assert!(approval.allowed.iter().any(|t| t == "TodoWrite"));
+            assert!(approval.tools.iter().any(|t| t == "TodoWrite"));
+        }
+        for kind in [RunKind::Unattended, RunKind::Internal] {
+            for input in every_input(kind) {
+                let approval = plan(&input);
+                assert!(approval.disallowed.iter().any(|t| t == "TodoWrite"));
+                assert!(!approval.tools.iter().any(|t| t == "TodoWrite"));
+            }
+        }
+    }
+
+    #[test]
+    fn a_loader_stays_with_every_run_and_runs_nothing() {
+        let loaders: Vec<&str> = crate::policy::tools::cli_names(loads_tools);
+        assert_eq!(loaders, ["ToolSearch"]);
+        for name in &loaders {
+            assert!(!crate::policy::tools::cli_tool(name).unwrap().writes);
+        }
+        let narrowing = vec!["get_note".to_string()];
+        for kind in [RunKind::Attended, RunKind::Unattended, RunKind::Internal] {
+            let mut inputs = every_input(kind);
+            inputs.push(ApprovalInput {
+                narrowing: Some(narrowing.as_slice()),
+                ..input(kind, ShellCeiling::Off)
+            });
+            for input in inputs {
+                let approval = plan(&input);
+                assert_eq!(
+                    approval.decision_of("ToolSearch").unwrap().decision,
+                    Decision::Cli,
+                    "{input:?}"
+                );
+                assert!(approval.tools.iter().any(|t| t == "ToolSearch"));
+            }
+        }
+    }
+
+    #[test]
+    fn a_loader_leaves_every_cell_to_the_cli_and_nothing_else_may_on_internal() {
+        let err = refused(|v| family(v, "meta")["grid"]["unattended"]["any"] = json!("deny"));
+        for fragment in [
+            "family meta",
+            "`grid`",
+            "must leave every run kind to the CLI: its tools only load other tools",
+        ] {
+            assert!(err.contains(fragment), "{fragment:?} missing from: {err}");
+        }
+        let err = refused(|v| {
+            family(v, "meta")
+                .as_object_mut()
+                .unwrap()
+                .remove("loads_tools");
+        });
+        assert!(
+            err.contains("family meta") && err.contains("`grid.internal` may only deny or refuse"),
+            "{err}"
+        );
+        for (flag, value) in [("loads_tools", json!(1)), ("needs_gate", json!("yes"))] {
+            let err = refused(|v| family(v, "delegate")[flag] = value);
+            assert!(err.contains("invalid type"), "{flag}: {err}");
+        }
+        let err = refused(|v| family(v, "delegate")["needs_seat"] = json!(true));
+        assert!(err.contains("unknown field"), "{err}");
+        // A loader that needs a gate would be denied wherever none sits.
+        let err = refused(|v| family(v, "meta")["needs_gate"] = json!(true));
+        for fragment in [
+            "family meta",
+            "`needs_gate`",
+            "must be false: a family that loads tools stays with every run",
+        ] {
+            assert!(err.contains(fragment), "{fragment:?} missing from: {err}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_tool_is_named_in_the_init_gates_words() {
+        let words = &messages().unknown_tool;
+        assert_eq!(words.matches("{tool}").count(), 1, "{words}");
+        assert!(words.starts_with("Claude Code offered a tool Cerebro doesn't know: {tool}."));
     }
 
     // M57.3: a question asks only where someone watches, with a question
@@ -2022,44 +2903,31 @@ mod tests {
         assert_eq!(rules, ["Read(./.trash/**)", "Edit(./.trash/**)"]);
         let narrowing = vec!["Read".to_string(), "get_note".to_string()];
         for kind in [RunKind::Attended, RunKind::Unattended, RunKind::Internal] {
-            for shell in ShellCeiling::ALL {
-                for web in WebCeiling::ALL {
-                    for ask_first in [false, true] {
-                        for read_scoped in [false, true] {
-                            for narrowed in [None, Some(narrowing.as_slice())] {
-                                let approval = plan(&ApprovalInput {
-                                    kind,
-                                    shell,
-                                    web,
-                                    ask_first,
-                                    read_scoped,
-                                    narrowing: narrowed,
-                                });
-                                let tail = &approval.disallowed
-                                    [approval.disallowed.len().saturating_sub(rules.len())..];
-                                let label = format!(
-                                    "{kind:?} {shell:?} {web:?} ask_first={ask_first} \
-                                     read_scoped={read_scoped} narrowed={}",
-                                    narrowed.is_some()
-                                );
-                                if kind == RunKind::Internal {
-                                    assert_eq!(
-                                        approval.disallowed,
-                                        crate::policy::tools::cli_names(|_| true),
-                                        "{label}"
-                                    );
-                                } else {
-                                    assert_eq!(tail, rules.as_slice(), "{label}");
-                                }
-                                // A path rule is never a tool's decision, an
-                                // allow or a gate match.
-                                for rule in &rules {
-                                    assert!(approval.decision_of(rule).is_none(), "{label}");
-                                    assert!(!approval.allowed.contains(rule), "{label}");
-                                    assert!(!approval.matcher().contains(rule), "{label}");
-                                }
-                            }
-                        }
+            for shape in every_input(kind) {
+                for narrowed in [None, Some(narrowing.as_slice())] {
+                    let input = ApprovalInput {
+                        narrowing: narrowed,
+                        ..shape
+                    };
+                    let approval = plan(&input);
+                    let tail = &approval.disallowed
+                        [approval.disallowed.len().saturating_sub(rules.len())..];
+                    let label = format!("{input:?}");
+                    if kind == RunKind::Internal {
+                        assert_eq!(
+                            approval.disallowed,
+                            crate::policy::tools::cli_names(|tool| !loads_tools(tool)),
+                            "{label}"
+                        );
+                    } else {
+                        assert_eq!(tail, rules.as_slice(), "{label}");
+                    }
+                    // A path rule is never a tool's decision, an allow or a
+                    // gate match.
+                    for rule in &rules {
+                        assert!(approval.decision_of(rule).is_none(), "{label}");
+                        assert!(!approval.allowed.contains(rule), "{label}");
+                        assert!(!approval.matcher().contains(rule), "{label}");
                     }
                 }
             }
@@ -2330,11 +3198,13 @@ mod tests {
         repo("shared/policy/goldens-tool-approval")
     }
 
-    /// A golden's decision input, `ask_first` among it since M57.4.
+    /// A golden's decision input, `ask_first` among it since M57.4 and
+    /// `delegate` since M91.2a.
     struct GoldenInput {
         kind: RunKind,
         shell: ShellCeiling,
         web: WebCeiling,
+        delegate: DelegateCeiling,
         ask_first: bool,
         read_scoped: bool,
         narrowing: Option<Vec<String>>,
@@ -2346,6 +3216,7 @@ mod tests {
                 kind: self.kind,
                 shell: self.shell,
                 web: self.web,
+                delegate: self.delegate,
                 ask_first: self.ask_first,
                 read_scoped: self.read_scoped,
                 narrowing: self.narrowing.as_deref(),
@@ -2358,6 +3229,7 @@ mod tests {
             kind: serde_json::from_value(value["kind"].clone()).unwrap(),
             shell: ShellCeiling::read(&value["shell"]),
             web: WebCeiling::read(value.get("web").expect("web")),
+            delegate: DelegateCeiling::read(value.get("delegate").expect("delegate")),
             ask_first: value["ask_first"].as_bool().expect("ask_first"),
             read_scoped: value["read_scoped"].as_bool().unwrap(),
             narrowing: value["narrowing"].as_array().map(|names| {
@@ -2398,9 +3270,12 @@ mod tests {
                 .map(|row| (row.tool.clone(), json!(row.decision.as_str())))
                 .collect();
             golden["expected"] = json!({
-                "permission_mode": approval.permission_mode, "allowed": approval.allowed,
-                "disallowed": approval.disallowed, "matcher": approval.matcher(),
-                "withheld": approval.withheld, "decisions": decisions,
+                "permission_mode": approval.permission_mode, "tools": approval.tools,
+                "allowed": approval.allowed, "disallowed": approval.disallowed,
+                "matcher": approval.matcher(), "withheld": approval.withheld,
+                "denied_agent_types": approval.denied_agent_types,
+                "allowed_agent_types": approval.allowed_agent_types,
+                "decisions": decisions,
             });
             std::fs::write(
                 golden_dir().join(name),
@@ -2502,16 +3377,19 @@ mod tests {
                 .collect();
             let got = json!({
                 "permission_mode": approval.permission_mode,
+                "tools": approval.tools,
                 "allowed": approval.allowed,
                 "disallowed": approval.disallowed,
                 "matcher": approval.matcher(),
                 "withheld": approval.withheld,
+                "denied_agent_types": approval.denied_agent_types,
+                "allowed_agent_types": approval.allowed_agent_types,
                 "decisions": decisions,
             });
             assert_eq!(&got, expected, "{name}");
             plans += 1;
         }
-        assert!(plans >= 22, "{plans} plan goldens");
+        assert!(plans >= 27, "{plans} plan goldens");
         assert!(answers > 0, "no host-answer cases");
     }
 
@@ -2553,6 +3431,36 @@ mod tests {
                 assert!(found, "no golden for {kind:?} with ask_first {ask_first}");
             }
         }
+        // Every run kind at each Subagents switch (M91.2a), and on the run
+        // that could hold the subagent tool, a narrowing that leaves it out
+        // and one that names it by its alias.
+        for kind in [RunKind::Attended, RunKind::Unattended, RunKind::Internal] {
+            for delegate in DelegateCeiling::ALL {
+                let found = files.iter().any(|(_, golden)| {
+                    golden["input"]["kind"] == kind.as_str()
+                        && golden["input"]["delegate"] == delegate.as_str()
+                        && golden["input"]["narrowing"].is_null()
+                });
+                assert!(found, "no golden for {kind:?} with delegate {delegate:?}");
+            }
+        }
+        let narrowed = |names: fn(&[Value]) -> bool, decision: &str| {
+            files.iter().any(|(_, golden)| {
+                let input = &golden["input"];
+                input["kind"] == "attended"
+                    && input["delegate"] == "on"
+                    && input["narrowing"].as_array().is_some_and(|n| names(n))
+                    && golden["expected"]["decisions"]["Agent"] == decision
+            })
+        };
+        assert!(
+            narrowed(|n| !n.iter().any(|e| e == "Agent" || e == "Task"), "deny"),
+            "no golden narrows the subagent tool out"
+        );
+        assert!(
+            narrowed(|n| n.iter().any(|e| e == "Task"), "cli"),
+            "no golden keeps it by its alias"
+        );
         // Every decision a cell can reach has a plan golden holding it, queue
         // included (M57.4c).
         let reached: Vec<Decision> = table()

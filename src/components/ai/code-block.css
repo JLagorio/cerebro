@@ -1,0 +1,243 @@
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   Code Block (M91.7) on the DS tokens: a sunken card with a hairline, its
+   code in the mono face. Shiki's colours arrive inline, already for the
+   caller's theme (workspace/highlighter.tsx); plain text takes the card's
+   ink. Unlayered like the app's other surface stylesheets; motion spends the
+   tokens only. */
+
+.cb-ai-code-block {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--n-100);
+  border-radius: var(--r-xl);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+}
+/* The content takes focus so a keyboard can scroll it; the ring is the
+   block's, which is what the reader sees as the thing focused. */
+.cb-ai-code-block:has(> .cb-ai-code-block-content:focus-visible) {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-code-block-destructive {
+  border-color: var(--danger-200);
+  background: var(--danger-50);
+  color: var(--danger-700);
+}
+.cb-ai-code-block-sm {
+  border-radius: var(--r-lg);
+  font-size: var(--fs-xs);
+}
+
+.cb-ai-code-block-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-4) var(--sp-4) 0;
+  color: var(--text-meta);
+}
+.cb-ai-code-block-sm > .cb-ai-code-block-header {
+  padding: var(--sp-3) var(--sp-3) 0;
+}
+.cb-ai-code-block-destructive > .cb-ai-code-block-header {
+  color: var(--danger-700);
+}
+.cb-ai-code-block-header > :has(> .cb-ai-code-block-title) {
+  min-width: 0;
+}
+
+.cb-ai-code-block-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-ai-code-block-destructive .cb-ai-code-block-title {
+  color: var(--danger-700);
+}
+.cb-ai-code-block-title > svg {
+  display: inline-block;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+  pointer-events: none;
+}
+
+.cb-ai-code-block-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: calc(var(--sp-1) * -1) -6px calc(var(--sp-1) * -1) auto;
+}
+/* With no header the actions float over the block's corner, shown while the
+   block is hovered or holds focus — so a keyboard reaches them too — and
+   always on a touch screen, which has no hover. */
+.cb-ai-code-block > .cb-ai-code-block-actions {
+  position: absolute;
+  top: var(--sp-3);
+  inset-inline-end: var(--sp-3);
+  z-index: 1;
+  margin: 0;
+  border-radius: var(--r-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-xs);
+  opacity: 0;
+  transition: opacity var(--motion-move);
+}
+.cb-ai-code-block-sm > .cb-ai-code-block-actions {
+  top: var(--sp-2);
+  inset-inline-end: var(--sp-2);
+}
+.cb-ai-code-block:hover > .cb-ai-code-block-actions,
+.cb-ai-code-block:focus-within > .cb-ai-code-block-actions {
+  opacity: 1;
+}
+@media (pointer: coarse) {
+  .cb-ai-code-block > .cb-ai-code-block-actions {
+    opacity: 1;
+  }
+}
+
+.cb-ai-code-block-content {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: var(--sp-4);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: inherit;
+  line-height: 1.6;
+  text-align: start;
+  white-space: pre;
+  outline: none;
+}
+.cb-ai-code-block:has(> .cb-ai-code-block-header) > .cb-ai-code-block-content {
+  padding-top: var(--sp-2);
+}
+.cb-ai-code-block:has(> .cb-ai-code-block-footer) > .cb-ai-code-block-content {
+  padding-bottom: var(--sp-2);
+}
+.cb-ai-code-block-sm > .cb-ai-code-block-content {
+  padding: var(--sp-3);
+}
+.cb-ai-code-block-sm:has(> .cb-ai-code-block-header) > .cb-ai-code-block-content {
+  padding-top: 6px;
+}
+.cb-ai-code-block-sm:has(> .cb-ai-code-block-footer) > .cb-ai-code-block-content {
+  padding-bottom: 6px;
+}
+.cb-ai-code-block-content[data-wrap] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* tokens/base.css draws every `code` as an inline chip — a ground, a border,
+   its own size. A block's code is the surface's own text, and a grid of its
+   lines, wide as the longest unless it wraps. */
+.cb-ai-code-block-code {
+  display: grid;
+  align-content: start;
+  min-width: max-content;
+  min-height: 1lh;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+.cb-ai-code-block-content[data-wrap] > .cb-ai-code-block-code {
+  min-width: 0;
+}
+.cb-ai-code-block-content[data-numbered] > .cb-ai-code-block-code {
+  grid-template-columns: auto 1fr;
+}
+
+/* A line runs to the block's edges, so a tint marks the whole row. */
+.cb-ai-code-block-line {
+  position: relative;
+  display: block;
+  min-height: 1lh;
+  margin-inline: calc(var(--sp-4) * -1);
+  padding-inline: var(--sp-4);
+}
+.cb-ai-code-block-sm .cb-ai-code-block-line {
+  margin-inline: calc(var(--sp-3) * -1);
+  padding-inline: var(--sp-3);
+}
+.cb-ai-code-block-line-content {
+  min-width: 0;
+}
+/* Numbers are a counter, never text: a selection leaves them behind, and the
+   empty alternative keeps them out of what a screen reader reads. */
+[data-numbered] > .cb-ai-code-block-code > .cb-ai-code-block-line {
+  display: grid;
+  grid-column: span 2;
+  grid-template-columns: subgrid;
+  column-gap: var(--sp-3);
+  counter-increment: cb-ai-line;
+}
+[data-numbered] > .cb-ai-code-block-code > .cb-ai-code-block-line::before {
+  min-width: var(--sp-6);
+  color: var(--n-400);
+  text-align: end;
+  user-select: none;
+  content: counter(cb-ai-line);
+  content: counter(cb-ai-line) / '';
+}
+
+.cb-ai-code-block-line[data-variant='added'] {
+  background: var(--success-50);
+}
+.cb-ai-code-block-line[data-variant='removed'] {
+  background: var(--danger-50);
+}
+.cb-ai-code-block-line[data-variant='highlighted'] {
+  background: var(--n-100);
+}
+/* A change is a mark as well as a tint, so it never rests on colour alone. A
+   raw diff carries its own `+` and `-` in its text; a line a caller marks
+   gets one drawn, outside the selection. */
+.cb-ai-code-block-content:not([data-language='diff'])
+  .cb-ai-code-block-line[data-variant='added']::after,
+.cb-ai-code-block-content:not([data-language='diff'])
+  .cb-ai-code-block-line[data-variant='removed']::after {
+  position: absolute;
+  top: 0;
+  inset-inline-start: var(--sp-1);
+  user-select: none;
+}
+.cb-ai-code-block-content:not([data-language='diff'])
+  .cb-ai-code-block-line[data-variant='added']::after {
+  color: var(--success-600);
+  content: '+';
+}
+.cb-ai-code-block-content:not([data-language='diff'])
+  .cb-ai-code-block-line[data-variant='removed']::after {
+  color: var(--danger-600);
+  content: '\2212';
+}
+
+.cb-ai-code-block-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: 0 var(--sp-4) var(--sp-4);
+  color: var(--text-meta);
+}
+.cb-ai-code-block-sm > .cb-ai-code-block-footer {
+  padding: 0 var(--sp-3) var(--sp-3);
+}

@@ -1,6 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { attachRun, onAgentEvent, readCliTranscript, runAgent } from './agentIpc';
 import {
   editedText,
   MOCK_FAILURES,
@@ -9,7 +10,10 @@ import {
   resetMockGrants,
   runMockAgent,
 } from './mockAgent';
-import type { AgentStreamEvent, UiAction } from './types';
+import { applyEvent, endLiveTurn, findCall, replayTranscript } from './transcript';
+import type { AgentEvent, AgentStreamEvent, ChatMessage, UiAction } from './types';
+import { parseStackTrace } from '@/engine/ai/stackFrames';
+import { testReportOf } from '@/engine/ai/testReport';
 import { notesPrompt, type ReviewNote } from '@/engine/reviewNotes';
 import { makeEntry } from '@/engine/testHelpers';
 import { organizePrompt } from '@/lib/prompts';
@@ -946,6 +950,12 @@ describe('the mock names its session and ends its turn as the fold does (M56.3)'
     );
   });
 
+  it('counts nothing on its result: only the M91 scripts carry a count (M92.2)', async () => {
+    const result = (await run(SESSION)).find((e) => e.kind === 'Result');
+    expect(result).toBeDefined();
+    expect(result !== undefined && 'duration_ms' in result).toBe(false);
+  });
+
   it('emits Text and TurnEnded before Result', async () => {
     const kinds = (await run(SESSION)).map((e) => e.kind);
     expect(kinds.slice(-4)).toEqual(['Text', 'TurnEnded', 'Result', 'Done']);
@@ -969,6 +979,122 @@ describe('the mock names its session and ends its turn as the fold does (M56.3)'
     const failure = runMockAgent('fail: unknown', (e) => failed.push(e), { delayMs: 50 });
     failure.cancel();
     expect(failed.map((e) => e.kind)).toEqual(['Cancelled', 'Done']);
+  });
+});
+
+describe('what a mock run reaches (M92.8)', () => {
+  const plan = (narrowing: string[] | null = null, askFirst = false) =>
+    planApproval({
+      kind: 'attended',
+      shell: 'ask',
+      web: 'on',
+      askFirst,
+      readScoped: false,
+      narrowing: narrowing === null ? null : (tool) => narrowing.includes(tool),
+    });
+
+  function run(message: string, opts: Parameters<typeof runMockAgent>[2]) {
+    const events: AgentStreamEvent[] = [];
+    return new Promise<AgentStreamEvent[]>((resolve) => {
+      runMockAgent(
+        message,
+        (event) => {
+          events.push(event);
+          if (event.kind === 'Done') resolve(events);
+        },
+        { delayMs: 0, ...opts },
+      );
+    });
+  }
+
+  it('says it right after its init, once, from the plan its calls decide through', async () => {
+    const approval = plan();
+    const events = await run('What is at risk right now?', { approval });
+    expect(events.map((e) => e.kind).slice(0, 3)).toEqual(['Init', 'Reach', 'ModelChanged']);
+    const reaches = events.filter((e) => e.kind === 'Reach');
+    expect(reaches).toHaveLength(1);
+    const [said] = reaches;
+    if (said.kind !== 'Reach') throw new Error('a Reach');
+    expect(said.reach).toMatchObject({
+      connectors: [],
+      missing: [],
+      missing_more: 0,
+      inherits: false,
+      permission_mode: approval.permission_mode,
+      cerebro: true,
+    });
+    // Each family's decisions once, as the plan decided its tools.
+    for (const row of approval.decisions) {
+      expect(said.reach.families[row.family], row.tool).toContain(row.decision);
+    }
+    const decided = Object.values(said.reach.families);
+    expect(decided.every((words) => new Set(words).size === words.length)).toBe(true);
+    expect(said.reach.families.shell).toEqual(['ask']);
+    expect(said.reach.families.web).toEqual(['allow']);
+    // Ask-first page writes ask, and say so.
+    const asking = await run('What is at risk right now?', { approval: plan(null, true) });
+    const reach = asking.find((e) => e.kind === 'Reach');
+    expect(reach?.kind === 'Reach' && reach.reach.families.confirmable).toEqual(['ask']);
+  });
+
+  it('holds Cerebro’s tools unless its declared tools leave every one out', async () => {
+    const said = async (allowedTools: string[] | null) => {
+      const events = await run('hello', { approval: plan(allowedTools ?? null), allowedTools });
+      const reach = events.find((e) => e.kind === 'Reach');
+      if (reach?.kind !== 'Reach') throw new Error('a Reach');
+      return reach.reach.cerebro;
+    };
+    expect(await said(null)).toBe(true);
+    expect(await said(['get_note'])).toBe(true);
+    expect(await said([])).toBe(false);
+  });
+
+  it('says nothing of its reach without a plan', async () => {
+    const events = await run('What is at risk right now?', {});
+    expect(events.some((e) => e.kind === 'Reach')).toBe(false);
+  });
+
+  it('says it after a failure script’s init too, as an admitted init does', async () => {
+    const events = await run('fail: usage-limit', { approval: plan() });
+    expect(events.map((e) => e.kind)).toEqual(['Init', 'Reach', 'Error', 'TurnEnded', 'Done']);
+  });
+
+  it('shows once on a re-attach, and never in the run’s transcript (CV-30)', async () => {
+    const session = '00000000-0000-4000-8000-0000000092a8';
+    const start = await runAgent('/demo-vault', {
+      message: 'What is at risk right now?',
+      sessionId: session,
+      shell: 'off',
+      connectors: false,
+      attended: true,
+    });
+    if ('deferred' in start || 'settled' in start) throw new Error('an attended run starts');
+    const live: AgentEvent[] = [];
+    await new Promise<void>((resolve) => {
+      const stop = onAgentEvent((event) => {
+        live.push(event);
+        if (event.kind === 'Done') {
+          stop();
+          resolve();
+        }
+      }, start.run);
+    });
+    const said = live.filter((e) => e.kind === 'Reach');
+    expect(said).toHaveLength(1);
+    expect(live[live.indexOf(said[0]) - 1].kind).toBe('Init');
+    // From the start, the journal hands it over once; from its own seq, not
+    // again.
+    const replay = async (after: number) => {
+      const seen: AgentEvent[] = [];
+      const attached = await attachRun(start, after, (event) => seen.push(event));
+      if (attached.state !== 'unknown') attached.detach();
+      return seen.filter((e) => e.kind === 'Reach');
+    };
+    expect(await replay(0)).toEqual(said);
+    expect(await replay(said[0].seq)).toEqual([]);
+    const read = await readCliTranscript('/demo-vault', session, null);
+    if (read.state !== 'read') throw new Error(`expected a read, got ${read.reason}`);
+    expect(read.events.some((e) => e.kind === 'Reach')).toBe(false);
   });
 });
 
@@ -1809,5 +1935,342 @@ describe('the canvas create script', () => {
     expect(actions).toEqual([]);
     expect(replyOf(events)).toBe('I could not create the whiteboard: Op 1: bad.');
     expect(events.find((event) => event.kind === 'ToolDone')).toMatchObject({ is_error: true });
+  });
+});
+
+/**
+ * The M91 scripts (M91.4): each emits only what Rust's fold emits, with the
+ * fields its events carry, so the panel's reducer meets in the browser what
+ * it meets from a real run. Rust's own vocabulary is read off the transcript
+ * goldens fold.rs writes.
+ */
+describe('the M91 scripts (M91.4)', () => {
+  const GOLDENS = join(__dirname, '../../conformance/transcript');
+  const goldenEvents = readdirSync(GOLDENS)
+    .filter((name) => name.endsWith('.json'))
+    .flatMap((name) => {
+      const golden = JSON.parse(readFileSync(join(GOLDENS, name), 'utf8')) as {
+        streams: { events: AgentStreamEvent[] }[];
+        session: { events: AgentStreamEvent[] } | null;
+      };
+      return [...golden.streams.flatMap((s) => s.events), ...(golden.session?.events ?? [])];
+    });
+  /** Each kind Rust's goldens show, with every field they carry it with. */
+  const RUST_FIELDS = new Map<string, Set<string>>();
+  const RESULT_FIELDS = new Map<string, Set<string>>();
+  for (const event of goldenEvents) {
+    const fields = RUST_FIELDS.get(event.kind) ?? new Set<string>();
+    for (const key of Object.keys(event)) fields.add(key);
+    RUST_FIELDS.set(event.kind, fields);
+    if (event.kind === 'ToolResult') {
+      const data = RESULT_FIELDS.get(event.data.type) ?? new Set<string>();
+      for (const key of Object.keys(event.data)) data.add(key);
+      RESULT_FIELDS.set(event.data.type, data);
+    }
+  }
+  /** What Rust's reader says that no fold golden holds: a run's end, a
+   * stop's, and what the run reaches (M92.8). */
+  const READER_KINDS = new Set(['Done', 'Cancelled', 'Changeset', 'Interaction', 'Reach']);
+
+  const SCRIPTS = [
+    'research the open risks with subagents',
+    'think it through: which risk do I escalate?',
+    'make a todo list for the risk review',
+    'run the tests',
+    'fail with a stack trace',
+    'search the web for scanner lead times',
+  ];
+
+  const ofKind = <K extends AgentStreamEvent['kind']>(events: AgentStreamEvent[], kind: K) =>
+    events.filter((e): e is Extract<AgentStreamEvent, { kind: K }> => e.kind === kind);
+
+  /** A live turn reduced as the panel reduces it, in `session`. */
+  const reduced = (
+    events: AgentStreamEvent[],
+    session = '00000000-0000-4000-8000-0000000091c1',
+  ): ChatMessage => {
+    let message: ChatMessage = { id: 'a', role: 'assistant', text: '', tools: [], streaming: true };
+    for (const event of events) {
+      message =
+        event.kind === 'Done' ? endLiveTurn(message) : applyEvent(message, event, 'live', session);
+    }
+    return message;
+  };
+
+  it.each(SCRIPTS)('emits only what Rust emits, with its fields: %s', async (message) => {
+    const { events } = await drain(message);
+    for (const event of events) {
+      if (READER_KINDS.has(event.kind)) continue;
+      const fields = RUST_FIELDS.get(event.kind);
+      expect(fields, event.kind).toBeDefined();
+      for (const key of Object.keys(event))
+        expect(fields?.has(key), `${event.kind}.${key}`).toBe(true);
+      if (event.kind === 'ToolResult') {
+        const data = RESULT_FIELDS.get(event.data.type);
+        expect(data, event.data.type).toBeDefined();
+        for (const key of Object.keys(event.data)) {
+          expect(data?.has(key), `${event.data.type}.${key}`).toBe(true);
+        }
+      }
+    }
+    // The CLI's times on its lines, and a branch's anchor at the turn's end,
+    // after its result, as Rust's fold ends a turn.
+    for (const event of events) {
+      if (['Thinking', 'ToolStart', 'ToolDone', 'Text'].includes(event.kind)) {
+        expect((event as { at?: string }).at, event.kind).toMatch(/^\d{4}-\d\d-\d\dT/);
+      }
+    }
+    expect(events.map((e) => e.kind).slice(-3)).toEqual(['Result', 'TurnEnded', 'Done']);
+    expect(ofKind(events, 'TurnEnded')[0].last_uuid).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    // Reduced, it anchors and never reads interrupted.
+    const reply = reduced(events);
+    expect(reply.anchor?.uuid).toBe(ofKind(events, 'TurnEnded')[0].last_uuid);
+    expect(reply.interrupted).toBeUndefined();
+  });
+
+  it.each(SCRIPTS)('counts on its result how long its run worked (M92.2): %s', async (message) => {
+    const { events } = await drain(message);
+    const [result] = ofKind(events, 'Result');
+    const worked = result.duration_ms ?? Number.NaN;
+    expect(Number.isSafeInteger(worked) && worked > 0).toBe(true);
+    // On the run's own clock: from its start, before its first stamped line,
+    // to its last.
+    const times = events.flatMap((e) =>
+      'at' in e && typeof e.at === 'string' ? [Date.parse(e.at)] : [],
+    );
+    expect(Math.max(...times) - worked).toBeLessThan(Math.min(...times));
+    expect(reduced(events).workedMs).toBe(worked);
+  });
+
+  it('research with subagents: two researchers, their steps under each call, their reports', async () => {
+    const { events } = await drain('research the open risks with subagents');
+    const agents = ofKind(events, 'ToolStart').filter((e) => e.tool_name === 'Agent');
+    expect(agents).toHaveLength(2);
+    for (const agent of agents) {
+      const input = JSON.parse(agent.input ?? '{}') as Record<string, string>;
+      expect(input.subagent_type).toBe('cerebro-researcher');
+      const started = ofKind(events, 'SubagentStarted').find((e) => e.tool_id === agent.tool_id);
+      expect(started).toMatchObject({
+        subagent_type: 'cerebro-researcher',
+        description: input.description,
+        background: false,
+        depth: 1,
+      });
+      expect(ofKind(events, 'SubagentProgress').some((e) => e.tool_id === agent.tool_id)).toBe(
+        true,
+      );
+      expect(ofKind(events, 'SubagentDone').find((e) => e.tool_id === agent.tool_id)).toMatchObject(
+        { status: 'completed' },
+      );
+      const report = ofKind(events, 'ToolResult').find((e) => e.tool_id === agent.tool_id);
+      expect(report?.data).toMatchObject({
+        type: 'agent',
+        agent_id: started?.agent_id,
+        agent_type: 'cerebro-researcher',
+        status: 'completed',
+      });
+      // Its steps name its call; the main thread's never do.
+      expect(
+        events.some(
+          (e) => (e.kind === 'ToolStart' || e.kind === 'Text') && e.parent === agent.tool_id,
+        ),
+      ).toBe(true);
+    }
+    expect(agents.every((agent) => agent.parent === undefined)).toBe(true);
+    // Its tokens never show, nor the trailer Claude Code writes for the model.
+    const said = JSON.stringify(events);
+    for (const leak of ['subagent_tokens', '<usage>', 'agentId:', 'total_tokens']) {
+      expect(said).not.toContain(leak);
+    }
+    const reply = reduced(events);
+    expect(reply.tools.map((t) => t.name)).toEqual(['Agent', 'Agent']);
+    for (const agent of agents) {
+      const run = findCall(reply.tools, agent.tool_id)?.subagent;
+      expect(run?.status).toBe('done');
+      expect(run?.summary).toBeTruthy();
+      expect(run?.tools.length).toBeGreaterThan(0);
+      expect(run?.parts.some((part) => part.kind === 'reasoning')).toBe(true);
+      // Its time is the CLI's, never a guess.
+      expect(run?.durationMs).toBeGreaterThan(0);
+    }
+    // The researchers' words are theirs; the reply is the main thread's.
+    expect(reply.text).toBe(replyOf(events));
+  });
+
+  it('think it through: reasoning streamed, then settled once, and timed', async () => {
+    const { events } = await drain('think it through: which risk do I escalate?');
+    const thinking = ofKind(events, 'Thinking');
+    expect(thinking).toHaveLength(2);
+    expect(
+      ofKind(events, 'ThinkingDelta')
+        .map((e) => e.text)
+        .join(''),
+    ).toBe(thinking.map((e) => e.text).join(''));
+    const reasoning = (reduced(events).parts ?? []).filter((part) => part.kind === 'reasoning');
+    expect(reasoning.map((part) => part.kind === 'reasoning' && part.text)).toEqual(
+      thinking.map((e) => e.text),
+    );
+    // The first block has no step before it to be timed from; the second is.
+    expect(reasoning.map((part) => part.kind === 'reasoning' && part.durationMs)).toEqual([
+      undefined,
+      expect.any(Number),
+    ]);
+  });
+
+  it('make a todo list: each item goes pending, in progress, completed', async () => {
+    const { events } = await drain('make a todo list for the risk review');
+    const lists = ofKind(events, 'ToolResult').flatMap((e) =>
+      e.data.type === 'todos' ? [e.data.todos] : [],
+    );
+    expect(lists.length).toBeGreaterThanOrEqual(3);
+    const order = ['pending', 'in_progress', 'completed'];
+    for (let item = 0; item < lists[0].length; item++) {
+      const seen = lists.map((todos) => order.indexOf(todos[item].status));
+      expect(seen.every((rank) => rank >= 0)).toBe(true);
+      expect([...seen].sort()).toEqual(seen);
+      expect(seen.at(-1)).toBe(2);
+    }
+    expect(lists[0].some((todo) => todo.status === 'pending')).toBe(true);
+    // Each result follows its TodoWrite's ToolDone, as the fold sends it.
+    const kinds = events.map((e) => e.kind);
+    for (const result of ofKind(events, 'ToolResult')) {
+      const at = events.indexOf(result);
+      expect(kinds[at - 1]).toBe('ToolDone');
+    }
+  });
+
+  it('run the tests: a failed command whose output reads as one failing test', async () => {
+    const { events } = await drain('run the tests');
+    const bash = ofKind(events, 'ToolStart').find((e) => e.tool_name === 'Bash');
+    expect(ofKind(events, 'ToolDone').find((e) => e.tool_id === bash?.tool_id)?.is_error).toBe(
+      true,
+    );
+    const shell = ofKind(events, 'ToolResult').find((e) => e.tool_id === bash?.tool_id)?.data;
+    if (shell?.type !== 'shell') throw new Error('no shell result');
+    const report = testReportOf(shell);
+    expect(report?.runner).toBe('vitest');
+    expect(report?.totals).toMatchObject({ passed: 18, failed: 1, total: 19 });
+    expect(report?.failures.map((f) => f.name)).toEqual([
+      expect.stringContaining('flags a risk with no mitigation'),
+    ]);
+    expect(shell.stdout.length).toBeLessThanOrEqual(2000);
+    expect(shell.stderr.length).toBeLessThanOrEqual(2000);
+  });
+
+  it('fail with a stack trace: Node’s trace, with a frame in a vault page', async () => {
+    const { events } = await drain('fail with a stack trace');
+    const result = ofKind(events, 'ToolResult')[0]?.data;
+    if (result?.type !== 'shell') throw new Error('no shell result');
+    expect(ofKind(events, 'ToolDone')[0].is_error).toBe(true);
+    const trace = parseStackTrace(result.stderr);
+    expect(trace?.language).toBe('javascript');
+    expect(trace?.message).toContain('ReferenceError: owner is not defined');
+    const relative = trace?.frames.filter((frame) => frame.origin === 'relative') ?? [];
+    expect(relative.map((frame) => frame.file)).toContain('records/risks/risk-scanner-delivery.md');
+    expect(trace?.frames.some((frame) => frame.origin === 'url')).toBe(true);
+  });
+
+  it('search the web: a search and a fetch, each with its result, cited in the reply', async () => {
+    const { events } = await drain('search the web for scanner lead times');
+    expect(toolNames(events)).toEqual(['WebSearch', 'WebFetch']);
+    const [search, fetched] = ofKind(events, 'ToolResult').map((e) => e.data);
+    if (search.type !== 'web_search' || fetched.type !== 'web_fetch') {
+      throw new Error('expected a search, then a fetch');
+    }
+    expect(search.results.length).toBeGreaterThan(0);
+    expect(search.results.every((r) => /^https:\/\//.test(r.url))).toBe(true);
+    expect(fetched).toMatchObject({ url: search.results[0].url, code: 200 });
+    expect(replyOf(events)).toContain(search.results[0].url);
+  });
+
+  it('decides each script’s calls by the run’s plan: Bash under Off is unavailable', async () => {
+    const events: AgentStreamEvent[] = [];
+    await new Promise<void>((resolve) => {
+      runMockAgent(
+        'run the tests',
+        (event) => {
+          events.push(event);
+          if (event.kind === 'Done') resolve();
+        },
+        {
+          delayMs: 0,
+          approval: planApproval({
+            kind: 'attended',
+            shell: 'off',
+            readScoped: false,
+            narrowing: null,
+          }),
+        },
+      );
+    });
+    expect(ofKind(events, 'ToolDone')[0]).toMatchObject({ is_error: true });
+    expect(ofKind(events, 'ToolResult')).toEqual([]);
+    expect(replyOf(events)).toBe('Bash is not available in this run.');
+  });
+
+  it('streams the default reply’s reasoning, then settles it once', async () => {
+    const { events } = await drain('What does this vault hold?');
+    const [thinking] = ofKind(events, 'Thinking');
+    expect(thinking.text).toBe('Reading the vault context first.');
+    expect(
+      ofKind(events, 'ThinkingDelta')
+        .map((e) => e.text)
+        .join(''),
+    ).toBe(thinking.text);
+    expect(reduced(events).parts?.[0]).toEqual({
+      kind: 'reasoning',
+      id: 'reasoning-1',
+      text: 'Reading the vault context first.',
+    });
+  });
+
+  it('records a replay with the subagents’ steps and nothing only the stream says', async () => {
+    const session = '00000000-0000-4000-8000-0000000091c2';
+    let done: () => void = () => {};
+    const finished = new Promise<void>((resolve) => (done = resolve));
+    const live: AgentStreamEvent[] = [];
+    const start = await runAgent('/demo-vault', {
+      message: 'research the open risks with subagents',
+      sessionId: session,
+      shell: 'off',
+      connectors: false,
+      attended: true,
+    });
+    if ('deferred' in start || 'settled' in start) throw new Error('an attended run starts');
+    const stop = onAgentEvent((event) => {
+      live.push(event);
+      if (event.kind === 'Done') done();
+    }, start.run);
+    await finished;
+    stop();
+    const read = await readCliTranscript('/demo-vault', session, null);
+    if (read.state !== 'read') throw new Error(`expected a read, got ${read.reason}`);
+    const kinds = new Set(read.events.map((e) => e.kind));
+    for (const liveOnly of [
+      'Init',
+      'Reach',
+      'TextDelta',
+      'ThinkingDelta',
+      'SubagentStarted',
+      'SubagentProgress',
+      'SubagentDone',
+      'ToolDenied',
+      'Result',
+      'Changeset',
+      'Done',
+    ]) {
+      expect(kinds.has(liveOnly as AgentStreamEvent['kind']), liveOnly).toBe(false);
+    }
+    expect(read.events.some((e) => e.kind === 'ToolStart' && e.parent !== undefined)).toBe(true);
+    // Replayed, the reply is the live one's: its parts, its runs, its anchor.
+    const replayed = replayTranscript(read.events, session).messages.at(-1);
+    const watched = reduced(live, session);
+    expect(replayed?.parts).toEqual(watched.parts);
+    expect(replayed?.anchor).toEqual(watched.anchor);
+    expect(replayed?.tools.map((t) => t.subagent?.summary)).toEqual(
+      watched.tools.map((t) => t.subagent?.summary),
+    );
   });
 });

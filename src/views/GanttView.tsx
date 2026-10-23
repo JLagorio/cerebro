@@ -1,3 +1,4 @@
+import { TimeViewport } from '@/views/TimeViewport';
 import { useMemo, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -118,7 +119,6 @@ export function GanttView({
     () => resolveColumns(presentation.columns, fields).map((c) => ({ def: c.def, width: c.width })),
     [presentation.columns, fields],
   );
-  const tableWidth = showTable ? nameWidth + columns.reduce((sum, c) => sum + c.width, 0) : 0;
 
   const rows = useMemo(
     () =>
@@ -164,7 +164,7 @@ export function GanttView({
   const [focusedSlip, setFocusedSlip] = useState(-1);
   const [showUndated, setShowUndated] = useState(false);
 
-  const { scrollerRef, capture } = useZoomAnchor(axis, zoom, tableWidth);
+  const { scrollerRef, capture } = useZoomAnchor(axis, zoom, 0);
 
   const stepSlip = () => {
     if (slips.length === 0) return;
@@ -207,7 +207,7 @@ export function GanttView({
       data-zoom={zoom}
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
-      <div className="flex flex-none items-center gap-3 border-b border-n-200 px-5 py-2">
+      <div className="flex flex-none flex-wrap items-center gap-3 border-b border-n-200 px-4 py-2">
         <ZoomControl zoom={zoom} onChange={setZoom} />
         <Switch checked={showTable} onChange={setShowTable} label="Show table" />
         <span className="flex-1" />
@@ -248,9 +248,10 @@ export function GanttView({
         )}
       </div>
 
-      <div ref={scrollerRef} className="min-h-0 min-w-0 flex-1 overflow-auto">
-        <div className="flex" style={{ width: tableWidth + width, minWidth: '100%' }}>
-          {showTable && (
+      <TimeViewport
+        axisRef={scrollerRef}
+        table={
+          showTable ? (
             <TimeTable
               rows={rows}
               schema={schema}
@@ -261,113 +262,112 @@ export function GanttView({
               onOpen={openPath}
               onResize={setNameWidth}
             />
-          )}
-
-          {/* Schedule */}
-          <div className="relative flex-none" style={{ width }}>
-            <TimeAxisHeader ticks={ticks} axis={axis} zoom={zoom} today={today} />
-            <div className="relative">
-              <TimeGridLines ticks={ticks} zoom={zoom} />
-              <TodayLine axis={axis} zoom={zoom} today={today} />
-              <DependencyArrows
-                edges={edges}
-                rows={rows}
-                axis={axis}
-                zoom={zoom}
-                focusedKey={focusedSlip >= 0 ? (slips[focusedSlip]?.key ?? null) : null}
-              />
-              {rows.map((row, rowIndex) => {
-                if (row.kind === 'band') {
-                  return (
-                    <div
-                      key={row.key}
-                      className="border-b border-n-100 bg-n-25"
-                      style={{ height: BAND_H }}
-                    />
-                  );
-                }
-                const stored = spanOf(row.entry, dateField, schema);
-                const span = stored === null ? null : drag.preview(row.key, stored);
-                const isParent = row.childCount > 0;
-                const geo = span === null ? null : barGeometry(span, axis, zoom);
+          ) : null
+        }
+      >
+        <div className="relative flex-none" style={{ width }}>
+          <TimeAxisHeader ticks={ticks} axis={axis} zoom={zoom} today={today} />
+          <div className="relative">
+            <TimeGridLines ticks={ticks} zoom={zoom} />
+            <TodayLine axis={axis} zoom={zoom} today={today} />
+            <DependencyArrows
+              edges={edges}
+              rows={rows}
+              axis={axis}
+              zoom={zoom}
+              focusedKey={focusedSlip >= 0 ? (slips[focusedSlip]?.key ?? null) : null}
+            />
+            {rows.map((row, rowIndex) => {
+              if (row.kind === 'band') {
                 return (
                   <div
                     key={row.key}
-                    data-testid="gantt-row"
-                    data-path={row.entry.path}
-                    data-row-index={rowIndex}
-                    className="relative border-b border-n-100"
-                    style={{ height: ROW_H }}
-                  >
-                    {span === null && showUndated && (
-                      // A row with no dates is not a blank lane: it is a row
-                      // that cannot be scheduled from the surface built for
-                      // scheduling. Give it a target at today's position.
+                    className="border-b border-n-100 bg-n-25"
+                    style={{ height: BAND_H }}
+                  />
+                );
+              }
+              const stored = spanOf(row.entry, dateField, schema);
+              const span = stored === null ? null : drag.preview(row.key, stored);
+              const isParent = row.childCount > 0;
+              const geo = span === null ? null : barGeometry(span, axis, zoom);
+              return (
+                <div
+                  key={row.key}
+                  data-testid="gantt-row"
+                  data-path={row.entry.path}
+                  data-row-index={rowIndex}
+                  className="relative border-b border-n-100"
+                  style={{ height: ROW_H }}
+                >
+                  {span === null && showUndated && (
+                    // A row with no dates is not a blank lane: it is a row
+                    // that cannot be scheduled from the surface built for
+                    // scheduling. Give it a target at today's position.
+                    <button
+                      type="button"
+                      data-testid="gantt-ghost"
+                      data-path={row.entry.path}
+                      onClick={() => openPath(row.entry.path)}
+                      title={`${row.entry.title} · no ${dateField} — open to set one`}
+                      className="absolute top-1.5 rounded-xs border border-dashed border-n-400 bg-transparent text-2xs text-n-500 hover:border-cortex-500 hover:text-cortex-600"
+                      style={{
+                        left: Math.max(0, dayOffset(axis, today)) * PX_PER_DAY[zoom],
+                        width: 96,
+                        height: ROW_H - 12,
+                      }}
+                    >
+                      Set dates
+                    </button>
+                  )}
+                  {span !== null && geo !== null && (
+                    <>
                       <button
                         type="button"
-                        data-testid="gantt-ghost"
+                        data-testid="gantt-bar"
                         data-path={row.entry.path}
-                        onClick={() => openPath(row.entry.path)}
-                        title={`${row.entry.title} · no ${dateField} — open to set one`}
-                        className="absolute top-1.5 rounded-xs border border-dashed border-n-400 bg-transparent text-2xs text-n-500 hover:border-cortex-500 hover:text-cortex-600"
-                        style={{
-                          left: Math.max(0, dayOffset(axis, today)) * PX_PER_DAY[zoom],
-                          width: 96,
-                          height: ROW_H - 12,
+                        data-start={span.start}
+                        data-end={span.end}
+                        {...(canReschedule(row.entry, dateField, schema)
+                          ? drag.handle.handleProps(row.key)
+                          : {})}
+                        onClick={() => {
+                          if (drag.handle.consumeClick()) return;
+                          openPath(row.entry.path);
                         }}
-                      >
-                        Set dates
-                      </button>
-                    )}
-                    {span !== null && geo !== null && (
-                      <>
-                        <button
-                          type="button"
-                          data-testid="gantt-bar"
-                          data-path={row.entry.path}
-                          data-start={span.start}
-                          data-end={span.end}
-                          {...(canReschedule(row.entry, dateField, schema)
-                            ? drag.handle.handleProps(row.key)
-                            : {})}
-                          onClick={() => {
-                            if (drag.handle.consumeClick()) return;
-                            openPath(row.entry.path);
-                          }}
-                          title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
-                          aria-label={`${row.entry.title}, ${span.start} to ${span.end}${canReschedule(row.entry, dateField, schema) ? '. Arrow keys move it; hold Shift to change its end.' : ''}`}
-                          // A row with children is a summary: drawn as a thin
-                          // spine so it reads as the roll-up of what is under it
-                          // rather than as another task competing with them.
-                          className={[
-                            'absolute touch-none select-none rounded-xs border',
-                            isParent
-                              ? 'top-3 border-n-600 bg-n-600'
-                              : 'top-1.5 border-cortex-500 bg-cortex-400',
-                          ].join(' ')}
-                          style={{ ...geo, height: isParent ? 5 : ROW_H - 12 }}
-                        />
-                        {canReschedule(row.entry, dateField, schema) &&
-                          dateKindOf(row.entry, dateField, schema) === 'daterange' && (
-                            <ResizeGrips
-                              id={row.key}
-                              title={row.entry.title}
-                              left={geo.left}
-                              width={geo.width}
-                              top={isParent ? 12 : 6}
-                              height={isParent ? 5 : ROW_H - 12}
-                              drag={drag.handle}
-                            />
-                          )}
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                        title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
+                        aria-label={`${row.entry.title}, ${span.start} to ${span.end}${canReschedule(row.entry, dateField, schema) ? '. Arrow keys move it; hold Shift to change its end.' : ''}`}
+                        // A row with children is a summary: drawn as a thin
+                        // spine so it reads as the roll-up of what is under it
+                        // rather than as another task competing with them.
+                        className={[
+                          'absolute touch-none select-none rounded-xs border',
+                          isParent
+                            ? 'top-3 border-n-600 bg-n-600'
+                            : 'top-1.5 border-cortex-500 bg-cortex-400',
+                        ].join(' ')}
+                        style={{ ...geo, height: isParent ? 5 : ROW_H - 12 }}
+                      />
+                      {canReschedule(row.entry, dateField, schema) &&
+                        dateKindOf(row.entry, dateField, schema) === 'daterange' && (
+                          <ResizeGrips
+                            id={row.key}
+                            title={row.entry.title}
+                            left={geo.left}
+                            width={geo.width}
+                            top={isParent ? 12 : 6}
+                            height={isParent ? 5 : ROW_H - 12}
+                            drag={drag.handle}
+                          />
+                        )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
-      </div>
+      </TimeViewport>
 
       {entries.length === 0 && (
         <div className="flex-none px-3 py-8">

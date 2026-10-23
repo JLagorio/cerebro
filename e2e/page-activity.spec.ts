@@ -5,13 +5,14 @@ import {
   seedBeforeBoot,
   type E2eSeedCommit,
   openDestination,
+  showPagePanel,
 } from './boot';
 
 /**
  * A page's History merges its versions, its edits and its Knowledge changes
  * (M64.2b), in the browser.
  *
- * The side panel's History tab (D18) reads `page_activity` beside M58.4's
+ * The page's History panel (D18) reads `page_activity` beside M58.4's
  * versions: your typing reads "You edited it" above the commit rows, which
  * still open the version lens; a concept lists what the ledger recorded
  * (seeded, since the browser keeps no ledger: `demoConceptHistory`); a failed
@@ -57,7 +58,7 @@ async function bootOnHistory(page: Page): Promise<void> {
   await page.evaluate(([path, md]) => window.__cerebroMockFs.set(path, md), [PAGE, BODY]);
 }
 
-/** Open How we schedule; the History tab is already the chosen one. */
+/** Open How we schedule; History is already the chosen panel. */
 async function openSchedule(page: Page) {
   const node = page.getByTestId('collection-node-doc').filter({ hasText: 'How we schedule' });
   if (!(await node.isVisible()))
@@ -101,10 +102,7 @@ test.describe("a page's History (M64.2b)", () => {
     await openKnowledgeTab(page, 'all');
     await page.getByTestId('concept-row').filter({ hasText: 'Warehouse cutover' }).first().click();
     await expect(page.getByTestId('doc-page')).toBeVisible();
-    if ((await page.getByTestId('doc-side-panel').count()) === 0) {
-      await page.getByRole('button', { name: 'Show panel' }).click();
-    }
-    await page.getByTestId('doc-side-panel').getByTestId('doc-panel-tab-history').click();
+    await showPagePanel(page, 'History');
     const history = page.getByTestId('doc-side-panel').getByTestId('page-history');
     await expect(
       history.getByTestId('history-concept').filter({ hasText: 'Created by Knowledge agent' }),

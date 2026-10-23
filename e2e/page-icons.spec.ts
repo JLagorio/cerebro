@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile, showPages } from './boot';
+import { boot, readMockFile, showPageFolders } from './boot';
 
 /**
  * Page icon and cover (M55.11). A page's own icon shows wherever the page is
@@ -39,7 +39,7 @@ test('a page icon shows everywhere the page is named, and its bytes round-trip',
   await boot(page);
 
   // -- A doc with a sub-page, through the tree -----------------------------
-  await showPages(page);
+  await showPageFolders(page);
   await page.getByRole('button', { name: 'New folder' }).click();
   await page.getByPlaceholder('Folder name').fill('Launch');
   await page.getByRole('button', { name: 'Create', exact: true }).click();

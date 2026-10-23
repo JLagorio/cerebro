@@ -3,6 +3,8 @@ import { openBesideIntent, withOpenBesideIntent } from '@/app/openIntent';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useContentSearch } from '@/app/useContentSearch';
 import { useOpenPath } from '@/app/useOpenPath';
+import { quickOpenAsk, sendAsk, type Ask } from '@/agent/elements/decisionsAsks';
+import { Suggestion } from '@/components/ai/Suggestion';
 import { Dialog } from '@/components/ui/Dialog';
 import { PageIconGlyph } from '@/components/PageIcon';
 import { Keycaps } from '@/components/ui/Keycaps';
@@ -27,7 +29,6 @@ import { pageIconOf, type PageIcon } from '@/engine/pageChrome';
 import { listTypes, typeStyle } from '@/engine/typeCatalog';
 import type { VaultHit } from '@/lib/ipc';
 import { rankNames } from '@/lib/nameRank';
-import { askAssistantLabel } from '@/lib/prompts';
 import { useNavStore } from '@/stores/navStore';
 import { pruneOpenLogToSnapshot, useOpenLogStore, useRecency } from '@/stores/openLogStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -83,6 +84,8 @@ interface Row {
   group: 'recent' | 'go' | 'match' | 'commands' | 'pages' | 'all';
   /** A page-text hit (M59.4), drawn with its excerpt. */
   hit?: VaultHit;
+  /** The ask row's Ask (M91.14), drawn as a Suggestion. */
+  ask?: Ask;
 }
 
 export function QuickOpen() {
@@ -308,14 +311,17 @@ function QuickOpenBody() {
     }
     // The DS ask-bar contract (M42.5): one synapse-tinted "ask" row at the
     // top — a row, not a mode. It hands the typed words to the assistant
-    // panel, which is the one chat there is.
+    // panel, which is the one chat there is: a Suggestion (M91.14) whose
+    // label says where the words go and whose prompt is the words.
+    const said = quickOpenAsk(q);
     const ask: Row = {
       key: 'ask:assistant',
       group: 'match',
+      ask: said,
       target: {
         id: 'ask:assistant',
         category: 'ask',
-        label: askAssistantLabel(q),
+        label: said.label,
         icon: 'sparkles',
         color: 'var(--synapse-500)',
         hint: '',
@@ -324,7 +330,7 @@ function QuickOpenBody() {
         alias: '',
         run: () => {
           close();
-          askAgent(q);
+          sendAsk(said, askAgent)(said.prompt);
         },
       },
     };
@@ -555,7 +561,7 @@ function QuickOpenBody() {
               data-testid={`palette-category-${chip.id}`}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => setCategory(chip.id)}
-              className={`rounded-sm px-2.5 py-1 text-xs ${category === chip.id ? 'bg-n-100 text-n-900' : 'text-n-500'}`}
+              className={`rounded-sm px-2.5 py-1 text-xs ${category === chip.id ? 'bg-n-100 text-n-900' : 'text-(--text-meta)'}`}
             >
               {chip.label}
             </button>
@@ -580,7 +586,7 @@ function QuickOpenBody() {
                 <div key={group} role="group" aria-label={label} data-section={group}>
                   <div
                     aria-hidden
-                    className="mt-1 px-2.5 pb-1 pt-1.5 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--text-meta)]"
+                    className="mt-1 px-2.5 pb-1 pt-1.5 text-metadata font-medium text-[var(--text-meta)]"
                   >
                     {label}
                   </div>
@@ -607,7 +613,7 @@ function QuickOpenBody() {
           <div role="group" aria-label="Commands" data-section="commands">
             <div
               aria-hidden
-              className="mt-1 px-2.5 py-1.5 text-2xs font-semibold uppercase text-[var(--text-meta)]"
+              className="mt-1 px-2.5 py-1.5 text-metadata font-medium text-[var(--text-meta)]"
             >
               Commands
             </div>
@@ -615,7 +621,7 @@ function QuickOpenBody() {
           </div>
         )}
         {level.kind !== 'root' && results.length === 0 && (
-          <p className="px-2.5 py-2 text-sm text-n-500">
+          <p className="px-2.5 py-2 text-sm text-(--text-meta)">
             No {level.kind === 'theme' ? 'themes' : level.kind} match.
           </p>
         )}
@@ -624,7 +630,10 @@ function QuickOpenBody() {
           content.status === 'unavailable' && (
             // A failed read is never "no matches" (CV-05): the names above
             // were found, and the page text was not searched.
-            <p data-testid="section-unavailable" className="m-0 px-2.5 py-2 text-2xs text-n-500">
+            <p
+              data-testid="section-unavailable"
+              className="m-0 px-2.5 py-2 text-ui text-(--text-meta)"
+            >
               Page text couldn't be searched. Names above are complete.
             </p>
           )}
@@ -632,7 +641,7 @@ function QuickOpenBody() {
           <div role="group" aria-label="In pages" data-section="pages">
             <div
               aria-hidden
-              className="mt-1 px-2.5 pb-1 pt-1.5 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--text-meta)]"
+              className="mt-1 px-2.5 pb-1 pt-1.5 text-metadata font-medium text-[var(--text-meta)]"
             >
               {ready.widened ? 'In pages · closest matches' : 'In pages'}
             </div>
@@ -667,7 +676,7 @@ function QuickOpenBody() {
         style={{ background: i === active ? 'var(--n-50)' : 'transparent' }}
       >
         <span className="flex w-full min-w-0 items-baseline gap-2">
-          <span className="min-w-0 flex-none truncate text-sm text-n-900">{hit.title}</span>
+          <span className="min-w-0 flex-none truncate text-ui text-n-900">{hit.title}</span>
           <span className="min-w-0 flex-1 truncate text-2xs text-[var(--text-meta)]">
             {hit.path}
           </span>
@@ -689,22 +698,56 @@ function QuickOpenBody() {
     );
   }
 
+  /** The ask row: a Suggestion that is one of the list's options, picked as
+   *  any other — by Enter on the highlight, or a press — and drawn as a row. */
+  function renderAskRow(r: Row, ask: Ask, i: number) {
+    return (
+      <Suggestion
+        key={r.key}
+        suggestion={ask.prompt}
+        icon={null}
+        // An OFFER, not a result: it repeats whatever was typed, so a spec
+        // (or anything else) picking "the result whose text is X" must never
+        // land on it.
+        data-testid="quick-open-ask"
+        role="option"
+        id={`${listId}-${i}`}
+        tabIndex={-1}
+        aria-selected={i === active}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => r.target.run()}
+        onMouseMove={() => mark(i)}
+        // The suggestion's own row look gives way to the list's: its label
+        // is the whole row, glyph, words and kind.
+        className="h-9 rounded-md text-left [&>.cb-ai-suggestion-text]:flex-1 [&_.cb-ai-suggestion-label]:flex [&_.cb-ai-suggestion-label]:min-w-0 [&_.cb-ai-suggestion-label]:items-center [&_.cb-ai-suggestion-label]:gap-2.5"
+        style={{ padding: '0 10px', background: i === active ? 'var(--n-50)' : 'transparent' }}
+      >
+        <span className="inline-flex flex-none" style={{ color: r.target.color ?? 'var(--n-500)' }}>
+          <PageIconGlyph icon={null} fallback={{ name: r.target.icon }} size={14} />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-ui text-n-900">{ask.label}</span>
+        <span className="w-[84px] flex-none truncate text-right text-2xs text-[var(--text-meta)]">
+          {r.target.kindLabel}
+        </span>
+      </Suggestion>
+    );
+  }
+
   function renderRow(r: Row, i: number) {
+    if (r.ask !== undefined) return renderAskRow(r, r.ask, i);
     return (
       <button
         key={r.key}
         type="button"
-        // The ask row is an OFFER, not a result: it repeats whatever was
-        // typed, so a spec (or anything else) picking "the result whose
-        // text is X" must never land on it. Nor is "All N matches" (M59.4).
+        // "All N matches" is no result either (M59.4): a spec picking "the
+        // result whose text is X" must never land on it. The ask row draws
+        // itself (renderAskRow).
         data-testid={
-          r.target.id === 'ask:assistant'
-            ? 'quick-open-ask'
-            : r.group === 'all'
-              ? 'quick-open-all-matches'
-              : r.group === 'commands'
-                ? 'quick-open-command'
-                : 'quick-open-result'
+          r.group === 'all'
+            ? 'quick-open-all-matches'
+            : r.group === 'commands'
+              ? 'quick-open-command'
+              : 'quick-open-result'
         }
         role="option"
         id={`${listId}-${i}`}
@@ -723,7 +766,7 @@ function QuickOpenBody() {
             size={14}
           />
         </span>
-        <span className="min-w-0 flex-1 truncate text-sm text-n-900">{r.target.label}</span>
+        <span className="min-w-0 flex-1 truncate text-ui text-n-900">{r.target.label}</span>
         {/* The record's key: a mono chip, because it is an identifier you
                 might have typed. Distinct from the kind label, which used to
                 sit beside it in the identical style and read as one phrase. */}

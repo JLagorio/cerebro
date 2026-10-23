@@ -301,6 +301,7 @@ export type LibraryTab = 'skill' | 'agent' | 'template';
 
 export type Selection =
   | { kind: 'home' }
+  | { kind: 'pages' }
   | { kind: 'inbox' } // capture queue: unorganized notes (M4)
   // M43 — open work across every database. Capability-gated membership
   // (engine/myWork); no per-entry state rides on the selection.
@@ -327,8 +328,8 @@ export type Selection =
        * button returns to — the same contract `list.view` follows. Absent =
        * the type's first tab. */
       tab?: string;
-      /** The comment thread in focus (M70.2b), by its id: the page opens on
-       * its Comments tab with that thread focused, so a thread is a place the
+      /** The comment thread in focus (M70.2b), by its id: the page opens
+       * its Comments panel with that thread focused, so a thread is a place the
        * back button returns to. A lens, like `tab`: `placeOf` drops it. */
       thread?: string;
     }

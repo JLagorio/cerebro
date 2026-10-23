@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MenuItem, MenuLabel, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
+import { Select } from '@/components/ui/Select';
 
 afterEach(cleanup);
 
@@ -141,5 +142,38 @@ describe('MenuItem', () => {
       </MenuSurface>,
     );
     expect(screen.getByRole('menuitem', { name: /Edit property/ }).textContent).toContain('Select');
+  });
+});
+
+/**
+ * A Select inside a menu (a property's Remind, in the column menu's edit
+ * step): its open list answers the arrows, and the menu must not move focus
+ * on the same keystroke — it once sent the next Enter to "Delete property".
+ */
+describe('MenuSurface around a Select', () => {
+  it('leaves the arrows to the open list, so Enter picks the row they reached', () => {
+    const onChange = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <MenuSurface>
+        <Select
+          ariaLabel="Remind"
+          options={[
+            { value: 'none', label: 'None' },
+            { value: '1d', label: '1 day before' },
+          ]}
+          value="none"
+          onChange={onChange}
+        />
+        <MenuItem label="Delete property" onSelect={onDelete} />
+      </MenuSurface>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Remind' }));
+    const list = screen.getByRole('listbox', { name: 'Remind' });
+    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(list);
+    fireEvent.keyDown(list, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('1d');
+    expect(onDelete).not.toHaveBeenCalled();
   });
 });

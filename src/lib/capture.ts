@@ -25,7 +25,7 @@ export function captureSlug(title: string, now: Date = new Date()): string {
 /**
  * Create an untyped note in `inbox/` and return its path. The body carries
  * the H1 only when a title was given: an untitled capture SHOULD read as
- * untitled in the queue, so the organize checklist can flag it.
+ * untitled in the queue.
  */
 export async function captureNote(title = ''): Promise<string> {
   const trimmed = title.trim();

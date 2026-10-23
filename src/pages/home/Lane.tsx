@@ -1,3 +1,4 @@
+import { StateMessage } from '@/components/ui/StateMessage';
 import { useContext, useState, type ReactNode } from 'react';
 import { HomeCursorContext } from './homeCursor';
 import { useOpenPath } from '@/app/useOpenPath';
@@ -67,14 +68,14 @@ export function Lane({
         </button>
       </div>
       {unavailable ? (
-        <p data-testid="section-unavailable" className="m-0 text-sm text-n-500">
-          {definition.label} could not be read, so nothing here is a statement about this vault.
-        </p>
+        <StateMessage state="unavailable" title={`${definition.label} could not be read`}>
+          Nothing here is a statement about this vault.
+        </StateMessage>
       ) : (
         <>
           {controls}
           {data.notes.map((note) => (
-            <p key={note} data-testid="home-lane-note" className="mb-2 text-xs text-n-500">
+            <p key={note} data-testid="home-lane-note" className="mb-2 text-xs text-(--text-meta)">
               {note}
             </p>
           ))}
@@ -123,11 +124,11 @@ export function Lane({
                           className="cb-home-row-link flex w-full min-w-0 items-center gap-3 rounded-md border-0 bg-transparent text-left hover:bg-n-50"
                           onClick={openRow}
                         >
-                          <span className="min-w-0 flex-1 truncate text-sm text-n-800">
+                          <span className="min-w-0 flex-1 truncate text-ui text-n-800">
                             {row.title}
                           </span>
                           {row.detail && (
-                            <span className="max-w-[45%] truncate text-xs text-n-500">
+                            <span className="max-w-[45%] truncate text-metadata text-(--text-meta)">
                               {row.detail}
                             </span>
                           )}
@@ -143,7 +144,7 @@ export function Lane({
             <button
               type="button"
               onClick={() => setAll(true)}
-              className="mt-1 border-0 bg-transparent p-1.5 text-xs text-n-500 hover:text-cortex-600"
+              className="mt-1 border-0 bg-transparent p-1.5 text-xs text-(--text-meta) hover:text-cortex-600"
             >
               Show all {data.rows.length}
             </button>

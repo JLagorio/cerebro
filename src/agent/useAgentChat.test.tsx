@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 
@@ -105,8 +107,10 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
 });
 
 import * as agentIpc from './agentIpc';
+import { loadConversations, newConversation, saveConversations } from './conversations';
+import { applyEvent, findCall, replayTranscript } from './transcript';
 import { STOP_CONFIRM_MS, useAgentChat, type TurnContext } from './useAgentChat';
-import type { ChatMessage, LiveTurn, PendingInteraction } from './types';
+import type { AgentStreamEvent, ChatMessage, LiveTurn, PendingInteraction } from './types';
 import { registerFlush } from '@/editor/openPages';
 import { makeEntry } from '@/engine/testHelpers';
 import { mentionedTools, type PromptGrant } from '@/engine/toolGrant';
@@ -906,6 +910,31 @@ describe('useAgentChat cannot be widened by who it is addressed to', () => {
     expect(await webOf(false, 'safe', 'plain question')).toBe(false);
   });
 
+  // M91.2d: every turn names the Subagents switch in DelegateCeiling's words,
+  // an addressed agent's included. Narrowing it is Rust's: a record that
+  // names neither Agent nor Task is denied the tool whatever this says.
+  it('names the Subagents switch on every send, to an addressed agent too', async () => {
+    const delegateOf = async (delegate: boolean | undefined, message: string) => {
+      vi.mocked(agentIpc.runAgent).mockClear();
+      useVaultStore.setState({ vaultPath: '/vault', entries: [agentEntry({ tools: 'safe' })] });
+      const { result } = renderHook(() =>
+        useAgentChat(turn('sys'), { shell: 'off', delegate, connectors: false }),
+      );
+      act(() => result.current.send(message));
+      await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+      return vi.mocked(agentIpc.runAgent).mock.calls[0][1];
+    };
+    expect((await delegateOf(true, 'plain question')).delegate).toBe('on');
+    expect((await delegateOf(false, 'plain question')).delegate).toBe('off');
+    const addressed = await delegateOf(true, '@release-scout look into it');
+    expect(addressed).toMatchObject({ delegate: 'on', actor: 'process:release-scout' });
+    expect((await delegateOf(false, '@release-scout look into it')).delegate).toBe('off');
+    // A hook nobody told reads off, and still names it, so Rust's default
+    // for a request that names none never decides a panel turn.
+    const untold = await delegateOf(undefined, 'plain question');
+    expect(untold).toHaveProperty('delegate', 'off');
+  });
+
   it('leaves an unaddressed turn on the Settings ceiling', async () => {
     vi.mocked(agentIpc.runAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault', entries: [] });
@@ -1443,6 +1472,24 @@ describe('useAgentChat composes the prompt for the turn’s grant (M54.7)', () =
     const { grant, options } = await sendAndCompose('what is at risk?', { shell: 'off' });
     expect(options.shell).toBe('off');
     expect(grant.shell).toBe(false);
+  });
+
+  // M91.17: Read opens an attached PDF or picture, so the prompt names it
+  // for an attached file only where the turn holds it.
+  it('composes every turn as holding Claude Code’s Read, at every ceiling', async () => {
+    for (const shell of ['off', 'ask', 'on'] as const) {
+      vi.mocked(agentIpc.runAgent).mockClear();
+      const { grant } = await sendAndCompose('what does the report say?', { shell });
+      expect(grant.read, shell).toBe(true);
+    }
+  });
+
+  it('composes a read-scoped agent’s turn without the Read its read limit withdraws', async () => {
+    useVaultStore.setState({
+      entries: [agentEntry({ 'allowed-tools': ['get_note'], 'read-scope': ['sources/'] })],
+    });
+    const { grant } = await sendAndCompose('@release-scout what does the report say?');
+    expect(grant.read).toBe(false);
   });
 
   it('composes an addressed turn with the agent’s narrowed tools', async () => {
@@ -2182,6 +2229,20 @@ describe('useAgentChat stops, and sends a frozen turn (M57.5)', () => {
     expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].shell).toBe('off');
   });
 
+  it('reads the Subagents switch in force when a queued turn starts (M91.2d)', async () => {
+    let delegate = true;
+    const { result, rerender } = renderHook(() =>
+      useAgentChat(turn('sys'), { shell: 'off', delegate, connectors: false }),
+    );
+    const frozen = turnOf('queued with subagents on');
+    // Settings switches subagents off while the entry waits.
+    delegate = false;
+    rerender();
+    act(() => result.current.send('queued earlier', undefined, undefined, frozen));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].delegate).toBe('off');
+  });
+
   it('marks the reply cancelled when the run list stopped it', async () => {
     const { result } = await started();
     emit({ kind: 'TextDelta', text: 'Partly' });
@@ -2479,5 +2540,307 @@ describe('useAgentChat detaches and re-attaches (M57.6)', () => {
     expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages[1].text).toBe('Done.');
     expect(result.current.streaming).toBe(false);
+  });
+});
+
+/**
+ * The M91 kinds go through the reducer unchanged (M91.4): a subagent's steps,
+ * reasoning and structured results land as a replay lands them, and a
+ * re-attach that lost events mid-subagent rebuilds the reply's parts and
+ * anchor from the session file (CV-30).
+ */
+describe('useAgentChat passes subagents, reasoning and results through (M91.4)', () => {
+  const opts = { shell: 'off' as const, connectors: false };
+  const SESSION = '00000000-0000-4000-8000-000000009500';
+  const AGENT = 'toolu_000000000000000000009501';
+  const golden = JSON.parse(
+    readFileSync(join(__dirname, '../../conformance/transcript/subagent.json'), 'utf8'),
+  ) as {
+    streams: { events: AgentStreamEvent[] }[];
+    session: { events: AgentStreamEvent[] };
+  };
+  const stream = golden.streams[0].events;
+  const replayed = replayTranscript(golden.session.events, SESSION).messages[1];
+  const LIVE: LiveTurn = { run: 8, attach: 'durable-chat-8', assistantId: 'a-1' };
+
+  beforeEach(() => {
+    handlers.length = 0;
+    journals.clear();
+    unknownRuns.clear();
+    vi.mocked(agentIpc.runAgent).mockReset();
+    vi.mocked(agentIpc.runAgent).mockResolvedValue({
+      run: 8,
+      durableId: 'durable-chat-8',
+      attach: 'durable-chat-8',
+      sessionId: SESSION,
+    });
+    vi.mocked(agentIpc.listInteractions).mockReset();
+    vi.mocked(agentIpc.listInteractions).mockResolvedValue([]);
+    vi.mocked(agentIpc.readCliTranscript).mockReset();
+    vi.mocked(agentIpc.readCliTranscript).mockResolvedValue({
+      state: 'unavailable',
+      reason: 'not_recorded',
+      retention_days: 30,
+    });
+    useVaultStore.setState({ vaultPath: '/vault' });
+    useUiStore.setState({ runs: [], toasts: [] });
+  });
+
+  function journalEmit(run: number, event: Record<string, unknown>) {
+    const journal = journals.get(run) ?? { events: [], first: 1, done: false };
+    journals.set(run, journal);
+    const tagged = { ...event, run, seq: journal.first + journal.events.length };
+    journal.events.push(tagged);
+    if (event.kind === 'Done') journal.done = true;
+    act(() => [...handlers].forEach((h) => h(tagged)));
+  }
+
+  /** The reply a watcher held after the stream's first `count` events. */
+  const heldAfter = (count: number): ChatMessage => ({
+    ...stream.slice(0, count).reduce<ChatMessage>((m, e) => applyEvent(m, e, 'live', SESSION), {
+      id: 'a-1',
+      role: 'assistant',
+      text: '',
+      tools: [],
+    }),
+    seq: count,
+  });
+  const thread = (reply: ChatMessage): ChatMessage[] => [
+    { id: 'u-1', role: 'user', text: 'question', tools: [] },
+    reply,
+  ];
+
+  it('builds the parts, runs and anchor a replay of the same turn builds', async () => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.send('Have a researcher read the launch note.'));
+    await vi.waitFor(() => expect(result.current.live).not.toBeNull());
+    const report = stream.findIndex((e) => e.kind === 'Text' && e.parent === AGENT);
+    stream.forEach((event, at) => {
+      journalEmit(8, event as unknown as Record<string, unknown>);
+      if (at !== report) return;
+      // Mid-turn the subagent runs, and its words never join the reply.
+      const mid = result.current.messages[1];
+      expect(findCall(mid.tools, AGENT)?.subagent?.status).toBe('running');
+      expect(mid.text).toBe('');
+      expect(mid.parts?.some((part) => part.kind === 'text')).toBe(false);
+    });
+    journalEmit(8, { kind: 'Done' });
+    const reply = result.current.messages[1];
+    expect(reply.text).toBe(replayed.text);
+    expect(reply.parts).toEqual(replayed.parts);
+    expect(reply.anchor).toEqual({
+      sessionId: SESSION,
+      uuid: '00000000-0000-4000-8000-000009500111',
+    });
+    expect(reply.tools.map((t) => t.id)).toEqual([AGENT]);
+    const { background, depth, progress, lastTool, ...run } = reply.tools[0].subagent ?? {};
+    expect([background, depth, progress, lastTool]).toEqual([
+      false,
+      1,
+      'Reading projects/launch.md',
+      'mcp__cerebro__get_note',
+    ]);
+    expect(run).toEqual(replayed.tools[0].subagent);
+    expect(reply.tools[0].result).toEqual(replayed.tools[0].result);
+    expect(result.current.streaming).toBe(false);
+  });
+
+  it('rebuilds a reply whose journal lost events mid-subagent with the file’s parts and anchor', async () => {
+    const cut = stream.findIndex((e) => e.kind === 'SubagentProgress');
+    const held = heldAfter(cut);
+    expect(findCall(held.tools, AGENT)?.subagent?.status).toBe('running');
+    // The journal dropped what came after the cut, and holds the rest.
+    const rest = stream.slice(cut + 4);
+    journals.set(8, {
+      events: rest.map((event, at) => ({ ...event, run: 8, seq: cut + 5 + at })),
+      first: cut + 5,
+      done: false,
+    });
+    vi.mocked(agentIpc.readCliTranscript).mockResolvedValueOnce({
+      state: 'read',
+      lines: golden.session.events.length,
+      unclassified: [],
+      events: golden.session.events,
+    });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.restore(thread(held), SESSION, undefined, LIVE));
+    await vi.waitFor(() => expect(result.current.messages[1].gap).toBe(true));
+    // After a gap only the run's end changes the reply; its file rebuilds it.
+    expect(result.current.messages[1].parts).toEqual(held.parts);
+    journalEmit(8, { kind: 'Done' });
+    await vi.waitFor(() => expect(result.current.messages[1].anchor).toBeDefined());
+    const reply = result.current.messages[1];
+    expect(reply.id).toBe('a-1');
+    expect(reply.parts).toEqual(replayed.parts);
+    expect(reply.anchor).toEqual(replayed.anchor);
+    expect(reply.tools).toEqual(replayed.tools);
+    expect(reply.text).toBe(replayed.text);
+    expect(reply.gap).toBeUndefined();
+    expect(result.current.streaming).toBe(false);
+  });
+
+  it('rebuilds a reply re-attached from its stored copy at Done, its steps before the close back', async () => {
+    // The panel closed after the subagent's read: the thread reopens from
+    // its stored copy, which keeps no reasoning and no subagent steps, and
+    // the journal holds every event after the reply's cursor, so no gap.
+    const cut = stream.findIndex((e) => e.kind === 'ToolDone' && e.parent === AGENT) + 1;
+    const held = heldAfter(cut);
+    try {
+      saveConversations([
+        { ...newConversation(), sessionId: SESSION, messages: thread(held), live: LIVE },
+      ]);
+      const stored = loadConversations()[0].messages;
+      expect(stored[1].parts?.some((part) => part.kind === 'reasoning')).toBe(false);
+      expect(findCall(stored[1].tools, AGENT)?.subagent?.tools).toEqual([]);
+      journals.set(8, {
+        events: stream.map((event, at) => ({ ...event, run: 8, seq: at + 1 })),
+        first: 1,
+        done: false,
+      });
+      vi.mocked(agentIpc.readCliTranscript).mockResolvedValueOnce({
+        state: 'read',
+        lines: golden.session.events.length,
+        unclassified: [],
+        events: golden.session.events,
+      });
+      const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+      act(() => result.current.restore(stored, SESSION, undefined, LIVE));
+      await vi.waitFor(() => expect(result.current.messages[1].seq).toBe(stream.length));
+      expect(result.current.messages[1].gap).toBeUndefined();
+      journalEmit(8, { kind: 'Done' });
+      await vi.waitFor(() => expect(result.current.messages[1].parts).toEqual(replayed.parts));
+      const reply = result.current.messages[1];
+      expect(reply.id).toBe('a-1');
+      expect(reply.tools).toEqual(replayed.tools);
+      expect(findCall(reply.tools, AGENT)?.subagent?.tools.length).toBe(1);
+      expect(result.current.streaming).toBe(false);
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+
+  it('keeps a stored copy re-attached to its end as it stands when its file cannot be read', async () => {
+    const held = heldAfter(stream.length - 2);
+    journals.set(8, {
+      events: stream.map((event, at) => ({ ...event, run: 8, seq: at + 1 })),
+      first: 1,
+      done: false,
+    });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.restore(thread(held), SESSION, undefined, LIVE));
+    await vi.waitFor(() => expect(result.current.messages[1].seq).toBe(stream.length));
+    journalEmit(8, { kind: 'Done' });
+    await vi.waitFor(() => expect(result.current.streaming).toBe(false));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.readCliTranscript)).toHaveBeenCalled());
+    // The read answered, and its answer changed nothing.
+    await act(async () => {
+      await vi.mocked(agentIpc.readCliTranscript).mock.results[0].value;
+    });
+    expect(result.current.messages[1].interrupted).toBeUndefined();
+    expect(result.current.messages[1].text).toBe(replayed.text);
+  });
+
+  it('reads a subagent running on a reply its file cannot rebuild as interrupted', async () => {
+    unknownRuns.add(8);
+    const held = heldAfter(stream.findIndex((e) => e.kind === 'SubagentProgress'));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.restore(thread(held), SESSION, undefined, LIVE));
+    await vi.waitFor(() => expect(result.current.messages[1].interrupted).toBe(true));
+    const reply = result.current.messages[1];
+    expect(findCall(reply.tools, AGENT)?.subagent?.status).toBe('interrupted');
+    expect(reply.streaming).toBe(false);
+  });
+});
+
+/**
+ * A branch's fork (M91.6) rides every send while the conversation has no
+ * session of its own: until the stream names the session Rust minted for
+ * it, and again after a send that failed or a turn that ended first.
+ */
+describe('useAgentChat sends a branch’s fork until its session is known (M91.6)', () => {
+  const opts = { shell: 'off' as const, connectors: false };
+  const FORK = {
+    from: '00000000-0000-4000-8000-000000000001',
+    at: '00000000-0000-4000-8000-000000000002',
+  };
+  const MINTED = '00000000-0000-4000-8000-000000000003';
+  const emit = (event: Record<string, unknown>) =>
+    act(() => [...handlers].forEach((h) => h({ run: 8, ...event })));
+  const sent = () => vi.mocked(agentIpc.runAgent).mock.calls.map(([, options]) => options);
+
+  beforeEach(() => {
+    handlers.length = 0;
+    journals.clear();
+    unknownRuns.clear();
+    vi.mocked(agentIpc.runAgent).mockReset();
+    vi.mocked(agentIpc.runAgent).mockResolvedValue({
+      run: 8,
+      durableId: 'durable-chat-8',
+      sessionId: MINTED,
+    });
+    vi.mocked(agentIpc.listInteractions).mockReset();
+    vi.mocked(agentIpc.listInteractions).mockResolvedValue([]);
+    useVaultStore.setState({ vaultPath: '/vault' });
+    useUiStore.setState({ runs: [], toasts: [] });
+  });
+
+  /** A branch opened in the hook, and one send of it that got its run. */
+  const branched = async () => {
+    const hook = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => hook.result.current.restore([], null, undefined, null, FORK));
+    act(() => hook.result.current.send('And if it slips?'));
+    await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
+    return hook;
+  };
+
+  it('sends the fork with no session, then the minted session and no fork', async () => {
+    const { result } = await branched();
+    expect(sent()[0]).toMatchObject({ sessionId: null, fork: FORK });
+    expect(result.current.sessionId).toBeNull();
+    emit({ kind: 'Init', session_id: MINTED });
+    expect(result.current.sessionId).toBe(MINTED);
+    emit({ kind: 'Done' });
+    act(() => result.current.send('Who decides?'));
+    await vi.waitFor(() => expect(sent()).toHaveLength(2));
+    expect(sent()[1]).toMatchObject({ sessionId: MINTED, fork: null });
+  });
+
+  it('forks again after a turn that ended before its stream named the session', async () => {
+    const { result } = await branched();
+    act(() => result.current.stop());
+    emit({ kind: 'Cancelled' });
+    emit({ kind: 'Done' });
+    expect(result.current.sessionId).toBeNull();
+    act(() => result.current.send('And if it slips?'));
+    await vi.waitFor(() => expect(sent()).toHaveLength(2));
+    expect(sent()[1]).toMatchObject({ sessionId: null, fork: FORK });
+  });
+
+  it('keeps the fork for the retry of a send that failed', async () => {
+    vi.mocked(agentIpc.runAgent).mockRejectedValueOnce(
+      new Error("Claude Code's record of that conversation has no turn ending there."),
+    );
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.restore([], null, undefined, null, FORK));
+    act(() => result.current.send('And if it slips?'));
+    await vi.waitFor(() => expect(result.current.streaming).toBe(false));
+    expect(result.current.messages[1].error).toContain('no turn ending');
+    act(() => result.current.send('And if it slips?'));
+    await vi.waitFor(() => expect(sent()).toHaveLength(2));
+    expect(sent().map((options) => options.fork)).toEqual([FORK, FORK]);
+  });
+
+  it('sends no fork for a conversation with a session, or once reset', async () => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.restore([], MINTED, undefined, null, FORK));
+    act(() => result.current.send('Who decides?'));
+    await vi.waitFor(() => expect(sent()).toHaveLength(1));
+    expect(sent()[0]).toMatchObject({ sessionId: MINTED, fork: null });
+    emit({ kind: 'Done' });
+    act(() => result.current.restore([], null, undefined, null, FORK));
+    act(() => result.current.reset());
+    act(() => result.current.send('A new question'));
+    await vi.waitFor(() => expect(sent()).toHaveLength(2));
+    expect(sent()[1]).toMatchObject({ sessionId: null, fork: null });
   });
 });

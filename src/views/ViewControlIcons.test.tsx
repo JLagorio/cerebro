@@ -41,7 +41,7 @@ function setup(overrides: Partial<React.ComponentProps<typeof ViewControlIcons>>
  * changed what the view was for everyone who opened it next.
  */
 describe('search within the view (M16.26)', () => {
-  it('is a glyph until pressed, then an input', () => {
+  it('is a named search pill until pressed, then an input', () => {
     setup({ search: '', onSearchChange: vi.fn() });
     expect(screen.queryByTestId('view-search-input')).toBeNull();
     fireEvent.click(screen.getByTestId('view-control-search'));
@@ -76,6 +76,35 @@ describe('search within the view (M16.26)', () => {
   it('absent on a surface that cannot hold the query', () => {
     setup();
     expect(screen.queryByTestId('view-control-search')).toBeNull();
+  });
+});
+
+describe('consolidated view options', () => {
+  it('uses the full settings panel as the single configuration door', () => {
+    const props = setup({
+      onSettingsOpenChange: vi.fn(),
+      settingsPanel: <div>Full settings</div>,
+      onFiltersChange: vi.fn(),
+    });
+    expect(screen.queryByTestId('view-control-sort')).toBeNull();
+    expect(screen.queryByTestId('view-control-group')).toBeNull();
+    expect(screen.queryByTestId('view-control-filter')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'View options' }));
+    expect(props.onSettingsOpenChange).toHaveBeenCalledWith(true);
+    expect(props.onChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps active filtering visible and directly clearable', () => {
+    const props = setup({
+      filters: { all: [{ field: 'status', op: 'equals', value: 'todo' }] },
+      onSettingsOpenChange: vi.fn(),
+      settingsPanel: <div>Full settings</div>,
+      onFiltersChange: vi.fn(),
+    });
+    expect(screen.getByTestId('view-control-filter').textContent).toContain('1');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(props.onFiltersChange).toHaveBeenCalledWith(null);
+    expect(props.onBarOpenChange).toHaveBeenCalledWith(false);
   });
 });
 

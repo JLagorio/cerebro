@@ -20,7 +20,7 @@ import { HistoryFeedSection } from '@/history/ActivityFeed';
  */
 export function PulsePage() {
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="pulse-page">
+    <div className="history-page flex min-h-0 min-w-0 flex-1 flex-col" data-testid="pulse-page">
       <div className="history-page-scroll">
         <div className="history-page-column">
           <PageHeader

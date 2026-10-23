@@ -78,7 +78,7 @@ export function TimeAxisHeader({
       {onAxis && (
         <span
           data-testid="today-label"
-          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-full bg-cortex-500 px-1.5 py-px text-2xs font-semibold text-n-0"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-full bg-cortex-500 px-1.5 py-px text-2xs font-semibold text-inverse"
           style={{ left: dayOffset(axis, today) * PX_PER_DAY[zoom], top: 4 }}
         >
           Today
@@ -226,12 +226,11 @@ export function TimeTable({
 }) {
   const total = nameWidth + columns.reduce((sum, c) => sum + c.width, 0);
   return (
-    <div
-      data-testid="time-table"
-      className="sticky left-0 z-30 flex-none bg-n-0"
-      style={{ width: total }}
-    >
-      <div className="flex border-b border-n-200 bg-n-25" style={{ height: HEAD_H }}>
+    <div data-testid="time-table" className="flex-none bg-n-0" style={{ width: total }}>
+      <div
+        className="sticky top-0 z-20 flex border-b border-n-200 bg-n-25"
+        style={{ height: HEAD_H }}
+      >
         <div
           className="relative flex flex-none items-center border-r border-n-200 px-3 text-xs font-semibold text-n-600"
           style={{ width: nameWidth }}

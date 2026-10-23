@@ -1,4 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { runStatus } from '@/agent/elements/runs';
+import { StepIcon } from '@/components/ai/StepLine';
+import { TraceLine, TraceTitle } from '@/components/ai/Trace';
 import { dayKeyOf, foldTimeline, pageDays, pageTimeline, type PageEntry } from '@/engine/activity';
 import type { CommitRun, FileCommit } from '@/engine/git';
 import { isKnowledgePath } from '@/engine/okf';
@@ -13,6 +16,7 @@ import type { ActivityRun } from '@/lib/ipc';
 import { RunWhy } from '@/status/RunWhy';
 import { useVaultStore } from '@/stores/vaultStore';
 import { usePageActivity } from './usePageActivity';
+import '@/status/runs.css';
 
 /** How many of a page's newest rows show before the fold (Q13). */
 export const PAGE_HISTORY_KEEP = 8;
@@ -39,7 +43,7 @@ export const PAGE_HISTORY_WORDS = {
 const NO_COMMITS: FileCommit[] = [];
 
 /**
- * One page's History (M64.2b, D18): the side panel's History tab, on docs and
+ * One page's History (M64.2b, D18): the side panel's History, on docs and
  * concepts alike. Its versions (M58.4) and what Cerebro recorded share one
  * timeline, newest day first, and are never blended: a commit is its own row
  * (`CommitRow`, named from the commit record alone, CV-35), a session is one
@@ -165,7 +169,7 @@ export function PageHistory({ path }: { path: string }) {
           {PAGE_HISTORY_WORDS.empty}
         </p>
       )}
-      <div data-testid="git-history" data-variant="tab" className="flex flex-col gap-2">
+      <div data-testid="git-history" data-variant="panel" className="flex flex-col gap-2">
         {pending && <UncommittedRow path={path} />}
         <Days entries={fold.shown} today={today} path={path} runs={runs} />
         {fold.hidden > 0 && (
@@ -208,7 +212,7 @@ function Days({
         >
           <h3
             data-testid="page-history-day"
-            className="m-0 px-1.5 pt-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500"
+            className="m-0 px-1.5 pt-1 text-metadata font-medium text-n-500"
           >
             {group.label}
           </h3>
@@ -243,17 +247,28 @@ function Row({
           {entry.text}
         </div>
       );
-    case 'run':
+    case 'run': {
+      // A trace line in its run's state (M91.14): its icon and ink, and its
+      // word for a screen reader.
+      const status = runStatus(entry.run.outcome);
       return (
         <div
           data-testid="history-run"
           data-run={entry.run.run_id}
-          className="flex min-w-0 items-baseline gap-1 border-l-2 border-synapse-200 pl-2.5 text-xs text-n-800"
+          className="flex min-w-0 border-l-2 border-synapse-200 pl-2.5 text-xs text-n-800"
         >
-          <span className="flex-none">{entry.text} ·</span>
-          <RunWhy cause={entry.run.cause} startedAt={entry.run.started_at} />
+          <TraceLine
+            status={status.trace}
+            statusText={status.statusText}
+            className="cb-run-line cb-run-line-xs"
+          >
+            <StepIcon state={status.state} icon={status.icon} />
+            <TraceTitle className="flex-none text-n-800">{entry.text} ·</TraceTitle>
+            <RunWhy cause={entry.run.cause} startedAt={entry.run.started_at} />
+          </TraceLine>
         </div>
       );
+    }
     case 'concept':
       return (
         <div

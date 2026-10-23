@@ -1,5 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { HOVER_OPEN_MS, resetHoverCards } from '@/components/ui/HoverCard';
 import { ConceptBody } from './ConceptBody';
 import { calculateSheets } from '@/lib/ipc';
 import { resetSheetCache } from '@/sheet/useSheetWorkbook';
@@ -256,5 +257,105 @@ describe('ConceptBody', () => {
     expect(screen.getByTestId('concept-wikilink').textContent).toBe('ims-7');
     // The citation still resolved to its source's 1-based index, not to `?`.
     expect(screen.getByText('1')).toBeTruthy();
+  });
+});
+
+/**
+ * A concept's `[^id]` citations are Inline Citation triggers (M91.14): the
+ * number stays the button the page's `onCite` hears, and hovering or
+ * focusing it shows the source — its name, what the body's own definition
+ * says of it, where it is. Only an http(s) source links out (CV-16); one
+ * nothing lists keeps its "?" and its words.
+ */
+describe('ConceptBody citations', () => {
+  const source = (id: string, resource: string, title: string | null = null) => ({
+    id,
+    resource,
+    title,
+    author: null,
+    usageCount: null,
+    lastModified: null,
+    usageWindow: null,
+  });
+  const SOURCES = [
+    source('s1', '/inbox/a.md', 'The intake note'),
+    source('web', 'https://example.com/report', 'The 2026 report'),
+    source('ftp', 'ftp://files.example.com/dump.csv'),
+  ];
+  // A definition quoted in a fence is the fence's code, not the source's.
+  const BODY =
+    'Claims[^s1] and more[^web] and raw[^ftp] and loose[^s9].\n\n' +
+    '```md\n[^web]: Quoted in a fence\n```\n\n' +
+    '[^s1]: As the intake note puts it\n' +
+    '[^web]: The report, page 4\n';
+
+  let at = 0;
+  const hover = (el: Element) => {
+    at += 7;
+    act(() => {
+      el.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, screenX: at, screenY: at }));
+    });
+  };
+  const card = () => screen.findByRole('group', { name: 'Source' });
+
+  beforeEach(() => resetHoverCards());
+
+  it('opens the source on hover, keeps the click the page’s, and says what the body says', async () => {
+    const cited: string[] = [];
+    render(
+      <ConceptBody
+        markdown={BODY}
+        sources={SOURCES}
+        fromPath="knowledge/x.md"
+        onCite={(id) => cited.push(id)}
+      />,
+    );
+    const first = screen.getByRole('button', { name: '1' });
+    expect(first.hasAttribute('title')).toBe(false);
+    hover(first);
+    const shown = await card();
+    expect(first.getAttribute('aria-describedby')).toBe(shown.id);
+    expect(shown.textContent).toContain('The intake note');
+    expect(shown.textContent).toContain('As the intake note puts it');
+    expect(shown.textContent).toContain('inbox/a.md');
+    // A vault path in the card is text: the trigger is the way in.
+    expect(within(shown).queryByRole('button')).toBeNull();
+    fireEvent.click(first);
+    expect(cited).toEqual(['s1']);
+    // The definitions stay out of the body.
+    expect(screen.getByTestId('concept-body').textContent).not.toContain('page 4');
+  });
+
+  it('opens on keyboard focus too, and links out only to http(s)', async () => {
+    render(<ConceptBody markdown={BODY} sources={SOURCES} fromPath="knowledge/x.md" />);
+    const web = screen.getByRole('button', { name: '2' });
+    vi.spyOn(web, 'matches').mockReturnValue(true);
+    act(() => web.focus());
+    const shown = await card();
+    expect(shown.textContent).toContain('The 2026 report');
+    expect(shown.textContent).toContain('The report, page 4');
+    expect(shown.textContent).not.toContain('Quoted in a fence');
+    const link = within(shown).getByRole('link', { name: 'example.com (opens in a new tab)' });
+    expect(link.getAttribute('href')).toBe('https://example.com/report');
+    expect(link.getAttribute('target')).toBe('_blank');
+    act(() => web.blur());
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Source' })).toBeNull());
+
+    hover(screen.getByRole('button', { name: '3' }));
+    const raw = await card();
+    expect(raw.textContent).toContain('ftp://files.example.com/dump.csv');
+    expect(raw.querySelector('a')).toBeNull();
+    for (const a of document.querySelectorAll('a')) {
+      expect(a.getAttribute('href') ?? '').toMatch(/^https?:\/\//);
+    }
+  });
+
+  it('keeps a "?" for a citation nothing lists, says so in words, and opens no card', async () => {
+    render(<ConceptBody markdown={BODY} sources={SOURCES} fromPath="knowledge/x.md" />);
+    const loose = screen.getByRole('button', { name: '?' });
+    expect(loose.getAttribute('title')).toBe('No source "s9"');
+    hover(loose);
+    await new Promise((resolve) => setTimeout(resolve, HOVER_OPEN_MS + 50));
+    expect(screen.queryByRole('group', { name: 'Source' })).toBeNull();
   });
 });

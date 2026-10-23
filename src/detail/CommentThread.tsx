@@ -1,6 +1,10 @@
 import { useState } from 'react';
+import { commentMessage } from '@/agent/elements/writingComments';
 import { MessageText } from '@/agent/MessageMarkdown';
+import { Message, MessageContent, MessageHeader } from '@/components/ai/Message';
 import { Button } from '@/components/ui/Button';
+import { Icon } from '@/components/ui/Icon';
+import { Arrival, useArrival } from '@/components/ui/motion';
 import { useOpenPath } from '@/app/useOpenPath';
 import { listAgents } from '@/engine/agents';
 import { OWNER, type CommentStamp, type PageComment } from '@/engine/comments';
@@ -11,6 +15,7 @@ import { useVaultStore } from '@/stores/vaultStore';
 import { CommentComposer } from './CommentComposer';
 import { noteText, type DetachedNote, type SectionThread } from './commentSections';
 import type { PageCommentsController } from './usePageComments';
+import './comments.css';
 
 /** The panel's own turns (mcp.rs `DEFAULT_ACTOR`). */
 const PANEL_ACTOR = 'claude-code';
@@ -45,20 +50,34 @@ function When({ at, now }: { at: string; now: Date }) {
   );
 }
 
+/**
+ * One comment, as a Message (M91.14): the person's at the start like every
+ * other, an agent's marked as the assistant's with the AI glyph. While its
+ * agent's turn runs, an answer is its working words with the element's light
+ * passing through them; its body, once it lands, is the chat's markdown, its
+ * wikilinks opening their pages.
+ */
 function CommentRow({
   comment,
   who,
   now,
   onOpen,
   onDelete,
+  fresh = false,
 }: {
   comment: PageComment;
   who: string;
   now: Date;
   onOpen: (target: string) => void;
   onDelete: () => Promise<boolean>;
+  /** Arrived while the thread was open: it rises in where it lands. */
+  fresh?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
+  // An answer that was a placeholder when the row mounted lands as it
+  // replaces it (comments.css), rather than swapping in place.
+  const [answered] = useState(comment.state === 'pending');
+  const arrival = useArrival(fresh);
   if (comment.deleted !== undefined) {
     return (
       <p data-testid="comment-tombstone" className="m-0 text-sm italic text-n-400">
@@ -66,65 +85,84 @@ function CommentRow({
       </p>
     );
   }
+  const view = commentMessage(comment, who);
   return (
-    <div
+    <Message
+      from={view.from}
+      align="start"
       data-testid="comment"
       data-comment-id={comment.id}
       data-state={comment.state}
-      className="flex flex-col gap-0.5"
+      {...arrival}
+      className="cb-comment"
     >
-      <div className="flex items-baseline gap-1.5">
-        <span className="text-xs font-medium text-n-800">{who}</span>
-        <When at={comment.created} now={now} />
-        <span className="flex-1" />
-        {!confirming && (
-          <button
-            type="button"
-            data-testid="comment-delete"
-            onClick={(e) => {
-              e.stopPropagation();
-              setConfirming(true);
-            }}
-            className="rounded-sm border-0 bg-transparent px-1 text-2xs text-n-400 hover:bg-n-50 hover:text-danger-600"
-          >
-            Delete
-          </button>
+      <MessageContent>
+        <MessageHeader>
+          {view.from === 'assistant' && (
+            <Icon name="sparkles" size={12} color="var(--synapse-500)" />
+          )}
+          <span className="text-xs font-medium text-n-800">{who}</span>
+          <When at={comment.created} now={now} />
+          <span className="flex-1" />
+          {!confirming && (
+            <details className="relative text-xs text-n-500">
+              <summary
+                aria-label="Comment actions"
+                className="motion-hover cursor-pointer list-none rounded-sm px-1.5 py-0.5 hover:bg-n-50"
+              >
+                ···
+              </summary>
+              <button
+                type="button"
+                data-testid="comment-delete"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setConfirming(true);
+                }}
+                className="rounded-sm border-0 bg-transparent px-1 text-2xs text-n-400 hover:bg-n-50 hover:text-danger-600"
+              >
+                Delete
+              </button>
+            </details>
+          )}
+        </MessageHeader>
+        {view.answering !== null ? (
+          <p data-testid="comment-pending" className="cb-ai-shimmer m-0 text-sm text-n-500">
+            {view.answering}
+          </p>
+        ) : (
+          <Arrival when={answered}>
+            <div
+              className={[
+                'whitespace-pre-wrap break-words text-sm leading-[19px]',
+                view.failed ? 'text-n-400' : 'text-n-800',
+              ].join(' ')}
+            >
+              <MessageText text={comment.body} onOpen={onOpen} />
+            </div>
+          </Arrival>
         )}
-      </div>
-      {comment.state === 'pending' ? (
-        <p data-testid="comment-pending" className="m-0 text-sm italic text-n-500">
-          {who} is answering…
-        </p>
-      ) : (
-        <div
-          className={[
-            'whitespace-pre-wrap break-words text-sm leading-[19px]',
-            comment.state === 'failed' ? 'text-n-400' : 'text-n-800',
-          ].join(' ')}
-        >
-          <MessageText text={comment.body} onOpen={onOpen} />
-        </div>
-      )}
-      {confirming && (
-        <div className="flex items-center gap-1.5 text-xs text-n-600">
-          <span>Delete this comment?</span>
-          <Button
-            size="sm"
-            variant="danger"
-            testId="comment-delete-confirm"
-            onClick={() => {
-              setConfirming(false);
-              void onDelete();
-            }}
-          >
-            Delete
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
-            Cancel
-          </Button>
-        </div>
-      )}
-    </div>
+        {confirming && (
+          <div className="flex items-center gap-1.5 text-xs text-n-600">
+            <span>Delete this comment?</span>
+            <Button
+              size="sm"
+              variant="danger"
+              testId="comment-delete-confirm"
+              onClick={() => {
+                setConfirming(false);
+                void onDelete();
+              }}
+            >
+              Delete
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+          </div>
+        )}
+      </MessageContent>
+    </Message>
   );
 }
 
@@ -138,7 +176,7 @@ function ResolvedBy({ stamp, entries, now }: { stamp: CommentStamp; entries: Ent
 }
 
 /**
- * One thread on the Comments tab (M70.2b): its quote, its comments, a reply
+ * One thread in the Comments panel (M70.2b): its quote, its comments, a reply
  * box and its actions. Clicking the card focuses it.
  */
 export function CommentThread({
@@ -146,14 +184,21 @@ export function CommentThread({
   note = null,
   controller,
   now,
+  fresh = false,
 }: {
   item: SectionThread;
   /** Why a quoted thread sits in Discussion. */
   note?: DetachedNote | null;
   controller: PageCommentsController;
   now: Date;
+  /** Arrived while the panel was open: it rises in where it lands. */
+  fresh?: boolean;
 }) {
   const { id, thread } = item;
+  // The comments it opened with are simply there; one added since — a
+  // reply, an agent's answer — rises in (comments.css).
+  const [opened] = useState(() => new Set(thread.comments.map((c) => c.id)));
+  const arrival = useArrival(fresh);
   const entries = useVaultStore((s) => s.entries);
   const openPath = useOpenPath();
   const [confirmingThread, setConfirmingThread] = useState(false);
@@ -171,22 +216,30 @@ export function CommentThread({
       data-testid="comment-thread"
       data-thread-id={id}
       data-focused={focused || undefined}
+      {...arrival}
       data-anchor={thread.anchor?.quote}
       onClick={() => {
         if (!focused) controller.focus(id);
       }}
       className={[
-        'flex flex-col gap-2 rounded-lg border px-2.5 py-2',
+        'motion-hover flex flex-col gap-2 rounded-lg border px-2.5 py-2',
         focused ? 'border-cortex-500 bg-n-0' : 'border-n-200 bg-n-0 hover:border-n-300',
       ].join(' ')}
     >
       {thread.anchor !== undefined && (
-        <blockquote
-          data-testid="comment-quote"
-          className="m-0 border-0 border-l-2 border-solid border-n-300 pl-2 text-xs text-n-600"
+        <button
+          type="button"
+          aria-label="Show quoted text"
+          className="border-0 bg-transparent p-0 text-left"
+          onClick={() => controller.focus(id)}
         >
-          {thread.anchor.quote}
-        </blockquote>
+          <blockquote
+            data-testid="comment-quote"
+            className="m-0 border-0 border-l-2 border-solid border-n-300 pl-2 text-xs text-n-600"
+          >
+            {thread.anchor.quote}
+          </blockquote>
+        </button>
       )}
       {note !== null && (
         <p data-testid="comment-note" className="m-0 text-2xs text-[var(--text-meta)]">
@@ -201,17 +254,32 @@ export function CommentThread({
           now={now}
           onOpen={open}
           onDelete={() => controller.deleteComment(id, c.id)}
+          fresh={!opened.has(c.id)}
         />
       ))}
       {thread.resolved !== undefined && (
         <ResolvedBy stamp={thread.resolved} entries={entries} now={now} />
       )}
-      <CommentComposer
-        placeholder="Reply…"
-        submitLabel="Reply"
-        testId="comment-reply-submit"
-        onSubmit={(body) => controller.reply(id, body)}
-      />
+      {focused ? (
+        <CommentComposer
+          placeholder="Reply…"
+          submitLabel="Reply"
+          testId="comment-reply-submit"
+          onSubmit={(body) => controller.reply(id, body)}
+          draft={
+            controller.composerDrafts === undefined
+              ? undefined
+              : {
+                  read: () => controller.composerDrafts!.read(`reply:${id}`),
+                  write: (value) => controller.composerDrafts!.write(`reply:${id}`, value),
+                }
+          }
+        />
+      ) : (
+        <Button size="sm" variant="ghost" onClick={() => controller.focus(id)}>
+          Reply…
+        </Button>
+      )}
       <div className="flex flex-wrap items-center gap-1.5">
         {resolved ? (
           <Button
@@ -236,14 +304,22 @@ export function CommentThread({
         )}
         <span className="flex-1" />
         {!confirmingThread && (
-          <Button
-            size="sm"
-            variant="ghost"
-            testId="comment-thread-delete"
-            onClick={() => setConfirmingThread(true)}
-          >
-            Delete thread
-          </Button>
+          <details className="text-xs text-n-500">
+            <summary
+              aria-label="Thread actions"
+              className="cursor-pointer list-none rounded-sm px-1.5 py-0.5 hover:bg-n-50"
+            >
+              ···
+            </summary>
+            <Button
+              size="sm"
+              variant="ghost"
+              testId="comment-thread-delete"
+              onClick={() => setConfirmingThread(true)}
+            >
+              Delete thread
+            </Button>
+          </details>
         )}
       </div>
       {confirmingThread && (

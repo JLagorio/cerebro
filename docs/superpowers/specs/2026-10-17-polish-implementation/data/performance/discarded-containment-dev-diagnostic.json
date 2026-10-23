@@ -1,0 +1,160 @@
+{
+  "environment": {
+    "at": "2026-10-17T17:56:43.397Z",
+    "platform": "darwin",
+    "release": "24.6.0",
+    "architecture": "arm64",
+    "cpu": "Apple M1 Pro",
+    "logicalCpus": 10,
+    "memoryGiB": 32,
+    "loadBefore": [
+      21.1962890625,
+      14.62109375,
+      12.22998046875
+    ],
+    "node": "v26.3.1",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "samples": 5,
+    "modulePath": "/src/views/TableView.tsx",
+    "mode": "Vite development, unthrottled headless Chromium, sequential fixture mounts",
+    "externalNetwork": "blocked; localhost:5382 only",
+    "input": "Synthetic ArrowDown at row level; dispatch to two animation frames; all text fields 140px; title + 12/24 declared scalar fields; no record limit; no edits; each scroll +80px"
+  },
+  "browser": "149.0.7827.55",
+  "results": [
+    {
+      "count": 100,
+      "cols": 12,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 2155,
+        "scrollHeight": 3636
+      },
+      "inputMs": [
+        76.09999996423721,
+        82.90000003576279,
+        71.70000004768372,
+        70.59999996423721,
+        72
+      ],
+      "mountedMs": 123,
+      "p95InputMs": 82.90000003576279,
+      "maxWarmedTaskMs": 108,
+      "renderedRows": 100
+    },
+    {
+      "count": 100,
+      "cols": 24,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 3835,
+        "scrollHeight": 3636
+      },
+      "inputMs": [
+        111,
+        112.80000001192093,
+        109.10000002384186,
+        115.5,
+        111.30000001192093
+      ],
+      "mountedMs": 218.4000000357628,
+      "p95InputMs": 115.5,
+      "maxWarmedTaskMs": 180,
+      "renderedRows": 100
+    },
+    {
+      "count": 1000,
+      "cols": 12,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 2155,
+        "scrollHeight": 36036
+      },
+      "inputMs": [
+        93.89999997615814,
+        83.60000002384186,
+        108.89999997615814,
+        149,
+        113.69999998807907
+      ],
+      "mountedMs": 580.6999999880791,
+      "p95InputMs": 149,
+      "maxWarmedTaskMs": 115,
+      "renderedRows": 1000
+    },
+    {
+      "count": 1000,
+      "cols": 24,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 3835,
+        "scrollHeight": 36036
+      },
+      "inputMs": [
+        181.69999998807907,
+        129.30000001192093,
+        130.79999995231628,
+        134,
+        133.5
+      ],
+      "mountedMs": 1182.800000011921,
+      "p95InputMs": 181.69999998807907,
+      "maxWarmedTaskMs": 203,
+      "renderedRows": 1000
+    },
+    {
+      "count": 5000,
+      "cols": 12,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 2155,
+        "scrollHeight": 180036
+      },
+      "inputMs": [
+        152.30000001192093,
+        145.79999995231628,
+        153.60000002384186,
+        153.39999997615814,
+        321.7000000476837
+      ],
+      "mountedMs": 3199.5,
+      "p95InputMs": 321.7000000476837,
+      "maxWarmedTaskMs": 170,
+      "renderedRows": 5000
+    },
+    {
+      "count": 5000,
+      "cols": 24,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 3835,
+        "scrollHeight": 180036
+      },
+      "inputMs": [
+        218,
+        241.60000002384186,
+        391,
+        232.0999999642372,
+        212.69999998807907
+      ],
+      "mountedMs": 5058,
+      "p95InputMs": 391,
+      "maxWarmedTaskMs": 381,
+      "renderedRows": 5000
+    }
+  ],
+  "loadAfter": [
+    17.44189453125,
+    14.3623046875,
+    12.22021484375
+  ]
+}

@@ -1,11 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
+
+const ipc = vi.hoisted(() => ({
+  canPickFiles: vi.fn(() => false),
+  pickFiles: vi.fn(async () => [] as string[]),
+}));
+
+vi.mock('@/lib/ipc', async (original) => ({
+  ...(await original<typeof import('@/lib/ipc')>()),
+  ...ipc,
+}));
+
 import { ChatInput } from './ChatInput';
+import type { FileSource } from './attachments';
+import { PromptInput } from '@/components/ai/PromptInput';
 import { useEscapeLayer } from '@/components/ui/Popover';
-import { chipId, type ContextChip } from './contextChips';
+import { chipId, fileChip, type ContextChip } from './contextChips';
+import { composerFiles, type PendingView } from './elements/attachments';
+import { NO_DROP_ZONE } from '@/engine/osDrop';
 import { makeEntry } from '@/engine/testHelpers';
+import { mockDrop } from '@/lib/mockDropped';
+import { retainOsDropRouter } from '@/lib/osDrop';
 import { useOpenLogStore } from '@/stores/openLogStore';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 afterEach(cleanup);
@@ -23,24 +41,35 @@ const skillEntry = (title: string) => {
   });
 };
 
+/** The composer's text sits in a Prompt Input, whose send it is (M91.12a). */
 function Harness({
   onSubmit = () => undefined,
   onAttach,
   attached,
+  files,
+  onAttachFiles,
+  onRemoveFile,
 }: {
   onSubmit?: () => void;
   onAttach?: (chip: ContextChip) => void;
   attached?: string[];
+  files?: ReturnType<typeof composerFiles>;
+  onAttachFiles?: (sources: readonly FileSource[]) => void;
+  onRemoveFile?: (id: string) => void;
 }) {
   const [value, setValue] = useState('');
   return (
-    <ChatInput
-      value={value}
-      onChange={setValue}
-      onSubmit={onSubmit}
-      onAttach={onAttach}
-      attached={attached}
-    />
+    <PromptInput onSubmit={onSubmit}>
+      <ChatInput
+        value={value}
+        onChange={setValue}
+        onAttach={onAttach}
+        attached={attached}
+        files={files}
+        onAttachFiles={onAttachFiles}
+        onRemoveFile={onRemoveFile}
+      />
+    </PromptInput>
   );
 }
 
@@ -134,13 +163,21 @@ describe('ChatInput slash completion (M13.1)', () => {
   });
 
   it('an external context append ignores the focused textarea caret from its previous value', () => {
-    const props = { onChange: vi.fn(), onSubmit: vi.fn(), onAttach: vi.fn() };
-    const { rerender } = render(<ChatInput {...props} value="Help me with" />);
+    const props = { onChange: vi.fn(), onAttach: vi.fn() };
+    const { rerender } = render(
+      <PromptInput onSubmit={vi.fn()}>
+        <ChatInput {...props} value="Help me with" />
+      </PromptInput>,
+    );
     box().focus();
     box().setSelectionRange(0, 0);
     // Add context appends to the draft; focus may return before React commits
     // the new value. That old caret cannot identify a token in the new text.
-    rerender(<ChatInput {...props} value="Help me with @" />);
+    rerender(
+      <PromptInput onSubmit={vi.fn()}>
+        <ChatInput {...props} value="Help me with @" />
+      </PromptInput>,
+    );
     expect(screen.getByTestId('attach-menu')).toBeTruthy();
     expect(box().value).toBe('Help me with @');
   });
@@ -388,5 +425,291 @@ describe('ChatInput ranking (M59.3)', () => {
     render(<Harness />);
     fireEvent.change(box(), { target: { value: '/sweep' } });
     expect(labels('skill-menu')).toEqual(['/sweep-inbox', '/risk-sweep']);
+  });
+});
+
+// Folded onto the assistant's button, the composer stays mounted with its
+// draft. A completion menu there would sit on the layer stack, unseen, and
+// swallow the page's next Escape: suspended, none opens.
+describe('ChatInput while suspended', () => {
+  it('opens no menu for the draft, and the same draft opens it once shown', () => {
+    useVaultStore.setState({ entries: [skillEntry('Risk sweep')] });
+    const props = { value: 'compare [[risk', onChange: () => undefined };
+    const { rerender } = render(
+      <PromptInput onSubmit={() => undefined}>
+        <ChatInput {...props} suspended />
+      </PromptInput>,
+    );
+    expect(screen.queryByTestId('wikilink-menu')).toBeNull();
+    rerender(
+      <PromptInput onSubmit={() => undefined}>
+        <ChatInput {...props} />
+      </PromptInput>,
+    );
+    expect(screen.getByTestId('wikilink-menu')).toBeTruthy();
+  });
+});
+
+// M91.12a — the text is a Prompt Input's: its Enter sends and Shift+Enter
+// breaks the line, an IME composition's keys are the composition's own, and
+// no form stands between the field and anything portalled out of it.
+describe('ChatInput in its Prompt Input (M91.12a)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({
+      entries: [skillEntry('Weekly review'), skillEntry('Risk sweep')],
+      views: [],
+      collections: [],
+    });
+  });
+
+  it('is the Prompt Input’s field, by its name and its placeholder, and no form', () => {
+    const onSubmit = vi.fn();
+    const { container } = render(<Harness onSubmit={onSubmit} />);
+    expect(screen.getByRole('textbox', { name: 'Message the assistant' })).toBe(box());
+    expect(box().dataset.slot).toBe('prompt-input-textarea');
+    expect(box().placeholder).toBe('Ask about this vault…');
+    expect(box().rows).toBe(1);
+    expect(box().parentElement?.dataset.slot).toBe('prompt-input-body');
+    expect(container.querySelector('form')).toBeNull();
+    fireEvent.change(box(), { target: { value: 'First line' } });
+    expect(fireEvent.keyDown(box(), { key: 'Enter', shiftKey: true })).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it('sends nothing on an Enter that ends an IME composition', () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+    fireEvent.change(box(), { target: { value: 'にほんご' } });
+    fireEvent.keyDown(box(), { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(box(), { key: 'Enter', keyCode: 229 });
+    fireEvent.compositionStart(box());
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(box());
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it('lets a composition keep its Enter and arrows while a menu is open', () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+    fireEvent.change(box(), { target: { value: '/' } });
+    const rows = () => [...screen.getByTestId('skill-menu').querySelectorAll('button')];
+    const first = rows()[0].querySelector('span')?.textContent;
+    expect(rows()[0].className).toContain('bg-cortex-50');
+    fireEvent.compositionStart(box());
+    fireEvent.keyDown(box(), { key: 'ArrowDown' });
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    fireEvent.keyDown(box(), { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(box(), { key: 'Tab', keyCode: 229 });
+    // No row was picked or moved to, and nothing was sent.
+    expect(box().value).toBe('/');
+    expect(rows()[0].className).toContain('bg-cortex-50');
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(box());
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(box().value).toBe(`${first} `);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * M91.17 — files from outside the vault: drawn as Attachments above the
+ * text, and taken from `@`'s Attach a file row, a drop on the composer and a
+ * paste. The panel copies them in on send; this hands them over.
+ */
+describe('ChatInput files (M91.17)', () => {
+  const record = makeEntry({
+    path: 'work/ship-beta.md',
+    filename: 'ship-beta.md',
+    folder: 'work',
+    title: 'Ship the beta',
+    type: 'Work item',
+  });
+  const waiting = (over: Partial<PendingView> = {}): PendingView => ({
+    id: 'pending:7',
+    label: 'Q3 report.pdf',
+    fileKind: 'pdf',
+    state: 'waiting',
+    ...over,
+  });
+
+  beforeEach(() => {
+    useVaultStore.setState({ entries: [record], views: [], collections: [] });
+    useUiStore.setState({ toasts: [] });
+    ipc.canPickFiles.mockReturnValue(false);
+    ipc.pickFiles.mockReset();
+    ipc.pickFiles.mockResolvedValue([]);
+  });
+
+  it('draws each file as an Attachment above the text: its name, its kind, a remove', () => {
+    const onRemoveFile = vi.fn();
+    render(
+      <Harness
+        files={composerFiles([fileChip('attachments/brief.docx')], [waiting()])}
+        onRemoveFile={onRemoveFile}
+      />,
+    );
+    const list = screen.getByRole('list', { name: 'Attached files' });
+    // Across the pill, in the Prompt Input's header, never in the text's body.
+    expect(list.parentElement?.dataset.slot).toBe('prompt-input-header');
+    const [docx, pdf] = within(list).getAllByRole('listitem');
+    expect(docx.dataset.testid).toBe('composer-attachment');
+    expect(docx.dataset.path).toBe('attachments/brief.docx');
+    expect(docx.dataset.state).toBe('done');
+    expect(docx.querySelector('[data-slot="attachment-preview"]')?.getAttribute('data-kind')).toBe(
+      'document',
+    );
+    expect(within(docx).getByText('brief.docx')).toBeTruthy();
+    expect(pdf.dataset.state).toBe('idle');
+    expect(pdf.dataset.path).toBeUndefined();
+    expect(within(pdf).getByText('Q3 report.pdf')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Q3 report.pdf from context' }));
+    expect(onRemoveFile).toHaveBeenCalledWith('pending:7');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove brief.docx from context' }));
+    expect(onRemoveFile).toHaveBeenLastCalledWith('file:attachments/brief.docx');
+  });
+
+  it('draws an attached image in the vault through FileThumb, never an img of its own (CV-61)', () => {
+    render(<Harness files={composerFiles([fileChip('attachments/diagram.png')], [])} />);
+    const chip = screen.getByTestId('composer-attachment');
+    expect(within(chip).getByTestId('file-thumb').dataset.path).toBe('attachments/diagram.png');
+    expect(chip.querySelector('img')).toBeNull();
+  });
+
+  it('draws no files row with nothing attached, and holds a copying file’s remove', () => {
+    const onRemoveFile = vi.fn();
+    const { rerender } = render(<Harness onRemoveFile={onRemoveFile} />);
+    expect(screen.queryByRole('list', { name: 'Attached files' })).toBeNull();
+    rerender(
+      <Harness
+        files={composerFiles([], [waiting({ state: 'copying' })])}
+        onRemoveFile={onRemoveFile}
+      />,
+    );
+    expect(screen.getByTestId('composer-attachment').dataset.state).toBe('uploading');
+    const remove = screen.getByRole('button', { name: 'Remove Q3 report.pdf from context' });
+    expect((remove as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('offers Attach a file last in @, only where files can be taken', () => {
+    const { rerender } = render(<Harness onAttach={vi.fn()} />);
+    fireEvent.change(box(), { target: { value: '@' } });
+    const labels = () =>
+      [...screen.getByTestId('attach-menu').querySelectorAll('button')].map(
+        (b) => b.querySelector('span')?.textContent,
+      );
+    expect(labels()).not.toContain('Attach a file…');
+    rerender(<Harness onAttach={vi.fn()} onAttachFiles={vi.fn()} />);
+    // The first row is still a chip row, and the file row comes last.
+    expect(labels()[0]).not.toBe('Attach a file…');
+    expect(labels().at(-1)).toBe('Attach a file…');
+    expect(screen.getByTestId('attach-menu').textContent).toContain('Files');
+  });
+
+  it('closes @ on a word nothing answers to, so Enter still sends', () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} onAttach={vi.fn()} onAttachFiles={vi.fn()} />);
+    fireEvent.change(box(), { target: { value: 'ask @zzz' } });
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+    fireEvent.change(box(), { target: { value: 'ask @upl' } });
+    expect(screen.getByTestId('attach-menu').textContent).toContain('Attach a file…');
+  });
+
+  it('opens the browser’s picker where there is no native one, and hands over what was chosen', () => {
+    const onAttachFiles = vi.fn();
+    render(<Harness onAttach={vi.fn()} onAttachFiles={onAttachFiles} />);
+    const input = screen.getByTestId('composer-file-input') as HTMLInputElement;
+    const click = vi.spyOn(input, 'click');
+    fireEvent.change(box(), { target: { value: 'read @attach' } });
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(click).toHaveBeenCalledOnce();
+    // The token is consumed, as a chip row's is.
+    expect(box().value).toBe('read ');
+    expect(ipc.pickFiles).not.toHaveBeenCalled();
+    const file = new File(['%PDF'], 'brief.pdf', { type: 'application/pdf' });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(onAttachFiles).toHaveBeenCalledWith([file]);
+  });
+
+  it('opens the native picker in the desktop app, and does nothing when it is cancelled', async () => {
+    ipc.canPickFiles.mockReturnValue(true);
+    ipc.pickFiles.mockResolvedValueOnce(['/outside/report.pdf']).mockResolvedValueOnce([]);
+    const onAttachFiles = vi.fn();
+    render(<Harness onAttach={vi.fn()} onAttachFiles={onAttachFiles} />);
+    for (let i = 0; i < 2; i += 1) {
+      fireEvent.change(box(), { target: { value: '@file' } });
+      await act(async () => {
+        fireEvent.keyDown(box(), { key: 'Enter' });
+      });
+    }
+    expect(ipc.pickFiles).toHaveBeenCalledTimes(2);
+    expect(onAttachFiles).toHaveBeenCalledOnce();
+    expect(onAttachFiles).toHaveBeenCalledWith(['/outside/report.pdf']);
+  });
+
+  it('says why when the native picker could not open', async () => {
+    ipc.canPickFiles.mockReturnValue(true);
+    ipc.pickFiles.mockRejectedValueOnce(new Error('the dialog is busy'));
+    render(<Harness onAttach={vi.fn()} onAttachFiles={vi.fn()} />);
+    fireEvent.change(box(), { target: { value: '@file' } });
+    await act(async () => {
+      fireEvent.keyDown(box(), { key: 'Enter' });
+    });
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toEqual([
+      "Couldn't choose files — the dialog is busy",
+    ]);
+  });
+
+  it('takes a drop anywhere on the composer through the OS drop router', async () => {
+    const onAttachFiles = vi.fn();
+    const { container } = render(<Harness onAttachFiles={onAttachFiles} />);
+    const pill = container.querySelector('[data-slot="prompt-input"]') as HTMLElement;
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => pill });
+    act(() =>
+      mockDrop({
+        at: { x: 4, y: 4 },
+        files: [{ path: '/outside/a.pdf', content: '%PDF' }],
+        hold: true,
+      }),
+    );
+    // Over it, the pill says it takes files.
+    expect(container.querySelector('.cb-chat-drop')?.textContent).toBe('Drop to attach');
+    await act(async () =>
+      mockDrop({ at: { x: 4, y: 4 }, files: [{ path: '/outside/a.pdf', content: '%PDF' }] }),
+    );
+    expect(onAttachFiles).toHaveBeenCalledWith(['/outside/a.pdf']);
+    expect(container.querySelector('.cb-chat-drop')).toBeNull();
+  });
+
+  it('is no drop zone where files cannot be taken', async () => {
+    // The app keeps the router listening with no zone, so the drop explains.
+    const release = retainOsDropRouter();
+    const { container } = render(<Harness />);
+    const pill = container.querySelector('[data-slot="prompt-input"]') as HTMLElement;
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => pill });
+    await act(async () =>
+      mockDrop({ at: { x: 4, y: 4 }, files: [{ path: '/outside/a.pdf', content: '%PDF' }] }),
+    );
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toEqual([NO_DROP_ZONE]);
+    release();
+  });
+
+  it('takes a pasted file, and leaves a paste of text to the text', () => {
+    const onAttachFiles = vi.fn();
+    render(<Harness onAttachFiles={onAttachFiles} />);
+    const shot = new File(['png'], 'shot.png', { type: 'image/png' });
+    const pasted = fireEvent.paste(box(), {
+      clipboardData: { files: [shot], types: ['Files'], getData: () => '' },
+    });
+    expect(pasted).toBe(false);
+    expect(onAttachFiles).toHaveBeenCalledWith([shot]);
+    const typed = fireEvent.paste(box(), {
+      clipboardData: { files: [], types: ['text/plain'], getData: () => 'words' },
+    });
+    expect(typed).toBe(true);
+    expect(onAttachFiles).toHaveBeenCalledOnce();
   });
 });

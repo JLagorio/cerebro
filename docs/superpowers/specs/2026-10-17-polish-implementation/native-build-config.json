@@ -1,0 +1,9 @@
+{
+  "productName": "Cerebro Polish Audit",
+  "identifier": "com.cerebro.polish-audit.audit20261017",
+  "bundle": {
+    "macOS": {
+      "infoPlist": "/private/tmp/cerebro-m90/native/AuditInfo.plist"
+    }
+  }
+}

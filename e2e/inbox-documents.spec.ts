@@ -6,7 +6,7 @@ async function drop(page: Page, name: string, bytes: Uint8Array) {
   await openDestination(page, 'Inbox');
   const box = await page.getByTestId('inbox-page').boundingBox();
   if (!box) throw new Error('Inbox has no bounds');
-  // The header is inside the Inbox drop zone and outside its editor's zone.
+  // The toolbar is inside the Inbox drop zone and outside its editor's zone.
   await page.evaluate(
     ({ name, base64, at }) =>
       window.__cerebroMockDrop({
@@ -45,6 +45,10 @@ test('an Office drop keeps its original, files an editable capture and deduplica
   await expect.poll(async () => (await captures(page)).length).toBe(1);
   const [[path, content]] = await captures(page);
   for (const words of [
+    // The document's own name titles the capture, in its frontmatter and
+    // as its H1 — not the filename fallback, which would read "Plan.docx".
+    'title: Plan\n',
+    '# Plan\n',
     'source_file: Plan.docx',
     'source_attachment: attachments/Plan.docx',
     'source_record_id:',
@@ -55,7 +59,8 @@ test('an Office drop keeps its original, files an editable capture and deduplica
   ])
     expect(content).toContain(words);
   await expect(page.getByTestId('markdown-editor')).toContainText('Goals');
-  await expect(page.getByText('(untitled capture)', { exact: true })).toHaveCount(0);
+  // And the page says so where it names the capture.
+  await expect(page.getByTestId('inbox-pane-header')).toContainText('Plan');
   await expect(page.getByTestId('lossy-import-banner')).toHaveCount(0);
   await expect(
     page.getByTestId('markdown-editor').locator('[contenteditable="true"]').first(),

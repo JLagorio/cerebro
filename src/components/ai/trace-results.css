@@ -1,0 +1,441 @@
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   The trace's results (M91.9b): Plan, Queue, Sources, Inline Citation, File
+   Tree, Checkpoint and Confirmation, drawn on Trace, Item and the DS tokens.
+   Each adds only what its element needs beyond a line: a queue's sections
+   and the actions beside its items, a citation's card, a tree's rows, the
+   checkpoint's rules and the asking card. Unlayered like the app's other
+   surface stylesheets; motion spends the hover token only, so nothing here
+   outlasts reduced motion. */
+
+/* Queue: sections one under another. A section's head is its line, or its
+   heading, with its actions beside it, never inside its trigger. */
+.cb-ai-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+}
+.cb-ai-queue-section {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+.cb-ai-queue-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-queue-heading {
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  font: inherit;
+}
+.cb-ai-queue-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  margin-top: var(--sp-2);
+}
+.cb-ai-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* An item: its line, its actions at the row's end, and what its caller hangs
+   under it, from the title. The line takes the room the actions leave and
+   its title gives way, so a long title never pushes them onto a row of their
+   own. */
+.cb-ai-queue-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-queue-item > .cb-ai-trace-line {
+  flex: 1 1 0;
+}
+.cb-ai-queue-detail {
+  flex-basis: 100%;
+  min-width: 0;
+  padding-inline-start: var(--sp-6);
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: break-word;
+}
+.cb-ai-queue-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+.cb-ai-queue-action {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-600);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-2xs);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.cb-ai-queue-action:hover:not(:disabled) {
+  border-color: var(--n-400);
+  color: var(--n-900);
+}
+.cb-ai-queue-action:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-queue-action:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* Plan: a plain line when the agent left its list empty; open, a sentence on
+   what it is for above its steps. */
+.cb-ai-plan {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+.cb-ai-plan-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* Inline Citation: the card's body. The card itself — its width, edge and
+   shadow — is the DS HoverCard's; a source after the first is ruled off. */
+.cb-ai-citation-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  color: var(--text-primary);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+.cb-ai-citation-source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.cb-ai-citation-source + .cb-ai-citation-source {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+}
+.cb-ai-citation-title {
+  margin: 0;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-ai-citation-description {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-meta);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+/* Where the source is: a link out, a page to open, or its address as text.
+   A link keeps this quiet ink over the app's link ink (tokens/base.css). */
+.cb-ai-citation-link,
+.cb-ai-citation-where {
+  max-width: 100%;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: anywhere;
+}
+.cb-ai-citation-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  text-decoration: none;
+  text-underline-offset: 4px;
+  cursor: pointer;
+  outline: none;
+  transition: color var(--motion-hover);
+}
+a.cb-ai-citation-link {
+  color: var(--text-meta);
+}
+.cb-ai-citation-link:hover,
+a.cb-ai-citation-link:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+.cb-ai-citation-link:focus-visible {
+  box-shadow: var(--ring);
+}
+
+/* File Tree: a file's row is its button, or its line, with its actions at the
+   row's end; a rename's old path and the caller's lines hang from the title.
+   The file shown beside the tree now reads in full ink. */
+.cb-ai-file-tree {
+  width: 100%;
+  min-width: 0;
+}
+.cb-ai-file-tree-file {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-05);
+  min-width: 0;
+}
+.cb-ai-file-tree-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-file-tree-name {
+  display: flex;
+  min-width: 0;
+}
+.cb-ai-file-tree-open[aria-current='true'] > .cb-ai-trace-line {
+  color: var(--text-primary);
+  font-weight: var(--w-medium);
+}
+.cb-ai-file-tree-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+.cb-ai-file-tree-note {
+  margin: 0;
+  padding-inline-start: var(--sp-6);
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: anywhere;
+}
+.cb-ai-file-tree-detail {
+  min-width: 0;
+  padding-inline-start: var(--sp-6);
+}
+
+/* Checkpoint: a labelled divider. Its rules are drawn either side and read as
+   nothing; its button and its note are what it says. */
+.cb-ai-checkpoint {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-ai-checkpoint::before,
+.cb-ai-checkpoint::after {
+  content: '';
+  flex: 1 1 0;
+  min-width: var(--sp-3);
+  height: 1px;
+  background: var(--border-subtle);
+}
+.cb-ai-checkpoint-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1) var(--sp-2);
+  max-width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+.cb-ai-checkpoint-icon {
+  display: inline-flex;
+  flex: none;
+}
+.cb-ai-checkpoint-icon svg {
+  pointer-events: none;
+}
+.cb-ai-checkpoint-trigger {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font: inherit;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  transition:
+    background-color var(--motion-hover),
+    border-color var(--motion-hover);
+}
+.cb-ai-checkpoint-trigger:hover:not(:disabled) {
+  background: var(--n-50);
+}
+.cb-ai-checkpoint-trigger:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-checkpoint-trigger:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.cb-ai-checkpoint-note {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+/* Confirmation: Item's anatomy as the asking card. Its icon and title share
+   the first row, with who asked at its end; what it would touch, its notices
+   and its answers each take a row of their own. The asking card wears the
+   brand's quiet ground; an outline one is a hairline card. */
+.cb-ai-confirmation.cb-ai-item {
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-lg);
+  color: var(--n-800);
+}
+.cb-ai-confirmation-ask.cb-ai-item {
+  border-color: var(--cortex-200);
+  background: var(--cortex-50);
+}
+.cb-ai-confirmation.cb-ai-item[data-state='refused'] {
+  border-color: var(--danger-200);
+}
+.cb-ai-confirmation-icon {
+  color: var(--cortex-600);
+}
+.cb-ai-confirmation .cb-ai-item-title {
+  color: var(--text-primary);
+  font-weight: var(--w-semibold);
+}
+.cb-ai-confirmation-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-ai-confirmation-body,
+.cb-ai-confirmation-refusal,
+.cb-ai-confirmation-notice,
+.cb-ai-confirmation-outcome,
+.cb-ai-confirmation-answers {
+  flex-basis: 100%;
+  min-width: 0;
+}
+.cb-ai-confirmation-body,
+.cb-ai-confirmation-answers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.cb-ai-confirmation-subject {
+  max-height: 160px;
+  margin: 0;
+  padding: var(--sp-1) 6px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-2xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cb-ai-confirmation-refusal,
+.cb-ai-confirmation-notice,
+.cb-ai-confirmation-outcome {
+  margin: 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: break-word;
+}
+.cb-ai-confirmation-refusal {
+  color: var(--danger-600);
+}
+.cb-ai-confirmation-notice {
+  color: var(--text-meta);
+}
+.cb-ai-confirmation-outcome {
+  color: var(--n-700);
+  font-weight: var(--w-medium);
+}
+.cb-ai-confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.cb-ai-confirmation-reason {
+  min-width: 0;
+  padding: var(--sp-1) 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font: inherit;
+  font-size: var(--fs-xs);
+  outline: none;
+  transition: border-color var(--motion-hover);
+}
+/* Asked for on Deny, it sits among the answers and gives way first. */
+.cb-ai-confirmation-actions > .cb-ai-confirmation-reason {
+  flex: 1 1 160px;
+}
+.cb-ai-confirmation-reason::placeholder {
+  color: var(--text-placeholder);
+}
+.cb-ai-confirmation-reason:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-confirmation-reason:disabled {
+  background: var(--n-50);
+  color: var(--text-disabled);
+}

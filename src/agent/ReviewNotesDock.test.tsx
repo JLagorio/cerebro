@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { NOTES_BLOCKED, NOTES_FULL, ReviewNotesDock } from './ReviewNotesDock';
 import type { UpNextEntry } from './upNextQueue';
 import { notesPrompt, type ReviewNote } from '@/engine/reviewNotes';
+import { statusWords } from '@/git/DiffNotes';
 import { useReviewNotesStore, type NewNote } from '@/stores/reviewNotesStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useUpNextStore } from '@/stores/upNextStore';
@@ -150,5 +151,117 @@ describe('ReviewNotesDock (M58.5)', () => {
     expect(screen.getByTestId('review-notes-cap').textContent).toBe(
       'Up to 30 notes per conversation.',
     );
+  });
+});
+
+/** What a screen reader reads of an element: its text, less what is hidden. */
+function spoken(element: Element): string {
+  const copy = element.cloneNode(true) as Element;
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
+  return (copy.textContent ?? '').replace(/\s+/g, ' ').trim();
+}
+
+// M91.14 — the dock is a Queue: one line counting the notes, which opens
+// onto them, with Send beside it; each note an item saying where it stands
+// in the diff's own words, its actions beside its line.
+describe('ReviewNotesDock as a Queue (M91.14)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useReviewNotesStore.setState({ notes: [] });
+    useUpNextStore.setState({ queues: {} });
+    useUiStore.setState({ toasts: [] });
+  });
+  afterEach(cleanup);
+
+  it('is the region Review notes, one line counting its notes that opens onto them', () => {
+    added();
+    added({ path: 'records/a.md', start: 1, end: 1 });
+    dock();
+    const region = screen.getByRole('region', { name: 'Review notes' });
+    expect(region).toBe(screen.getByTestId('review-notes-dock'));
+    expect(region.tagName).toBe('SECTION');
+    expect(region.dataset.slot).toBe('queue');
+    const toggle = screen.getByTestId('review-notes-toggle');
+    expect(toggle).toBe(screen.getByRole('button', { name: '2 review notes ready' }));
+    expect(toggle.contains(screen.getByTestId('review-notes-count'))).toBe(true);
+    // Closed until asked, its notes kept in the document.
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getAllByTestId('review-note')[0].closest('[hidden]')).not.toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getAllByTestId('review-note')[0].closest('[hidden]')).toBeNull();
+    // Send is the section's action, beside its line and never inside it.
+    const send = screen.getByTestId('review-notes-send');
+    expect(toggle.contains(send)).toBe(false);
+    expect(send.closest('[data-slot="queue-section-actions"]')).not.toBeNull();
+  });
+
+  it('lists its notes in path and line order, each an item of the list', () => {
+    added({ path: 'records/b.md', start: 9, end: 9 });
+    added({ path: 'records/a.md', start: 3, end: 3 });
+    added({ path: 'records/b.md', start: 2, end: 4 });
+    dock();
+    const notes = screen.getAllByTestId('review-note');
+    expect(notes.map((li) => li.tagName)).toEqual(['LI', 'LI', 'LI']);
+    expect(notes.every((li) => li.dataset.slot === 'queue-item')).toBe(true);
+    const part = (li: HTMLElement, slot: string) =>
+      li.querySelector(`[data-slot="${slot}"]`)?.textContent ?? '';
+    expect(notes.map((li) => [part(li, 'trace-title'), part(li, 'trace-description')])).toEqual([
+      ['records/a.md', '· line 3'],
+      ['records/b.md', '· lines 2–4'],
+      ['records/b.md', '· line 9'],
+    ]);
+  });
+
+  it('says each note’s status in the diff’s own words, before the place it is on', () => {
+    const note = added();
+    dock();
+    const [item] = screen.getAllByTestId('review-note');
+    const line = item.querySelector('[data-slot="trace-line"]') as HTMLElement;
+    expect(statusWords(note)).toBe('Queued for the agent');
+    expect(line.querySelector('.sr-only')?.textContent).toBe('Queued for the agent: ');
+    expect(spoken(line)).toMatch(/^Queued for the agent: records\/b\.md\s*· line 2$/);
+    // The path gives way in a narrow dock, whole on hover; its lines never do.
+    const title = line.querySelector('[data-slot="trace-title"]') as HTMLElement;
+    expect(title.getAttribute('title')).toBe('records/b.md');
+    expect(title.nextElementSibling?.getAttribute('data-slot')).toBe('trace-description');
+  });
+
+  it('names each action by the note it acts on, and puts it beside the line', () => {
+    const note = added({ start: 2, end: 4 });
+    const { onOpenNote } = dock();
+    const [item] = screen.getAllByTestId('review-note');
+    const view = within(item).getByRole('button', {
+      name: 'View diff of records/b.md, lines 2–4',
+      hidden: true,
+    });
+    expect(view).toBe(within(item).getByTestId('review-note-open'));
+    expect(view.textContent).toBe('View diff');
+    const remove = within(item).getByRole('button', {
+      name: 'Remove the note on records/b.md, lines 2–4',
+      hidden: true,
+    });
+    expect(remove).toBe(within(item).getByTestId('review-note-remove'));
+    // An ×, as Up next's Remove is.
+    expect(remove.querySelector('[data-icon="x"]')).not.toBeNull();
+    for (const action of [view, remove]) {
+      expect(action.closest('[data-slot="trace-line"]')).toBeNull();
+      expect(action.closest('[data-slot="queue-item-actions"]')?.parentElement).toBe(item);
+    }
+    // Its words are edited under its line.
+    const edit = within(item).getByTestId('review-note-edit');
+    expect(edit.getAttribute('aria-label')).toBe('Note on records/b.md, lines 2–4');
+    expect(edit.closest('[data-slot="queue-item-detail"]')).not.toBeNull();
+    fireEvent.click(view);
+    expect(onOpenNote).toHaveBeenCalledWith(expect.objectContaining({ id: note.id }));
+  });
+
+  it('says why it cannot send under the line, the line and its notes kept', () => {
+    added();
+    dock({ blocked: true });
+    const blocked = screen.getByTestId('review-notes-blocked');
+    expect(blocked.closest('[data-slot="queue-section"]')).toBeNull();
+    expect(blocked.parentElement).toBe(screen.getByTestId('review-notes-dock'));
+    expect(screen.getByTestId('review-notes-toggle')).toBeTruthy();
   });
 });

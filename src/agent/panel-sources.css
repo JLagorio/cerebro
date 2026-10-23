@@ -1,0 +1,33 @@
+/* The panel's own sources (M91.14, AiPanel): the pull requests a session
+   opened, under its thread, and the Knowledge the next turn carries, under
+   its context chips — each the Sources element's line that opens onto its
+   rows (components/ai/Sources.tsx), at its place's scale. In the thread it
+   is a reply's steps' size (chat-turn.css); in the dock, the chips' own
+   small face, its concepts hanging from a short rule. */
+.cb-chat-pr-links .cb-ai-trace-line {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+}
+.cb-chat-knowledge {
+  margin-bottom: 6px;
+}
+.cb-chat-knowledge .cb-ai-trace-line {
+  gap: 6px;
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-2xs);
+}
+.cb-chat-knowledge .cb-ai-trace-icon {
+  width: 12px;
+  height: 12px;
+}
+.cb-chat-knowledge .cb-ai-trace-icon svg {
+  width: 11px;
+  height: 11px;
+}
+.cb-chat-knowledge .cb-ai-trace-content {
+  margin: var(--sp-1) 0 0 5px;
+  padding: 0 0 0 var(--sp-3);
+}
+.cb-chat-knowledge .cb-ai-trace {
+  gap: var(--sp-1);
+}

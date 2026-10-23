@@ -261,6 +261,7 @@ export function isPlace(raw: unknown): raw is Place {
     // tab/path and workspace's root/path, and `placeKey`/`placeLabel` read
     // no other field of these kinds.
     case 'home':
+    case 'pages':
     case 'inbox':
     case 'mywork':
     case 'changes':

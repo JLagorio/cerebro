@@ -12,8 +12,10 @@ import { describe, expect, it } from 'vitest';
 import { sha256Hex } from '../sha256';
 import { POLICY } from './table';
 import TOOL_CASES from '../../../src-tauri/fixtures/tool-cases.json';
+import INIT_SIGNED_IN from '../../../src-tauri/fixtures/cli-stream/init-signed-in.json';
 import {
   bareToolName,
+  cliTool,
   clientToolsets,
   isConfirmable,
   neverCallNames,
@@ -26,6 +28,7 @@ import {
   toolSchema,
   toolsetWrites,
   type CliTool,
+  type RunningFold,
   type ToolRow,
   type ToolsManifest,
 } from './tools';
@@ -116,6 +119,13 @@ function cli(raw: ToolsManifest, name: string): CliTool {
   const row = raw.cli_tools.find((r) => r.name === name);
   if (row === undefined) throw new Error(`the manifest has a ${name} CLI row`);
   return row;
+}
+
+/** A row's fold's running words, as the cases edit them. */
+function running(row: ToolRow | CliTool): RunningFold {
+  const words = row.fold?.running;
+  if (words === null || words === undefined) throw new Error(`${row.name} has no running words`);
+  return words;
 }
 
 /** A row's input schema, as the cases edit it. */
@@ -451,8 +461,8 @@ describe('the load refuses what tools.rs refuses, in the same words', () => {
     expectNames([
       [
         'name shape',
-        (v) => (cli(v, 'Task').name = 'task'),
-        ['cli tool task', '`name`', '[A-Z][A-Za-z]*'],
+        (v) => (cli(v, 'Agent').name = 'agent'),
+        ['cli tool agent', '`name`', '[A-Z][A-Za-z]*'],
       ],
       [
         'a row with no family',
@@ -485,13 +495,45 @@ describe('the load refuses what tools.rs refuses, in the same words', () => {
       ['Grep', 'file_read', 'pattern'],
       ['WebFetch', 'web', 'url'],
       ['WebSearch', 'web', 'query'],
-      ['Task', 'delegate', 'description'],
+      ['Agent', 'delegate', 'description'],
       ['AskUserQuestion', 'question', null],
       ['ExitPlanMode', 'plan', null],
+      ['EnterPlanMode', 'plan', null],
+      ['TodoWrite', 'todo', null],
+      ['TaskCreate', 'task_list', null],
+      ['TaskGet', 'task_list', null],
+      ['TaskList', 'task_list', null],
+      ['TaskUpdate', 'task_list', null],
+      ['TaskOutput', 'background', null],
+      ['TaskStop', 'background', null],
+      ['SendMessage', 'cross_session', null],
+      ['ListAgents', 'cross_session', null],
+      ['CronCreate', 'schedule', null],
+      ['CronDelete', 'schedule', null],
+      ['CronList', 'schedule', null],
+      ['ScheduleWakeup', 'schedule', null],
+      ['RemoteTrigger', 'schedule', null],
+      ['Artifact', 'outside', null],
+      ['PushNotification', 'outside', null],
+      ['DesignSync', 'outside', null],
+      ['ReportFindings', 'outside', null],
+      ['Workflow', 'outside', null],
+      ['EnterWorktree', 'outside', null],
+      ['ExitWorktree', 'outside', null],
+      ['SendUserMessage', 'outside', null],
+      ['REPL', 'outside', null],
+      ['ListMcpResourcesTool', 'outside', null],
+      ['ReadMcpResourceTool', 'outside', null],
+      ['ReadMcpResourceDirTool', 'outside', null],
+      ['LSP', 'outside', null],
+      ['Monitor', 'outside', null],
+      ['Skill', 'skill', null],
+      ['ToolSearch', 'meta', null],
     ]);
-    for (const name of ['AskUserQuestion', 'ExitPlanMode']) {
+    for (const name of ['AskUserQuestion', 'ExitPlanMode', 'EnterPlanMode', 'ToolSearch']) {
       expect(toolFacts(name)).toMatchObject({ writes: false, renderer: 'step' });
     }
+    expect(toolFacts('TodoWrite')).toMatchObject({ writes: false, renderer: 'todo' });
   });
 
   it('keeps fold phrases on read rows alone (M56.8)', () => {
@@ -556,11 +598,183 @@ describe('the load refuses what tools.rs refuses, in the same words', () => {
         (v) => put(fold(tool(v, 'get_note')), 'few', 'read a few notes'),
         ['tool get_note', '`fold.few`'],
       ],
+      // M91.1: a fold's running words answer to the same rules.
+      [
+        'running one with {n}',
+        (v) => (running(tool(v, 'get_note')).one = 'reading {n}'),
+        ['tool get_note', '`fold.running.one`', 'without {n}'],
+      ],
+      [
+        'running many without {n}',
+        (v) => (running(tool(v, 'get_note')).many = 'reading notes'),
+        ['tool get_note', '`fold.running.many`', 'exactly one {n}'],
+      ],
+      [
+        'capitalized running one',
+        (v) => (running(cli(v, 'Read')).one = 'Reading a file'),
+        ['cli tool Read', '`fold.running.one`', 'lowercase'],
+      ],
+      [
+        'a long running many',
+        (v) => (running(cli(v, 'Grep')).many = `${'s'.repeat(38)}{n}`),
+        ['cli tool Grep', '`fold.running.many`', '1 to 40'],
+      ],
+      [
+        'an unknown running field',
+        (v) => put(running(tool(v, 'get_note')), 'all', 'reading'),
+        ['tool get_note', '`fold.running.all`'],
+      ],
     ]);
     // Exactly 40 characters loads.
     const raw = JSON.parse(RAW) as ToolsManifest;
     fold(tool(raw, 'get_note')).one = 'r'.repeat(40);
     expect(() => parseToolsManifest(raw)).not.toThrow();
+    // A fold may leave its running words out, absent or null, and absent
+    // stays absent.
+    const bare = JSON.parse(RAW) as ToolsManifest;
+    drop(fold(tool(bare, 'get_note')), 'running');
+    put(fold(cli(bare, 'Read')), 'running', null);
+    const loaded = parseToolsManifest(bare);
+    expect(fold(tool(loaded, 'get_note'))).not.toHaveProperty('running');
+    expect(fold(cli(loaded, 'Read')).running).toBeNull();
+  });
+
+  it('holds a row’s status words to one call in lowercase (M91.1)', () => {
+    const raw = JSON.parse(RAW) as ToolsManifest;
+    put(cli(raw, 'Bash'), 'phrases', {
+      running: 'running a command',
+      done: 'ran a command',
+      failed: 'failed to run a command',
+    });
+    put(tool(raw, 'create_note'), 'phrases', {
+      running: 'making a note',
+      done: 'made a note',
+      failed: 'failed to make a note',
+    });
+    const loaded = parseToolsManifest(raw);
+    expect(cli(loaded, 'Bash').phrases?.done).toBe('ran a command');
+    // M91.13: the rows a conversation names ship them; a read keeps its name
+    // on a line of its own, its fold words a run of it, and a row without
+    // them stays as the file has it.
+    expect(toolFacts('Bash')?.phrases?.done).toBe('ran a command');
+    expect(TOOLS.tools.filter((row) => row.fold !== null).every((row) => !row.phrases)).toBe(true);
+    expect(TOOLS.tools.some((row) => row.phrases === undefined)).toBe(true);
+    expect(toolFacts('mcp__cerebro__get_note')?.phrases).toBeNull();
+    expectNames([
+      [
+        'a count in a phrase',
+        (v) =>
+          put(cli(v, 'Bash'), 'phrases', {
+            running: 'running {n} commands',
+            done: 'ran it',
+            failed: 'failed',
+          }),
+        ['cli tool Bash', '`phrases.running`', 'without {n}'],
+      ],
+      [
+        'a capitalized phrase',
+        (v) =>
+          put(tool(v, 'get_note'), 'phrases', {
+            running: 'reading',
+            done: 'Read a note',
+            failed: 'failed to read',
+          }),
+        ['tool get_note', '`phrases.done`', 'lowercase'],
+      ],
+      [
+        'a blank phrase',
+        (v) =>
+          put(tool(v, 'get_note'), 'phrases', { running: 'reading', done: 'read', failed: ' ' }),
+        ['tool get_note', '`phrases.failed`', '1 to 40'],
+      ],
+      [
+        'a long phrase',
+        (v) =>
+          put(tool(v, 'get_note'), 'phrases', {
+            running: 'r'.repeat(41),
+            done: 'read',
+            failed: 'failed',
+          }),
+        ['tool get_note', '`phrases.running`', '1 to 40'],
+      ],
+      [
+        'a missing phrase',
+        (v) => put(cli(v, 'Bash'), 'phrases', { running: 'running', done: 'ran' }),
+        ['cli tool Bash', '`phrases.failed`', 'missing'],
+      ],
+      [
+        'an unknown phrase',
+        (v) =>
+          put(cli(v, 'Bash'), 'phrases', { running: 'a', done: 'b', failed: 'c', paused: 'd' }),
+        ['cli tool Bash', '`phrases.paused`'],
+      ],
+    ]);
+  });
+
+  it('answers Task and Agent with one row (M91.1)', () => {
+    const agent = cliTool('Agent');
+    expect(agent?.aliases).toEqual(['Task']);
+    expect(cliTool('Task')).toBe(agent);
+    expect(toolFacts('Task')).toEqual(toolFacts('Agent'));
+    expect(toolFacts('Agent')).toMatchObject({
+      origin: 'cli',
+      writes: false,
+      renderer: 'subagent',
+      fold: null,
+      icon: 'bot',
+    });
+    for (const name of ['task', 'agent', 'mcp__cerebro__Task', 'Tasks']) {
+      expect(cliTool(name), name).toBeNull();
+    }
+    expect(TOOLS.cli_tools.filter((row) => row.aliases !== undefined).map((r) => r.name)).toEqual([
+      'Agent',
+    ]);
+  });
+
+  it('keeps one CLI spelling to one row (M91.1)', () => {
+    expectNames([
+      [
+        'a lowercase alias',
+        (v) => put(cli(v, 'Agent'), 'aliases', ['task']),
+        ['cli tool Agent', '`aliases`', 'must each match [A-Z][A-Za-z]*'],
+      ],
+      [
+        "another row's name",
+        (v) => put(cli(v, 'Agent'), 'aliases', ['Bash']),
+        ['cli tool Agent', '`aliases`', 'names Bash, which a CLI row already answers to'],
+      ],
+      [
+        'an alias twice',
+        (v) => put(cli(v, 'Agent'), 'aliases', ['Task', 'Task']),
+        ['cli tool Agent', '`aliases`', 'names Task'],
+      ],
+      [
+        'an alias two rows hold',
+        (v) => put(cli(v, 'Read'), 'aliases', ['Task']),
+        ['cli tool Agent', '`aliases`', 'names Task'],
+      ],
+      [
+        "the row's own name",
+        (v) => put(cli(v, 'Agent'), 'aliases', ['Agent']),
+        ['cli tool Agent', '`aliases`', 'names Agent'],
+      ],
+      [
+        'a null list',
+        (v) => put(cli(v, 'Agent'), 'aliases', null),
+        ['cli tool Agent', '`aliases`', 'must be a list'],
+      ],
+    ]);
+    const raw = JSON.parse(RAW) as ToolsManifest;
+    drop(cli(raw, 'Agent'), 'aliases');
+    expect(cli(parseToolsManifest(raw), 'Agent')).not.toHaveProperty('aliases');
+  });
+
+  it('has a row for every built-in a signed-in 2.1.250 init lists (M91.1)', () => {
+    const builtins = (INIT_SIGNED_IN.tools as string[]).filter((name) => !name.startsWith('mcp__'));
+    expect(builtins).toHaveLength(32);
+    for (const name of builtins) expect(cliTool(name), name).not.toBeNull();
+    expect(builtins).toContain('Task');
+    expect(builtins).not.toContain('Agent');
   });
 
   it('keeps each renderer on its own door (M56.8)', () => {
@@ -602,10 +816,36 @@ describe('the load refuses what tools.rs refuses, in the same words', () => {
       ],
       [
         'handoff on a CLI row',
-        (v) => (cli(v, 'Task').renderer = 'handoff'),
-        ['cli tool Task', '`renderer`', 'never a CLI tool'],
+        (v) => (cli(v, 'Agent').renderer = 'handoff'),
+        ['cli tool Agent', '`renderer`', 'never a CLI tool'],
+      ],
+      // M91.1: the two renderers that draw the CLI's own work sit on its
+      // rows alone.
+      [
+        'subagent on a cerebro row',
+        (v) => (tool(v, 'hand_to').renderer = 'subagent'),
+        [
+          'tool hand_to',
+          '`renderer`',
+          "subagent draws one of the CLI's own tools, never a cerebro tool",
+        ],
+      ],
+      [
+        'todo on a cerebro row',
+        (v) => (tool(v, 'open_note').renderer = 'todo'),
+        ['tool open_note', '`renderer`', "todo draws one of the CLI's own tools"],
+      ],
+      [
+        'a generated subagent',
+        (v) => (v.generated.renderer = 'subagent'),
+        ['generated', '`renderer`', 'never a cerebro tool'],
       ],
     ]);
+    // Either sits on any CLI row that does not write.
+    const raw = JSON.parse(RAW) as ToolsManifest;
+    cli(raw, 'Bash').renderer = 'subagent';
+    cli(raw, 'WebSearch').renderer = 'todo';
+    expect(() => parseToolsManifest(raw)).not.toThrow();
   });
 
   it('fails an unknown field rather than dropping it', () => {
@@ -720,7 +960,12 @@ describe('toolFacts', () => {
     expect(toolFacts('mcp__cerebro__get_note')?.fold).toEqual({
       one: 'read a note',
       many: 'read {n} notes',
+      running: { one: 'reading a note', many: 'reading {n} notes' },
     });
+    // M91.1: every fold the manifest ships names its running words too.
+    for (const row of [...TOOLS.tools, ...TOOLS.cli_tools]) {
+      if (row.fold !== null) expect(row.fold.running, row.name).toBeTruthy();
+    }
     expect(toolFacts('propose_create_belief')?.fold).toBeNull();
     expect(toolFacts('create_note')?.fold).toBeNull();
     expect(toolFacts('suggest_view')?.renderer).toBe('view');

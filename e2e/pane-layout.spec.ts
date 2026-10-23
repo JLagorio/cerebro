@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, seedFileBeforeBoot, openDestination, showPages } from './boot';
+import { boot, seedFileBeforeBoot, openDestination, showPageFolders } from './boot';
 const frame = (page: Page, index: number) =>
   page.locator(`[data-testid="pane"][data-pane-index="${index}"]`);
 async function openPage(page: Page, title: string, beside = false) {
@@ -74,7 +74,7 @@ test('a rename moves the open pane, favorite, Recent and saved layout together',
   await openPage(page, 'Systems map', true);
   await frame(page, 1).getByRole('button', { name: 'Add to favorites' }).click();
   await openPage(page, 'Systems map');
-  await showPages(page);
+  await showPageFolders(page);
   const tree = page.getByTestId('file-tree');
   const folder = tree.getByTestId('tree-folder').filter({ hasText: 'Strategy' });
   if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click();

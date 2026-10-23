@@ -29,6 +29,7 @@ import * as agentIpc from '@/agent/agentIpc';
 import * as ipc from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 
 afterEach(cleanup);
 
@@ -335,6 +336,46 @@ describe('SettingsPage', () => {
     });
   });
 
+  // M91.2d: Subagents is the delegate ceiling, two states, on by default,
+  // beside the shell and web ceilings.
+  describe('subagents', () => {
+    beforeEach(() => {
+      useUiStore.setState({ agentDelegate: true });
+      window.localStorage.removeItem('cerebro.agentDelegate');
+    });
+
+    it('is a labelled switch, on by default, with its hint, and it persists', async () => {
+      const user = userEvent.setup();
+      await renderSettings('Assistant');
+      const subagents = screen.getByRole('switch', { name: 'Subagents' }) as HTMLInputElement;
+      expect(subagents.checked).toBe(true);
+      const hint = screen.getByText(
+        'Let the assistant hand reading to a researcher that reports back, only in a conversation you are in; the researcher changes nothing.',
+      );
+      expect(hint.closest('.cb-setting-row')).toBe(subagents.closest('.cb-setting-row'));
+      await user.click(subagents);
+      expect(subagents.checked).toBe(false);
+      expect(useUiStore.getState().agentDelegate).toBe(false);
+      expect(window.localStorage.getItem('cerebro.agentDelegate')).toBe('false');
+      await user.click(subagents);
+      expect(useUiStore.getState().agentDelegate).toBe(true);
+      expect(window.localStorage.getItem('cerebro.agentDelegate')).toBe('true');
+    });
+
+    it('sits after Web access and before Connectors', async () => {
+      await renderSettings('Assistant');
+      const web = screen.getByRole('switch', { name: 'Web access' });
+      const subagents = screen.getByRole('switch', { name: 'Subagents' });
+      const connectors = screen.getByRole('switch', { name: 'Connectors' });
+      expect(
+        web.compareDocumentPosition(subagents) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(
+        subagents.compareDocumentPosition(connectors) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+  });
+
   // M56.4: the row a not-signed-in card's Open Settings lands on.
   describe('the Claude Code row', () => {
     const status = () => screen.getByTestId('settings-claude-code-status');
@@ -441,34 +482,37 @@ describe('Panel assistant', () => {
     useUiStore.setState({ toasts: [], panelAgents: {}, settingsFocus: null });
   });
 
-  const select = () => screen.getByRole('combobox', { name: 'Panel assistant' });
+  const select = () => screen.getByRole('button', { name: 'Panel assistant' });
 
   it('lists the plain assistant and each agent by title, paused ones marked', async () => {
     await renderSettings('Assistant');
-    const options = Array.from(select().querySelectorAll('option')).map((o) => [
-      o.value,
-      o.textContent,
+    expect(optionLabels(select())).toEqual([
+      'Claude Code (no agent)',
+      'Digest (paused)',
+      'Release scout',
     ]);
-    expect(options).toEqual([
-      ['', 'Claude Code (no agent)'],
-      ['digest', 'Digest (paused)'],
-      ['release-scout', 'Release scout'],
-    ]);
+    await userEvent.click(select());
+    const list = document.getElementById(select().getAttribute('aria-controls') ?? '');
+    expect(
+      within(list!)
+        .getAllByRole('option')
+        .map((option) => option.getAttribute('data-value')),
+    ).toEqual(['', 'digest', 'release-scout']);
+    await userEvent.keyboard('{Escape}');
     await vi.waitFor(() => expect(useUiStore.getState().panelAgents['/demo-vault']).toBeNull());
-    expect((select() as HTMLSelectElement).value).toBe('');
+    expect(select().getAttribute('data-value')).toBe('');
     expect(screen.getByText(/Who answers in the assistant panel\./)).toBeTruthy();
   });
 
   it('choosing an agent writes the binding, and the plain assistant clears it', async () => {
-    const user = userEvent.setup();
     await renderSettings('Assistant');
     await vi.waitFor(() => expect(useUiStore.getState().panelAgents['/demo-vault']).toBeNull());
-    await user.selectOptions(select(), 'release-scout');
+    chooseOption(select(), 'Release scout');
     await vi.waitFor(async () =>
       expect(await ipc.getPanelAgent('/demo-vault')).toBe('release-scout'),
     );
-    expect((select() as HTMLSelectElement).value).toBe('release-scout');
-    await user.selectOptions(select(), '');
+    expect(select().getAttribute('data-value')).toBe('release-scout');
+    chooseOption(select(), 'Claude Code (no agent)');
     await vi.waitFor(async () => expect(await ipc.getPanelAgent('/demo-vault')).toBeNull());
     expect(screen.queryByTestId('panel-agent-dangling')).toBeNull();
   });

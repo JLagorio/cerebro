@@ -47,6 +47,11 @@ test('Work lends one Explorer to the shell and keeps the open file through compa
   const sidebar = page.getByTestId('sidebar');
   const tree = sidebar.getByTestId('root-tree');
   await expect(tree).toBeVisible();
+  await expect(sidebar.getByText('Explorer', { exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole('button', { name: 'Mount a folder' })).toHaveText('Mount folder');
+  await sidebar.getByRole('button', { name: 'Explorer settings' }).click();
+  await expect(sidebar.getByRole('menuitemcheckbox', { name: 'File type icons' })).toBeVisible();
+  await sidebar.getByRole('button', { name: 'Explorer settings' }).click();
   await expect(page.getByTestId('root-tree')).toHaveCount(1);
   await expect(page.getByTestId('workspace-page').getByTestId('root-tree')).toHaveCount(0);
   await tree.getByRole('treeitem', { name: /Reading room/ }).click();

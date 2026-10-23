@@ -1,7 +1,15 @@
 import { Keycaps } from '@/components/ui/Keycaps';
 import { useState } from 'react';
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from '@/components/ai/PromptInput';
 import { Button } from '@/components/ui/Button';
 import { useEscapeLayer } from '@/components/ui/Popover';
+import './comments.css';
 
 /**
  * Escape, while the composer has focus. A layer only then: one registered for
@@ -13,9 +21,13 @@ function EscapeWhileFocused({ onEscape }: { onEscape: () => void }) {
 }
 
 /**
- * Where a comment is written (M70.2b). ⌘Enter or the button posts; Escape
- * cancels. Disabled while a post is in flight, and the text stays when the
- * post fails, so nothing typed is lost to a refusal.
+ * Where a comment is written (M70.2b), on the Prompt Input's anatomy
+ * (M91.14): the text, then a quiet bar with the keys and the button inside
+ * the same box. ⌘Enter or the button posts — a comment runs to paragraphs, so
+ * a bare Enter is its new line — and Escape cancels. Disabled while a post is
+ * in flight, and the text stays when the post fails, so nothing typed is lost
+ * to a refusal. Posting writes the comment only; whether it asks an agent is
+ * the thread's to read from the person's own `@handle` (CV-36).
  */
 export function CommentComposer({
   placeholder,
@@ -24,6 +36,7 @@ export function CommentComposer({
   onSubmit,
   onCancel,
   autoFocus = false,
+  draft,
 }: {
   placeholder: string;
   submitLabel: string;
@@ -34,8 +47,13 @@ export function CommentComposer({
   /** What Escape does; by default it clears the text. */
   onCancel?: () => void;
   autoFocus?: boolean;
+  draft?: { read(): string; write(value: string): void };
 }) {
-  const [text, setText] = useState('');
+  const [text, setLocalText] = useState(() => draft?.read() ?? '');
+  const setText = (value: string) => {
+    setLocalText(value);
+    draft?.write(value);
+  };
   const [busy, setBusy] = useState(false);
   const [focused, setFocused] = useState(false);
   const empty = text.trim() === '';
@@ -56,46 +74,50 @@ export function CommentComposer({
     onCancel?.();
   };
 
+  // One box, the way a chat composer reads. The box takes the focus ring, so
+  // the field and its button read as one control.
   return (
-    <div className="flex flex-col gap-1.5">
+    <PromptInput
+      onSubmit={() => void submit()}
+      disabled={busy}
+      data-busy={busy || undefined}
+      className="cb-composer"
+    >
       {focused && <EscapeWhileFocused onEscape={cancel} />}
-      <textarea
-        data-testid={`${testId}-input`}
-        aria-label={placeholder}
-        placeholder={placeholder}
-        rows={2}
-        value={text}
-        disabled={busy}
-        // A composer that opens with a draft is where the next keystroke goes.
-        autoFocus={autoFocus}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            void submit();
-          }
-        }}
-        className="w-full resize-y rounded-md border border-n-200 bg-n-0 px-2 py-1.5 text-sm text-n-800 outline-none placeholder:text-n-400 focus:border-cortex-500 disabled:opacity-60"
-      />
-      <div className="flex items-center justify-end gap-1.5">
-        <Keycaps keys="mod+enter" />
+      <PromptInputBody>
+        <PromptInputTextarea
+          data-testid={`${testId}-input`}
+          aria-label={placeholder}
+          placeholder={placeholder}
+          submitOn="mod+enter"
+          rows={2}
+          value={text}
+          // A composer that opens with a draft is where the next keystroke goes.
+          autoFocus={autoFocus}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onChange={(e) => setText(e.target.value)}
+          className="cb-composer-input"
+        />
+      </PromptInputBody>
+      <PromptInputFooter className="cb-composer-bar">
+        <span className="cb-composer-keys" aria-hidden="true">
+          <Keycaps keys="mod+enter" />
+        </span>
         {onCancel !== undefined && (
           <Button size="sm" variant="ghost" onClick={cancel} disabled={busy}>
             Cancel
           </Button>
         )}
-        <Button
-          size="sm"
-          variant="primary"
-          testId={testId}
+        <PromptInputSubmit
+          data-testid={testId}
+          aria-label={submitLabel}
           disabled={empty || busy}
-          onClick={() => void submit()}
+          className="cb-composer-submit"
         >
           {submitLabel}
-        </Button>
-      </div>
-    </div>
+        </PromptInputSubmit>
+      </PromptInputFooter>
+    </PromptInput>
   );
 }

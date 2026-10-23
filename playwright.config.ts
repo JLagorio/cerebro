@@ -37,8 +37,25 @@ export default defineConfig({
         'inbox-documents.spec.ts',
         'remote-images.spec.ts',
         'chat-canvas.spec.ts',
+        'floating-assistant.spec.ts',
+        'pages-browser.spec.ts',
         'visual-pages.spec.ts',
+        'page-title-polish.spec.ts',
+        'record-page-composition.spec.ts',
+        'editor-writing-polish.spec.ts',
+        'polish-integration.spec.ts',
+        'surface-system.spec.ts',
+        'surface-states.spec.ts',
+        'hover-preview.spec.ts',
+        'data-display-polish.spec.ts',
+        'data-reading-polish.spec.ts',
+        'grouped-table-polish.spec.ts',
+        'record-peek-polish.spec.ts',
         'workspace-redesign.spec.ts',
+        'shell-join.spec.ts',
+        'shell-layout.spec.ts',
+        'status-bar.spec.ts',
+        'sidebar-content.spec.ts',
         'workspace-surfaces.spec.ts',
         'home-document-polish.spec.ts',
         'settings-redesign.spec.ts',
@@ -54,6 +71,13 @@ export default defineConfig({
     // fixed too — otherwise the same pinned instant is a different calendar
     // day on a developer's machine than it is in CI (M26.3e).
     timezoneId: 'UTC',
+    // Surfaces arrive and leave in motion (components/ui/motion.ts), and a
+    // spec measures a panel, a drawer or the assistant the moment it is on
+    // screen — mid-slide, it would measure where it was going. Reduced
+    // motion lands everything where it belongs in the commit that put it
+    // there, as it does for a reader who asks for that. The motion itself is
+    // proven where it plays, in e2e/motion.spec.ts.
+    contextOptions: { reducedMotion: 'reduce' },
   },
   webServer: {
     command: 'pnpm dev',

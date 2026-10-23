@@ -69,4 +69,19 @@ test('a page link previews its page on hover, and Escape closes only the card', 
   // -- A link to nothing -----------------------------------------------------
   await chip('no-such-page').hover();
   await expect(card.getByTestId('page-preview-missing')).toHaveText('No page named "no-such-page"');
+  await rest(page);
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = '2';
+  });
+  await chip('no-such-page').hover();
+  await expect(card).toBeVisible();
+  const anchorBounds = (await chip('no-such-page').boundingBox())!;
+  const cardBounds = (await card.boundingBox())!;
+  const gap = Math.min(
+    Math.abs(cardBounds.y - anchorBounds.y - anchorBounds.height),
+    Math.abs(anchorBounds.y - cardBounds.y - cardBounds.height),
+  );
+  expect(Math.abs(gap - 12)).toBeLessThanOrEqual(2);
+  expect(cardBounds.x).toBeGreaterThanOrEqual(0);
+  expect(cardBounds.x + cardBounds.width).toBeLessThanOrEqual(1440);
 });

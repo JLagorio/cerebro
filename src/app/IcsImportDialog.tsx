@@ -32,7 +32,7 @@ const COUNT_LABELS: Record<keyof IcsCounts, string> = {
   addressesRemoved: 'Address occurrences removed',
   unknownZone: 'Unknown-zone events kept as local times',
   dstEdge: 'Daylight-saving gaps or overlaps kept as local times',
-  secondsDropped: 'Events rounded-sm down to the minute',
+  secondsDropped: 'Event times trimmed to the minute',
   invalidEnd: 'Unreadable ends omitted',
 };
 export function IcsImportDialog(props: {
@@ -161,8 +161,8 @@ function CalendarDraft({
                 disabled={busy !== null}
                 value={mapping.type}
                 options={targets.map((row) => ({ value: row.name, label: row.name }))}
-                onChange={(event) => {
-                  const type = targets.find((row) => row.name === event.target.value);
+                onChange={(value) => {
+                  const type = targets.find((row) => row.name === value);
                   if (type) setMapping(defaultIcsMapping(type));
                 }}
               />
@@ -177,7 +177,7 @@ function CalendarDraft({
                 options={selected.fields
                   .filter((field) => field.kind === 'date' || field.kind === 'daterange')
                   .map((field) => ({ value: field.name, label: humanize(field.name) }))}
-                onChange={(event) => setMapping({ ...mapping, date: event.target.value })}
+                onChange={(date) => setMapping({ ...mapping, date })}
               />
             </label>
             <label className="space-y-1 text-xs text-n-600">
@@ -193,7 +193,7 @@ function CalendarDraft({
                     .filter((field) => field.kind === 'person')
                     .map((field) => ({ value: field.name, label: humanize(field.name) })),
                 ]}
-                onChange={(event) => setMapping({ ...mapping, person: event.target.value || null })}
+                onChange={(person) => setMapping({ ...mapping, person: person || null })}
               />
             </label>
             <label className="space-y-1 text-xs text-n-600">
@@ -209,9 +209,7 @@ function CalendarDraft({
                     .filter((field) => field.kind === 'text')
                     .map((field) => ({ value: field.name, label: humanize(field.name) })),
                 ]}
-                onChange={(event) =>
-                  setMapping({ ...mapping, location: event.target.value || null })
-                }
+                onChange={(location) => setMapping({ ...mapping, location: location || null })}
               />
             </label>
           </div>
@@ -270,7 +268,7 @@ function CalendarDraft({
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-n-500">
+            <p className="text-xs text-(--text-meta)">
               Attendee and organizer addresses are removed. People link only when one page has a
               matching declared email property.
             </p>

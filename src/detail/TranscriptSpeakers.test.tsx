@@ -68,10 +68,27 @@ describe('TranscriptSpeakers', () => {
     const patchFrontmatter = vi.fn<VaultState['patchFrontmatter']>().mockResolvedValue(true);
     useVaultStore.setState({ patchFrontmatter });
     render(<TranscriptSpeakers path="inbox/standup.md" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Add 1 to Attendees' }));
+    const add = screen.getByRole('button', { name: 'Add 1 to Attendees' });
+    // An act drawn as the inspector's row, not an outlined button.
+    expect(add.classList.contains('cb-inspector-action')).toBe(true);
+    fireEvent.click(add);
     expect(patchFrontmatter).toHaveBeenCalledWith('inbox/standup.md', {
       attendees: ['[[marcus-webb]]', '[[dana-fox]]', '[[priya-nair]]'],
     });
+  });
+
+  // The inspector's one voice: a sentence-case subhead, no overline and no
+  // rule of its own; a match names its page, a miss says why, quietly.
+  it('heads its rows with the inspector subhead and names each match', async () => {
+    await staged('inbox/standup.md', ['ingest_format: vtt', 'speakers: [Marcus Webb, Jo Nobody]']);
+    render(<TranscriptSpeakers path="inbox/standup.md" />);
+    const block = screen.getByTestId('transcript-speakers');
+    expect(block.querySelector('.cb-inspector-subhead')?.textContent).toBe('Speakers');
+    expect(block.querySelector('.uppercase, .border-t')).toBeNull();
+    const [matched, missed] = screen.getAllByTestId('speaker-row');
+    expect(matched.querySelector('button')?.textContent).toBe('Marcus Webb');
+    expect(missed.querySelector('button')).toBeNull();
+    expect(missed.textContent).toBe('Jo Nobodyno page');
   });
 
   it('offers no Add while the capture is untyped, or its type has several person fields', async () => {

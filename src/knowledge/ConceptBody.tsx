@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { citedSource, noSourceText } from '@/agent/elements/writingCitations';
+import { InlineCitation } from '@/components/ai/InlineCitation';
 import { resolveBundleLink, type Source } from '@/engine/okf';
 import { MermaidDiagram } from '@/mermaid/MermaidDiagram';
 import { MermaidLightbox } from '@/mermaid/MermaidLightbox';
@@ -67,33 +69,54 @@ const INLINE =
 interface InlineContext {
   fromPath: string;
   sources: Source[];
+  /** What the body's own `[^id]:` lines say, by id; the first line wins. */
+  definitions?: ReadonlyMap<string, string>;
   onOpenConcept?: (path: string) => void;
   onCite?: (sourceId: string) => void;
   onOpenWikilink?: (target: string) => void;
 }
 
+const CITATION =
+  'mx-[1px] inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full border-0 px-1 align-super text-2xs font-semibold [font-family:var(--font-mono)]';
+
+/**
+ * A `[^id]` citation: its source's number, the trigger of an Inline Citation
+ * (M91.14) whose card shows the source — its name, what the body's own
+ * definition says of it, and where it is. A click is still the page's
+ * (`onCite`).
+ */
 function Citation({ id, ctx }: { id: string; ctx: InlineContext }) {
   const index = ctx.sources.findIndex((s) => s.id === id);
   // A label with no matching `sources` entry is a dangling citation. Show it
   // muted rather than hiding it — a claim that cites nothing is exactly what
-  // a reviewer needs to see.
-  const known = index >= 0;
+  // a reviewer needs to see — and say so in words, since it has no card.
+  if (index < 0) {
+    return (
+      <button
+        type="button"
+        title={noSourceText(id)}
+        className={`${CITATION} cursor-default bg-n-100 text-n-400`}
+      >
+        ?
+      </button>
+    );
+  }
+  const source = ctx.sources[index];
+  const card = citedSource({
+    resource: source.resource,
+    name: source.title ?? source.resource,
+    definition: ctx.definitions?.get(id),
+  });
   return (
-    <button
-      type="button"
-      title={
-        known ? (ctx.sources[index].title ?? ctx.sources[index].resource) : `No source "${id}"`
-      }
-      onClick={known ? () => ctx.onCite?.(id) : undefined}
-      className={[
-        'mx-[1px] inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full border-0 px-1 align-super text-2xs font-semibold [font-family:var(--font-mono)]',
-        known
-          ? 'cursor-pointer bg-cortex-50 text-cortex-600 hover:bg-cortex-100'
-          : 'cursor-default bg-n-100 text-n-400',
-      ].join(' ')}
-    >
-      {known ? index + 1 : '?'}
-    </button>
+    <InlineCitation sources={[card]}>
+      <button
+        type="button"
+        onClick={() => ctx.onCite?.(id)}
+        className={`${CITATION} cursor-pointer bg-cortex-50 text-cortex-600 hover:bg-cortex-100`}
+      >
+        {index + 1}
+      </button>
+    </InlineCitation>
   );
 }
 
@@ -186,8 +209,27 @@ const splitRow = (line: string): string[] =>
 
 const isDivider = (line: string): boolean => /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(line);
 
-/** `[^id]: text` definitions render in the Sources panel, not in the body. */
-const isFootnoteDef = (line: string): boolean => /^\[\^[^\]\s]+\]:/.test(line);
+/** `[^id]: text` definitions render in the Sources panel, not in the body:
+ * there, and in their citations' cards. */
+const FOOTNOTE_DEF = /^\[\^([^\]\s]+)\]:(.*)$/;
+const isFootnoteDef = (line: string): boolean => FOOTNOTE_DEF.test(line);
+
+/** What each `[^id]:` line says, by id; an id defined twice keeps its first.
+ * A line inside a fence is the fence's code, not a definition. */
+function footnoteDefinitions(lines: readonly string[]): Map<string, string> {
+  const said = new Map<string, string>();
+  let fence: ReturnType<typeof fenceOpening> = null;
+  for (const line of lines) {
+    if (fence !== null) {
+      if (fenceCloses(line, fence.marker)) fence = null;
+      continue;
+    }
+    fence = fenceOpening(line);
+    const def = fence === null ? FOOTNOTE_DEF.exec(line) : null;
+    if (def !== null && !said.has(def[1])) said.set(def[1], def[2].trim());
+  }
+  return said;
+}
 
 /** One list item: its marker (`-`, `*`, `+` or `3.`) and its text. */
 const LIST_ITEM = /^\s*([-*+]|\d+\.)\s+(.*)$/;
@@ -228,8 +270,15 @@ export function ConceptBody({
   onOpenWikilink,
   fromPath,
 }: ConceptBodyProps) {
-  const ctx: InlineContext = { fromPath, sources, onOpenConcept, onCite, onOpenWikilink };
   const lines = markdown.split('\n');
+  const ctx: InlineContext = {
+    fromPath,
+    sources,
+    definitions: footnoteDefinitions(lines),
+    onOpenConcept,
+    onCite,
+    onOpenWikilink,
+  };
   const blocks: (React.ReactNode | { sheet: number; key: number })[] = [];
   const sheetSources: string[] = [];
   const unclosed: number[] = [];

@@ -1,8 +1,10 @@
 # Cerebro databases and views — composed, readable, dependable
 
-**Status: Draft for owner review, 2026-10-17.** This document proposes design and acceptance
-contracts. It does not authorize implementation. Provisional allocation: **M87 — database
-workspace and tables; M88 — alternate views and displays**. The [milestone plan](../plans/2026-10-17-m84-m90-product-polish.md) defines sequencing.
+**Status: Design specification, 2026-10-17; implementation subsequently authorized.**
+Allocation: **M87 — database workspace and tables; M88 — alternate views and displays**.
+The [milestone plan](../plans/2026-10-17-m84-m90-product-polish.md) defines sequencing; the
+[implementation record](../plans/2026-10-17-m84-m90-implementation-record.md) records actual
+changes, measured results and remaining acceptance.
 
 ## 1. Outcome and boundary
 

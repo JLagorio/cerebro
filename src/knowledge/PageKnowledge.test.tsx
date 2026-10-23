@@ -32,7 +32,15 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
 // The editor is a heavy BlockNote surface with its own async load — what is
 // under test is the Knowledge beside it.
 vi.mock('@/editor/NoteBodyEditor', () => ({
-  NoteBodyEditor: ({ path }: { path: string }) => <div data-testid="body-editor">{path}</div>,
+  // The editor now hosts the stable metadata portal below its native title.
+  // Keep that slot in this lightweight double so the real Knowledge surface
+  // is exercised in both hosts.
+  NoteBodyEditor: ({ path, pageChrome }: { path: string; pageChrome?: React.ReactNode }) => (
+    <div data-testid="body-editor">
+      {pageChrome}
+      {path}
+    </div>
+  ),
 }));
 
 const RECORD = 'projects/onboarding/items/fld-1.md';
@@ -59,9 +67,7 @@ const record = () => useVaultStore.getState().entries.find((e) => e.path === REC
 
 function SidePanel() {
   const schema = useSchema();
-  return (
-    <DocSidePanel entry={record()} schema={schema} editor={null} scrollRef={{ current: null }} />
-  );
+  return <DocSidePanel entry={record()} schema={schema} panel="details" />;
 }
 
 /** The testids under the page's Knowledge, in document order. */
@@ -75,7 +81,13 @@ beforeEach(() => {
     vaultPath: '/vault',
     entries: [...fixtureVault(), LEARNED, ABOUT, AROUND],
   });
-  useUiStore.setState({ detailPath: RECORD, docPanelTab: 'knowledge', handoffs: [] });
+  // The page inspector's Knowledge is a section of its Details.
+  useUiStore.setState({
+    detailPath: RECORD,
+    docPanel: 'details',
+    inspectorCollapsed: [],
+    handoffs: [],
+  });
   vi.mocked(ipc.ingestItemState).mockClear();
   vi.mocked(ipc.ingestItemState).mockResolvedValue(null);
 });
@@ -83,7 +95,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('PageKnowledge (M52.3)', () => {
-  it('reads the same from the record peek and from the page tab', () => {
+  it("reads the same from the record peek and from the page inspector's section", () => {
     render(<DetailPanel />);
     const peek = anatomy();
     cleanup();
@@ -181,6 +193,46 @@ describe('PageKnowledge (M52.3)', () => {
     expect(screen.queryByText('Learned from this page')).toBeNull();
   });
 
+  // Owner, 2026-10-18 — the panel speaks in one voice: groups under the
+  // inspector's subheads, and the asks as its act rows, not a wall of
+  // outlined buttons. M91.14 — each row is a Suggestion.
+  it('names its groups with the inspector’s subheads and draws its asks as act rows', () => {
+    render(<PageKnowledge entry={record()} />);
+    const root = screen.getByTestId('page-knowledge');
+    expect(
+      [...root.querySelectorAll('.cb-inspector-subhead > span:first-child')].map(
+        (el) => el.textContent,
+      ),
+    ).toEqual(['Learned from this page', 'About this page']);
+    const asks = within(root).getByRole('group', { name: 'Ask Knowledge' });
+    expect(
+      within(asks)
+        .getAllByRole('button')
+        .map((b) => [b.textContent, b.className, b.dataset.slot, b.dataset.tone]),
+    ).toEqual([
+      [
+        'What does Knowledge say about this?',
+        'cb-ai-suggestion cb-inspector-action',
+        'suggestion',
+        'ai',
+      ],
+      ["What's missing?", 'cb-ai-suggestion cb-inspector-action', 'suggestion', 'ai'],
+      ['Learn from this page', 'cb-ai-suggestion cb-inspector-action', 'suggestion', 'ai'],
+    ]);
+  });
+
+  it('reads a learned concept like the dossier’s rows: one line, its summary its tooltip', () => {
+    const described = makeEntry({
+      ...LEARNED,
+      properties: { ...LEARNED.properties, description: 'Setup fits on one screen.' },
+    });
+    useVaultStore.setState({ entries: [...fixtureVault(), described] });
+    render(<PageKnowledge entry={record()} />);
+    const row = screen.getByTestId('committed-concept');
+    expect(row.textContent).toBe('First run takes one screen');
+    expect(row.title).toBe('Setup fits on one screen.');
+  });
+
   it('asks about the page by the act and the page’s name', () => {
     render(<PageKnowledge entry={record()} />);
     fireEvent.click(screen.getByRole('button', { name: "What's missing?" }));
@@ -188,5 +240,18 @@ describe('PageKnowledge (M52.3)', () => {
     expect(pending?.label).toBe("What's missing? · Design first-run flow");
     expect(pending?.subject).toBe(RECORD);
     expect(pending?.text).toContain('**Missing**');
+  });
+
+  // M91.14 — a Suggestion shows its label and sends its prompt: the row says
+  // "Learn from this page", and the agent hears the distil step.
+  it('shows each ask’s label and sends its prompt', () => {
+    render(<PageKnowledge entry={record()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Learn from this page' }));
+    const pending = useUiStore.getState().handoffs.at(-1);
+    expect(pending?.text.split('\n')[0]).toBe(
+      `Learn from the note at ${RECORD} ("Design first-run flow").`,
+    );
+    expect(pending?.label).toBe('Learn from this page · Design first-run flow');
+    expect(screen.getByTestId('page-knowledge').textContent).not.toContain('Learn from the note');
   });
 });

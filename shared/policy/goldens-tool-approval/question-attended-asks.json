@@ -7,6 +7,7 @@
         "kind": "attended",
         "shell": "off",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -44,6 +45,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -81,6 +83,7 @@
         "kind": "attended",
         "shell": "on",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -118,6 +121,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null

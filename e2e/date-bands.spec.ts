@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { boot, readMockFile, showDatabases } from './boot';
+import { chooseOption } from './select';
 
 async function drag(page: Page, card: Locator, target: Locator) {
   const start = await card.boundingBox();
@@ -67,7 +68,7 @@ test('date bands create on days, preserve date moves, and refuse ambiguous perio
     await expect(page.getByTestId('view-settings-panel')).toBeVisible();
   }).toPass();
   await page.getByTestId('view-settings-group').click();
-  await page.getByTestId('group-date-bucket-0').selectOption('month');
+  await chooseOption(page.getByTestId('group-date-bucket-0'), { value: 'month' });
   await expect.poll(() => readMockFile(page, 'types/work-item.md')).toContain('dateBucket: month');
   await expect(column('July 2026')).toBeVisible();
 });

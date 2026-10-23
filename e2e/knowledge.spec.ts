@@ -7,7 +7,8 @@ import {
   openAssistantPanel,
   openDestination,
   showDatabases,
-  showPages,
+  showPageFolders,
+  showPagePanel,
 } from './boot';
 
 const CONCEPT = 'knowledge/metrics/sync-error-rate.md';
@@ -500,7 +501,7 @@ test('knowledge: the bundle stays out of the surfaces you author', async ({ page
   // Not in the Pages tree: the bundle is not yours to edit, so `docsOnly`
   // prunes its files and the knowledge/ folder with them (M38.3 — the tree
   // is the standing pages nav now that the Docs surface is gone).
-  await showPages(page);
+  await showPageFolders(page);
   const tree = page.getByTestId('file-tree');
   await expect(tree.getByTestId('tree-row').first()).toBeVisible();
   const docPaths = await tree
@@ -663,4 +664,69 @@ test('knowledge: a vault with no ledger shows no axes rather than empty ones', a
   const panel = await showConceptDetails(page);
   await expect(panel.getByTestId('belief-axes')).toHaveCount(0);
   await expect(panel.getByTestId('axis-chip')).toHaveCount(0);
+});
+
+/** A record, found by its title, opened as a page with its Details showing. */
+async function openPageDetails(page: Page, query: string, title: string) {
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByTestId('quick-open-input').fill(query);
+  await page.getByTestId('quick-open-result').filter({ hasText: title }).first().click();
+  await page.getByRole('button', { name: 'Open in full page' }).click();
+  await expect(page.getByTestId('markdown-editor')).toBeVisible();
+  return showPagePanel(page, 'Details');
+}
+
+// Owner, 2026-10-18 — "that right side panel is disgusting". A page's
+// Knowledge speaks in the inspector's voice: quiet subheads, rows on the
+// section's text edge, and its asks as act rows rather than outlined buttons.
+test("knowledge: a page's Knowledge reads in the inspector's voice, in the panel and the peek", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await boot(page);
+  const panel = await openPageDetails(page, 'offline sync hardening', 'Offline sync hardening');
+  const knowledge = panel.getByTestId('page-knowledge');
+  const about = knowledge.locator('.cb-inspector-subhead').filter({ hasText: 'About this page' });
+  await expect(about).toBeVisible();
+  await expect(about).toHaveCSS('text-transform', 'none');
+  const edge = (await about.boundingBox())!.x;
+  // A concept's title sits on that edge; its row's hover washes 8px past it.
+  const row = knowledge.getByTestId('dossier-concept').first();
+  const title = row.locator('span').first();
+  expect(Math.round((await title.boundingBox())!.x)).toBe(Math.round(edge));
+  expect(Math.round((await row.boundingBox())!.x)).toBe(Math.round(edge - 8));
+  // The asks are rows: no border, no fill at rest, one line each.
+  const asks = knowledge.getByRole('group', { name: 'Ask Knowledge' }).getByRole('button');
+  await expect(asks).toHaveText([
+    'What does Knowledge say about this?',
+    "What's missing?",
+    'Learn from this page',
+  ]);
+  for (const ask of await asks.all()) {
+    await expect(ask).toHaveCSS('border-top-width', '0px');
+    await expect(ask).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    expect((await ask.boundingBox())!.height).toBeLessThanOrEqual(30);
+  }
+
+  // The record peek draws the same anatomy, and its old styling for the
+  // buttons these rows replaced does not fill them.
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByTestId('quick-open-input').fill('go-live');
+  await page.getByTestId('quick-open-result').filter({ hasText: 'PRD' }).first().click();
+  const peek = page.getByTestId('detail-panel');
+  await peek.getByTestId('detail-knowledge-toggle').click();
+  const peekAsk = peek.getByRole('group', { name: 'Ask Knowledge' }).getByRole('button').first();
+  await expect(peekAsk).toBeVisible();
+  await expect(peekAsk).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+});
+
+test("knowledge: a concept's Details name their groups in sentence case", async ({ page }) => {
+  await boot(page);
+  await openConcept(page, 'Sync error rate');
+  const panel = await showConceptDetails(page);
+  const labels = panel.locator('.cb-inspector-subhead');
+  await expect(labels).toHaveText(['About', 'Written by', 'Verified by', 'Sources', 'Tags']);
+  await expect(labels.first()).toHaveCSS('text-transform', 'none');
+  // Its tags are words, not chips.
+  await expect(panel.getByTestId('concept-tags')).toContainText('#reliability');
 });

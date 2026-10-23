@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { chooseOption } from '@/test/chooseOption';
 import { ScheduleField } from './ScheduleField';
 const NOW = new Date(2026, 6, 28, 12);
 afterEach(cleanup);
@@ -33,16 +34,16 @@ it.each([
   ['once', 'once 2026-07-28 09:00'],
 ])('emits the canonical %s option', (value, wanted) => {
   const change = setup();
-  fireEvent.change(screen.getByLabelText('Repeat'), { target: { value } });
+  chooseOption(screen.getByLabelText('Repeat'), { value });
   expect(change).toHaveBeenLastCalledWith([wanted]);
 });
 it('one selected day becomes weekly and a last-day monthly choice survives a time change', () => {
   const change = setup(['weekly mon,thu 09:00']);
   fireEvent.click(screen.getByLabelText('Thursday'));
   expect(change).toHaveBeenLastCalledWith(['weekly mon 09:00']);
-  expect((screen.getByLabelText('Repeat') as HTMLSelectElement).value).toBe('weekly');
-  fireEvent.change(screen.getByLabelText('Repeat'), { target: { value: 'monthly' } });
-  fireEvent.change(screen.getByLabelText('Day of month'), { target: { value: 'last' } });
+  expect(screen.getByLabelText('Repeat').getAttribute('data-value')).toBe('weekly');
+  chooseOption(screen.getByLabelText('Repeat'), 'Every month');
+  chooseOption(screen.getByLabelText('Day of month'), 'Last day');
   fireEvent.change(screen.getByLabelText('Time'), { target: { value: '18:00' } });
   expect(change).toHaveBeenLastCalledWith(['monthly last 18:00']);
 });

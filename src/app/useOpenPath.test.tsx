@@ -143,8 +143,8 @@ describe('useOpenPath library records (M55.12)', () => {
 });
 
 // M70.2b — Changes' Open passes a sidecar's path: it opens the page the
-// comments are on, full, on its Comments tab, even when the page is a record
-// (comments are not in the peek, Q6).
+// comments are on, full, with its Comments panel, even when the page is a
+// record (comments are not in the peek, Q6).
 describe('useOpenPath comment sidecars (M70.2b)', () => {
   beforeEach(() => {
     useNavStore.setState({
@@ -155,9 +155,9 @@ describe('useOpenPath comment sidecars (M70.2b)', () => {
     useUiStore.setState({
       detailPath: null,
       docPanelOpen: false,
-      docPanelTab: 'outline',
+      docPanel: 'history',
       conceptPanelOpen: false,
-      conceptPanelTab: 'details',
+      conceptPanel: 'details',
     });
     useVaultStore.setState({
       entries: [
@@ -180,7 +180,7 @@ describe('useOpenPath comment sidecars (M70.2b)', () => {
     const ui = useUiStore.getState();
     expect(ui.detailPath).toBeNull();
     expect(ui.docPanelOpen).toBe(true);
-    expect(ui.docPanelTab).toBe('comments');
+    expect(ui.docPanel).toBe('comments');
   });
 
   it("opens a concept's sidecar on its own panel's Comments", () => {
@@ -191,13 +191,13 @@ describe('useOpenPath comment sidecars (M70.2b)', () => {
       path: 'knowledge/concepts/a.md',
     });
     expect(useUiStore.getState().conceptPanelOpen).toBe(true);
-    expect(useUiStore.getState().conceptPanelTab).toBe('comments');
+    expect(useUiStore.getState().conceptPanel).toBe('comments');
   });
 
   it('leaves a path that is no sidecar to the usual rules', () => {
     const { result } = renderHook(() => useOpenPath());
     act(() => result.current('.comments/notes.txt'));
-    expect(useUiStore.getState().docPanelTab).toBe('outline');
+    expect(useUiStore.getState().docPanel).toBe('history');
   });
 });
 

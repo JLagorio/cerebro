@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { claimsKey, claimsOf } from '@/lib/keys/claims';
 import { IS_MAC } from '@/lib/keys/combo';
+import { chooseOption } from '@/test/chooseOption';
 import type { FileProbe } from '@/engine/fileBytes';
 import type { PdfDocument, PdfViewEvents } from './pdf/pdfjs';
 import { PdfViewer } from './PdfViewer';
@@ -89,10 +91,24 @@ it('jumps by outline and page input, clamps, zooms, and destroys both view and d
   fireEvent.change(input, { target: { value: '12' } });
   fireEvent.blur(input);
   expect(mocks.view.page).toHaveBeenLastCalledWith(12);
+  const preset = screen.getByRole('button', { name: 'PDF zoom preset' });
+  expect(preset.getAttribute('data-value')).toBe('page-width');
+  // The file viewer binds a bare Space to Quick Look; the trigger keeps it.
+  const space = { key: ' ', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false };
+  expect(claimsKey(claimsOf(preset), space)).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
   expect(mocks.view.scale).toHaveBeenLastCalledWith(1.1);
-  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'page-fit' } });
+  // A step leaves the presets, so none of them claims the scale — and Page
+  // width can be picked again to get back.
+  expect(preset.getAttribute('data-value')).toBe('');
+  expect(preset.textContent).toBe('Custom');
+  chooseOption(preset, 'Page fit');
   expect(mocks.view.scale).toHaveBeenLastCalledWith('page-fit');
+  chooseOption(preset, '100%');
+  expect(mocks.view.scale).toHaveBeenLastCalledWith(1);
+  chooseOption(preset, 'Page width');
+  expect(mocks.view.scale).toHaveBeenLastCalledWith('page-width');
+  expect(preset.getAttribute('data-value')).toBe('page-width');
   mounted.unmount();
   expect(mocks.view.destroy).toHaveBeenCalledOnce();
   expect(doc.destroy).toHaveBeenCalledOnce();

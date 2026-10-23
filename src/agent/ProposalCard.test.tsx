@@ -465,3 +465,42 @@ describe('ProposalCard plans the filing it writes (M64.7)', () => {
     expect(screen.queryByTestId('proposal-unfiled')).toBeNull();
   });
 });
+
+describe('ProposalCard as a Confirmation (M91.14)', () => {
+  it('is one group named by what it is, its reasoning and rows its body', () => {
+    stubWrites();
+    propose({ type: 'Work item', title: 'New title' });
+    const group = screen.getByRole('group', { name: 'Suggested filing' });
+    expect(group).toBe(screen.getByTestId('proposal-card'));
+    expect(group.dataset.slot).toBe('confirmation');
+    expect(group.dataset.state).toBe('pending');
+    const body = group.querySelector('[data-slot="confirmation-body"]');
+    expect(body?.textContent).toContain('It names an action.');
+    expect(body?.textContent).toContain('New title');
+  });
+
+  it('holds both answers while Apply writes, and Dismiss writes nothing', async () => {
+    const { patchFrontmatter } = stubWrites();
+    let finish: ((landed: boolean) => void) | undefined;
+    patchFrontmatter.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const apply = propose({ type: 'Work item' });
+    const dismiss = screen.getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement;
+    fireEvent.click(apply);
+    await waitFor(() =>
+      expect(screen.getByTestId('proposal-card').dataset.state).toBe('answering'),
+    );
+    expect(dismiss.disabled).toBe(true);
+    finish?.(false);
+    await waitFor(() => expect(dismiss.disabled).toBe(false));
+
+    fireEvent.click(dismiss);
+    expect(held()).toBeUndefined();
+    expect(screen.queryByTestId('proposal-card')).toBeNull();
+    expect(patchFrontmatter).toHaveBeenCalledTimes(1);
+  });
+});

@@ -15,9 +15,10 @@
 //! Pure: no I/O. The fold (`super::fold`) owns a `Failures` for each turn and
 //! feeds it the lines it already reads, so a turn watched live and a thread
 //! rebuilt from the session file get the same notice; the init gate
-//! (`super::InitGate`) makes the tools notice and, since M57.2, the
-//! ask-first one. TS renders these words and
-//! never switches on the kind (D3).
+//! (`super::InitGate`) makes the tools notice, since M57.2 the ask-first
+//! one, and since M91.2b its two stops for what Claude Code offered beyond
+//! the run's plan: an unknown built-in and an unexpected agent type. TS
+//! renders these words and never switches on the kind (D3).
 
 use chrono::{DateTime, SecondsFormat};
 use serde::Serialize;
@@ -42,11 +43,17 @@ pub enum FailureKind {
     /// A run whose plan asks before running commands started in another
     /// permission mode or on an older Claude Code (M57.2, the init gate).
     AskUnavailable,
+    /// Claude Code offered a built-in the tool manifest has no row for
+    /// (M91.1, the init gate).
+    UnknownTool,
+    /// A run that holds the subagent tool was offered an agent type its
+    /// argv neither allows nor denies (M91.2b, the init gate).
+    UnexpectedAgentType,
 }
 
 impl FailureKind {
     /// Every kind, in declaration order.
-    pub const ALL: [FailureKind; 12] = [
+    pub const ALL: [FailureKind; 14] = [
         FailureKind::NotSignedIn,
         FailureKind::AccountBlocked,
         FailureKind::UsageLimit,
@@ -59,6 +66,8 @@ impl FailureKind {
         FailureKind::ToolsUnavailable,
         FailureKind::TurnLimit,
         FailureKind::AskUnavailable,
+        FailureKind::UnknownTool,
+        FailureKind::UnexpectedAgentType,
     ];
 
     /// Does this failure pause unattended work (the meter's `quota_failed`)?
@@ -96,6 +105,8 @@ impl FailureKind {
             FailureKind::ToolsUnavailable => "Cerebro's tools didn't load",
             FailureKind::TurnLimit => "The run reached its turn limit",
             FailureKind::AskUnavailable => "This run couldn't ask first",
+            FailureKind::UnknownTool => "Claude Code offered a tool Cerebro doesn't know",
+            FailureKind::UnexpectedAgentType => "Claude Code offered an agent Cerebro doesn't know",
         }
     }
 }
@@ -232,7 +243,21 @@ fn body(kind: FailureKind, window: Option<&str>) -> String {
         FailureKind::ToolsUnavailable => init_refusal("unreported"),
         FailureKind::TurnLimit => "The run used every turn it was allowed before it finished. Ask again to carry on from where it stopped.".into(),
         FailureKind::AskUnavailable => crate::policy::tool_approval::messages().mode_mismatch.clone(),
+        FailureKind::UnknownTool | FailureKind::UnexpectedAgentType => unknown_tool_words(UNNAMED),
     }
+}
+
+/// What the two offer stops say when they name nothing, which no stop does:
+/// each names what Claude Code offered (`unknown_tool`,
+/// `unexpected_agent_type`).
+const UNNAMED: &str = "one it did not name";
+
+/// The table's words for a stop over something Claude Code offered beyond
+/// the run's plan (M91.1): `messages.unknown_tool`, naming `tool`.
+pub(crate) fn unknown_tool_words(tool: &str) -> String {
+    crate::policy::tool_approval::messages()
+        .unknown_tool
+        .replace("{tool}", tool)
 }
 
 /// The notice for `kind`.
@@ -272,6 +297,27 @@ pub fn ask_unavailable(message: &str, cli_version: Option<&str>) -> FailureNotic
     FailureNotice {
         body: message.to_string(),
         ..notice(FailureKind::AskUnavailable, None, None, cli_version)
+    }
+}
+
+/// The notice the init gate attaches to a run whose init offered a built-in
+/// the manifest has no row for (M91.1): `message` is the table's
+/// `unknown_tool`, naming it.
+pub fn unknown_tool(message: &str, cli_version: Option<&str>) -> FailureNotice {
+    FailureNotice {
+        body: message.to_string(),
+        ..notice(FailureKind::UnknownTool, None, None, cli_version)
+    }
+}
+
+/// The notice the init gate attaches to a run that holds the subagent tool
+/// and whose init listed an agent type its argv neither allows nor denies
+/// (M91.2b): `message` is the table's `unknown_tool`, naming the type as
+/// its deny rule would (`super::cli_agents::agent_type_rule`).
+pub fn unexpected_agent_type(message: &str, cli_version: Option<&str>) -> FailureNotice {
+    FailureNotice {
+        body: message.to_string(),
+        ..notice(FailureKind::UnexpectedAgentType, None, None, cli_version)
     }
 }
 
@@ -703,6 +749,52 @@ mod tests {
         assert_eq!(notice.title, "Cerebro's tools didn't load");
         assert_eq!(notice.body, init_refusal("failed"));
         assert_eq!(notice.action, None);
+    }
+
+    // M91.2b: the two offer stops have kinds of their own, worded by the
+    // tool-approval table and titled here; neither has a fix the panel can
+    // offer, and neither pauses unattended work.
+    #[test]
+    fn the_offer_stops_have_their_own_kinds() {
+        let tool = unknown_tool_words("Teleport");
+        assert!(tool.starts_with("Claude Code offered a tool Cerebro doesn't know: Teleport."));
+        let notice = unknown_tool(&tool, Some("2.1.250"));
+        assert_eq!(notice.kind, FailureKind::UnknownTool);
+        assert_eq!(
+            notice.title,
+            "Claude Code offered a tool Cerebro doesn't know"
+        );
+        assert_eq!(notice.body, tool);
+        assert_eq!(notice.action, None);
+        assert_eq!(notice.cli_version.as_deref(), Some("2.1.250"));
+        let agent = unknown_tool_words(&super::super::cli_agents::agent_type_rule("gsd-planner"));
+        let notice = unexpected_agent_type(&agent, None);
+        assert_eq!(notice.kind, FailureKind::UnexpectedAgentType);
+        assert_eq!(
+            notice.title,
+            "Claude Code offered an agent Cerebro doesn't know"
+        );
+        assert!(
+            notice.body.contains("Agent(gsd-planner)"),
+            "{}",
+            notice.body
+        );
+        assert_eq!(notice.action, None);
+        for kind in [FailureKind::UnknownTool, FailureKind::UnexpectedAgentType] {
+            assert!(!kind.is_quota());
+            assert!(!notice_body(kind).contains("{tool}"), "{kind:?}");
+            assert_eq!(
+                serde_json::to_value(kind).unwrap(),
+                json!(match kind {
+                    FailureKind::UnknownTool => "unknown_tool",
+                    _ => "unexpected_agent_type",
+                })
+            );
+        }
+    }
+
+    fn notice_body(kind: FailureKind) -> String {
+        notice(kind, None, None, None).body
     }
 
     #[test]

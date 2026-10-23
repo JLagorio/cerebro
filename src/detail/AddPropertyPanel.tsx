@@ -70,7 +70,7 @@ export interface AddPropertyPanelProps {
   onAdd: (name: string, kind: FieldKind, relation?: RelationConfig) => void;
   onCancel: () => void;
   /**
-   * Anchor it to the "+ Add property" trigger, which is Notion's shape and
+   * Anchor it to the "Add property" trigger, which is Notion's shape and
    * the detail panels' (M16.9). Omitted by the view settings panel, where
    * this is a PAGE inside a popover that already exists — nesting a second
    * anchored surface there would point at the trigger of the first.
@@ -86,7 +86,7 @@ export interface AddPropertyPanelProps {
 }
 
 /**
- * The "+ Add property" surface (M2.x, extracted M3, rebuilt M16.9).
+ * The "Add property" surface (M2.x, extracted M3, rebuilt M16.9).
  *
  * It was an inline bordered `<div>` that pushed the whole panel down as it
  * opened, with a 14-item scroller, no search, no way out but a Cancel button,
@@ -139,7 +139,8 @@ export function AddPropertyPanel({
   const duplicate = typed !== '' && taken.has(typed.toLowerCase());
 
   /** An untyped doc has no schema to declare a kind on: addPropertyToEntry
-   * writes plain frontmatter and the Info panel renders every loose key
+   * writes plain frontmatter and the inspector's Properties section
+   * (DocProperties) renders every loose key
    * through a text input. Picking "Checkbox" there produced a text box
    * containing "false", so the catalog offers only what actually survives. */
   const supportedOnOwner = (kind: FieldKind) =>
@@ -325,7 +326,7 @@ export function AddPropertyPanel({
         // under the pointer — cortex-600 in light, cortex-400 in dark (~3.6:1
         // under white) — where it was cortex-700, which dark mode turns into
         // a pale tint that dropped the white label under 2:1.
-        className="mt-0.5 rounded-md border-0 bg-accent px-2 py-1.5 text-sm font-medium text-inverse hover:bg-accent-hover disabled:cursor-default disabled:opacity-40"
+        className="mt-0.5 rounded-md border-0 bg-action-primary px-2 py-1.5 text-sm font-medium text-on-action-primary hover:bg-action-primary-hover active:bg-action-primary-press disabled:cursor-default disabled:opacity-40"
       >
         {isPerson ? 'Add person' : 'Add relation'}
       </button>

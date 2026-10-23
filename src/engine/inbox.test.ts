@@ -1,17 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  humanizeStem,
-  hasRealTitle,
-  inInbox,
-  inboxCount,
-  inboxCounts,
-  inboxEntries,
-  isOrganized,
-  isStructural,
-  organizeChecklist,
-  withinPeriod,
-} from './inbox';
-import { buildSchema } from './schema';
+import { inInbox, inboxCount, inboxEntries, isOrganized, isStructural } from './inbox';
 import { makeEntry } from './testHelpers';
 
 const NOW = new Date('2026-07-28T12:00:00.000Z');
@@ -57,22 +45,6 @@ describe('isStructural', () => {
   });
 });
 
-describe('withinPeriod', () => {
-  it('bounds week and month, and lets all through', () => {
-    const old = makeEntry({ createdAt: daysAgo(45) });
-    expect(withinPeriod(old, 'week', NOW)).toBe(false);
-    expect(withinPeriod(old, 'month', NOW)).toBe(false);
-    expect(withinPeriod(old, 'all', NOW)).toBe(true);
-
-    const recent = makeEntry({ createdAt: daysAgo(3) });
-    expect(withinPeriod(recent, 'week', NOW)).toBe(true);
-  });
-
-  it('surfaces an unparseable createdAt instead of hiding it', () => {
-    expect(withinPeriod(makeEntry({ createdAt: 'not-a-date' }), 'week', NOW)).toBe(true);
-  });
-});
-
 describe('inboxEntries', () => {
   const entries = [
     makeEntry({ path: 'inbox/a.md', title: 'A', createdAt: daysAgo(1) }),
@@ -82,117 +54,26 @@ describe('inboxEntries', () => {
     makeEntry({ path: 'types/risk.md', title: 'Risk', type: 'Type', createdAt: daysAgo(1) }),
   ];
 
-  it('returns unorganized notes newest first', () => {
-    expect(inboxEntries(entries, 'all', NOW).map((e) => e.title)).toEqual(['A', 'B', 'C']);
+  it('returns every unorganized note newest first, however old', () => {
+    // No period narrows the queue: a capture two months old still waits.
+    expect(inboxEntries(entries).map((e) => e.title)).toEqual(['A', 'B', 'C']);
   });
 
-  it('narrows by period', () => {
-    expect(inboxEntries(entries, 'week', NOW).map((e) => e.title)).toEqual(['A']);
-    expect(inboxEntries(entries, 'month', NOW).map((e) => e.title)).toEqual(['A', 'B']);
+  it('keeps a capture whose creation time cannot be read', () => {
+    const untimed = [
+      ...entries,
+      makeEntry({ path: 'inbox/u.md', title: 'U', createdAt: '' }),
+      makeEntry({ path: 'inbox/n.md', title: 'N', createdAt: 'not-a-date' }),
+    ];
+    expect(
+      inboxEntries(untimed)
+        .map((e) => e.title)
+        .sort(),
+    ).toEqual(['A', 'B', 'C', 'N', 'U']);
   });
 
-  it('counts each period and the whole queue', () => {
-    expect(inboxCounts(entries, NOW)).toEqual({ week: 1, month: 2, all: 3 });
+  it('counts the whole queue for the nav badge, agreeing with the list', () => {
     expect(inboxCount(entries)).toBe(3);
-  });
-});
-
-describe('hasRealTitle', () => {
-  it('honors an explicit title even when a one-word filename matches it', () => {
-    expect(
-      hasRealTitle(
-        makeEntry({ filename: 'plan.md', title: 'Plan', properties: { title: 'Plan' } }),
-      ),
-    ).toBe(true);
-    expect(
-      hasRealTitle(makeEntry({ filename: 'plan.md', title: 'Plan', properties: { title: ' ' } })),
-    ).toBe(false);
-  });
-  it('recognises the humanized-filename fallback as untitled', () => {
-    expect(humanizeStem('capture-2026-07-28.md')).toBe('Capture 2026 07 28');
-    expect(hasRealTitle(makeEntry({ filename: 'fld-7.md', title: 'Fld 7' }))).toBe(false);
-    expect(hasRealTitle(makeEntry({ filename: 'fld-7.md', title: 'Warehouse cutover' }))).toBe(
-      true,
-    );
-  });
-
-  it('accepts a title the filename was generated FROM', () => {
-    // Every capture and every ingested doc is named by slugifying its own
-    // title, so the stem round-trips exactly — this used to read as untitled
-    // forever, and no amount of retyping the H1 could satisfy the check.
-    expect(
-      hasRealTitle(
-        makeEntry({
-          filename: 'standup-notes-for-tuesday.md',
-          title: 'Standup notes for tuesday',
-        }),
-      ),
-    ).toBe(true);
-  });
-
-  it('still flags a machine-minted stem', () => {
-    expect(
-      hasRealTitle(
-        makeEntry({
-          filename: 'capture-2026-07-28-1432.md',
-          title: 'Capture 2026 07 28 1432',
-        }),
-      ),
-    ).toBe(false);
-    expect(hasRealTitle(makeEntry({ filename: 'x.md', title: 'X' }))).toBe(false);
-    expect(hasRealTitle(makeEntry({ filename: 'notes.md', title: '' }))).toBe(false);
-  });
-});
-
-describe('organizeChecklist', () => {
-  const typeDoc = makeEntry({
-    path: 'types/work-item.md',
-    filename: 'work-item.md',
-    folder: 'types',
-    title: 'Work item',
-    type: 'Type',
-    properties: {
-      statuses: [
-        { id: 'todo', label: 'To do', group: 'active' },
-        { id: 'done', label: 'Done', group: 'done' },
-      ],
-    },
-  });
-
-  it('flags what an untyped capture is still missing', () => {
-    const capture = makeEntry({ path: 'inbox/x.md', filename: 'x.md', title: 'X' });
-    const checks = organizeChecklist(capture, buildSchema([capture]));
-    expect(checks.map((c) => c.id)).toEqual(['title', 'type', 'links']);
-    expect(checks.every((c) => !c.done)).toBe(true);
-  });
-
-  it('asks for a status only once the type declares one', () => {
-    const untyped = makeEntry({ path: 'inbox/x.md' });
-    expect(
-      organizeChecklist(untyped, buildSchema([untyped, typeDoc])).some((c) => c.id === 'status'),
-    ).toBe(false);
-
-    const item = makeEntry({ path: 'items/1.md', type: 'Work item' });
-    const checks = organizeChecklist(item, buildSchema([item, typeDoc]));
-    expect(checks.find((c) => c.id === 'status')?.done).toBe(false);
-  });
-
-  it('passes every check for a fully organized note', () => {
-    const item = makeEntry({
-      path: 'items/1.md',
-      filename: 'fld-7.md',
-      title: 'Warehouse cutover',
-      type: 'Work item',
-      properties: { status: 'todo' },
-      relationships: { belongs_to: ['phoenix'] },
-    });
-    const checks = organizeChecklist(item, buildSchema([item, typeDoc]));
-    expect(checks.every((c) => c.done)).toBe(true);
-  });
-
-  it('counts a body wikilink as a connection', () => {
-    const item = makeEntry({ path: 'inbox/x.md', outgoingLinks: ['kickoff'] });
-    const links = organizeChecklist(item, buildSchema([item])).find((c) => c.id === 'links');
-    expect(links?.done).toBe(true);
+    expect(inboxCount(entries)).toBe(inboxEntries(entries).length);
   });
 });

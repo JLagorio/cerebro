@@ -37,7 +37,7 @@ export function CanvasPage({ selection }: { selection: Extract<Selection, { kind
       ].join(' · ')
     : null;
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="canvas-page">
+    <div className="canvas-page flex min-h-0 min-w-0 flex-1 flex-col" data-testid="canvas-page">
       <header className="canvas-page-heading">
         <span className="canvas-page-icon">
           <Icon name="presentation" size={18} />
@@ -96,7 +96,7 @@ export function CanvasPage({ selection }: { selection: Extract<Selection, { kind
             {board.nodes.size === 0 && board.edges.size === 0 && board.ink.size === 0 && (
               <p
                 data-testid="canvas-empty"
-                className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-n-500"
+                className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-(--text-meta)"
               >
                 This whiteboard is empty.
               </p>

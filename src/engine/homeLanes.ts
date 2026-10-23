@@ -20,7 +20,7 @@ import {
 import { type BandContext } from './dateBuckets';
 import { dateEpoch, readDateValue } from './dateGrammar';
 import { addDays } from './dates';
-import { inboxEntries, type InboxPeriod } from './inbox';
+import { inboxEntries } from './inbox';
 import { workSections, workState } from './myWork';
 import { isKnowledgePath } from './okf';
 import { humanize } from './schema';
@@ -334,8 +334,9 @@ export function proposalRows(
   };
 }
 
-export function captureRows(entries: Entry[], period: InboxPeriod, now: Date): LaneData {
-  const rows = inboxEntries(entries, period, now).map((entry) => ({
+/** Every capture the Inbox holds: the lane shows its whole queue. */
+export function captureRows(entries: Entry[]): LaneData {
+  const rows = inboxEntries(entries).map((entry) => ({
     subject: entry.path,
     path: entry.path,
     title: entry.title,

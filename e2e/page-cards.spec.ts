@@ -166,7 +166,7 @@ test('a card picked among pages sharing a stem shows and opens the one picked', 
     .toContain(`\`\`\`cerebro-page\n[[${title}]]\n\`\`\``);
   // A Meeting is a record: Open lands on its row, with this one's panel open.
   await card.getByRole('button', { name: 'Open' }).click();
-  await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue(title, {
-    timeout: 10_000,
-  });
+  await expect(
+    page.getByTestId('detail-panel').getByRole('heading', { name: title, exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
 });

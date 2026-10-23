@@ -56,6 +56,16 @@ describe('prefers-reduced-motion', () => {
     expect(block).toMatch(/--dur-move:\s*0s/);
   });
 
+  it('collapses arriving and leaving with it, and the wait between siblings', () => {
+    // The arrival pairs (owner, 2026-10-19) are motion by the same reading: a surface
+    // that slides in, a copy that fades out, a list whose rows follow each
+    // other in.
+    expect(block.startsWith(QUERY)).toBe(true);
+    for (const token of ['--dur-enter', '--dur-pop', '--dur-exit', '--dur-stagger']) {
+      expect(block).toMatch(new RegExp(`${token}:\\s*0s`));
+    }
+  });
+
   it('leaves the hover guard alone, deliberately', () => {
     // The blanket `* { transition-duration: 0.01ms !important }` idiom would
     // take 20ms with it and restore the strobing it exists to stop. A 20ms
@@ -72,6 +82,35 @@ describe('prefers-reduced-motion', () => {
     expect(app).toContain('.cb-panel-in');
     expect(app).toContain('.cb-menu-in');
     expect(app).toMatch(/animation:\s*none/);
+  });
+});
+
+describe('arriving and leaving', () => {
+  it('pairs each kind with its curve, and leaving is quicker than arriving', () => {
+    expect(TOKENS).toMatch(/--motion-enter:\s*var\(--dur-enter\)\s+var\(--ease-enter\)/);
+    expect(TOKENS).toMatch(/--motion-pop:\s*var\(--dur-pop\)\s+var\(--ease-enter\)/);
+    expect(TOKENS).toMatch(/--motion-exit:\s*var\(--dur-exit\)\s+var\(--ease-exit\)/);
+    const ms = (token: string) => Number(TOKENS.match(new RegExp(`${token}:\\s*(\\d+)ms`))?.[1]);
+    expect(ms('--dur-exit')).toBeLessThan(ms('--dur-pop'));
+    expect(ms('--dur-pop')).toBeLessThan(ms('--dur-enter'));
+  });
+
+  it("moves the shared keyframes' individual properties, never a whole transform", () => {
+    // A keyframe that set `transform` would replace a surface's own (a
+    // centred toast host, a positioned card) for as long as it played.
+    for (const name of [
+      'cb-fade-in',
+      'cb-fade-out',
+      'cb-rise-in',
+      'cb-pop-in',
+      'cb-pop-out',
+      'cb-mark-in',
+    ]) {
+      const start = APP_CSS.indexOf(`@keyframes ${name} `);
+      expect(start, name).toBeGreaterThan(-1);
+      const body = APP_CSS.slice(start, APP_CSS.indexOf('\n}', start));
+      expect(body, name).not.toMatch(/\btransform:/);
+    }
   });
 });
 

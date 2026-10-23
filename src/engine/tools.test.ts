@@ -255,6 +255,7 @@ describe('toolRenderer and toolFold (M56.8)', () => {
     expect(toolFold('mcp__cerebro__get_note')).toEqual({
       one: 'read a note',
       many: 'read {n} notes',
+      running: { one: 'reading a note', many: 'reading {n} notes' },
     });
     expect(toolFold('Grep')?.many).toBe('searched files {n} times');
     expect(toolFold('mcp__cerebro__create_note')).toBeNull();

@@ -183,6 +183,8 @@ function SingleValue({
           { value: '', label: 'Choose…' },
           ...options.map((o) => ({ value: o.id, label: o.label })),
         ]}
+        // An option deleted since the filter was saved reads as the prompt.
+        placeholder="Choose…"
         value={value === undefined || value === null ? '' : String(value)}
         onChange={onChange}
       />

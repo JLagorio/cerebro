@@ -160,7 +160,7 @@ export function KnowledgeLog({ onOpenConcept }: { onOpenConcept: (path: string) 
   const heading = (
     <>
       <h2 className="m-0 text-sm font-semibold text-n-800">Update log</h2>
-      <p className="mb-3 mt-1 text-xs text-n-500">
+      <p className="mb-3 mt-1 text-ui text-(--text-meta)">
         What agents have learned, and when. Every entry names the concept it touched.
       </p>
     </>
@@ -170,7 +170,7 @@ export function KnowledgeLog({ onOpenConcept }: { onOpenConcept: (path: string) 
     return (
       <section data-testid="knowledge-log">
         {heading}
-        <p data-testid="section-unavailable" className="text-xs text-n-500">
+        <p data-testid="section-unavailable" className="text-ui text-(--text-meta)">
           The update log could not be read, so nothing here is a statement about what has been
           learned.
         </p>

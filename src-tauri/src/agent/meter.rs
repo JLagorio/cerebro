@@ -4,7 +4,11 @@
 //! reaps the child at EOF, and emits the terminal `Done`. That makes it the
 //! one place that knows both what the CLI reported and when the run actually
 //! ended, so it is where usage is recorded. Nothing about spend travels on
-//! the UI event channel (see [`super::usage`]).
+//! the UI event channel (see [`super::usage`]). A panel sees two of a run's
+//! numbers: how full a conversation's context is, which the reader files in
+//! a memory-only [`ContextBook`] for the panel to pull (M91.5), and how long
+//! each turn worked, the result's `duration_ms`, which the fold carries on
+//! the turn's own event (M92.2) as the meter books it on the run's row.
 //!
 //! **A meter is optional.** A run started before a vault is registered, or in
 //! a build with no runtime DB, streams exactly as it always did — metering is
@@ -15,11 +19,13 @@
 //! abort were spent, the item goes back in the queue, and the run is recorded
 //! `elapsed_aborted` rather than pretending it never left.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::runtime::cause::RunCause;
@@ -118,8 +124,10 @@ pub struct Meter {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEnd {
     pub outcome: RunOutcome,
-    /// `None` means the run ended without saying what it spent. It is not
-    /// zero — M25 treats missing usage as an unknown day, never a free one.
+    /// `None` means the run ended without saying what it spent, or all of
+    /// it: since M91.2c, a run whose subagents' share went unreported. It is
+    /// not zero — M25 treats missing usage as an unknown day, never a free
+    /// one.
     pub usage: Option<Usage>,
     /// Terminal model and other measured facts, passed to a supervisor's finalize.
     pub facts: Option<RunFacts>,
@@ -134,14 +142,25 @@ pub struct RunEnd {
 /// What the stream said, accumulated as it is read.
 #[derive(Debug, Default)]
 pub struct Tally {
-    /// From the TERMINAL event only. An `assistant` turn's usage is that
-    /// turn's alone and the cached prefix repeats on every one of them, so
-    /// summing them would over-count badly.
+    /// From the TERMINAL event only: its `modelUsage` summed over models
+    /// when that is a measurement of this run alone, the whole tree's
+    /// (M91.2c), else its `usage`. An `assistant` turn's usage is that turn's alone and the
+    /// cached prefix repeats on every one of them, so summing them would
+    /// over-count badly.
     usage: Option<Usage>,
+    /// `usage` is the whole tree's, subagents included (M91.2c).
+    whole_tree: bool,
+    /// The run's own thread called the subagent tool (M91.2c), so some of
+    /// what it spent was its subagents', which only `modelUsage` counts.
+    delegated: bool,
+    /// The first `system/init` line's `claude_code_version`, which says
+    /// whether the result's `modelUsage` is this run's alone (M91.2c).
+    cli_version: Option<String>,
     /// The non-count facts (M31.5), accumulated across the whole stream:
-    /// each assistant turn overwrites `model_id`/`stop_reason` (last wins),
-    /// the terminal event fills the rest once, and a deferred result's stop
-    /// reason wins over the last turn's (M57.1).
+    /// each of the run's own assistant turns overwrites
+    /// `model_id`/`stop_reason` (last wins; a subagent's never does,
+    /// M91.3b), the terminal event fills the rest once, and a deferred
+    /// result's stop reason wins over the last turn's (M57.1).
     facts: RunFacts,
     /// The call a hook deferred, by tool name, when the terminal result
     /// carried `deferred_tool_use` (M57.1): the run is suspended on it, not
@@ -153,7 +172,8 @@ pub struct Tally {
     quota: bool,
     /// The run's typed failure fields, read by the same classifier the fold
     /// uses, for the one fact the fold's verdict does not carry: when the
-    /// limit resets (M56.14, `quota_resets_at`).
+    /// limit resets (M56.14, `quota_resets_at`). Like the fold's, from the
+    /// run's own lines: a subagent's API error is its own (M91.3b).
     failures: super::failure::Failures,
     unknown_fields: Vec<String>,
     /// The stream kinds this build has no row for (M56.2, `super::kinds`),
@@ -171,6 +191,13 @@ pub struct Tally {
     /// The CLI tools the run's plan would have asked for and nobody could
     /// answer, so it ran without them (M57.2), in the manifest's order.
     withheld: Vec<String>,
+    /// How much of its context window the run's own thread used, as its
+    /// latest turn said, with the window the result reported for that
+    /// turn's model (M91.5). Read off the turn's own line, so unlike `usage`
+    /// it needs no `cli_version`: the totals Claude Code 2.1.277 restores
+    /// into a resumed session's result never reach a line. Never booked:
+    /// the reader files it in the [`ContextBook`] once the stream ends.
+    context: Option<ContextUse>,
 }
 
 impl Tally {
@@ -187,6 +214,12 @@ impl Tally {
         if is_init && self.init_session.is_none() {
             self.init_session = session();
         }
+        if is_init && self.cli_version.is_none() {
+            self.cli_version = event
+                .get("claude_code_version")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
         if usage::is_result(event) && self.result_session.is_none() {
             self.result_session = session();
         }
@@ -200,8 +233,22 @@ impl Tally {
                 self.unclassified.push(kind);
             }
         }
-        self.failures.observe(event);
-        if let Some(turn) = RunFacts::from_assistant(event) {
+        if !usage::from_a_subagent(event) {
+            self.failures.observe(event);
+        }
+        if usage::calls_subagent_tool(event) {
+            self.delegated = true;
+        }
+        let turn = RunFacts::from_assistant(event);
+        if let Some(used) = usage::context_used(event) {
+            self.context = Some(ContextUse {
+                used,
+                window: None,
+                model: turn.as_ref().and_then(|turn| turn.model_id.clone()),
+                at: reading_time(event),
+            });
+        }
+        if let Some(turn) = turn {
             self.facts.merge(turn);
         }
         if !usage::is_result(event) {
@@ -217,11 +264,32 @@ impl Tally {
                     .unwrap_or("a tool")
                     .to_string()
             });
-        self.usage = usage::parse(event);
+        let whole_tree = usage::whole_tree(event)
+            .filter(|_| usage::model_usage_is_the_runs(self.cli_version.as_deref()));
+        self.whole_tree = whole_tree.is_some();
+        self.usage = whole_tree.or_else(|| usage::parse(event));
         if let Some(terminal) = RunFacts::parse(event) {
             self.facts.merge(terminal);
         }
         self.failed = usage::is_failure(event);
+        // The window belongs to the reading's model; a result that names
+        // none for it leaves what an earlier one said.
+        if let Some(reading) = self.context.as_mut() {
+            let window = reading
+                .model
+                .as_deref()
+                .and_then(|model| usage::context_window(event, model));
+            if window.is_some() {
+                reading.window = window;
+            }
+        }
+    }
+
+    /// How much of its context window the run's own thread used, as its
+    /// latest turn said (M91.5). `None` when no turn of its own reported a
+    /// whole reading ([`usage::context_used`]).
+    pub(crate) fn context(&self) -> Option<&ContextUse> {
+        self.context.as_ref()
     }
 
     /// Record whether the run's failure was a quota one: the usage limit, a
@@ -294,11 +362,19 @@ impl Tally {
         self.facts.denied_tools.as_deref().unwrap_or(&[])
     }
 
+    /// The non-count facts the stream has said so far (M31.5).
+    pub fn facts(&self) -> &RunFacts {
+        &self.facts
+    }
+
     /// How this run ended, and what it cost.
     ///
     /// A stream that ended without a terminal event yields `None` usage —
     /// the honest-unknown path — rather than a zero that would let the same
-    /// tokens be spent again.
+    /// tokens be spent again. So does a run that called the subagent tool
+    /// when its result did not count its whole tree alone (M91.2c): its own
+    /// thread's `usage` leaves its subagents out, so booking it would read
+    /// as a smaller bill than the one paid.
     ///
     /// `aborted` is the watchdog's doing and outranks everything the stream
     /// said. A run stopped at init because cerebro's tools did not load
@@ -309,10 +385,6 @@ impl Tally {
     /// switch, quit — and it names the ending only of a run that never
     /// reached its terminal event: one that already said how it ended keeps
     /// that ending, because the stop lost the race to it.
-    pub fn facts(&self) -> &RunFacts {
-        &self.facts
-    }
-
     pub fn ended(&self, aborted: bool, cancelled: bool) -> (RunOutcome, Option<Usage>) {
         let outcome = if aborted {
             RunOutcome::ElapsedAborted
@@ -329,8 +401,106 @@ impl Tally {
         } else {
             RunOutcome::Succeeded
         };
-        (outcome, self.usage)
+        let usage = if self.delegated && !self.whole_tree {
+            None
+        } else {
+            self.usage
+        };
+        (outcome, usage)
     }
+}
+
+// ---------------------------------------------------------------------------
+// How full a session's context is (M91.5)
+// ---------------------------------------------------------------------------
+
+/// How much of its model's context window one Claude Code session had used
+/// (M91.5), as the latest turn of a run's own thread reported it: a reading,
+/// never a total, which the next turn's replaces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextUse {
+    /// The tokens that turn's request sent (`usage::context_used`).
+    pub used: u64,
+    /// The model's context window, when the run's result reported one for
+    /// the turn's model (`usage::context_window`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<u64>,
+    /// The model that answered the turn, when its line named one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// When the reading was taken (`reading_time`), RFC 3339 UTC.
+    pub at: String,
+}
+
+/// What `agent_context_usage` answers for a session (M91.5): its latest
+/// reading, or not recorded when the book holds none for it. Never a zero
+/// (CV-05).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ContextUsage {
+    Recorded(ContextUse),
+    NotRecorded,
+}
+
+/// The most sessions the [`ContextBook`] holds; past it, the one recorded
+/// longest ago goes.
+pub const CONTEXT_SESSIONS: usize = 64;
+
+/// The latest [`ContextUse`] of each recent session a panel shows (M91.5),
+/// by its Claude Code session id: filed by a run's reader once its stream
+/// ends, and read by `agent_context_usage` when the panel asks.
+///
+/// Memory only, by the owner's call (Q7): never written to disk, journaled,
+/// logged or emitted, and gone with the process. Bounded at
+/// [`CONTEXT_SESSIONS`], the session recorded longest ago going first. The
+/// lock is taken poisoned or not, as the journal's is, because the reader
+/// files from its run's afterlife, where a panic would leave the run
+/// unreaped.
+#[derive(Debug, Default)]
+pub struct ContextBook {
+    sessions: Mutex<VecDeque<(String, ContextUse)>>,
+}
+
+impl ContextBook {
+    fn sessions(&self) -> MutexGuard<'_, VecDeque<(String, ContextUse)>> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// File `reading` as `session`'s latest, the newest in the book.
+    pub fn record(&self, session: &str, reading: ContextUse) {
+        let mut sessions = self.sessions();
+        sessions.retain(|(id, _)| id != session);
+        sessions.push_back((session.to_string(), reading));
+        while sessions.len() > CONTEXT_SESSIONS {
+            sessions.pop_front();
+        }
+    }
+
+    /// `session`'s latest reading, or not recorded when the book holds none.
+    pub fn usage(&self, session: &str) -> ContextUsage {
+        self.sessions()
+            .iter()
+            .find(|(id, _)| id == session)
+            .map_or(ContextUsage::NotRecorded, |(_, reading)| {
+                ContextUsage::Recorded(reading.clone())
+            })
+    }
+}
+
+/// When a context reading was taken (M91.5): its line's own `timestamp`, or,
+/// on a stream whose lines carry none (2.1.250's assistant lines), the
+/// moment the reader read it. Spelled as `runtime::now_utc` spells every
+/// time: RFC 3339 UTC with milliseconds.
+fn reading_time(event: &Value) -> String {
+    event
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+        .map_or_else(Utc::now, |at| at.with_timezone(&Utc))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 /// Open an attended run's row before its child spawns (M49.9). The other
@@ -2093,6 +2263,7 @@ mod tests {
                 kind: crate::policy::tool_approval::RunKind::Unattended,
                 shell: crate::policy::tool_approval::ShellCeiling::Ask,
                 web: crate::policy::tool_approval::WebCeiling::Off,
+                delegate: crate::policy::tool_approval::DelegateCeiling::Off,
                 ask_first: false,
                 read_scoped: false,
                 narrowing: None,
@@ -2139,5 +2310,565 @@ mod tests {
         assert!(rows_under(&conn, ASK_SURFACE).is_empty());
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- M91.2c: what a run's subagents spent --------------------------------
+
+    /// The synthetic subagent stream (cli-stream/transcript-subagent.stream.json,
+    /// M91.3b): one Agent call, and a result whose `modelUsage` counts the
+    /// subagent beside the run's own thread.
+    fn subagent_stream() -> Vec<Value> {
+        serde_json::from_str(include_str!(
+            "../../fixtures/cli-stream/transcript-subagent.stream.json"
+        ))
+        .unwrap()
+    }
+
+    const SUBAGENT_CALL: &str = "toolu_000000000000000000000001";
+
+    /// A turn of the run's own thread that calls the subagent tool as `name`.
+    fn subagent_call(name: &str) -> Value {
+        json!({ "type": "assistant", "parent_tool_use_id": null, "message": {
+            "id": "msg_000000000000000000000001", "model": "claude-sonnet-5",
+            "stop_reason": "tool_use", "content": [{ "type": "tool_use", "id": SUBAGENT_CALL,
+                "name": name, "input": { "description": "Look it up",
+                    "subagent_type": "cerebro-researcher", "prompt": "Find it." } }] } })
+    }
+
+    /// The run's `system/init`, naming the Claude Code release it ran on.
+    fn init_on(version: &str) -> Value {
+        json!({ "type": "system", "subtype": "init", "session_id": "s",
+            "claude_code_version": version })
+    }
+
+    /// What the run's own thread spent, as the result's `usage` says it.
+    const OWN: Usage = Usage {
+        input_tokens: 14,
+        output_tokens: 150,
+        cache_read: 6_200,
+        cache_write: 0,
+    };
+
+    /// A `modelUsage` of two models, the run's own and its subagent's.
+    fn two_models() -> Value {
+        json!({
+            "claude-sonnet-5": { "inputTokens": 14, "outputTokens": 150,
+                "cacheReadInputTokens": 6200, "cacheCreationInputTokens": 0,
+                "webSearchRequests": 0, "costUSD": 0.0123, "contextWindow": 200000,
+                "maxOutputTokens": 32000, "canonicalModel": "claude-sonnet-5",
+                "provider": "firstParty", "costBasis": "list" },
+            "claude-haiku-4-5-20251001": { "inputTokens": 2950, "outputTokens": 170,
+                "cacheReadInputTokens": 0, "cacheCreationInputTokens": 1200,
+                "webSearchRequests": 0, "costUSD": 0.0042, "contextWindow": 200000,
+                "maxOutputTokens": 32000 }
+        })
+    }
+
+    /// A clean result whose `usage` is [`OWN`], with `model_usage` when given.
+    fn result_with(model_usage: Option<Value>) -> Value {
+        let mut terminal = result(
+            json!({ "input_tokens": 14, "output_tokens": 150,
+                "cache_read_input_tokens": 6200, "cache_creation_input_tokens": 0 }),
+            false,
+            "done",
+        );
+        if let Some(model_usage) = model_usage {
+            terminal["modelUsage"] = model_usage;
+        }
+        terminal
+    }
+
+    #[test]
+    fn a_runs_usage_is_the_whole_trees_when_model_usage_counts_it() {
+        // Two models, the run's own and its subagent's: `usage` holds the
+        // first alone, and the books take both.
+        let tally = tally_of(&[
+            init_on("2.1.250"),
+            subagent_call("Agent"),
+            result_with(Some(two_models())),
+        ]);
+        assert_eq!(
+            tally.ended(false, false),
+            (
+                RunOutcome::Succeeded,
+                Some(Usage {
+                    input_tokens: 2_964,
+                    output_tokens: 320,
+                    cache_read: 6_200,
+                    cache_write: 1_200,
+                })
+            )
+        );
+        assert!(
+            tally.unknown_fields.is_empty(),
+            "{:?}",
+            tally.unknown_fields
+        );
+        // The committed subagent stream, read as the reader reads it.
+        let tally = tally_of(&subagent_stream());
+        assert_eq!(
+            tally.ended(false, false),
+            (
+                RunOutcome::Succeeded,
+                Some(Usage {
+                    input_tokens: 2_964,
+                    output_tokens: 320,
+                    cache_read: 6_200,
+                    cache_write: 0,
+                })
+            )
+        );
+        assert!(
+            tally.unknown_fields.is_empty(),
+            "{:?}",
+            tally.unknown_fields
+        );
+    }
+
+    #[test]
+    fn an_empty_or_missing_model_usage_keeps_the_runs_own_usage() {
+        // The committed recordings all say `{}`, which counts nothing, so it
+        // is never a zero bill. A run that called no subagent keeps its own
+        // thread's `usage`, as before M91.2c.
+        for model_usage in [
+            None,
+            Some(json!({})),
+            Some(json!({ "claude-sonnet-5": { "inputTokens": 14 } })),
+        ] {
+            let tally = tally_of(&[init_on("2.1.250"), result_with(model_usage.clone())]);
+            assert_eq!(
+                tally.ended(false, false),
+                (RunOutcome::Succeeded, Some(OWN)),
+                "{model_usage:?}"
+            );
+        }
+        // Nor does an empty one stand in for a `usage` the result left out.
+        let tally = tally_of(&[
+            init_on("2.1.250"),
+            json!({ "type": "result", "is_error": false, "result": "done", "modelUsage": {} }),
+        ]);
+        assert_eq!(tally.ended(false, false).1, None, "unknown, never zero");
+    }
+
+    #[test]
+    fn a_run_that_delegated_without_model_usage_spent_an_unknown_amount() {
+        // CV-05: its own thread's `usage` leaves its subagents out, so it is
+        // not what the run spent, and neither is zero.
+        let zeroed = json!({ "claude-sonnet-5": { "inputTokens": 0, "outputTokens": 0,
+            "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0 } });
+        for name in ["Agent", "Task"] {
+            for model_usage in [None, Some(json!({})), Some(zeroed.clone())] {
+                let tally = tally_of(&[
+                    init_on("2.1.250"),
+                    subagent_call(name),
+                    result_with(model_usage.clone()),
+                ]);
+                assert_eq!(
+                    tally.ended(false, false),
+                    (RunOutcome::Succeeded, None),
+                    "{name}, {model_usage:?}"
+                );
+            }
+        }
+        // A hand-off is another run, with books of its own.
+        let handed = json!({ "type": "assistant", "parent_tool_use_id": null, "message": {
+            "id": "msg_000000000000000000000002", "content": [{ "type": "tool_use",
+                "id": SUBAGENT_CALL, "name": "mcp__cerebro__hand_to", "input": {} }] } });
+        assert_eq!(
+            tally_of(&[handed, result_with(None)]).ended(false, false).1,
+            Some(OWN)
+        );
+    }
+
+    #[test]
+    fn a_model_usage_that_may_carry_earlier_turns_is_never_booked() {
+        // From 2.1.277 a resumed thread's `modelUsage` starts from the
+        // session's saved totals: booking it would charge each turn for every
+        // turn before it. A run whose init named no readable release is held
+        // to the same rule.
+        for init in [
+            Some(init_on("2.1.277")),
+            Some(init_on("2.1.308")),
+            Some(json!({ "type": "system", "subtype": "init", "session_id": "s" })),
+            None,
+        ] {
+            let lines = |calls: bool| -> Vec<Value> {
+                init.iter()
+                    .cloned()
+                    .chain(calls.then(|| subagent_call("Agent")))
+                    .chain([result_with(Some(two_models()))])
+                    .collect()
+            };
+            assert_eq!(
+                tally_of(&lines(false)).ended(false, false).1,
+                Some(OWN),
+                "its own thread's, as before M91.2c: {init:?}"
+            );
+            assert_eq!(
+                tally_of(&lines(true)).ended(false, false).1,
+                None,
+                "a delegated run's spend is unknown: {init:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_subagents_lines_never_speak_for_the_run() {
+        // M91.3b: Claude Code forwards a subagent's lines beside the run's.
+        // Its model is not the run's, and its API error is its own: the fold
+        // never hands it to the turn's failures, and nor does the tally, or a
+        // subagent's rejected weekly limit would set the reset a throttled
+        // run backs off until.
+        let forwarded = |mut line: Value| {
+            line["parent_tool_use_id"] = json!(SUBAGENT_CALL);
+            line
+        };
+        let mut limit = api_error_reply("rate_limit");
+        limit["quotaLimits"] = json!({ "status": "rejected", "rateLimitType": "seven_day",
+            "resetsAt": 1767225600 });
+        let tally = tally_of(&[
+            subagent_call("Agent"),
+            forwarded(json!({ "type": "assistant", "message": { "id": "msg_sub",
+                "model": "claude-haiku-4-5-20251001", "stop_reason": "end_turn",
+                "content": [{ "type": "text", "text": "Found it." }] } })),
+            forwarded(limit.clone()),
+            api_error_reply("rate_limit"),
+            result(json!({ "output_tokens": 0 }), true, "x"),
+        ]);
+        assert_eq!(tally.facts().model_id.as_deref(), Some("claude-sonnet-5"));
+        assert_eq!(tally.facts().stop_reason.as_deref(), Some("tool_use"));
+        assert_eq!(
+            tally.ended(false, false).0,
+            RunOutcome::QuotaFailed,
+            "the run's own throttle"
+        );
+        assert_eq!(
+            tally.quota_resets_at(),
+            None,
+            "a throttle names no reset (Q10)"
+        );
+        // The same limit on the run's own thread is the run's, reset and all.
+        let own = tally_of(&[limit, result(json!({ "output_tokens": 0 }), true, "x")]);
+        assert_eq!(
+            own.quota_resets_at(),
+            DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+                .ok()
+                .map(|at| at.with_timezone(&Utc))
+        );
+    }
+
+    #[test]
+    fn a_delegated_run_books_its_whole_tree_or_says_its_usage_is_unknown() {
+        let dir = crate::vault::testutil::temp_vault("meter-delegated");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+        finish(
+            &attended_meter(&dir, &vault, "counted"),
+            &tally_of(&subagent_stream()),
+            false,
+            false,
+            Utc::now(),
+        );
+        finish(
+            &attended_meter(&dir, &vault, "uncounted"),
+            &tally_of(&[
+                init_on("2.1.250"),
+                subagent_call("Agent"),
+                result_with(Some(json!({}))),
+            ]),
+            false,
+            false,
+            Utc::now(),
+        );
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let books = |run_id: &str| -> (String, String, i64, i64, i64) {
+            conn.query_row(
+                "SELECT outcome, usage_state, input_tokens, output_tokens, cache_read \
+                 FROM runs WHERE run_id = ?1",
+                [run_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            books("counted"),
+            ("succeeded".into(), "exact".into(), 2_964, 320, 6_200)
+        );
+        let (outcome, state, ..) = books("uncounted");
+        assert_eq!(
+            (outcome.as_str(), state.as_str()),
+            ("succeeded", "unknown"),
+            "its columns' zeros are not a measurement, and fleet reads the state first"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- M91.5: how full a session's context is ------------------------------
+
+    /// A turn of the run's own thread on `model` whose request sent `input`
+    /// new tokens and read `read` from the cache, its line written at `at`
+    /// when given.
+    fn turn_on(model: &str, input: u64, read: u64, at: Option<&str>) -> Value {
+        let mut line = json!({ "type": "assistant", "parent_tool_use_id": null,
+            "message": { "id": "msg_000000000000000000000501", "model": model,
+                "stop_reason": "end_turn", "content": [{ "type": "text", "text": "Done." }],
+                "usage": { "input_tokens": input, "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": read, "output_tokens": 12 } } });
+        if let Some(at) = at {
+            line["timestamp"] = json!(at);
+        }
+        line
+    }
+
+    /// A reading of `model`'s turn, as the tally takes it.
+    fn reading_of(used: u64, window: Option<u64>, model: &str, at: &str) -> ContextUse {
+        ContextUse {
+            used,
+            window,
+            model: Some(model.into()),
+            at: at.into(),
+        }
+    }
+
+    /// A `modelUsage` entry with `window`, counting four calls' worth.
+    fn entry_with(window: Value) -> Value {
+        json!({ "inputTokens": 14, "outputTokens": 150, "cacheReadInputTokens": 6200,
+            "cacheCreationInputTokens": 0, "contextWindow": window, "maxOutputTokens": 32000 })
+    }
+
+    const FIRST: &str = "2026-10-22T12:00:02.000Z";
+    const LATER: &str = "2026-10-22T12:00:08.000Z";
+
+    #[test]
+    fn a_subagents_turn_never_reads_as_the_runs_context() {
+        // M91.3b's rule: the forwarded line is the subagent's own request,
+        // with its own context, however much larger, and its model's window
+        // is not the run's.
+        let mut forwarded = turn_on(
+            "claude-haiku-4-5-20251001",
+            2_950,
+            90_000,
+            Some("2026-10-22T12:00:04.000Z"),
+        );
+        forwarded["parent_tool_use_id"] = json!(SUBAGENT_CALL);
+        let mut sidechain = forwarded.clone();
+        sidechain["parent_tool_use_id"] = Value::Null;
+        sidechain["isSidechain"] = json!(true);
+        let tally = tally_of(&[
+            init_on("2.1.250"),
+            turn_on("claude-sonnet-5", 8, 6_100, Some(FIRST)),
+            subagent_call("Agent"),
+            forwarded,
+            sidechain,
+            result_with(Some(json!({
+                "claude-sonnet-5": entry_with(json!(1_000_000)),
+                "claude-haiku-4-5-20251001": entry_with(json!(200_000)),
+            }))),
+        ]);
+        assert_eq!(
+            tally.context(),
+            Some(&reading_of(
+                6_108,
+                Some(1_000_000),
+                "claude-sonnet-5",
+                FIRST
+            ))
+        );
+    }
+
+    #[test]
+    fn the_latest_whole_reading_is_the_one_kept() {
+        let tally = tally_of(&[
+            init_on("2.1.250"),
+            turn_on("claude-sonnet-5", 8, 6_100, Some(FIRST)),
+            turn_on("claude-sonnet-5", 12, 9_400, Some(LATER)),
+            // A line that counts nothing read nothing, and a turn with no
+            // usage at all says nothing about the context.
+            turn_on("claude-sonnet-5", 0, 0, Some("2026-10-22T12:00:09.000Z")),
+            subagent_call("Agent"),
+            result_with(None),
+        ]);
+        assert_eq!(
+            tally.context(),
+            Some(&reading_of(9_412, None, "claude-sonnet-5", LATER)),
+            "a result with no modelUsage names no window, and none is guessed"
+        );
+    }
+
+    #[test]
+    fn a_window_comes_only_from_the_readings_own_models_entry() {
+        let window_after = |model_usage: Value| {
+            tally_of(&[
+                init_on("2.1.250"),
+                turn_on("claude-sonnet-5", 8, 6_100, Some(FIRST)),
+                result_with(Some(model_usage)),
+            ])
+            .context()
+            .and_then(|reading| reading.window)
+        };
+        assert_eq!(
+            window_after(json!({ "claude-sonnet-5": entry_with(json!(200_000)) })),
+            Some(200_000)
+        );
+        for (case, model_usage) in [
+            ("the recordings' empty object", json!({})),
+            (
+                "another model's entry",
+                json!({ "claude-haiku-4-5-20251001": entry_with(json!(200_000)) }),
+            ),
+            (
+                "a window as text",
+                json!({ "claude-sonnet-5": entry_with(json!("200000")) }),
+            ),
+            (
+                "a zero window",
+                json!({ "claude-sonnet-5": entry_with(json!(0)) }),
+            ),
+        ] {
+            assert_eq!(window_after(model_usage), None, "{case}");
+        }
+        // A continuation's later result that names no window leaves the one
+        // an earlier result named for the same reading.
+        let tally = tally_of(&[
+            init_on("2.1.250"),
+            turn_on("claude-sonnet-5", 8, 6_100, Some(FIRST)),
+            result_with(Some(
+                json!({ "claude-sonnet-5": entry_with(json!(200_000)) }),
+            )),
+            result_with(Some(json!({}))),
+        ]);
+        assert_eq!(
+            tally.context().and_then(|reading| reading.window),
+            Some(200_000)
+        );
+    }
+
+    #[test]
+    fn a_stream_with_no_whole_reading_has_none() {
+        assert_eq!(Tally::default().context(), None);
+        assert_eq!(
+            tally_of(&usage_limit_stream()).context(),
+            None,
+            "the CLI's own reply to a refused request is no reading"
+        );
+        assert_eq!(
+            tally_of(&subagent_stream()).context(),
+            None,
+            "its lines carry no usage"
+        );
+        assert_eq!(
+            tally_of(&[result_with(Some(
+                json!({ "claude-sonnet-5": entry_with(json!(200_000)) })
+            ))])
+            .context(),
+            None,
+            "a window alone is no reading"
+        );
+    }
+
+    #[test]
+    fn a_resumed_sessions_restored_totals_never_reach_its_reading() {
+        // From 2.1.277 a resumed session's result restores the totals its
+        // transcript saved, so its `modelUsage` counts every earlier turn.
+        // The context is read off the turn's own line, which that change
+        // does not touch, and the window is the model's limit, not a total.
+        let restored = json!({ "claude-sonnet-5": { "inputTokens": 180_000,
+            "outputTokens": 9_000, "cacheReadInputTokens": 2_400_000,
+            "cacheCreationInputTokens": 61_000, "contextWindow": 200_000,
+            "maxOutputTokens": 32_000 } });
+        let mut resumed = result_with(Some(restored));
+        resumed["num_turns"] = json!(7);
+        let tally = tally_of(&[
+            init_on("2.1.300"),
+            turn_on("claude-sonnet-5", 12, 48_000, None),
+            resumed,
+        ]);
+        let reading = tally.context().expect("the turn's own line is a reading");
+        assert_eq!(
+            (reading.used, reading.window),
+            (48_012, Some(200_000)),
+            "the turn's own request, in the model's own window"
+        );
+        assert_eq!(
+            tally.ended(false, false).1,
+            Some(OWN),
+            "and the books still take only the run's own thread"
+        );
+    }
+
+    #[test]
+    fn a_reading_is_dated_by_its_line_else_when_it_was_read() {
+        let mut tally = Tally::default();
+        tally.observe(&turn_on(
+            "claude-sonnet-5",
+            8,
+            6_100,
+            Some("2026-10-22T14:00:02.5+02:00"),
+        ));
+        assert_eq!(
+            tally.context().map(|reading| reading.at.as_str()),
+            Some("2026-10-22T12:00:02.500Z"),
+            "in UTC, as every stored time is spelt"
+        );
+        // 2.1.250's assistant lines carry no timestamp, and a timestamp
+        // that does not parse is none.
+        for stamp in [None, Some("yesterday")] {
+            let before = Utc::now() - chrono::Duration::milliseconds(1);
+            tally.observe(&turn_on("claude-sonnet-5", 8, 6_100, stamp));
+            let after = Utc::now();
+            let at = DateTime::parse_from_rfc3339(&tally.context().unwrap().at)
+                .unwrap()
+                .with_timezone(&Utc);
+            assert!(before <= at && at <= after, "{stamp:?}: {at}");
+        }
+    }
+
+    #[test]
+    fn the_book_keeps_each_sessions_latest_and_lets_the_oldest_go() {
+        let book = ContextBook::default();
+        assert_eq!(
+            book.usage("00000000-0000-4000-8000-000000000501"),
+            ContextUsage::NotRecorded,
+            "nothing seen is not recorded, never zero"
+        );
+        let session = |n: usize| format!("00000000-0000-4000-8000-{n:012}");
+        for n in 0..CONTEXT_SESSIONS {
+            book.record(
+                &session(n),
+                reading_of(n as u64 + 1, None, "claude-sonnet-5", FIRST),
+            );
+        }
+        // A session's next reading replaces its last, and makes it the
+        // newest.
+        book.record(
+            &session(0),
+            reading_of(9_412, Some(200_000), "claude-sonnet-5", LATER),
+        );
+        book.record(
+            &session(CONTEXT_SESSIONS),
+            reading_of(7, None, "claude-sonnet-5", LATER),
+        );
+        assert_eq!(book.sessions().len(), CONTEXT_SESSIONS);
+        assert_eq!(
+            book.usage(&session(1)),
+            ContextUsage::NotRecorded,
+            "past the cap, the session recorded longest ago goes"
+        );
+        assert_eq!(
+            book.usage(&session(0)),
+            ContextUsage::Recorded(reading_of(9_412, Some(200_000), "claude-sonnet-5", LATER))
+        );
+        assert_eq!(
+            book.usage(&session(2)),
+            ContextUsage::Recorded(reading_of(3, None, "claude-sonnet-5", FIRST))
+        );
+        assert!(matches!(
+            book.usage(&session(CONTEXT_SESSIONS)),
+            ContextUsage::Recorded(_)
+        ));
     }
 }

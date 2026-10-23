@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { conceptSourceRow, resourceRow, type ResourceRow } from '@/agent/elements/decisionsSources';
+import { Source as SourceLine } from '@/components/ai/Sources';
+import { Trace } from '@/components/ai/Trace';
 import { Icon } from '@/components/ui/Icon';
-import { Tag } from '@/components/ui/Tag';
 import { NewRecordDialog } from '@/app/CreateMenu';
+import { InspectorSubhead } from '@/detail/InspectorParts';
 import {
   conceptEdges,
   localDayOf,
@@ -10,9 +13,7 @@ import {
   type Source,
   type Stamp,
 } from '@/engine/okf';
-import { sourceTarget } from '@/editor/citations';
 import { resolveAuthor } from '@/engine/authors';
-import { linkLabel } from '@/engine/linkLabels';
 import { typeStyle } from '@/engine/typeCatalog';
 import { resolveTarget } from '@/engine/wikilink';
 import { FacetChips } from '@/knowledge/FacetChips';
@@ -32,7 +33,31 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
  * judges; the format just refuses to hide the evidence.
  */
 
-const LABEL = 'text-2xs font-semibold uppercase tracking-[0.06em] text-n-500';
+/**
+ * One group of the Details panel (owner, 2026-10-18): the inspector's subhead
+ * over its rows, sentence case where the overlines were uppercase.
+ */
+function Group({
+  label,
+  testId,
+  children,
+}: {
+  label: string;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mt-3.5 first:mt-0" data-testid={testId}>
+      <InspectorSubhead label={label} />
+      {children}
+    </div>
+  );
+}
+
+/** Rows whose text sits on the tab's edge and whose hover washes past it. */
+const ROWS = '-mx-2 flex flex-col gap-px';
+/** One ~28px row of the panel: 14px icon, 13px text. */
+const ROW = 'flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-[5px] text-left text-ui';
 
 /**
  * "3 days ago" — freshness is what makes a trust tier actionable. Counted in
@@ -77,7 +102,10 @@ export function ActorLine({
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   const when = relativeDay(stamp.at, today);
   const author = resolveAuthor(stamp.by, entries);
-  const whenTail = when !== null && <span className="flex-none text-2xs text-n-400">{when}</span>;
+  // A row of the panel (owner, 2026-10-18): who, and when at the row's end.
+  const whenTail = when !== null && (
+    <span className="ml-auto flex-none pl-2 text-xs text-n-400">{when}</span>
+  );
   if (author.kind === 'agent' || author.kind === 'assistant') {
     return (
       <button
@@ -90,11 +118,11 @@ export function ActorLine({
             ? navigate({ kind: 'agents', actor: author.actor })
             : setAiPanelOpen(true)
         }
-        className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent p-0 text-left text-xs text-n-700 hover:text-cortex-600"
+        className={`${ROW} bg-transparent text-n-800 hover:bg-n-50`}
       >
         <Icon
           name={author.kind === 'agent' ? 'bot' : 'sparkles'}
-          size={12}
+          size={14}
           color="var(--synapse-500)"
         />
         <span className="truncate">{author.kind === 'agent' ? author.title : 'Assistant'}</span>
@@ -113,20 +141,44 @@ export function ActorLine({
         data-path={person}
         title={stamp.by.raw}
         onClick={() => onOpenEntity(person)}
-        className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent p-0 text-left text-xs text-n-700 hover:text-cortex-600"
+        className={`${ROW} bg-transparent text-n-800 hover:bg-n-50`}
       >
-        <Icon name={icon} size={12} color="var(--n-500)" />
+        <Icon name={icon} size={14} color="var(--n-400)" />
         <span className="truncate">{author.label}</span>
         {whenTail}
       </button>
     );
   }
   return (
-    <div className="flex items-center gap-1.5 text-xs text-n-700" title={stamp.by.raw}>
-      <Icon name={icon} size={12} color="var(--n-500)" />
+    <div className={`${ROW} text-n-800`} title={stamp.by.raw}>
+      <Icon name={icon} size={14} color="var(--n-400)" />
       <span className="truncate">{author.label}</span>
       {whenTail}
     </div>
+  );
+}
+
+/**
+ * One resource as the Sources element draws it (M91.14): a web page is a
+ * link out, a page of this vault opens in the app through `onOpenEntity`,
+ * and anything else is its words (CV-16). Its own row of a Trace, so the
+ * element's link and focus rules hold.
+ */
+function ResourceLine({
+  row,
+  onOpenEntity,
+}: {
+  row: ResourceRow;
+  onOpenEntity: (path: string) => void;
+}) {
+  return (
+    <Trace>
+      <SourceLine
+        source={row.ref}
+        onOpenPath={onOpenEntity}
+        isVaultPath={(path) => path === row.page}
+      />
+    </Trace>
   );
 }
 
@@ -146,12 +198,7 @@ function SourceRow({
   // opens like one (M50.1) — it used to render as plain text. One rule for
   // this list and the body's citation chips (M51.5), so a source never opens
   // from one and not the other.
-  const target = sourceTarget(source.resource, entries);
-  const external = target !== null && 'external' in target;
-  const internal =
-    target !== null && 'internal' in target
-      ? (entries.find((e) => e.path === target.internal) ?? null)
-      : null;
+  const row = conceptSourceRow(source, entries);
   // Who wrote the source, in the app's nouns (M52.3) — a person by their
   // page's title, and that page one click away; the stamp in the tooltip.
   const author = source.author === null ? null : resolveAuthor(source.author, entries);
@@ -186,40 +233,21 @@ function SourceRow({
   }
 
   return (
-    <li className="flex gap-2 py-1.5">
-      <span className="mt-[2px] inline-flex h-[15px] min-w-[15px] flex-none items-center justify-center rounded-full bg-cortex-50 px-1 text-2xs font-semibold text-cortex-600 [font-family:var(--font-mono)]">
+    <li
+      data-testid="concept-source"
+      data-kind={row.ref.kind}
+      data-path={row.page ?? undefined}
+      className="flex gap-2 py-1"
+    >
+      {/* The number the body's citation pill shows (M51.5), drawn the same
+          way, so a [2] in the text finds its row here. */}
+      <span className="mt-0.5 inline-flex h-3.5 min-w-3.5 flex-none items-center justify-center rounded-full bg-cortex-50 px-[3px] text-2xs font-semibold text-cortex-600 tabular-nums">
         {index + 1}
       </span>
-      <span className="min-w-0 flex-1">
-        {external ? (
-          // An untitled link reads as the name its URL carries (M69.2), and
-          // the URL stays one hover away: the name is derived, never stored.
-          <a
-            href={source.resource}
-            target="_blank"
-            rel="noreferrer noopener"
-            title={source.resource}
-            className="block truncate text-xs text-cortex-600 underline decoration-cortex-200 underline-offset-2"
-          >
-            {source.title ?? linkLabel(source.resource)?.text ?? source.resource}
-          </a>
-        ) : internal !== null ? (
-          <button
-            type="button"
-            data-testid="concept-source"
-            data-path={internal.path}
-            onClick={() => onOpenEntity(internal.path)}
-            className="block max-w-full truncate border-0 bg-transparent p-0 text-left text-xs text-cortex-600 hover:underline"
-          >
-            {source.title ?? internal.title}
-          </button>
-        ) : (
-          // Not every resource is followable: OKF also allows a scope
-          // descriptor ("all queries in project X"), which has no link.
-          <span className="block text-xs text-n-700">{source.title ?? source.resource}</span>
-        )}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <ResourceLine row={row} onOpenEntity={onOpenEntity} />
         {(authorName !== null || signals.length > 0) && (
-          <span className="mt-0.5 block text-2xs leading-[15px] text-n-500">
+          <span className="block text-xs leading-4 text-n-500">
             {authorName !== null &&
               (person !== null ? (
                 <button
@@ -228,7 +256,7 @@ function SourceRow({
                   data-path={person}
                   title={source.author?.raw}
                   onClick={() => onOpenEntity(person)}
-                  className="border-0 bg-transparent p-0 text-2xs text-n-600 hover:text-cortex-600 hover:underline"
+                  className="bg-transparent p-0 text-n-600 decoration-n-300 underline-offset-2 hover:text-n-800 hover:underline"
                 >
                   {authorName}
                 </button>
@@ -241,7 +269,7 @@ function SourceRow({
             </span>
           </span>
         )}
-      </span>
+      </div>
     </li>
   );
 }
@@ -267,12 +295,11 @@ function AboutBlock({
   const [promoting, setPromoting] = useState<string | null>(null);
   if (concept.about.length === 0) return null;
   return (
-    <div className="mt-4">
-      <div className={LABEL}>About</div>
+    <Group label="About">
       {promoting !== null && (
         <NewRecordDialog defaultTitle={promoting} onClose={() => setPromoting(null)} />
       )}
-      <div className="mt-1.5 flex flex-col gap-1">
+      <div className={ROWS}>
         {concept.about.map((target) => {
           const entry = resolveTarget(target, entries);
           const style = typeStyle(entry?.type ?? null, schema);
@@ -283,23 +310,21 @@ function AboutBlock({
             // reads as ordinary text that happens not to be clickable — the
             // same treatment an unfollowable source gets above — rather than
             // a greyed-out broken-link glyph reporting damage. And it offers
-            // `+ Create page` here (M51), where the subject is met: the
-            // subject view that offered it has no row leading to it now.
+            // Create page here (M51), where the subject is met: the subject
+            // view that offered it has no row leading to it now.
             return (
-              <span
-                key={target}
-                data-testid="about-entity"
-                className="flex items-center gap-1.5 text-xs text-n-700"
-              >
-                <Icon name="circle-dashed" size={12} color="var(--n-500)" />
-                <span className="truncate">{target}</span>
+              <span key={target} data-testid="about-entity" className={`${ROW} text-n-600`}>
+                <Icon name="circle-dashed" size={14} color="var(--n-400)" />
+                <span className="min-w-0 truncate">{target}</span>
                 <button
                   type="button"
                   data-testid="promote-subject"
+                  title={`Write a page for ${target}`}
                   onClick={() => setPromoting(target)}
-                  className="ml-auto flex-none border-0 bg-transparent p-0 text-2xs text-n-500 hover:text-cortex-600"
+                  className="ml-auto flex flex-none items-center gap-1 bg-transparent p-0 text-xs text-n-400 hover:text-n-800"
                 >
-                  + Create page
+                  <Icon name="plus" size={12} />
+                  Create page
                 </button>
               </span>
             );
@@ -311,15 +336,15 @@ function AboutBlock({
               data-testid="about-entity"
               data-path={entry.path}
               onClick={() => onOpenEntity(entry.path)}
-              className="flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-xs text-cortex-600 hover:underline"
+              className={`${ROW} bg-transparent text-n-800 hover:bg-n-50`}
             >
-              <Icon name={style.icon} size={12} color={style.color ?? 'var(--n-500)'} />
+              <Icon name={style.icon} size={14} color={style.color ?? 'var(--n-500)'} />
               <span className="truncate">{entry.title}</span>
             </button>
           );
         })}
       </div>
-    </div>
+    </Group>
   );
 }
 
@@ -353,6 +378,8 @@ function RelationsBlock({
 
   if (edges.length === 0 && duplicates.length === 0) return null;
 
+  // The edge first, in a column of its own so the titles line up: "Replaced
+  // by" reads as the sentence it is, and stays the loudest word here.
   const row = (key: string, label: string, title: string, path: string, tone: 'warn' | 'plain') => (
     <button
       key={key}
@@ -361,23 +388,22 @@ function RelationsBlock({
       data-path={path}
       data-label={label}
       onClick={() => onOpenConcept(path)}
-      className="flex w-full min-w-0 items-start gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left hover:bg-n-50"
+      className={`${ROW} bg-transparent hover:bg-n-50`}
     >
       <span
-        className={`mt-px flex-none text-2xs font-medium uppercase tracking-[0.04em] ${
-          tone === 'warn' ? 'text-warn-600' : 'text-n-400'
+        className={`w-20 flex-none truncate text-xs ${
+          tone === 'warn' ? 'font-medium text-warn-600' : 'text-n-500'
         }`}
       >
         {label}
       </span>
-      <span className="min-w-0 flex-1 truncate text-xs text-cortex-600">{title}</span>
+      <span className="min-w-0 flex-1 truncate text-n-800">{title}</span>
     </button>
   );
 
   return (
-    <div className="mt-4" data-testid="concept-relations">
-      <div className={LABEL}>Related knowledge</div>
-      <div className="mt-1.5 flex flex-col gap-px">
+    <Group label="Related knowledge" testId="concept-relations">
+      <div className={ROWS}>
         {edges.map((edge) =>
           row(
             `${edge.kind}:${edge.direction}:${edge.concept.entry.path}`,
@@ -395,7 +421,7 @@ function RelationsBlock({
           row(`dup:${other.entry.path}`, 'Overlaps?', other.title, other.entry.path, 'plain'),
         )}
       </div>
-    </div>
+    </Group>
   );
 }
 
@@ -416,68 +442,66 @@ export function KnowledgePanel({
   chips?: BeliefChips | null;
   className?: string;
 }) {
-  // The Details tab of a concept page's side panel (M50.1). Its two acts and
+  const entries = useVaultStore((s) => s.entries);
+  // What the concept describes, read as its sources are: a web address links
+  // out only when it is http(s), and a vault page opens in the app (CV-16).
+  const resource = concept.resource === null ? null : resourceRow(concept.resource, null, entries);
+  // The Details panel of a concept page (M50.1). Its two acts and
   // its status moved to the review bar under the title in M51.3 — here is
   // the evidence behind them, a click away rather than a column wide.
   return (
     <section
       aria-label="Details"
       data-testid="knowledge-panel"
-      className={`flex flex-col px-1.5 pb-3 pt-1.5 ${className}`}
+      className={`flex flex-col ${className}`}
     >
       {/* The three axes, per facet. Kept apart from the review status in the
           bar, never folded into it: whether a person looked and what rests
           underneath are different questions, and a migrated concept somebody
           verified answers "yes" to the first and "nothing" to the second. */}
       {chips !== null && (
-        <div data-testid="belief-axes">
-          <div className={LABEL}>What this rests on</div>
-          <div className="mt-1.5">
-            <FacetChips chips={chips} />
-          </div>
-        </div>
+        <Group label="What this rests on" testId="belief-axes">
+          <FacetChips chips={chips} />
+        </Group>
       )}
 
       <AboutBlock concept={concept} onOpenEntity={onOpenEntity} />
 
       <RelationsBlock concept={concept} onOpenConcept={onOpenConcept} />
 
-      <div className="mt-4">
-        <div className={LABEL}>Written by</div>
-        <div className="mt-1.5">
-          {concept.generated !== null ? (
+      <Group label="Written by">
+        {concept.generated !== null ? (
+          <div className={ROWS}>
             <ActorLine stamp={concept.generated} today={today} onOpenEntity={onOpenEntity} />
-          ) : (
-            <span className="text-xs text-n-400">Not recorded</span>
-          )}
-        </div>
-      </div>
+          </div>
+        ) : (
+          <p className="py-[5px] text-ui text-n-400">Not recorded</p>
+        )}
+      </Group>
 
-      <div className="mt-4">
-        <div className={LABEL}>Verified by</div>
-        <div className="mt-1.5 flex flex-col gap-1">
-          {concept.verified.length > 0 ? (
-            // Multiple entries capture INDEPENDENT checks — a human sign-off
-            // and a nightly process are different claims, so both are shown.
-            concept.verified.map((stamp, i) => (
+      <Group label="Verified by">
+        {concept.verified.length > 0 ? (
+          // Multiple entries capture INDEPENDENT checks — a human sign-off
+          // and a nightly process are different claims, so both are shown.
+          <div className={ROWS}>
+            {concept.verified.map((stamp, i) => (
               <ActorLine key={i} stamp={stamp} today={today} onOpenEntity={onOpenEntity} />
-            ))
-          ) : concept.verifiedNotice !== null ? (
-            // M23.4: the review happened, the content moved on. Say so —
-            // never render a stale stamp, never pretend nobody reviewed it.
-            <span data-testid="verified-notice" className="text-xs text-n-600">
-              {concept.verifiedNotice}
-            </span>
-          ) : (
-            <span className="text-xs text-n-400">Nobody yet</span>
-          )}
-        </div>
-      </div>
+            ))}
+          </div>
+        ) : concept.verifiedNotice !== null ? (
+          // M23.4: the review happened, the content moved on. Say so —
+          // never render a stale stamp, never pretend nobody reviewed it.
+          <p data-testid="verified-notice" className="py-1 text-metadata text-n-600">
+            {concept.verifiedNotice}
+          </p>
+        ) : (
+          <p className="py-[5px] text-ui text-n-400">Nobody yet</p>
+        )}
+      </Group>
 
       {concept.sources.length > 0 && (
-        <div className="mt-4">
-          <div className={LABEL}>Sources</div>
-          <ul className="m-0 mt-1 list-none p-0">
+        <Group label="Sources">
+          <ul className="flex flex-col">
             {concept.sources.map((source, i) => (
               <SourceRow
                 key={source.id ?? i}
@@ -488,32 +512,26 @@ export function KnowledgePanel({
               />
             ))}
           </ul>
-        </div>
+        </Group>
       )}
 
+      {/* Words, not chips: the panel's values read as text. */}
       {concept.tags.length > 0 && (
-        <div className="mt-4">
-          <div className={LABEL}>Tags</div>
-          <div className="mt-1.5 flex flex-wrap gap-1">
+        <Group label="Tags" testId="concept-tags">
+          <p className="flex flex-wrap gap-x-2 py-1 text-ui text-n-700">
             {concept.tags.map((tag) => (
-              <Tag key={tag}>{tag}</Tag>
+              <span key={tag}>#{tag}</span>
             ))}
-          </div>
-        </div>
+          </p>
+        </Group>
       )}
 
-      {concept.resource !== null && (
-        <div className="mt-4">
-          <div className={LABEL}>Resource</div>
-          <a
-            href={concept.resource}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="mt-1.5 block break-all text-xs text-cortex-600 underline decoration-cortex-200 underline-offset-2"
-          >
-            {concept.resource}
-          </a>
-        </div>
+      {resource !== null && (
+        <Group label="Resource">
+          <div className="py-1">
+            <ResourceLine row={resource} onOpenEntity={onOpenEntity} />
+          </div>
+        </Group>
       )}
     </section>
   );

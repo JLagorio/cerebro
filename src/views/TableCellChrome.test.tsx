@@ -174,10 +174,10 @@ describe('TableView cell chrome at rest (M16.35)', () => {
     fireEvent.focus(grid, { target: grid });
     const after = rows()[0];
 
-    // The row's box is untouched by the reveal: the 36px default (`h-9`) is
+    // The row's box is untouched by the reveal: the 44px default (`h-11`) is
     // the same in both states. Only the fill and the cursor rule change, and
     // neither of those is a size.
-    expect(restBox).toContain('h-9');
+    expect(restBox).toContain('h-11');
     expect(boxClasses(after)).toEqual(restBox);
     // `visibility`, never `display: none` — the hidden glyph still occupies
     // its box, so the value beside it does not slide sideways on hover.

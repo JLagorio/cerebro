@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { conceptAskOf, sendAsk } from '@/agent/elements/decisionsAsks';
+import { Suggestion } from '@/components/ai/Suggestion';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { resolveAuthor } from '@/engine/authors';
@@ -16,11 +18,11 @@ import { FlagChip, ReviewChip } from '@/knowledge/ReviewChip';
 import { useConcepts } from '@/knowledge/useConcepts';
 import { useDecisions, usePendingCards } from '@/knowledge/usePendingCards';
 import { verifyConcept } from '@/lib/ipc';
-import { askedAbout, conceptAsk } from '@/lib/prompts';
 import { refusalText } from '@/lib/refusal';
 import { sha256Hex } from '@/lib/sha256';
 import { todayIso } from '@/lib/templates';
 import { ProposalCard } from '@/status/ProposalCard';
+import '@/status/review.css';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -28,7 +30,8 @@ import { useVaultStore } from '@/stores/vaultStore';
 /**
  * A concept's review, as one bar under its title (M51.3): where it stands,
  * who wrote it, what it rests on — and the two acts that follow, Verify and
- * asking an agent to revise it (or, once it is due, to recheck it).
+ * asking an agent to revise it (or, once it is due, to recheck it). The ask
+ * is a Suggestion (M91.14): it shows its label and sends its prompt.
  *
  * A replaced concept offers neither (M52.3). Verifying a claim something
  * newer already overrode is busywork, and asking to revise it edits the
@@ -70,7 +73,7 @@ export function ConceptReviewBar({
   const askAgent = useUiStore((s) => s.askAgent);
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   const setPanelOpen = useUiStore((s) => s.setConceptPanelOpen);
-  const setPanelTab = useUiStore((s) => s.setConceptPanelTab);
+  const setPanel = useUiStore((s) => s.setConceptPanel);
   const navigate = useNavStore((s) => s.navigate);
   const all = useConcepts();
   const [verifying, setVerifying] = useState(false);
@@ -123,8 +126,11 @@ export function ConceptReviewBar({
       }
     })();
   };
-  const act = conceptAsk({ path: concept.entry.path, title: concept.title, stale: concept.stale });
-  const ask = () => askAgent(act.text, concept.entry.path, askedAbout(act.label, concept.title));
+  const ask = conceptAskOf({
+    path: concept.entry.path,
+    title: concept.title,
+    stale: concept.stale,
+  });
   // A replaced concept carries no back-pointer of its own (M8.7: the
   // replacement holds `supersedes`), so what replaced it is looked up.
   const replacedBy = concept.supersededBy;
@@ -138,7 +144,7 @@ export function ConceptReviewBar({
   // list is the first sentence, a missing key the second.
   const sources = sourceCount(concept.entry);
   const openDetails = () => {
-    setPanelTab('details');
+    setPanel('details');
     setPanelOpen(true);
   };
 
@@ -279,15 +285,17 @@ export function ConceptReviewBar({
                 not move `stale_after` (it is the agent's), so Verify alone
                 leaves it due; elsewhere Verify leads and asking is the aside.
                 Neither leads while a proposal waits on this concept. */}
-            <Button
-              variant={concept.stale && !proposalWaits ? 'primary' : 'secondary'}
-              size="sm"
-              icon="sparkles"
-              testId={concept.stale ? 'recheck-concept' : 'revise-concept'}
-              onClick={ask}
+            <Suggestion
+              suggestion={ask.prompt}
+              icon={null}
+              data-testid={concept.stale ? 'recheck-concept' : 'revise-concept'}
+              data-lead={concept.stale && !proposalWaits ? '' : undefined}
+              onClick={sendAsk(ask, askAgent)}
+              className="cb-review-bar-ask"
             >
-              {act.label}
-            </Button>
+              <Icon name="sparkles" size={14} />
+              {ask.label}
+            </Suggestion>
             <Button
               variant={concept.stale || proposalWaits ? 'secondary' : 'primary'}
               size="sm"

@@ -426,4 +426,58 @@ describe('Popover re-measures when a host says its anchors moved', () => {
       Element.prototype.getBoundingClientRect = original;
     }
   });
+
+  it('positions a body portal and exposes usable bounds in cumulative CSS zoom coordinates', () => {
+    const original = Element.prototype.getBoundingClientRect;
+    const rootZoom = document.documentElement.style.zoom;
+    const bodyZoom = document.body.style.zoom;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    document.documentElement.style.zoom = '1.6';
+    document.body.style.zoom = '1.25';
+    // jsdom has neither CSS zoom layout nor its computed value. Supply the
+    // two browser-computed values alongside the already measured rectangles.
+    const computed = window.getComputedStyle.bind(window);
+    const computedSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((node, pseudo) => {
+      const style = computed(node, pseudo);
+      Object.defineProperty(style, 'zoom', {
+        configurable: true,
+        value: node === document.documentElement ? '1.6' : node === document.body ? '1.25' : '1',
+      });
+      return style;
+    });
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 900 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 600 });
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const box =
+        this.getAttribute('data-testid') === 'anchor'
+          ? { left: 700, top: 450, width: 160, height: 40 }
+          : { left: 0, top: 0, width: 200, height: 200 };
+      return {
+        ...box,
+        right: box.left + box.width,
+        bottom: box.top + box.height,
+        x: box.left,
+        y: box.top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+    try {
+      render(<Anchored />);
+      const panel = screen.getByLabelText('Panel');
+      // At 2x the 100x100 CSS panel flips above a low anchor and fits
+      // inside a 450x300 CSS viewport, retaining its 8px CSS edge.
+      expect(panel.parentElement!.style.left).toBe('342px');
+      expect(panel.parentElement!.style.top).toBe('121px');
+      expect(panel.style.getPropertyValue('--popover-available-width')).toBe('434px');
+      expect(panel.style.getPropertyValue('--popover-available-height')).toBe('284px');
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+      computedSpy.mockRestore();
+      document.documentElement.style.zoom = rootZoom;
+      document.body.style.zoom = bodyZoom;
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+    }
+  });
 });

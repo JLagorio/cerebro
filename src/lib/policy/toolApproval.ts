@@ -13,7 +13,15 @@
  * whether AskUserQuestion asks the person with a question card, and, since
  * M57.7, whether a run holds WebFetch and WebSearch, by the web ceiling, and,
  * since M60.8b, which vault folders (`hidden_paths`, the Trash) the CLI's own
- * readers and editors may not open. This module is its second interpreter (the critical.ts precedent): the same
+ * readers and editors may not open. Since M91.1 a run holds only the
+ * built-ins its plan admits (`tools`, its `--tools`), the subagent tool only
+ * where a gate sits (`needs_gate`), and ToolSearch, which only loads other
+ * tools (`loads_tools`), on every run. Since M91.2a the subagent tool reads
+ * its own ceiling, the Subagents switch (`delegate`), a record that narrows
+ * its tools without naming it is denied it (`narrowed_out`), and a run that
+ * holds it names the agent types it may start and the built-in ones its argv
+ * denies (`agent_types`). This module is its second
+ * interpreter (the critical.ts precedent): the same
  * strict load, refusal for refusal and in the same words, `plan` for a run,
  * and `hostAnswer` for one call. Nothing here restates a decision; the
  * parity is the shared goldens in `shared/policy/goldens-tool-approval/`,
@@ -27,7 +35,7 @@
  */
 
 import raw from '../../../shared/policy/tool-approval.v1.json';
-import { TOOLS, type ToolsManifest } from './tools';
+import { cliTool, TOOLS, type CliTool, type ToolsManifest } from './tools';
 
 export const TOOL_APPROVAL_PATH = 'shared/policy/tool-approval.v1.json';
 export const TOOL_APPROVAL_DIGEST_PATH = 'shared/policy/tool-approval.v1.sha256';
@@ -51,6 +59,13 @@ export const WEB_CEILINGS: readonly WebCeiling[] = ['off', 'on'];
 
 /** The axis the web family's grid is read by (M57.7). */
 export const WEB_AXIS = 'web';
+
+/** The Settings Subagents switch (M91.2a): off or on, two states. */
+export type DelegateCeiling = 'off' | 'on';
+export const DELEGATE_CEILINGS: readonly DelegateCeiling[] = ['off', 'on'];
+
+/** The axis the subagent tool's grid is read by (M91.2a). */
+export const DELEGATE_AXIS = 'delegate';
 
 /** `queue` (M57.4c) holds an unattended ask-first page write for Review: the
  * ask-first family's alone. */
@@ -83,10 +98,25 @@ export interface Card {
   answers: CardAnswer[];
 }
 
+/** What a narrowing makes of a tool it leaves out (M91.2a). */
+export type NarrowedOut = 'default' | 'deny';
+const NARROWED_OUT: readonly NarrowedOut[] = ['default', 'deny'];
+
 export interface Family {
   id: string;
   ceiling: string;
   needs_default_mode: boolean;
+  /** Only a run with a gate a person can answer holds these (M91.1): on any
+   * other run the decision is deny, whatever the cell says. Absent is
+   * false. */
+  needs_gate?: boolean;
+  /** Its tools only load other tools' schemas (M91.1, ToolSearch), so every
+   * run kind leaves them to the CLI. Absent is false. */
+  loads_tools?: boolean;
+  /** What becomes of its tools when a record narrows its run's tools and
+   * names none of them, by name or alias (M91.2a): `deny` whatever the cell
+   * says, or the narrowing's own rule. Absent is `default`. */
+  narrowed_out?: NarrowedOut;
   grid: Record<string, Record<string, Decision>>;
   card: Card | null;
   message: string | null;
@@ -98,6 +128,9 @@ export interface Messages {
   denied: string;
   unlisted: string;
   mode_mismatch: string;
+  /** The init gate's stop for a built-in the manifest has no row for
+   * (M91.1); `{tool}` is its name. */
+  unknown_tool: string;
   ask_first_unattended: string;
   ask_first_unapproved: string;
   ask_first_declined: string;
@@ -153,6 +186,15 @@ export interface HiddenPaths {
   tools: string[];
 }
 
+/** The agent types of a run that holds a tool the delegate ceiling reads
+ * (M91.2a): `builtin` is Claude Code's own, pinned to the types a 2.1.250
+ * init lists, which such a run's argv denies by name; `allowed` is
+ * Cerebro's own, `subagents.v1.json`'s presets, which it may start. */
+export interface AgentTypes {
+  builtin: string[];
+  allowed: string[];
+}
+
 export interface ToolApproval {
   format: number;
   artifact_version: number;
@@ -171,6 +213,8 @@ export interface ToolApproval {
   messages: Messages;
   ask_first: AskFirstBlock;
   queue_limits: QueueLimits;
+  /** What a run holding the subagent tool may start (M91.2a). */
+  agent_types: AgentTypes;
 }
 
 // --- The shape serde reads on the Rust side ---------------------------------
@@ -184,11 +228,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** A struct with exactly `keys`: an unknown field fails, as
- * `deny_unknown_fields` does, and so does a missing one. */
-function exactly(value: unknown, where: string, keys: readonly string[]): Record<string, unknown> {
+ * `deny_unknown_fields` does, and so does a missing one, but for the
+ * `optional` keys serde defaults when they are absent. */
+function exactly(
+  value: unknown,
+  where: string,
+  keys: readonly string[],
+  optional: readonly string[] = [],
+): Record<string, unknown> {
   if (!isRecord(value)) throw new Error(`${TOOL_APPROVAL_PATH}: ${where} must be an object`);
   for (const key of Object.keys(value)) {
-    if (!keys.includes(key)) throw new Error(`${TOOL_APPROVAL_PATH}: unknown field \`${key}\``);
+    if (!keys.includes(key) && !optional.includes(key)) {
+      throw new Error(`${TOOL_APPROVAL_PATH}: unknown field \`${key}\``);
+    }
   }
   for (const key of keys) {
     if (!(key in value)) throw new Error(`${TOOL_APPROVAL_PATH}: missing field \`${key}\``);
@@ -215,6 +267,7 @@ function checkShape(value: unknown): ToolApproval {
     'messages',
     'ask_first',
     'queue_limits',
+    'agent_types',
   ]);
   const decision = (word: unknown) => {
     if (typeof word !== 'string' || !DECISIONS.includes(word as Decision)) {
@@ -242,14 +295,23 @@ function checkShape(value: unknown): ToolApproval {
   }
   if (!Array.isArray(top.families)) throw new Error(`${TOOL_APPROVAL_PATH}: families`);
   for (const family of top.families) {
-    const row = exactly(family, 'a family', [
-      'id',
-      'ceiling',
-      'needs_default_mode',
-      'grid',
-      'card',
-      'message',
-    ]);
+    const row = exactly(
+      family,
+      'a family',
+      ['id', 'ceiling', 'needs_default_mode', 'grid', 'card', 'message'],
+      ['needs_gate', 'loads_tools', 'narrowed_out'],
+    );
+    for (const flag of ['needs_gate', 'loads_tools'] as const) {
+      if (row[flag] !== undefined && typeof row[flag] !== 'boolean') {
+        throw new Error(`${TOOL_APPROVAL_PATH}: invalid type: ${flag} must be true or false`);
+      }
+    }
+    if (row.narrowed_out !== undefined) {
+      if (typeof row.narrowed_out !== 'string') {
+        throw new Error(`${TOOL_APPROVAL_PATH}: expected value: narrowed_out must be a word`);
+      }
+      variant(row.narrowed_out, NARROWED_OUT);
+    }
     if (!isRecord(row.grid)) throw new Error(`${TOOL_APPROVAL_PATH}: grid`);
     for (const cells of Object.values(row.grid)) {
       if (!isRecord(cells)) throw new Error(`${TOOL_APPROVAL_PATH}: grid`);
@@ -269,6 +331,7 @@ function checkShape(value: unknown): ToolApproval {
     'denied',
     'unlisted',
     'mode_mismatch',
+    'unknown_tool',
     'ask_first_unattended',
     'ask_first_unapproved',
     'ask_first_declined',
@@ -291,6 +354,15 @@ function checkShape(value: unknown): ToolApproval {
   if (!Array.isArray(block.cases)) throw new Error(`${TOOL_APPROVAL_PATH}: cases`);
   for (const one of block.cases) {
     variant(exactly(one, 'an ask_first case', ['why', 'held', 'value', 'on', 'warn']).held, HELD);
+  }
+  const types = exactly(top.agent_types, 'agent_types', ['builtin', 'allowed']);
+  for (const key of ['builtin', 'allowed'] as const) {
+    const list = types[key];
+    if (!Array.isArray(list) || !list.every((item) => typeof item === 'string')) {
+      throw new Error(
+        `${TOOL_APPROVAL_PATH}: invalid type: agent_types.${key} must be a list of names`,
+      );
+    }
   }
   return value as ToolApproval;
 }
@@ -369,10 +441,36 @@ function checkFamily(table: ToolApproval, family: Family, manifest: ToolsManifes
   if (writes && family.ceiling !== 'shell') {
     throw refusal(subject, 'ceiling', 'must be shell: the family holds a tool that writes');
   }
-  if (Object.values(family.grid.internal).some((d) => d !== 'deny' && d !== 'refuse')) {
+  const cells = Object.values(family.grid).flatMap((row) => Object.values(row));
+  if (family.loads_tools === true) {
+    // M91.1: a loader runs nothing itself, and an internal run's deferred
+    // Cerebro tools sit behind it, so every run keeps it.
+    if (cells.some((d) => d !== 'cli')) {
+      throw refusal(
+        subject,
+        'grid',
+        'must leave every run kind to the CLI: its tools only load other tools',
+      );
+    }
+    // needs_gate would deny it wherever no gate sits, whatever the cells say,
+    // and narrowed_out deny wherever a record leaves it out (M91.2a).
+    if (family.needs_gate === true) {
+      throw refusal(
+        subject,
+        'needs_gate',
+        'must be false: a family that loads tools stays with every run',
+      );
+    }
+    if (family.narrowed_out === 'deny') {
+      throw refusal(
+        subject,
+        'narrowed_out',
+        'must be default: a family that loads tools stays with every run',
+      );
+    }
+  } else if (Object.values(family.grid.internal).some((d) => d !== 'deny' && d !== 'refuse')) {
     throw refusal(subject, 'grid.internal', 'may only deny or refuse');
   }
-  const cells = Object.values(family.grid).flatMap((row) => Object.values(row));
   // M57.4c: only a page write can wait in Review.
   if (family.id !== table.ask_first.family && cells.includes('queue')) {
     throw refusal(subject, 'grid', 'may queue only on the ask_first family');
@@ -428,16 +526,17 @@ function validate(table: ToolApproval, manifest: ToolsManifest): void {
   }
   const ceilingKeys = sortedKeys(table.ceilings);
   if (
-    !same(ceilingKeys, [ASK_FIRST_AXIS, 'none', 'shell', WEB_AXIS]) ||
+    !same(ceilingKeys, [ASK_FIRST_AXIS, DELEGATE_AXIS, 'none', 'shell', WEB_AXIS]) ||
     !same(table.ceilings.none, ['any']) ||
     !same(table.ceilings.shell, SHELL_CEILINGS) ||
     !same(table.ceilings[ASK_FIRST_AXIS], ['yes', 'no']) ||
-    !same(table.ceilings[WEB_AXIS], WEB_CEILINGS)
+    !same(table.ceilings[WEB_AXIS], WEB_CEILINGS) ||
+    !same(table.ceilings[DELEGATE_AXIS], DELEGATE_CEILINGS)
   ) {
     throw refusal(
       'table',
       'ceilings',
-      'must be none: [any], shell: [off, ask, on], ask_first: [yes, no] and web: [off, on]',
+      'must be none: [any], shell: [off, ask, on], ask_first: [yes, no], web: [off, on] and delegate: [off, on]',
     );
   }
   if (
@@ -503,6 +602,43 @@ function validate(table: ToolApproval, manifest: ToolsManifest): void {
     if (table.queue_limits[field] === 0) throw refusal('queue_limits', field, 'must be at least 1');
   }
   checkAskFirst(table, manifest);
+  checkAgentTypes(table);
+}
+
+/** An agent type's name as argv carries it inside `Agent(<name>)` and an
+ * init lists it (M91.2a): letters, digits, colons, dots, dashes and
+ * underscores, at least one, so no comma, parenthesis or space can split the
+ * rule or end it early. `subagents.v1.json`'s presets are held to it too. */
+export function isAgentType(name: string): boolean {
+  return /^[A-Za-z0-9:._-]+$/.test(name);
+}
+
+/** The agent types (M91.2a), as tool_approval.rs's `check_agent_types`: each
+ * one a name argv carries whole, none twice in its list, and none allowed
+ * that is one of Claude Code's built-in types, which argv denies. */
+function checkAgentTypes(table: ToolApproval): void {
+  const types = table.agent_types;
+  for (const [field, names] of [
+    ['agent_types.builtin', types.builtin],
+    ['agent_types.allowed', types.allowed],
+  ] as const) {
+    names.forEach((name, at) => {
+      const problem = !isAgentType(name)
+        ? 'must be one or more letters, digits, colons, dots, dashes or underscores'
+        : names.slice(0, at).includes(name)
+          ? 'is named twice'
+          : null;
+      if (problem !== null) throw refusal(`agent type ${JSON.stringify(name)}`, field, problem);
+    });
+  }
+  const builtin = types.allowed.find((name) => types.builtin.includes(name));
+  if (builtin !== undefined) {
+    throw refusal(
+      `agent type ${JSON.stringify(builtin)}`,
+      'agent_types.allowed',
+      "is one of Claude Code's built-in types, which argv denies",
+    );
+  }
 }
 
 /** The hidden folders (M60.8b), as tool_approval.rs's `check_hidden_paths`:
@@ -637,6 +773,24 @@ export function parseWebCeiling(value: unknown): WebCeiling {
   return value === true || value === 'on' ? 'on' : 'off';
 }
 
+/** A stored or wire Subagents switch (M91.2a), as tool_approval.rs's
+ * `DelegateCeiling::read`: "on" exactly is on, and anything else, a boolean
+ * included, is off. */
+export function parseDelegateCeiling(value: unknown): DelegateCeiling {
+  return value === 'on' ? 'on' : 'off';
+}
+
+/** A run's Subagents switch, as tool_approval.rs's `DelegateCeiling::of`
+ * reads a request's: absent is on where a person watches, the switch's
+ * default, and off everywhere else. Only a run with a gate can hold the
+ * subagent tool anyway (`needs_gate`). */
+export function delegateCeilingOf(
+  delegate: DelegateCeiling | null | undefined,
+  attended: boolean,
+): DelegateCeiling {
+  return delegate ?? (attended ? 'on' : 'off');
+}
+
 /** What an agent's run may hold: `declared` is whether its record declares
  * the shell (`tools: shell`), null for a run with no record. No record runs
  * at the ceiling; a record that does not declare it gets off; one that does
@@ -665,6 +819,10 @@ export interface ApprovalInput {
    * Read scope leaves it alone: a read limit bounds vault folders, not the
    * outside world. */
   web?: WebCeiling;
+  /** The Subagents switch (M91.2a). Absent reads as `delegateCeilingOf` reads
+   * a request's: on for an attended run, off for any other. Read scope leaves
+   * it alone too: a subagent reads under its run's own grant. */
+  delegate?: DelegateCeiling;
   /** Does the run's agent ask before its page writes (M57.4)? Absent reads
    * as no, as for a run no agent answers (the prompt grant's plan). */
   askFirst?: boolean;
@@ -682,11 +840,20 @@ export interface ToolDecision {
 /** What a run's argv and its gate take from the table, in manifest order. */
 export interface RunApproval {
   permission_mode: string;
+  /** `--tools` (M91.1): the only built-ins the run holds, each CLI row the
+   * plan allows, asks for or leaves to the CLI, by its name. */
+  tools: string[];
   allowed: string[];
   disallowed: string[];
   asks: string[];
   refused: string[];
   withheld: string[];
+  /** Claude Code's built-in agent types, which a run holding the subagent
+   * tool denies by name (M91.2a); empty on a run without it. */
+  denied_agent_types: string[];
+  /** The agent types a run holding the subagent tool may start, Cerebro's
+   * own (M91.2a); empty on a run without it. */
+  allowed_agent_types: string[];
   decisions: ToolDecision[];
 }
 
@@ -695,26 +862,53 @@ export function matcherOf(approval: RunApproval): string[] {
   return [...approval.asks, ...approval.refused];
 }
 
+/** Does the narrowing name the CLI row `tool`, by its name or an alias
+ * (M91.1)? A record written for `Task` still names the subagent row. */
+function namesRow(narrowing: (tool: string) => boolean, tool: CliTool): boolean {
+  return narrowing(tool.name) || (tool.aliases ?? []).some((alias) => narrowing(alias));
+}
+
+/** What a narrowing makes of `decision`, a tool of `family` it leaves out,
+ * as tool_approval.rs's `narrowed_out`: deny where the family's
+ * `narrowed_out` says so (M91.2a); else an ask or a queue is denied, so is an
+ * allow acceptEdits would approve, any other allow is left to the CLI, and
+ * the rest stands. */
+function narrowedOut(family: Family, decision: Decision): Decision {
+  if (family.narrowed_out === 'deny') return 'deny';
+  if (decision === 'ask' || decision === 'queue') return 'deny';
+  if (decision === 'allow') return family.needs_default_mode ? 'deny' : 'cli';
+  return decision;
+}
+
 /** The plan for one run, in tool_approval.rs's order: the cell, the read
- * scope, the narrowing, then what a run that cannot ask does instead. The
+ * scope, the narrowing (a family whose `narrowed_out` is deny denies what it
+ * leaves out, M91.2a), then what a run that cannot ask does instead, a
+ * family that needs a gate denied among it (M91.1). Allow, ask and cli fill
+ * `tools`, the run's `--tools` (M91.1), and a run that holds a tool the
+ * delegate ceiling reads names the agent types (M91.2a). The
  * manifest's confirmable rows follow the CLI's by the same steps, read by
  * `askFirst` (M57.4); only their asks reach the lists, a queued one rides
  * neither (M57.4c), a narrowed-out one is denied rather than queued, and a
  * run that cannot ask withholds nothing for them. An attended or unattended
  * run's `disallowed` ends with the hidden folders' path rules (M60.8b); an
- * internal run's needs none, since it is denied every CLI tool. */
+ * internal run's needs none, since it holds no CLI tool that opens a file. */
 export function plan(input: ApprovalInput, table: ToolApproval = TOOL_APPROVAL): RunApproval {
   const canAsk = table.run_kinds.find((kind) => kind.id === input.kind)?.can_ask ?? false;
   const approval: RunApproval = {
     permission_mode: '',
+    tools: [],
     allowed: [],
     disallowed: [],
     asks: [],
     refused: [],
     withheld: [],
+    denied_agent_types: [],
+    allowed_agent_types: [],
     decisions: [],
   };
+  const delegate = delegateCeilingOf(input.delegate, input.kind === 'attended');
   let defaultMode = false;
+  let startsAgents = false;
   for (const tool of TOOLS.cli_tools) {
     const family = table.families.find((row) => row.id === tool.family);
     if (family === undefined) continue;
@@ -723,22 +917,27 @@ export function plan(input: ApprovalInput, table: ToolApproval = TOOL_APPROVAL):
         ? input.shell
         : family.ceiling === WEB_AXIS
           ? (input.web ?? 'off')
-          : 'any';
+          : family.ceiling === DELEGATE_AXIS
+            ? delegate
+            : 'any';
     let decision = family.grid[input.kind][value];
     if (input.readScoped && table.read_scope[family.id] !== undefined) {
       decision = table.read_scope[family.id];
     }
-    if (input.narrowing !== null && !input.narrowing(tool.name)) {
-      if (decision === 'ask' || decision === 'queue') decision = 'deny';
-      else if (decision === 'allow') decision = family.needs_default_mode ? 'deny' : 'cli';
+    if (input.narrowing !== null && !namesRow(input.narrowing, tool)) {
+      decision = narrowedOut(family, decision);
     }
     if (!canAsk) {
       if (decision === 'ask') {
         approval.withheld.push(tool.name);
         decision = 'deny';
-      } else if (decision === 'refuse') {
+      } else if (decision === 'refuse' || family.needs_gate === true) {
         decision = 'deny';
       }
+    }
+    if (decision === 'allow' || decision === 'ask' || decision === 'cli') {
+      approval.tools.push(tool.name);
+      startsAgents ||= family.ceiling === DELEGATE_AXIS;
     }
     if (decision === 'allow') approval.allowed.push(tool.name);
     if (decision === 'deny') approval.disallowed.push(tool.name);
@@ -748,6 +947,10 @@ export function plan(input: ApprovalInput, table: ToolApproval = TOOL_APPROVAL):
     }
     if (decision === 'refuse') approval.refused.push(tool.name);
     approval.decisions.push({ tool: tool.name, family: family.id, decision });
+  }
+  if (startsAgents) {
+    approval.denied_agent_types = [...table.agent_types.builtin];
+    approval.allowed_agent_types = [...table.agent_types.allowed];
   }
   if (input.kind === 'unattended') approval.disallowed.push(...unattendedPathRules(table));
   if (input.kind !== 'internal') approval.disallowed.push(...hiddenPathRules(table));
@@ -761,10 +964,14 @@ export function plan(input: ApprovalInput, table: ToolApproval = TOOL_APPROVAL):
         decision = table.read_scope[askFamily.id];
       }
       if (input.narrowing !== null && !input.narrowing(tool)) {
-        if (decision === 'ask' || decision === 'queue') decision = 'deny';
-        else if (decision === 'allow') decision = askFamily.needs_default_mode ? 'deny' : 'cli';
+        decision = narrowedOut(askFamily, decision);
       }
-      if (!canAsk && (decision === 'ask' || decision === 'refuse')) decision = 'deny';
+      if (
+        !canAsk &&
+        (askFamily.needs_gate === true || decision === 'ask' || decision === 'refuse')
+      ) {
+        decision = 'deny';
+      }
       if (decision === 'ask') {
         approval.asks.push(tool);
         defaultMode ||= askFamily.needs_default_mode;
@@ -790,7 +997,7 @@ export type HostAnswer =
  * holds it as text, else the whole input as compact JSON; cut at
  * SUBJECT_CHARS characters, ending in an ellipsis when cut. */
 export function subjectOf(tool: string, input: unknown): string {
-  const field = TOOLS.cli_tools.find((row) => row.name === tool)?.subject ?? null;
+  const field = cliTool(tool)?.subject ?? null;
   const named = field !== null && isRecord(input) ? input[field] : undefined;
   const text = typeof named === 'string' ? named : (JSON.stringify(input ?? null) ?? 'null');
   const chars = [...text];
@@ -819,7 +1026,9 @@ export function hostAnswer(
   input: unknown,
   table: ToolApproval = TOOL_APPROVAL,
 ): HostAnswer {
-  const row = approval.decisions.find((d) => d.tool === tool);
+  // A built-in answers by its row's name or an alias (M91.1).
+  const name = cliTool(tool)?.name ?? tool;
+  const row = approval.decisions.find((d) => d.tool === name);
   const decision = row?.decision ?? table.unlisted.decision;
   const message = table.families.find((family) => family.id === row?.family)?.message ?? null;
   switch (decision) {
@@ -881,7 +1090,9 @@ export function confirmableDecision(
   if (family === undefined) return 'deny';
   const decision = family.grid[kind][askFirst ? 'yes' : 'no'];
   const canAsk = table.run_kinds.find((row) => row.id === kind)?.can_ask ?? false;
-  return !canAsk && (decision === 'ask' || decision === 'refuse') ? 'deny' : decision;
+  return !canAsk && (family.needs_gate === true || decision === 'ask' || decision === 'refuse')
+    ? 'deny'
+    : decision;
 }
 
 /** What the model reads when the person declines a write (Rust's

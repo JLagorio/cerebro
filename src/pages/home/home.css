@@ -14,8 +14,8 @@
 
 .cb-home-lane-meta {
   color: var(--text-meta);
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
 }
 
 .cb-home-lane-door {
@@ -49,7 +49,7 @@
 
 .cb-home-row-link,
 .cb-home-task {
-  min-height: 44px;
+  min-height: 48px;
   padding: var(--sp-2);
 }
 

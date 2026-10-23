@@ -51,8 +51,6 @@ export interface ChainBuilderProps {
   blockedHint?: string;
 }
 
-const ADD_SENTINEL = '__add__';
-
 export function ChainBuilder({
   label,
   icon,
@@ -183,7 +181,8 @@ export function ChainBuilder({
                     size="sm"
                     value={row.value}
                     options={row.options}
-                    onChange={(e) => onChange(i, e.target.value)}
+                    ariaLabel={`Level ${i + 1}`}
+                    onChange={(value) => onChange(i, value)}
                     width="100%"
                   />
                   {row.dir !== undefined && onToggleDir !== undefined && (
@@ -212,13 +211,15 @@ export function ChainBuilder({
                 <span className="w-8 flex-none text-2xs text-n-400">
                   {rows.length === 0 ? 'By' : 'then'}
                 </span>
+                {/* Holds no value of its own: a pick adds a level, and the
+                    trigger goes back to saying what it is for. */}
                 <Select
                   size="sm"
-                  value={ADD_SENTINEL}
-                  options={[{ value: ADD_SENTINEL, label: addLabel }, ...addOptions]}
-                  onChange={(e) => {
-                    if (e.target.value !== ADD_SENTINEL) onAdd(e.target.value);
-                  }}
+                  value=""
+                  placeholder={addLabel}
+                  ariaLabel={addLabel}
+                  options={addOptions}
+                  onChange={onAdd}
                   width="100%"
                 />
               </div>

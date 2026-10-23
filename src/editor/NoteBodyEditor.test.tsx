@@ -82,6 +82,62 @@ describe('NoteBodyEditor', () => {
     await waitFor(() => expect(screen.getByText('Body line here.')).toBeTruthy());
   });
 
+  it('keeps metadata mounted while the live title projection changes and undoes', async () => {
+    const ready = vi.fn<(info: EditorReadyInfo) => void>();
+    render(
+      <NoteBodyEditor
+        path={PAGE}
+        pageTitle="Test page"
+        debounceMs={60_000}
+        pageChrome={<input aria-label="Unfinished metadata" defaultValue="" />}
+        onReady={ready}
+      />,
+    );
+    const field = screen.getByRole('textbox', { name: 'Unfinished metadata' });
+    fireEvent.change(field, { target: { value: 'Still drafting' } });
+    await waitFor(() => expect(ready).toHaveBeenCalled(), DISK_ROUND_TRIP);
+    const owner = ready.mock.calls[0][0];
+    expect(screen.getAllByRole('heading', { name: 'Test page' })).toHaveLength(1);
+    expect(screen.queryByRole('textbox', { name: 'Document title' })).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Unfinished metadata' })).toBe(field);
+    expect((field as HTMLInputElement).value).toBe('Still drafting');
+    act(() => owner.editor.updateBlock(owner.editor.document[0], { type: 'paragraph' }));
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: 'Document title' })).toBeTruthy(),
+    );
+    expect(screen.queryByRole('heading', { name: 'Test page' })).toBeNull();
+    act(() => owner.editor.undo());
+    await waitFor(() =>
+      expect(screen.queryByRole('textbox', { name: 'Document title' })).toBeNull(),
+    );
+    expect(screen.getAllByRole('heading', { name: 'Test page' })).toHaveLength(1);
+    expect(screen.getByRole('textbox', { name: 'Unfinished metadata' })).toBe(field);
+    expect((field as HTMLInputElement).value).toBe('Still drafting');
+    expect(fs().get(PAGE)).toBe('---\ntype: Doc\n---\n\n# Test page\n\nBody line here.\n');
+  });
+
+  it('preserves an in-progress filename composition before reconciling an outside title', async () => {
+    fs().set(PAGE, 'A body without a heading.\n');
+    const ready = vi.fn<(info: EditorReadyInfo) => void>();
+    render(
+      <NoteBodyEditor path={PAGE} pageTitle="Test page" onReady={ready} debounceMs={60_000} />,
+    );
+    await waitFor(() => expect(ready).toHaveBeenCalled(), DISK_ROUND_TRIP);
+    const fallback = screen.getByRole('textbox', { name: 'Document title' });
+    fireEvent.compositionStart(fallback);
+    fireEvent.change(fallback, { target: { value: '正在写标题' } });
+    expect(fs().get(PAGE)).toBe('A body without a heading.\n');
+    await act(async () => {
+      fs().set(PAGE, '# Outside title\n\nA body without a heading.\n');
+      await announceExternalWrites([PAGE], () => Promise.resolve());
+    });
+    await waitFor(() => expect(ready.mock.calls[0][0].serialize()).toContain('正在写标题'));
+    expect(ready.mock.calls[0][0].serialize()).toContain('A body without a heading.');
+    await act(() => flushOpenPages());
+    expect(fs().get(PAGE)).toContain('正在写标题');
+    expect(fs().get(PAGE)).toContain('Outside title');
+  });
+
   it('persists a debounced edit and preserves the frontmatter', async () => {
     const { editor } = await renderReady(PAGE);
     const last = editor.document[editor.document.length - 1];
@@ -354,6 +410,28 @@ describe('NoteBodyEditor when the file changes underneath it', () => {
     await waitFor(() => expect(fs().get(PAGE)).toContain('Second, typed by me.'), DISK_ROUND_TRIP);
     expect(fs().get(PAGE)).toContain('# Renamed page');
     expect(fs().get(PAGE)).not.toContain('# Test page');
+  });
+
+  it('settles a dirty body before a table rename and retains both in the same editor', async () => {
+    const tracked = await renderTracking(60_000);
+    const info = tracked.seen[0];
+    const before = ids(info);
+    await typeOver(info, 'Second line.', 'My unsaved paragraph.');
+    expect(fs().get(PAGE)).not.toContain('My unsaved paragraph.');
+    await act(async () => {
+      expect(await useVaultStore.getState().setTitle(PAGE, 'Renamed from table')).toBe(true);
+    });
+    await waitFor(() => expect(textOf(info)).toContain('# Renamed from table'));
+    expect(fs().get(PAGE)).toContain('My unsaved paragraph.');
+    expect(fs().get(PAGE)).toContain('# Renamed from table');
+    expect(tracked.seen).toHaveLength(1);
+    keptAll(info, before);
+    expect(screen.queryByTestId('merge-choices')).toBeNull();
+    await typeOver(info, 'First line.', 'A later paragraph.');
+    await act(() => flushOpenPages());
+    expect(fs().get(PAGE)).toContain('# Renamed from table');
+    expect(fs().get(PAGE)).toContain('My unsaved paragraph.');
+    expect(fs().get(PAGE)).toContain('A later paragraph.');
   });
 
   it('never re-applies its own save', async () => {

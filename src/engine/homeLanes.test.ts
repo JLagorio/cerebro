@@ -109,18 +109,18 @@ describe('Home lane builders', () => {
       ).rows,
     ).toHaveLength(3);
   });
-  it('uses Inbox membership and period, including unknown capture times honestly', () => {
+  it('uses Inbox membership, keeping old captures and unknown capture times honestly', () => {
     const entries = [
       makeEntry({ path: 'a.md', createdAt: '2026-07-28T00:00:00Z' }),
       makeEntry({ path: 'old.md' }),
       makeEntry({ path: 'unknown.md', createdAt: '' }),
       makeEntry({ path: 'typed.md', type: 'Person' }),
     ];
-    expect(captureRows(entries, 'week', now).rows.map((row) => row.path)).toEqual([
-      'a.md',
-      'unknown.md',
-    ]);
-    expect(captureRows(entries, 'all', now).rows).toHaveLength(3);
+    // No period narrows the lane: it holds the Inbox's whole queue.
+    const data = captureRows(entries);
+    expect(data.rows.map((row) => row.path)).toEqual(['a.md', 'old.md', 'unknown.md']);
+    expect(data.rows[2].at).toBe('');
+    expect(data.line).toBe('3 captures to organize');
   });
   it('admits declared upcoming dates, excludes deadlines and finished records, and reports bad dates', () => {
     const type = makeEntry({

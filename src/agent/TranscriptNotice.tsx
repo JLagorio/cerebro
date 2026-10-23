@@ -1,3 +1,5 @@
+import { useArrival } from '@/components/ui/motion';
+
 /**
  * Why a thread's transcript could not be read back (M56.3).
  *
@@ -14,6 +16,9 @@ export interface TranscriptNoticeProps {
   detail?: string;
   /** The thread still shows Cerebro's cached copy. */
   cached: boolean;
+  /** The read that failed lands after the thread is on screen: the notice
+   *  comes in (components/ui/motion.ts). */
+  arrive?: boolean;
 }
 
 function words(
@@ -44,7 +49,14 @@ function words(
   }
 }
 
-export function TranscriptNotice({ reason, retentionDays, detail, cached }: TranscriptNoticeProps) {
+export function TranscriptNotice({
+  reason,
+  retentionDays,
+  detail,
+  cached,
+  arrive = false,
+}: TranscriptNoticeProps) {
+  const arrival = useArrival(arrive);
   const { title, body } = words(reason, retentionDays, detail);
   return (
     <div
@@ -52,6 +64,7 @@ export function TranscriptNotice({ reason, retentionDays, detail, cached }: Tran
       data-reason={reason}
       role="status"
       className="flex flex-col gap-0.5 rounded-lg border border-n-200 bg-n-25 px-3 py-2 text-xs leading-[17px] text-n-600"
+      {...arrival}
     >
       <span className="font-medium text-n-800">{title}</span>
       {body !== null && <span>{body}</span>}

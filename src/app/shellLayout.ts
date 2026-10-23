@@ -53,6 +53,12 @@ import {
 /** M71's persistent application rail, beside the contextual sidebar. */
 export const SIDEBAR_RAIL_WIDTH = 54;
 
+/** The flush shell has no outside gutter or horizontal border. Keep the
+ * frame budget explicit: every available pixel belongs to navigation or content. */
+export const SHELL_FRAME_GUTTER = 0;
+export const SHELL_FRAME_BORDER = 0;
+const SHELL_FRAME_CHROME = SHELL_FRAME_GUTTER + SHELL_FRAME_BORDER;
+
 /** The parked assistant's tab on the canvas row's right edge (M52). */
 export const PARKED_TAB_WIDTH = 32;
 
@@ -64,21 +70,21 @@ const TWO_PANEL_ROW = CANVAS_MIN_WIDTH + 2 * RIGHT_PANEL_MIN_WIDTH;
  * one per way the sidebar can be drawn beside them: at its floor, as its
  * rail, and collapsed by the user (rail only).
  *
- * 54 + 180 + 400 + 2 × 320 = 1274 for a sidebar column. The 240px sidebar in M15's
- * "~20px canvas at 1280" complaint is its DEFAULT width, not its floor; at the
- * floor the arithmetic clears 1280 with room to spare.
+ * 54 + 180 + 400 + 2 × 320 = 1274 for a sidebar column. The flush shell
+ * reserves no outside frame, so all remaining width belongs to content.
  *
  * `SHELL_CLASSES` spells these out as literal Tailwind classes, because the
  * class scanner reads source text and cannot see an interpolated number;
  * shellLayout.test.ts holds the two to the same values.
  */
-export const SHELL_TWO_PANEL_MIN = SIDEBAR_RAIL_WIDTH + SIDEBAR_WIDTH_MIN + TWO_PANEL_ROW;
-export const SHELL_RAIL_TWO_PANEL_MIN = SIDEBAR_RAIL_WIDTH + TWO_PANEL_ROW;
-export const SHELL_BARE_TWO_PANEL_MIN = SIDEBAR_RAIL_WIDTH + TWO_PANEL_ROW;
+export const SHELL_TWO_PANEL_MIN =
+  SIDEBAR_RAIL_WIDTH + SIDEBAR_WIDTH_MIN + TWO_PANEL_ROW + SHELL_FRAME_CHROME;
+export const SHELL_RAIL_TWO_PANEL_MIN = SIDEBAR_RAIL_WIDTH + TWO_PANEL_ROW + SHELL_FRAME_CHROME;
+export const SHELL_BARE_TWO_PANEL_MIN = SIDEBAR_RAIL_WIDTH + TWO_PANEL_ROW + SHELL_FRAME_CHROME;
 
 /**
  * The window width at which a sidebar column still fits beside a record and
- * the parked assistant's tab: 54 + 180 + 400 + 320 + 32 = 986 (M52). Tauri lets
+ * the parked assistant's tab: 54 + 180 + 400 + 320 + 32 = 986. Tauri lets
  * the window go to 900, and in between the tab was the one thing left to
  * give — a 20px sliver of it at 920, nothing at 900 — so under this the
  * sidebar takes its rail instead.
@@ -88,7 +94,8 @@ export const SHELL_PARKED_COLUMN_MIN =
   SIDEBAR_WIDTH_MIN +
   CANVAS_MIN_WIDTH +
   RIGHT_PANEL_MIN_WIDTH +
-  PARKED_TAB_WIDTH;
+  PARKED_TAB_WIDTH +
+  SHELL_FRAME_CHROME;
 
 /** Which of those widths the window clears. */
 export interface ShellRoom {
@@ -138,14 +145,14 @@ export interface ShellState {
  * M17.2's rule stands: when only one fits the RECORD wins — something just
  * asked for it to be seen, and that is the newer intent. What changed is how
  * soon it comes to that. The assistant used to park the moment the window
- * was under 1274, silently. Now the sidebar steps down to its rail first,
+ * was under its two-panel floor, silently. Now the sidebar steps down to its rail first,
  * which keeps both panels down to 1094, and below that the assistant parks
  * behind a tab that says so.
  *
  * The rail is taken only when it keeps something on screen. Below 1094 it
- * no longer keeps the assistant, so the sidebar keeps its column — opening
- * the assistant or a record there never costs the sidebar anything — unless
- * the rail was already showing as the window shrank past 1094
+ * no longer keeps the assistant, so the sidebar keeps its column at the
+ * largest width that fits beside the parked tab, without changing the
+ * stored preference — unless the rail was already showing as the window shrank past 1094
  * (`railLatched`), when growing it back into a column would be a jump the
  * other way. Under 986 the column does not leave room for the parked tab,
  * and the rail is what keeps THAT on screen, so it is taken again. Like a
@@ -310,11 +317,11 @@ export function dragCeiling(room: number | null, max: number): number {
  * shortfall out of the sidebar, so the sidebar gives before the assistant
  * does, and before a page's reading column does. Capped at what the window
  * can hold beside a minimum sidebar, because a floor wider than that would
- * push the whole right edge out of the window, which is the bug this exists
- * to prevent.
+ * push the whole right edge out of the window. The flush frame reserves no
+ * extra width outside the content; the viewport cap counts navigation once.
  */
 export function mainColumnFloor(panels: FloorPanels): string {
-  return `min(${mainColumnFloorPx(panels)}px, 100vw - ${SIDEBAR_WIDTH_MIN + SIDEBAR_RAIL_WIDTH}px)`;
+  return `min(${mainColumnFloorPx(panels) + SHELL_FRAME_BORDER}px, 100vw - ${SIDEBAR_WIDTH_MIN + SIDEBAR_RAIL_WIDTH + SHELL_FRAME_GUTTER}px)`;
 }
 
 /** What the main column's floor counts. */
@@ -330,7 +337,7 @@ export interface FloorPanels {
   panes?: number;
 }
 
-/** `mainColumnFloor`'s uncapped sum, in px. */
+/** The uncapped content floor. */
 export function mainColumnFloorPx({
   detail,
   assistant,
@@ -361,7 +368,7 @@ export function sidebarCeiling(window: number | null, floor: number): number {
   if (window === null) return SIDEBAR_WIDTH_MAX;
   return Math.max(
     SIDEBAR_WIDTH_MIN,
-    Math.min(SIDEBAR_WIDTH_MAX, window - SIDEBAR_RAIL_WIDTH - floor),
+    Math.min(SIDEBAR_WIDTH_MAX, window - SIDEBAR_RAIL_WIDTH - floor - SHELL_FRAME_CHROME),
   );
 }
 
@@ -371,8 +378,8 @@ export interface PageAsides {
   pages: boolean;
   /**
    * The side panel fits beside the reading column. When it does not, an open
-   * one folds away and the page's panel toggle opens it as a drawer over the
-   * column instead.
+   * one folds away, and a panel's toolbar button opens it as a drawer over
+   * the column instead.
    */
   sideFits: boolean;
 }
@@ -382,7 +389,8 @@ export interface PageAsides {
  *
  * Inside a page, when the canvas runs short, things give way in this order:
  *   1. the reading column, down to DOC_COLUMN_MIN_WIDTH (flex does it);
- *   2. the side panel and the Pages panel, down to their floors (flex again);
+ *   2. the side panel and the Pages panel, down to their floors (the page's
+ *      frame and flex);
  *   3. the Pages panel folds to its floating button;
  *   4. the side panel folds, and opens on request as a drawer over the column.
  *
@@ -390,28 +398,54 @@ export interface PageAsides {
  * whenever it did not fit would cover most of every page on a narrow window.
  * A fold is DERIVED, like the parked assistant — it never writes the stored
  * open flags, so the panels come back as they were the moment there is room.
- * `row` is the page body's measured width; `null` (unmeasured) draws what is
- * stored.
+ * `row` is the page frame's measured width, its side panel's column
+ * included; `null` (unmeasured) draws what is stored.
  */
 export function pageAsides({
   row,
   pages,
   side,
+  sideFloor = DOC_PANEL_MIN_WIDTH,
 }: {
   row: number | null;
   /** The Pages panel is open (and the doc has pages). */
   pages: boolean;
   /** The side panel is open. */
   side: boolean;
+  /** The side panel's floor: DOC_PANEL_MIN_WIDTH, or wider when the toolbar
+   *  actions it opens under need more (components/pageFrame.css). */
+  sideFloor?: number;
 }): PageAsides {
   if (row === null) return { pages, sideFits: true };
   const fits = (withPages: boolean, withSide: boolean) =>
-    row - (withPages ? DOC_PAGES_MIN_WIDTH : 0) - (withSide ? DOC_PANEL_MIN_WIDTH : 0) >=
+    row - (withPages ? DOC_PAGES_MIN_WIDTH : 0) - (withSide ? sideFloor : 0) >=
     DOC_COLUMN_MIN_WIDTH;
   // Whether the side panel fits is asked with the Pages panel folded, because
   // the Pages panel folds first to make it so.
   const sideFits = fits(false, true);
   return { pages: pages && fits(true, side && sideFits), sideFits };
+}
+
+/**
+ * The canvas conversation's details (M92.1): a rail of a fixed 300px beside
+ * its transcript. It docks while the canvas frame holds a 600px reading
+ * column, the rail and a 30px gutter either side of the column, so a 1440 or
+ * 1280 window docks it beside a default sidebar; under that it folds away,
+ * and opens on request as a drawer over the transcript — `pageAsides`' fold,
+ * for the conversation. CSS draws which (agent/chat.css, the `chat-canvas`
+ * container), in the same layout pass as the frame's width; the panel asks
+ * `chatRailDocks` of the width it measured, for what CSS cannot say: that a
+ * folded rail is inert, what its toggle does, and where focus goes.
+ */
+export const CHAT_RAIL_WIDTH = 300;
+const CHAT_READING_MIN = 600;
+const CHAT_RAIL_GUTTER = 30;
+export const CHAT_RAIL_DOCK_MIN = CHAT_READING_MIN + CHAT_RAIL_WIDTH + 2 * CHAT_RAIL_GUTTER;
+
+/** Whether the rail docks in a canvas frame `width` px wide; null while the
+ *  frame is unmeasured, or has no box to measure. */
+export function chatRailDocks(width: number | null): boolean | null {
+  return width === null || width <= 0 ? null : width >= CHAT_RAIL_DOCK_MIN;
 }
 
 /** One reading column never yields; extra panes reserve a tab strip. */

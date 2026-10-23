@@ -7,6 +7,7 @@ import { useCommands } from '@/lib/keys/useKeys';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { CREATE_ROWS, availableRows } from './createCatalog';
+import { revealTheme } from './shellMotion';
 import { createContext, useLauncherStore } from '@/stores/launcherStore';
 
 /** ⌘K: the palette. */
@@ -17,7 +18,21 @@ function openPalette(): void {
 /** ⌘J: the assistant, a companion to whatever surface you are on (M6). */
 function toggleAssistant(): void {
   const ui = useUiStore.getState();
-  ui.setAiPanelOpen(!ui.aiPanelOpen);
+  if (!ui.aiPanelOpen || ui.aiPanelMinimized || ui.aiPanelPresentation !== 'floating') {
+    ui.openAssistantFloating();
+  } else {
+    ui.setAiPanelMinimized(true);
+  }
+}
+
+/**
+ * ⌥⌘R, the conversation's details (M92.1): from outside the canvas, the
+ * conversation opens in it with its rail shown; in it, the rail shows or
+ * hides. The panel answers the ask, since only it knows whether its rail
+ * docks or opens as a drawer.
+ */
+function toggleConversationDetails(): void {
+  useUiStore.getState().toggleChatRail();
 }
 
 /**
@@ -51,7 +66,11 @@ function toggleTheme(): void {
   const ui = useUiStore.getState();
   const systemDark =
     typeof window.matchMedia === 'function' && window.matchMedia(DARK_QUERY).matches;
-  ui.setThemeMode(resolveTheme(ui.themeMode, systemDark) === 'dark' ? 'light' : 'dark');
+  // Drawn from the rail's theme button, as a press on it is (shellMotion).
+  revealTheme(
+    resolveTheme(ui.themeMode, systemDark) === 'dark' ? 'light' : 'dark',
+    document.querySelector('[data-testid="app-rail"] [aria-label^="Theme:"]'),
+  );
 }
 
 /** M15: nav history existed in the store with no way to reach it. */
@@ -66,6 +85,7 @@ function forward(): void {
 const GENERAL = [
   { id: 'palette.open', run: openPalette },
   { id: 'assistant.toggle', run: toggleAssistant },
+  { id: 'assistant.rail', run: toggleConversationDetails },
   { id: 'capture.new', run: newCapture },
   { id: 'theme.toggle', run: toggleTheme },
   { id: 'nav.back', run: back },

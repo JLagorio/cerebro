@@ -1,12 +1,14 @@
-import { clientReach } from '@/engine/clientAccess';
+import { clientReach, type ClientReach } from '@/engine/clientAccess';
 import { CLIENT_ACTOR_PREFIX } from '@/engine/authors';
 import { GOVERNED_TYPES } from '@/engine/agentAccess';
 import { useClientAccessStore } from '@/stores/clientAccessStore';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
+import { Icon } from '@/components/ui/Icon';
 import {
   accessLines,
   pageAccess,
+  summaryShort,
   summaryWords,
   type AccessRow,
   type Reach,
@@ -23,43 +25,77 @@ const WRITE_ATTR: Record<Reach, string> = {
   none: 'no',
 };
 
-function AccessRowView({ row }: { row: AccessRow }) {
-  const open = useOpenPath();
-  const { status, reasons } = accessLines(row);
-  const path = row.path;
+/** A quiet disclosure's chevron: right when folded, down when open. */
+function Chevron({ open }: { open: boolean }) {
   return (
-    <li
-      data-testid="page-access-row"
-      data-actor={row.actor}
-      data-panel={row.panel ? 'yes' : undefined}
-      data-write={WRITE_ATTR[row.write]}
-      data-read={row.read ? 'yes' : 'no'}
-      data-unattended={row.runsUnattended ? 'yes' : 'no'}
-      className="flex flex-col gap-0.5 rounded-md px-1.5 py-1.5"
-    >
-      <div className="flex min-w-0 items-baseline gap-2">
-        {path !== null && !row.panel ? (
+    <Icon
+      name="chevron-right"
+      size={14}
+      className={`flex-none text-n-400 motion-move ${open ? 'rotate-90' : ''}`}
+    />
+  );
+}
+
+/**
+ * One line per agent or app (owner, 2026-10-18): its name, which opens it
+ * when it has a page, and what it can do here at the line's end. Pressing
+ * that shows the reasons, which stay in the DOM while folded.
+ */
+function AccessLine({
+  title,
+  status,
+  reasons,
+  onOpen,
+  facts,
+}: {
+  title: string;
+  status: string;
+  reasons: readonly string[];
+  /** Opens its page; without one the name is only a name. */
+  onOpen?: () => void;
+  /** The row's `data-*` attributes: what it can reach, for whoever reads them. */
+  facts: Record<string, string | undefined>;
+}) {
+  const [why, setWhy] = useState(false);
+  const reasonsId = useId();
+  const name = 'min-w-0 max-w-[60%] flex-none truncate text-ui text-n-800';
+  return (
+    <li data-testid="page-access-row" {...facts}>
+      <div className="-mx-2 flex min-h-7 min-w-0 items-center gap-2 rounded-md px-2 hover:bg-n-50">
+        {onOpen !== undefined ? (
           <button
             type="button"
             data-testid="page-access-agent"
-            onClick={() => open(path)}
-            className="min-w-0 truncate border-0 bg-transparent p-0 text-left text-sm font-medium text-n-800 hover:underline"
+            onClick={onOpen}
+            className={`${name} bg-transparent p-0 text-left decoration-n-300 underline-offset-2 hover:underline`}
           >
-            {row.title}
+            {title}
           </button>
         ) : (
-          <span className="min-w-0 truncate text-sm font-medium text-n-800">{row.title}</span>
+          <span className={name}>{title}</span>
         )}
-        <span data-testid="page-access-status" className="flex-none text-xs text-n-600">
-          {status}
-        </span>
+        <button
+          type="button"
+          data-testid="page-access-why"
+          aria-expanded={why}
+          aria-controls={reasonsId}
+          aria-label={`${title}: ${status}`}
+          title={why ? 'Hide why' : 'Show why'}
+          onClick={() => setWhy((v) => !v)}
+          className="ml-auto flex min-w-0 items-center gap-1 bg-transparent p-0 text-xs text-n-500 hover:text-n-800"
+        >
+          <span data-testid="page-access-status" className="min-w-0 truncate">
+            {status}
+          </span>
+          <Chevron open={why} />
+        </button>
       </div>
-      <ul className="m-0 flex list-none flex-col gap-px p-0">
+      <ul id={reasonsId} hidden={!why} className="flex flex-col gap-0.5 pb-1.5 pt-0.5">
         {reasons.map((reason) => (
           <li
             key={reason}
             data-testid="page-access-reason"
-            className="text-2xs leading-[15px] text-n-500"
+            className="text-xs leading-4 text-n-500"
           >
             {reason}
           </li>
@@ -69,21 +105,75 @@ function AccessRowView({ row }: { row: AccessRow }) {
   );
 }
 
+function AgentLine({ row }: { row: AccessRow }) {
+  const open = useOpenPath();
+  const { status, reasons } = accessLines(row);
+  const path = row.path;
+  return (
+    <AccessLine
+      title={row.title}
+      status={status}
+      reasons={reasons}
+      onOpen={path !== null && !row.panel ? () => open(path) : undefined}
+      facts={{
+        'data-actor': row.actor,
+        'data-panel': row.panel ? 'yes' : undefined,
+        'data-write': WRITE_ATTR[row.write],
+        'data-read': row.read ? 'yes' : 'no',
+        'data-unattended': row.runsUnattended ? 'yes' : 'no',
+      }}
+    />
+  );
+}
+
+/** An app's token, said in an agent's words, so the two lists read alike. */
+function clientStatus(row: ClientReach): string {
+  if (row.write) return 'Can change it';
+  return row.read ? 'Can read it' : "Can't reach it";
+}
+
+/** The page's access rows, as both the section and its header read them. */
+function usePageAccess(entry: Entry) {
+  const entries = useVaultStore((s) => s.entries);
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const shell = useUiStore((s) => s.agentShell);
+  const delegate = useUiStore((s) => (s.agentDelegate ? 'on' : 'off'));
+  const panelAgent = useUiStore((s) =>
+    vaultPath === null ? null : (s.panelAgents[vaultPath] ?? null),
+  );
+  return useMemo(
+    () => pageAccess({ entries, path: entry.path, type: entry.type, shell, delegate, panelAgent }),
+    [entries, entry.path, entry.type, shell, delegate, panelAgent],
+  );
+}
+
 /**
- * Who can change this page (M58.6), on the Info tab: the assistant panel and
- * every agent, each with what it can reach here and why, derived by
- * engine/agentAccess from the tool manifest, the tool-approval table and the
- * record's own axes. Rows that can't change the page fold away.
+ * What the Access section holds, said on its header, folded or open: how
+ * many agents can change the page. The rule behind it is its tooltip.
+ */
+export function AccessSummary({ entry }: { entry: Entry }) {
+  const access = usePageAccess(entry);
+  return (
+    <span
+      data-testid="page-access-summary"
+      title={`${summaryWords(access)} You can always change this page. An agent can only as its grant allows.`}
+    >
+      {summaryShort(access)}
+    </span>
+  );
+}
+
+/**
+ * Who can change this page (M58.6), the inspector's Access section, which
+ * names it: the assistant panel and every agent, each with what it can reach
+ * here and why, derived by engine/agentAccess from the tool manifest, the
+ * tool-approval table and the record's own axes. A row is one line, its
+ * reasons folded under it; rows that can't change the page fold away too.
  *
  * Token reach is read from runtime metadata and has its own unavailable state.
  */
 export function PageAccess({ entry }: { entry: Entry }) {
-  const entries = useVaultStore((s) => s.entries);
   const vaultPath = useVaultStore((s) => s.vaultPath);
-  const shell = useUiStore((s) => s.agentShell);
-  const panelAgent = useUiStore((s) =>
-    vaultPath === null ? null : (s.panelAgents[vaultPath] ?? null),
-  );
   const [showOthers, setShowOthers] = useState(false);
   const clients = useClientAccessStore();
   useEffect(() => {
@@ -99,90 +189,83 @@ export function PageAccess({ entry }: { entry: Entry }) {
       : [];
   const writers = clientRows.filter((row) => row.write);
 
-  const access = useMemo(
-    () => pageAccess({ entries, path: entry.path, type: entry.type, shell, panelAgent }),
-    [entries, entry.path, entry.type, shell, panelAgent],
-  );
+  const access = usePageAccess(entry);
   const reaching = access.rows.filter((row) => row.write !== 'none');
   const others = access.rows.filter((row) => row.write === 'none');
 
   return (
-    <section data-testid="page-access" className="mt-3 border-t border-n-100 px-1.5 pt-2">
-      <h3 className="m-0 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
-        Who can change this page
-      </h3>
-      <p className="m-0 mt-1 text-xs text-n-600">
-        You can always change this page. An agent can only as its grant allows.
-      </p>
-      <p data-testid="page-access-summary" className="m-0 mt-1 text-xs font-medium text-n-800">
-        {summaryWords(access)}
-      </p>
+    <div data-testid="page-access">
       {reaching.length > 0 && (
-        <ul className="m-0 mt-1 flex list-none flex-col gap-px p-0">
+        <ul className="flex flex-col gap-px">
           {reaching.map((row) => (
-            <AccessRowView key={row.panel ? 'panel' : row.actor} row={row} />
+            <AgentLine key={row.panel ? 'panel' : row.actor} row={row} />
           ))}
         </ul>
       )}
       {others.length > 0 && (
-        <div data-testid="page-access-others" className="mt-1">
+        <div data-testid="page-access-others">
           <button
             type="button"
             data-testid="page-access-others-toggle"
             aria-expanded={showOthers}
             onClick={() => setShowOthers((v) => !v)}
-            className="border-0 bg-transparent px-1.5 py-1 text-xs text-n-500 hover:text-n-800"
+            className="-mx-2 flex min-h-7 w-[calc(100%+16px)] items-center gap-1 rounded-md bg-transparent px-2 text-left text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
           >
-            {showOthers ? 'Hide' : `${others.length} more can't change it`}
+            <Chevron open={showOthers} />
+            {`${others.length} more can't change it`}
           </button>
           {showOthers && (
-            <ul className="m-0 flex list-none flex-col gap-px p-0">
+            <ul className="flex flex-col gap-px">
               {others.map((row) => (
-                <AccessRowView key={row.panel ? 'panel' : row.actor} row={row} />
+                <AgentLine key={row.panel ? 'panel' : row.actor} row={row} />
               ))}
             </ul>
           )}
         </div>
       )}
-      <div data-testid="page-client-access" className="mt-2">
+      {/* Other apps, last: one quiet line when none can change the page,
+          their rows when some hold a token. Connector tools are never
+          counted, which the line's tooltip says rather than a footnote. */}
+      <div
+        data-testid="page-client-access"
+        title="Connector tools act outside the vault’s checks, so they are not counted here."
+        className="mt-1 text-xs leading-4 text-n-400"
+      >
         {clients.vault !== vaultPath ||
         clients.tokensStatus === 'loading' ||
         clients.tokensStatus === 'idle' ? (
-          <p className="text-xs text-n-500">Reading other apps…</p>
+          <p className="py-1.5">Reading other apps…</p>
         ) : clients.tokensStatus === 'error' ? (
-          <p data-testid="section-unavailable" className="text-xs text-n-500">
-            Couldn't read which other apps have tokens.
+          <p data-testid="section-unavailable" className="py-1.5">
+            Couldn&rsquo;t read which other apps have tokens.
           </p>
         ) : (
           <>
-            <p className="text-xs text-n-600">
+            <p className="py-1.5">
               {writers.length
-                ? `Other apps that can change this page: ${writers.map((row) => row.token.name).join(', ')}.`
-                : 'No other app can change this page.'}
+                ? `Other apps that can change it: ${writers.map((row) => row.token.name).join(', ')}`
+                : 'No other app can change it'}
             </p>
-            <ul className="m-0 list-none p-0">
-              {clientRows.map((row) => (
-                <li
-                  key={row.token.tokenId}
-                  data-testid="page-access-row"
-                  data-actor={`${CLIENT_ACTOR_PREFIX}${row.token.slug}`}
-                  data-write={row.write ? 'yes' : 'no'}
-                  data-read={row.read ? 'yes' : 'no'}
-                  className="px-1.5 py-1.5"
-                >
-                  <span className="text-sm font-medium text-n-800">{row.token.name}</span>
-                  <p data-testid="page-access-reason" className="m-0 text-2xs text-n-500">
-                    {row.reason}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            {clientRows.length > 0 && (
+              <ul className="flex flex-col gap-px">
+                {clientRows.map((row) => (
+                  <AccessLine
+                    key={row.token.tokenId}
+                    title={row.token.name}
+                    status={clientStatus(row)}
+                    reasons={[row.reason]}
+                    facts={{
+                      'data-actor': `${CLIENT_ACTOR_PREFIX}${row.token.slug}`,
+                      'data-write': row.write ? 'yes' : 'no',
+                      'data-read': row.read ? 'yes' : 'no',
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
           </>
         )}
       </div>
-      <p className="m-0 mt-2 text-2xs text-n-400">
-        Connector tools act outside the vault&rsquo;s checks, so they are not counted here.
-      </p>
-    </section>
+    </div>
   );
 }

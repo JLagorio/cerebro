@@ -1,0 +1,229 @@
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   The trace steps (M91.9a): Chain of Thought, Reasoning, Tool, Task,
+   Subagent, Terminal, Test Results and Stack Trace, drawn on Trace and Code
+   Block and the DS tokens. Each adds only what a step needs beyond a line:
+   the words under it, the detail it opens onto, the frames and the cases.
+   Unlayered like the app's other surface stylesheets; the motion is the
+   foundation's (trace.css, foundation.css), so nothing here takes time. */
+
+/* A step that does not open: its line, and what its caller adds under it. */
+.cb-ai-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  width: 100%;
+  min-width: 0;
+}
+
+/* A step's line, and the words a stopped turn or a hook left it with, or what
+   a running subagent is doing, under its title. The second line hangs from
+   the title, past the 16px icon and its gap. */
+.cb-ai-step-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-05);
+  max-width: 100%;
+  min-width: 0;
+}
+.cb-ai-step-note {
+  padding-inline-start: var(--sp-6);
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: break-word;
+}
+/* The line's body: the title, then what follows it (a server chip, a type
+   badge, the counts and times) as one group. Where the line cannot hold
+   both, as in the 380px panel, the group wraps under the title, hung from
+   it, so the title, which says what the step was asked to do, is never cut
+   down to make room for its facts. */
+.cb-ai-step-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-step-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--sp-2);
+  min-width: 0;
+}
+/* An indicator after the title is drawn closer to it (trace.css). */
+.cb-ai-step-facts > .cb-ai-trace-icon:first-child {
+  margin-left: calc(var(--sp-1) * -1);
+}
+/* With a second line, the icon and the chevron stay level with the first:
+   each takes the line's 20px height and centres its 16px glyph in it. */
+.cb-ai-step-head > .cb-ai-trace-line {
+  align-items: flex-start;
+}
+.cb-ai-step-head > .cb-ai-trace-line > .cb-ai-trace-icon,
+.cb-ai-trace-trigger:has(> .cb-ai-step-head) > .cb-ai-trace-chevron {
+  height: var(--lh-ui);
+}
+.cb-ai-trace-trigger:has(> .cb-ai-step-head) {
+  align-items: flex-start;
+}
+
+/* A caller's own lines under a step's line hang from its title too; under a
+   trigger they keep the step's gap. */
+.cb-ai-step-extra {
+  min-width: 0;
+  padding-inline-start: var(--sp-6);
+}
+.cb-ai-trace-trigger + .cb-ai-step-extra {
+  margin-top: var(--sp-1);
+}
+
+/* A line that is a button of its own — a stack frame that opens its file, a
+   hand-off that opens its run — keeps a line's ink and takes the row's ring,
+   as a trigger does (trace.css). */
+.cb-ai-step-link {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+}
+.cb-ai-step-link:focus-visible {
+  box-shadow: var(--ring);
+}
+
+/* What a step opens onto: its blocks, one under another. */
+.cb-ai-step-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+/* Long output scrolls inside its block (shadcn's `max-h-64`). */
+.cb-ai-step-code {
+  max-height: 16rem;
+}
+.cb-ai-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.cb-ai-step-quiet {
+  margin: 0;
+  color: var(--text-meta);
+}
+
+/* Reasoning keeps the model's line breaks. */
+.cb-ai-reasoning-text {
+  white-space: pre-wrap;
+}
+
+/* Subagent: what kind it is and which model ran it, and what it found. */
+.cb-ai-subagent-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.cb-ai-subagent-result {
+  margin: 0;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+/* A hand-off's refusal: its first lines under the line; the detail holds the
+   whole of it. The clamp clips at its own box, so no sliver of a fourth line
+   shows. */
+.cb-ai-handoff-refusal {
+  display: -webkit-box;
+  margin: 0;
+  padding-inline-start: var(--sp-6);
+  overflow: hidden;
+  color: var(--danger-700);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.cb-ai-handoff-refusal[hidden] {
+  display: none;
+}
+
+/* Terminal: the command as typed, then its output; stderr is ruled off and in
+   danger ink, so it reads as the other stream without its label. */
+.cb-ai-terminal-command {
+  color: var(--text-primary);
+  font-weight: var(--w-medium);
+}
+/* The prompt is drawn, not typed: a copied selection leaves it behind. */
+.cb-ai-terminal-prompt {
+  color: var(--text-meta);
+  user-select: none;
+}
+.cb-ai-terminal-note {
+  color: var(--text-meta);
+  font-family: var(--font-ui);
+}
+.cb-ai-terminal-stderr {
+  margin-inline-start: calc(var(--sp-3) * -1);
+  padding-inline-start: calc(var(--sp-3) - 2px);
+  border-inline-start: 2px solid var(--danger-200);
+  color: var(--danger-700);
+}
+.cb-ai-terminal-marker {
+  color: var(--warn-700);
+}
+
+/* Test Results: the run's totals, and the note when the failures it counted
+   are not all still in the output. */
+.cb-ai-test-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.cb-ai-test-cut {
+  margin: 0;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+
+/* Stack Trace: the runtime's and the libraries' frames, as printed, in a
+   sunken block that scrolls sideways rather than wrap a path. */
+.cb-ai-stack-frames {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: var(--sp-3);
+  overflow-x: auto;
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  color: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  list-style: none;
+}
+.cb-ai-stack-frames > li {
+  white-space: pre;
+}
+
+/* A row of chips — the hosts a search found — and a file's name, which a
+   step's chip sets in the mono face. */
+.cb-ai-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.cb-ai-mono {
+  font-family: var(--font-mono);
+}

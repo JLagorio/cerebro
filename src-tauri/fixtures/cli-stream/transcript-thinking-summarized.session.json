@@ -1,0 +1,177 @@
+[
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "synthetic": "hand-shaped from Claude Code 2.1.250's measured shapes (M91.3a), not recorded: synthetic ids, and M91.R's live recording replaces it; reasoning shown",
+    "timestamp": "2026-10-22T12:00:00.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000009100",
+    "content": "Is the launch note ready to share?"
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-10-22T12:00:00.002Z",
+    "sessionId": "00000000-0000-4000-8000-000000009100"
+  },
+  {
+    "parentUuid": null,
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000009100003",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "Is the launch note ready to share?"
+    },
+    "permissionMode": "default",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000009100002",
+    "timestamp": "2026-10-22T12:00:00.005Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009100",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009100002",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009101",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The person asks whether the launch note is ready to share. I should read it before I answer.",
+          "signature": "sig-9101"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009101",
+    "uuid": "00000000-0000-4000-8000-000009100101",
+    "timestamp": "2026-10-22T12:00:02.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009100",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009100101",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009101",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009101",
+          "name": "mcp__cerebro__get_note",
+          "input": {
+            "path": "projects/launch.md"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009101",
+    "uuid": "00000000-0000-4000-8000-000009100102",
+    "timestamp": "2026-10-22T12:00:02.400Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009100",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009100102",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009101",
+          "type": "tool_result",
+          "content": "# Launch\n\nStatus: ready for review.\nPress list: still open."
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000009100103",
+    "timestamp": "2026-10-22T12:00:03.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009100",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009100103",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009102",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "It is ready for review, but the press list is still open, so it is not ready to share yet.",
+          "signature": "sig-9102"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009102",
+    "uuid": "00000000-0000-4000-8000-000009100104",
+    "timestamp": "2026-10-22T12:00:04.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009100",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009100104",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009102",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Almost: the launch note is ready for review, but its press list is still open."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009102",
+    "uuid": "00000000-0000-4000-8000-000009100105",
+    "timestamp": "2026-10-22T12:00:04.300Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009100",
+    "version": "2.1.250"
+  },
+  {
+    "type": "last-prompt",
+    "lastPrompt": "Is the launch note ready to share?",
+    "leafUuid": "00000000-0000-4000-8000-000009100105",
+    "sessionId": "00000000-0000-4000-8000-000000009100"
+  }
+]

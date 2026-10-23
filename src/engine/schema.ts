@@ -27,6 +27,7 @@ import {
   computeRollup,
   formatNumber,
   formatTimestamp,
+  plainText,
   rollupCalcMeta,
 } from './properties';
 import {
@@ -676,8 +677,8 @@ export function buildSchema(entries: Entry[]): Schema {
       // yet to adopt. Fall through to the raw reading rather than blanking it.
     }
 
-    // text and undeclared fields
-    const display = Array.isArray(raw) ? raw.map(String).join(', ') : String(raw);
+    // text and undeclared fields; a map reads as its keys and values.
+    const display = plainText(raw);
     return { def, raw, display, color: null, ghost: false };
   }
 

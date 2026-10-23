@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Select } from '@/components/ui/Select';
 import {
@@ -66,6 +66,16 @@ export function RepeatEditor({
     String(base.byMonth[0] ?? Number(anchor?.start.slice(5, 7) ?? 1)),
   );
   const [customTouched, setCustomTouched] = useState(false);
+  // The custom section's own onChange hears its inputs. A Select is a button
+  // and sends no change event, so each one marks the draft touched itself —
+  // otherwise Done would save the rule the picked unit or ending replaced.
+  const touch = (apply: (value: string) => void) => (value: string) => {
+    setCustomTouched(true);
+    apply(value);
+  };
+  const patternId = useId();
+  const monthId = useId();
+  const endsId = useId();
   const [ends, setEnds] = useState(
     base.count !== null ? 'count' : base.until !== null ? 'until' : 'never',
   );
@@ -154,11 +164,14 @@ export function RepeatEditor({
           </p>
         ) : (
           <>
-            <label className="flex flex-col gap-1 text-xs text-n-600">
-              Pattern
+            <div className="flex flex-col gap-1">
+              <label htmlFor={patternId} className="text-xs text-n-600">
+                Pattern
+              </label>
               <Select
+                id={patternId}
                 value={choice}
-                onChange={(e) => setChoice(e.target.value)}
+                onChange={setChoice}
                 width="100%"
                 testId="repeat-pattern"
                 options={[
@@ -170,7 +183,7 @@ export function RepeatEditor({
                   { value: CUSTOM, label: 'Custom…' },
                 ]}
               />
-            </label>
+            </div>
             {choice === CUSTOM && (
               <div
                 className="flex flex-col gap-3"
@@ -194,7 +207,7 @@ export function RepeatEditor({
                     ariaLabel="Repeat unit"
                     value={freq}
                     options={frequencies}
-                    onChange={(e) => setFreq(e.target.value as RepeatFrequency)}
+                    onChange={touch((value) => setFreq(value as RepeatFrequency))}
                     width={140}
                   />
                 </div>
@@ -223,9 +236,12 @@ export function RepeatEditor({
                 {(freq === 'MONTHLY' || freq === 'YEARLY') && (
                   <>
                     {freq === 'YEARLY' && (
-                      <label className="flex flex-col gap-1 text-xs text-n-600">
-                        Month
+                      <div className="flex flex-col gap-1">
+                        <label htmlFor={monthId} className="text-xs text-n-600">
+                          Month
+                        </label>
                         <Select
+                          id={monthId}
                           ariaLabel="Repeat month"
                           value={month}
                           options={Array.from({ length: 12 }, (_, i) => ({
@@ -235,9 +251,9 @@ export function RepeatEditor({
                               timeZone: 'UTC',
                             }).format(new Date(Date.UTC(2000, i, 1))),
                           }))}
-                          onChange={(e) => setMonth(e.target.value)}
+                          onChange={touch(setMonth)}
                         />
-                      </label>
+                      </div>
                     )}
                     <Select
                       ariaLabel="Monthly pattern"
@@ -246,7 +262,7 @@ export function RepeatEditor({
                         { value: 'day', label: 'Day of month' },
                         { value: 'weekday', label: 'Nth weekday' },
                       ]}
-                      onChange={(e) => setMonthMode(e.target.value)}
+                      onChange={touch(setMonthMode)}
                     />
                     {monthMode === 'day' ? (
                       <label className="flex flex-col gap-1 text-xs text-n-600">
@@ -270,7 +286,7 @@ export function RepeatEditor({
                             value: String(n),
                             label: n === -1 ? 'Last' : n < 0 ? `${-n} from last` : String(n),
                           }))}
-                          onChange={(e) => setNth(e.target.value)}
+                          onChange={touch(setNth)}
                         />
                         <Select
                           ariaLabel="Day of week"
@@ -279,24 +295,27 @@ export function RepeatEditor({
                             value: day,
                             label: dayNames[i],
                           }))}
-                          onChange={(e) => setNthDay(e.target.value)}
+                          onChange={touch(setNthDay)}
                         />
                       </div>
                     )}
                   </>
                 )}
-                <label className="flex flex-col gap-1 text-xs text-n-600">
-                  Ends
+                <div className="flex flex-col gap-1">
+                  <label htmlFor={endsId} className="text-xs text-n-600">
+                    Ends
+                  </label>
                   <Select
+                    id={endsId}
                     value={ends}
                     options={[
                       { value: 'never', label: 'Never' },
                       { value: 'until', label: 'On a date' },
                       { value: 'count', label: 'After a number of occurrences' },
                     ]}
-                    onChange={(e) => setEnds(e.target.value)}
+                    onChange={touch(setEnds)}
                   />
-                </label>
+                </div>
                 {ends === 'until' && (
                   <input
                     className="h-8 min-w-0 rounded-md border border-n-300 bg-n-0 px-2 text-sm text-n-800"

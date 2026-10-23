@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { fixtureVault, makeEntry } from '@/test/factories';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { ChecklistLine } from '@/engine/promote';
@@ -70,15 +71,24 @@ describe('PromoteDialog', () => {
       <PromoteDialog lines={lines} source={source} onCreated={(rows) => rows} onClose={vi.fn()} />,
     );
     expect(screen.queryByTestId('promote-person')).toBeNull();
-    fireEvent.change(screen.getByTestId('promote-target'), { target: { value: 'Work item' } });
+    const database = screen.getByRole('button', { name: 'Database' });
+    expect(database.getAttribute('data-value')).toBe('Issue');
+    chooseOption(database, 'Work item');
     expect(localStorage.getItem('cerebro.promoteTarget')).toBe('Work item');
-    expect(screen.getByTestId('promote-person')).toBeTruthy();
-    expect(screen.getByTestId('promote-parent')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'People' })).toBe(
+      screen.getByTestId('promote-person'),
+    );
+    const parent = screen.getByRole('button', { name: 'Parent' });
+    expect(parent).toBe(screen.getByTestId('promote-parent'));
+    expect(parent.getAttribute('data-value')).toBe('');
+    expect(optionLabels(parent)).toEqual(['No parent', 'Parent', 'Feature']);
+    chooseOption(parent, 'Feature');
+    expect(parent.getAttribute('data-value')).toBe('feature');
     view.unmount();
     render(
       <PromoteDialog lines={lines} source={source} onCreated={(rows) => rows} onClose={vi.fn()} />,
     );
-    expect(screen.getByTestId('promote-target')).toHaveProperty('value', 'Work item');
+    expect(screen.getByTestId('promote-target').getAttribute('data-value')).toBe('Work item');
   });
 
   it('names an unavailable status capability and cannot promote', () => {

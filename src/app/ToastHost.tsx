@@ -86,6 +86,8 @@ export function ToastHost() {
       {toasts.map((t) => (
         <Toast
           key={t.id}
+          // It rises into the stack (index.css).
+          className="cb-toast"
           title={t.message}
           action={
             t.action === undefined

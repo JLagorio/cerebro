@@ -45,22 +45,21 @@ const MODEL_SWAP: &str =
 pub(crate) const STREAM_KINDS: &[(&str, Handling)] = &[
     (
         "agent-color",
-        Ignored("the colour a subagent's name is drawn in"),
+        Ignored("the colour the CLI's own UI draws a subagent's name in; the panel draws its own"),
     ),
-    ("agent-name", Ignored("a subagent's display name")),
+    (
+        "agent-name",
+        Ignored("the name the CLI's own UI shows for a subagent; the panel names it by its type and task"),
+    ),
     (
         "ai-title",
         Ignored("the title the CLI's own picker shows; the panel titles the thread itself"),
     ),
-    (
-        "assistant/redacted_thinking",
-        Ignored("encrypted reasoning, which no person can read"),
-    ),
+    // M91.3a: both reasoning blocks fold whole, in either format, to a
+    // Thinking event; a redacted one's encrypted words cross as no text.
+    ("assistant/redacted_thinking", Translated),
     ("assistant/text", Translated),
-    (
-        "assistant/thinking",
-        Ignored("the model's reasoning, which the panel never shows as the reply; live, it arrives as thinking_delta events"),
-    ),
+    ("assistant/thinking", Translated),
     ("assistant/tool_use", Translated),
     (
         "atis-latch",
@@ -73,6 +72,12 @@ pub(crate) const STREAM_KINDS: &[(&str, Handling)] = &[
     // M57.1: a PreToolUse hook deferred a call; the session file's mark that
     // the turn is suspended on it, folded as the stream's deferred result is.
     ("attachment/hook_deferred_tool", Translated),
+    // M92.0: live on 2.1.250, an answer-resume streams two of these, started
+    // then completed, and a fresh run or a plain resume none (measured).
+    (
+        "command_lifecycle",
+        Ignored("the CLI's bookkeeping around a resumed deferred call, whose own lines carry what happened"),
+    ),
     ("control_cancel_request", Ignored(STREAM_JSON_ONLY)),
     ("control_request", Ignored(STREAM_JSON_ONLY)),
     ("control_response", Ignored(STREAM_JSON_ONLY)),
@@ -155,8 +160,23 @@ pub(crate) const STREAM_KINDS: &[(&str, Handling)] = &[
     ("system/api_error", Translated),
     ("system/api_retry", Translated),
     (
+        "system/background_tasks_changed",
+        Ignored("the CLI's list of its background tasks; background tasks are disabled for Cerebro runs"),
+    ),
+    (
         "system/compact_boundary",
         Ignored("the CLI compacted its context, which the transcript does not show"),
+    ),
+    // Live on 2.1.250 a hook from the person's own user settings, such as a
+    // SessionStart hook, sends both; the run's own PreToolUse gate sends
+    // neither.
+    (
+        "system/hook_response",
+        Ignored("what a hook from the person's own Claude Code settings said and how it exited, which belongs to the CLI's own UI"),
+    ),
+    (
+        "system/hook_started",
+        Ignored("a hook from the person's own Claude Code settings starting; its hook_response follows"),
     ),
     ("system/init", Translated),
     (
@@ -184,6 +204,9 @@ pub(crate) const STREAM_KINDS: &[(&str, Handling)] = &[
         "system/notification",
         Ignored("a notice for the CLI's own UI, such as a spinner's text"),
     ),
+    // M91.3a: Claude Code refused a call by its own rules; folded to a
+    // ToolDenied, live only, since the session file never says it.
+    ("system/permission_denied", Translated),
     (
         "system/status",
         Ignored("a progress word such as requesting; the panel shows its own"),
@@ -191,6 +214,16 @@ pub(crate) const STREAM_KINDS: &[(&str, Handling)] = &[
     (
         "system/stop_hook_summary",
         Ignored("what the CLI's Stop hooks said, which belongs to the CLI's own UI"),
+    ),
+    // M91.3b: a subagent's life, live only, since the session file never
+    // says it: started, its progress and its end fold to Subagent* events;
+    // a task that is not a subagent is ignored where it is read.
+    ("system/task_notification", Translated),
+    ("system/task_progress", Translated),
+    ("system/task_started", Translated),
+    (
+        "system/task_updated",
+        Ignored("a background task's status changing; its notification carries how it ended"),
     ),
     (
         "system/thinking_tokens",

@@ -239,6 +239,7 @@ pub(crate) fn plan(
         system_prompt: Some(system_prompt),
         // M56.3 mints a fresh session: a thread turn never resumes one (Q13).
         session_id: None,
+        fork: None,
         model,
         effort,
         // Fail closed, as a handed-to run does (Q11): the shell and web
@@ -247,6 +248,7 @@ pub(crate) fn plan(
         // the panel.
         shell: Some(crate::agent::ShellCeiling::Off),
         web: Some(false),
+        delegate: None,
         connectors: Some(false),
         connector_names: Some(vec![]),
         // Unseated (Q12): nobody answers a card in a thread.

@@ -12,6 +12,8 @@ import React, {
 import { createPortal } from 'react-dom';
 import { isInsideLayerAbove } from '@/components/ui/layers';
 import { useEscapeLayer } from '@/components/ui/Popover';
+import { arrivingScale, useGhostOnUnmount } from './motion';
+import { readPortalViewport, toPortalRect } from './portalGeometry';
 
 /**
  * A card that opens over a link while the pointer rests on it (M59.7).
@@ -157,7 +159,9 @@ export function HoverCard({
   const cardRef = useRef<HTMLDivElement | null>(null);
   cardRef.current = card;
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; side: 'top' | 'bottom' } | null>(
+    null,
+  );
 
   // Latest values, read by native listeners bound once per element.
   const latest = useRef({ parent, group, openDelay, closeDelay, openOnFocus, disabled });
@@ -334,17 +338,23 @@ export function HoverCard({
   const measure = useCallback(() => {
     const el = cardRef.current;
     if (trigger === null || el === null) return;
-    const a = trigger.getBoundingClientRect();
-    const b = el.getBoundingClientRect();
+    const viewport = readPortalViewport();
+    const a = toPortalRect(trigger.getBoundingClientRect(), viewport.zoom);
+    const drawn = toPortalRect(el.getBoundingClientRect(), viewport.zoom);
+    // Placed by the size it lands at, though it may still be arriving.
+    const grown = arrivingScale(el);
+    const b = { width: drawn.width / grown, height: drawn.height / grown };
     const below = a.bottom + GAP;
     const above = a.top - GAP - b.height;
-    const fitsBelow = below + b.height <= window.innerHeight - EDGE;
-    const top = !fitsBelow && above >= EDGE ? above : below;
-    const left = Math.max(EDGE, Math.min(a.left, window.innerWidth - b.width - EDGE));
+    const fitsBelow = below + b.height <= viewport.height - EDGE;
+    const up = !fitsBelow && above >= EDGE;
+    const top = up ? above : below;
+    const left = Math.max(EDGE, Math.min(a.left, viewport.width - b.width - EDGE));
+    const side = up ? 'top' : 'bottom';
     setPos((was) =>
-      was !== null && was.left === left && was.top === Math.max(EDGE, top)
+      was !== null && was.left === left && was.top === Math.max(EDGE, top) && was.side === side
         ? was
-        : { left, top: Math.max(EDGE, top) },
+        : { left, top: Math.max(EDGE, top), side },
     );
   }, [trigger]);
 
@@ -371,35 +381,66 @@ export function HoverCard({
           onDismiss={(how) => close(how !== 'other' && insideTrigger.current)}
         />
       )}
-      {shown &&
-        createPortal(
-          <HoverCardContext.Provider value={asParent}>
-            <div
-              ref={setCard}
-              id={id}
-              role="group"
-              aria-label={label}
-              data-testid="hover-card"
-              className="fixed z-[1100] w-[320px] max-w-[calc(100vw-16px)] rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
-              style={
-                pos === null
-                  ? { left: 0, top: 0, visibility: 'hidden' }
-                  : { left: pos.left, top: pos.top }
-              }
-              // A portal still bubbles through the React tree, into the chip
-              // and the editor host's ⌘K handler: the card's events stop here.
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
-            >
-              {content({ close: () => close() })}
-            </div>
-          </HoverCardContext.Provider>,
-          document.body,
-        )}
+      {shown && (
+        <HoverCardSurface
+          setCard={setCard}
+          render={(ref) =>
+            createPortal(
+              <HoverCardContext.Provider value={asParent}>
+                <div
+                  ref={ref}
+                  id={id}
+                  role="group"
+                  aria-label={label}
+                  data-testid="hover-card"
+                  data-side={pos?.side}
+                  className={`fixed z-[1100] w-[320px] max-w-[calc(100vw-16px)] rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-lg)] ${pos === null ? '' : 'cb-hover-card'}`}
+                  style={
+                    pos === null
+                      ? { left: 0, top: 0, visibility: 'hidden' }
+                      : { left: pos.left, top: pos.top }
+                  }
+                  // A portal still bubbles through the React tree, into the chip
+                  // and the editor host's ⌘K handler: the card's events stop here.
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  {content({ close: () => close() })}
+                </div>
+              </HoverCardContext.Provider>,
+              document.body,
+            )
+          }
+        />
+      )}
     </>
   );
+}
+
+/**
+ * The card's own component, so it can leave a fading copy as it goes
+ * (components/ui/motion.ts) while the real one unmounts with its layer.
+ * Placed, it arrives out of its link (`cb-hover-card`, index.css).
+ */
+function HoverCardSurface({
+  setCard,
+  render,
+}: {
+  setCard: (card: HTMLDivElement | null) => void;
+  render: (ref: (card: HTMLDivElement | null) => void) => React.ReactNode;
+}) {
+  const own = useRef<HTMLDivElement | null>(null);
+  useGhostOnUnmount(own, 'cb-popover-leave', { strip: ['cb-hover-card'] });
+  const ref = useCallback(
+    (card: HTMLDivElement | null) => {
+      own.current = card;
+      setCard(card);
+    },
+    [setCard],
+  );
+  return render(ref);
 }
 
 /**

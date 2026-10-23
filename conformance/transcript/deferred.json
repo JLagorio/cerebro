@@ -20,18 +20,21 @@
         {
           "kind": "Text",
           "message_id": "msg_000000000000000000005701",
-          "text": "Adding it to your inbox."
+          "text": "Adding it to your inbox.",
+          "at": "2026-10-14T12:00:02.000Z"
         },
         {
           "kind": "ToolStart",
           "tool_name": "mcp__cerebro__append_to_note",
           "tool_id": "toolu_000000000000000000005701",
-          "input": "{\"path\":\"notes/inbox.md\",\"content\":\"- Call the vendor about the delay\"}"
+          "input": "{\"path\":\"notes/inbox.md\",\"content\":\"- Call the vendor about the delay\"}",
+          "at": "2026-10-14T12:00:02.100Z"
         },
         {
           "kind": "ToolDeferred",
           "tool_id": "toolu_000000000000000000005701",
-          "tool_name": "mcp__cerebro__append_to_note"
+          "tool_name": "mcp__cerebro__append_to_note",
+          "duration_ms": 2400
         }
       ],
       "classes": {
@@ -54,7 +57,8 @@
     "events": [
       {
         "kind": "UserPrompt",
-        "text": "Add 'call the vendor about the delay' to my inbox."
+        "text": "Add 'call the vendor about the delay' to my inbox.",
+        "uuid": "00000000-0000-4000-8000-000000005721"
       },
       {
         "kind": "ModelChanged",
@@ -63,13 +67,15 @@
       {
         "kind": "Text",
         "message_id": "msg_000000000000000000005701",
-        "text": "Adding it to your inbox."
+        "text": "Adding it to your inbox.",
+        "at": "2026-10-14T12:00:02.000Z"
       },
       {
         "kind": "ToolStart",
         "tool_name": "mcp__cerebro__append_to_note",
         "tool_id": "toolu_000000000000000000005701",
-        "input": "{\"path\":\"notes/inbox.md\",\"content\":\"- Call the vendor about the delay\"}"
+        "input": "{\"path\":\"notes/inbox.md\",\"content\":\"- Call the vendor about the delay\"}",
+        "at": "2026-10-14T12:00:02.100Z"
       },
       {
         "kind": "ToolDeferred",

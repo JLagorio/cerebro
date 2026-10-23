@@ -1,0 +1,792 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "synthetic": "hand-shaped from Claude Code 2.1.250's measured shapes (M91.3b), not recorded: synthetic ids, and M91.R's live recording replaces it",
+    "cwd": "/vault",
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "tools": ["Task", "Read", "ToolSearch", "mcp__cerebro__get_note"],
+    "mcp_servers": [
+      {
+        "name": "cerebro",
+        "status": "connected"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "permissionMode": "default",
+    "apiKeySource": "none",
+    "claude_code_version": "2.1.250",
+    "agents": ["cerebro-researcher"],
+    "uuid": "00000000-0000-4000-8000-000009500001"
+  },
+  {
+    "type": "system",
+    "subtype": "status",
+    "status": "requesting",
+    "uuid": "00000000-0000-4000-8000-000009500501",
+    "session_id": "00000000-0000-4000-8000-000000009500"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_start",
+      "message": {
+        "model": "claude-haiku-4-5-20251001",
+        "id": "msg_000000000000000000009501",
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "stop_reason": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500502"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": {
+        "type": "thinking",
+        "thinking": "",
+        "signature": ""
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500503"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 6,
+    "estimated_tokens_delta": 6,
+    "uuid": "00000000-0000-4000-8000-000009500504",
+    "session_id": "00000000-0000-4000-8000-000000009500"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "thinking_delta",
+        "thinking": "The person wants the launch note's status. A ",
+        "estimated_tokens": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500505"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 12,
+    "estimated_tokens_delta": 6,
+    "uuid": "00000000-0000-4000-8000-000009500506",
+    "session_id": "00000000-0000-4000-8000-000000009500"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "thinking_delta",
+        "thinking": "researcher can read the note and report back.",
+        "estimated_tokens": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500507"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "signature_delta",
+        "signature": "sig-9501"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500508"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009501",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The person wants the launch note's status. A researcher can read the note and report back.",
+          "signature": "sig-9501"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500101",
+    "timestamp": "2026-10-22T12:00:02.000Z",
+    "request_id": "req_000000000000000000009501"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 0
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500509"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 1,
+      "content_block": {
+        "type": "tool_use",
+        "id": "toolu_000000000000000000009501",
+        "name": "Agent",
+        "input": {}
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500510"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": {
+        "type": "input_json_delta",
+        "partial_json": "{\"description\":\"Read the launch note\",\"subagent_type\":\"cerebro-researcher\",\"prompt\":\"Read projects/launch.md and report its status in one sentence.\"}"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500511"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009501",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009501",
+          "name": "Agent",
+          "input": {
+            "description": "Read the launch note",
+            "subagent_type": "cerebro-researcher",
+            "prompt": "Read projects/launch.md and report its status in one sentence."
+          },
+          "caller": {
+            "type": "direct"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500102",
+    "timestamp": "2026-10-22T12:00:02.400Z",
+    "request_id": "req_000000000000000000009501"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 1
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500512"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_delta",
+      "delta": {
+        "stop_reason": "tool_use",
+        "stop_sequence": null
+      },
+      "usage": {
+        "output_tokens": 40
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500513"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_stop"
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500514"
+  },
+  {
+    "type": "system",
+    "subtype": "task_started",
+    "task_id": "a0000000000000001",
+    "tool_use_id": "toolu_000000000000000000009501",
+    "description": "Read the launch note",
+    "subagent_type": "cerebro-researcher",
+    "is_backgrounded": false,
+    "spawn_depth": 1,
+    "task_type": "local_agent",
+    "prompt": "Read projects/launch.md and report its status in one sentence.",
+    "uuid": "00000000-0000-4000-8000-000009500515",
+    "session_id": "00000000-0000-4000-8000-000000009500"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Read projects/launch.md and report its status in one sentence."
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000009500103",
+    "timestamp": "2026-10-22T12:00:02.410Z",
+    "parent_tool_use_id": "toolu_000000000000000000009501",
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "subagent_type": "cerebro-researcher",
+    "task_description": "Read the launch note"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009511",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "I need to read projects/launch.md before I can report its status.",
+          "signature": "sig-9511"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "uuid": "00000000-0000-4000-8000-000009500104",
+    "timestamp": "2026-10-22T12:00:04.000Z",
+    "parent_tool_use_id": "toolu_000000000000000000009501",
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "subagent_type": "cerebro-researcher",
+    "task_description": "Read the launch note",
+    "request_id": "req_000000000000000000009511"
+  },
+  {
+    "type": "system",
+    "subtype": "task_progress",
+    "task_id": "a0000000000000001",
+    "tool_use_id": "toolu_000000000000000000009501",
+    "description": "Reading projects/launch.md",
+    "subagent_type": "cerebro-researcher",
+    "usage": {
+      "total_tokens": 2410,
+      "tool_uses": 1,
+      "duration_ms": 1600
+    },
+    "last_tool_name": "mcp__cerebro__get_note",
+    "uuid": "00000000-0000-4000-8000-000009500516",
+    "session_id": "00000000-0000-4000-8000-000000009500"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009511",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009511",
+          "name": "mcp__cerebro__get_note",
+          "input": {
+            "path": "projects/launch.md"
+          },
+          "caller": {
+            "type": "direct"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "uuid": "00000000-0000-4000-8000-000009500105",
+    "timestamp": "2026-10-22T12:00:04.300Z",
+    "parent_tool_use_id": "toolu_000000000000000000009501",
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "subagent_type": "cerebro-researcher",
+    "task_description": "Read the launch note",
+    "request_id": "req_000000000000000000009511"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009511",
+          "type": "tool_result",
+          "content": "# Launch\n\nStatus: ready for review.\nPress list: still open.\n\n- Review note 1: the copy reads well, and the dates hold.\n- Review note 2: the copy reads well, and the dates hold.\n- Review note 3: the copy reads well, and the dates hold.\n- Review note 4: the copy reads well, and the dates hold.\n- Review note 5: the copy reads well, and the dates hold.\n- Review note 6: the copy reads well, and the dates hold.\n- Review note 7: the copy reads well, and the dates hold.\n- Review note 8: the copy reads well, and the dates hold.\n- Review note 9: the copy reads well, and the dates hold.\n- Review note 10: the copy reads well, and the dates hold.\n- Review note 11: the copy reads well, and the dates hold.\n- Review note 12: the copy reads well, and the dates hold.\n- Review note 13: the copy reads well, and the dates hold.\n- Review note 14: the copy reads well, and the dates hold.\n- Review note 15: the copy reads well, and the dates hold.\n- Review note 16: the copy reads well, and the dates hold.\n- Review note 17: the copy reads well, and the dates hold.\n- Review note 18: the copy reads well, and the dates hold.\n- Review note 19: the copy reads well, and the dates hold.\n- Review note 20: the copy reads well, and the dates hold.\n- Review note 21: the copy reads well, and the dates hold.\n- Review note 22: the copy reads well, and the dates hold.\n- Review note 23: the copy reads well, and the dates hold.\n- Review note 24: the copy reads well, and the dates hold.\n- Review note 25: the copy reads well, and the dates hold.\n- Review note 26: the copy reads well, and the dates hold.\n- Review note 27: the copy reads well, and the dates hold.\n- Review note 28: the copy reads well, and the dates hold.\n- Review note 29: the copy reads well, and the dates hold.\n- Review note 30: the copy reads well, and the dates hold.\n- Review note 31: the copy reads well, and the dates hold.\n- Review note 32: the copy reads well, and the dates hold.\n- Review note 33: the copy reads well, and the dates hold.\n- Review note 34: the copy reads well, and the dates hold.\n- Review note 35: the copy reads well, and the dates hold.\n- Review note 36: the copy reads well, and the dates hold.\n- Review note 37: the copy reads well, and the dates hold.\n- Review note 38: the copy reads well, and the dates hold.\n- Review note 39: the copy reads well, and the dates hold.\n- Review note 40: the copy reads well, and the dates hold.\n- Review note 41: the copy reads well, and the dates hold.\n- Review note 42: the copy reads well, and the dates hold.\n- Review note 43: the copy reads well, and the dates hold.\n- Review note 44: the copy reads well, and the dates hold.\n- Review note 45: the copy reads well, and the dates hold."
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000009500106",
+    "timestamp": "2026-10-22T12:00:04.500Z",
+    "parent_tool_use_id": "toolu_000000000000000000009501",
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "subagent_type": "cerebro-researcher",
+    "task_description": "Read the launch note"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009512",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "It says ready for review, with the press list still open.",
+          "signature": "sig-9512"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "uuid": "00000000-0000-4000-8000-000009500107",
+    "timestamp": "2026-10-22T12:00:06.000Z",
+    "parent_tool_use_id": "toolu_000000000000000000009501",
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "subagent_type": "cerebro-researcher",
+    "task_description": "Read the launch note",
+    "request_id": "req_000000000000000000009512"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009512",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "The launch note is ready for review, but its press list is still open."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "uuid": "00000000-0000-4000-8000-000009500108",
+    "timestamp": "2026-10-22T12:00:06.200Z",
+    "parent_tool_use_id": "toolu_000000000000000000009501",
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "subagent_type": "cerebro-researcher",
+    "task_description": "Read the launch note",
+    "request_id": "req_000000000000000000009512"
+  },
+  {
+    "type": "system",
+    "subtype": "task_updated",
+    "task_id": "a0000000000000001",
+    "patch": {
+      "status": "completed",
+      "end_time": 1792670406250
+    },
+    "uuid": "00000000-0000-4000-8000-000009500517",
+    "session_id": "00000000-0000-4000-8000-000000009500"
+  },
+  {
+    "type": "system",
+    "subtype": "task_notification",
+    "task_id": "a0000000000000001",
+    "tool_use_id": "toolu_000000000000000000009501",
+    "status": "completed",
+    "output_file": "/cli-temp/-vault/00000000-0000-4000-8000-000000009500/tasks/a0000000000000001.output",
+    "summary": "The launch note is ready for review, but its press list is still open.",
+    "usage": {
+      "total_tokens": 3050,
+      "tool_uses": 1,
+      "duration_ms": 3800
+    },
+    "uuid": "00000000-0000-4000-8000-000009500518",
+    "session_id": "00000000-0000-4000-8000-000000009500"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009501",
+          "type": "tool_result",
+          "content": [
+            {
+              "type": "text",
+              "text": "The launch note is ready for review, but its press list is still open."
+            },
+            {
+              "type": "text",
+              "text": "agentId: a0000000000000001 (use SendMessage with to: 'a0000000000000001', summary: '<5-10 word recap>' to continue this agent)\n<usage>subagent_tokens: 3120\ntool_uses: 1\nduration_ms: 3800</usage>"
+            }
+          ]
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500109",
+    "timestamp": "2026-10-22T12:00:06.300Z",
+    "tool_use_result": {
+      "status": "completed",
+      "prompt": "Read projects/launch.md and report its status in one sentence.",
+      "agentId": "a0000000000000001",
+      "agentType": "cerebro-researcher",
+      "content": [
+        {
+          "type": "text",
+          "text": "The launch note is ready for review, but its press list is still open."
+        }
+      ],
+      "resolvedModel": "claude-haiku-4-5-20251001",
+      "totalDurationMs": 3800,
+      "totalTokens": 3120,
+      "totalToolUseCount": 1,
+      "usage": {
+        "input_tokens": 2950,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 170
+      },
+      "toolStats": {
+        "readCount": 0,
+        "searchCount": 0,
+        "bashCount": 0,
+        "editFileCount": 0,
+        "linesAdded": 0,
+        "linesRemoved": 0,
+        "otherToolCount": 1
+      }
+    }
+  },
+  {
+    "type": "system",
+    "subtype": "status",
+    "status": "requesting",
+    "uuid": "00000000-0000-4000-8000-000009500519",
+    "session_id": "00000000-0000-4000-8000-000000009500"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_start",
+      "message": {
+        "model": "claude-haiku-4-5-20251001",
+        "id": "msg_000000000000000000009502",
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "stop_reason": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500520"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": {
+        "type": "thinking",
+        "thinking": "",
+        "signature": ""
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500521"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 6,
+    "estimated_tokens_delta": 6,
+    "uuid": "00000000-0000-4000-8000-000009500522",
+    "session_id": "00000000-0000-4000-8000-000000009500"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "thinking_delta",
+        "thinking": "The researcher says the note is ready ",
+        "estimated_tokens": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500523"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 12,
+    "estimated_tokens_delta": 6,
+    "uuid": "00000000-0000-4000-8000-000009500524",
+    "session_id": "00000000-0000-4000-8000-000000009500"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "thinking_delta",
+        "thinking": "for review, but the press list is open.",
+        "estimated_tokens": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500525"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "signature_delta",
+        "signature": "sig-9502"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500526"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009502",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The researcher says the note is ready for review, but the press list is open.",
+          "signature": "sig-9502"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500110",
+    "timestamp": "2026-10-22T12:00:08.000Z",
+    "request_id": "req_000000000000000000009502"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 0
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500527"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 1,
+      "content_block": {
+        "type": "text",
+        "text": ""
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500528"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": {
+        "type": "text_delta",
+        "text": "Almost: the launch note is ready for re"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500529"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": {
+        "type": "text_delta",
+        "text": "view, but its press list is still open."
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500530"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009502",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Almost: the launch note is ready for review, but its press list is still open."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500111",
+    "timestamp": "2026-10-22T12:00:08.400Z",
+    "request_id": "req_000000000000000000009502"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 1
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500531"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_delta",
+      "delta": {
+        "stop_reason": "end_turn",
+        "stop_sequence": null
+      },
+      "usage": {
+        "output_tokens": 40
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500532"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_stop"
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500533"
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "duration_ms": 9000,
+    "duration_api_ms": 7000,
+    "num_turns": 2,
+    "result": "Almost: the launch note is ready for review, but its press list is still open.",
+    "stop_reason": "end_turn",
+    "total_cost_usd": 0.006,
+    "usage": {
+      "input_tokens": 14,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 6200,
+      "output_tokens": 150
+    },
+    "modelUsage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 2964,
+        "outputTokens": 320,
+        "cacheReadInputTokens": 6200,
+        "cacheCreationInputTokens": 0,
+        "costUSD": 0.006,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      }
+    },
+    "permission_denials": [],
+    "subagent_stats": {
+      "spawned": 1,
+      "requested": {
+        "background": 0,
+        "foreground": 1
+      },
+      "max_depth": 1,
+      "completed": 1,
+      "failed": 0,
+      "killed": {
+        "parent": 0,
+        "user": 0,
+        "system": 0
+      },
+      "refused": {
+        "depth_limit": 0,
+        "concurrency_limit": 0,
+        "budget": 0
+      },
+      "by_type": {
+        "cerebro-researcher": 1
+      }
+    },
+    "terminal_reason": "completed",
+    "session_id": "00000000-0000-4000-8000-000000009500",
+    "uuid": "00000000-0000-4000-8000-000009500999"
+  }
+]

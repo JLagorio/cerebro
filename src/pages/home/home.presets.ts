@@ -21,7 +21,7 @@ function clean() {
   __seedReview({ cards: [], applications: [] });
   useDoneMarksStore.getState().reset(null);
   useReminderStore.getState().reset('/demo-vault');
-  useUiStore.setState({ inboxEnabled: true, inboxPeriod: 'all', homeTaskAssignee: '' });
+  useUiStore.setState({ inboxEnabled: true, homeTaskAssignee: '' });
 }
 const TASK_TYPE =
   '---\ntype: Type\ndeadline: due\nstatuses:\n  - {id: open, group: active}\nfields:\n  status: {kind: status}\n  due: {kind: date}\n---\n# Work\n';

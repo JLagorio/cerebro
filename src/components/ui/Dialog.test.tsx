@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Dialog } from '@/components/ui/Dialog';
+import { Select } from '@/components/ui/Select';
 
 afterEach(cleanup);
 
@@ -38,6 +39,37 @@ describe('Dialog', () => {
     fireEvent.mouseDown(screen.getByRole('dialog'));
     expect(onClose).not.toHaveBeenCalled();
     const scrim = document.querySelector('.cb-dlg-scrim')!;
+    fireEvent.mouseDown(scrim);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  /** A press on the scrim while a Select's list is open over the dialog
+   *  closes the list, as a press outside any list does — and only the list:
+   *  the dialog and its draft stay. */
+  it('keeps the dialog when a press on the scrim only closes a list open over it', () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog open onClose={onClose} title="New record">
+        <Select
+          ariaLabel="Database"
+          options={[
+            { value: 'a', label: 'Work item' },
+            { value: 'b', label: 'Person' },
+          ]}
+          value="a"
+          onChange={vi.fn()}
+        />
+      </Dialog>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Database' }));
+    expect(screen.getByRole('listbox')).toBeTruthy();
+    const scrim = document.querySelector('.cb-dlg-scrim')!;
+    fireEvent.pointerDown(scrim);
+    fireEvent.mouseDown(scrim);
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    // The next press, with nothing open over it, closes the dialog.
+    fireEvent.pointerDown(scrim);
     fireEvent.mouseDown(scrim);
     expect(onClose).toHaveBeenCalledTimes(1);
   });

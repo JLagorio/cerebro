@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   anchor,
   DEFAULT_TITLE,
@@ -8,9 +10,20 @@ import {
   ordered,
   retitle,
   saveConversations,
+  threadReach,
   titleFrom,
+  withSession,
 } from '@/agent/conversations';
-import type { ChatMessage, Conversation } from '@/agent/types';
+import { healFromTranscript, replayTranscript } from '@/agent/transcript';
+import type {
+  AgentStreamEvent,
+  ChatMessage,
+  Conversation,
+  MessagePart,
+  RunReach,
+  SubagentRun,
+  ToolCall,
+} from '@/agent/types';
 import type { RunChangeset } from '@/engine/changeset';
 import { ASK_BASE_LABEL, askedAbout } from '@/lib/prompts';
 
@@ -570,5 +583,660 @@ describe('a turn left running (M57.6)', () => {
     const [loaded] = loadConversations();
     expect('seq' in loaded.messages[1]).toBe(false);
     expect('gap' in loaded.messages[1]).toBe(false);
+  });
+});
+
+describe('how long a reply worked (M92.2)', () => {
+  const reply = (id: string, over: Partial<ChatMessage>): ChatMessage => ({
+    ...msg('assistant', id),
+    ...over,
+  });
+  const running = (open: ChatMessage, over: Partial<Conversation> = {}): Conversation => ({
+    ...newConversation(),
+    messages: [msg('user', 'go'), open],
+    live: { run: 3, attach: 'run-0003', assistantId: open.id },
+    ...over,
+  });
+
+  it('keeps a sum through save and load, and an open count only on the reply a live turn writes into', () => {
+    const open = reply('open', { workedMs: 3000, workedRun: 3000, streaming: true, seq: 4 });
+    saveConversations([
+      {
+        ...newConversation(),
+        messages: [
+          reply('counted', { workedMs: 5400 }),
+          reply('unrecorded', { workedMs: null }),
+          // Its run's Changeset never came (Cerebro quit as it committed):
+          // its count stands in the sum, and no run can close it any more.
+          reply('ended', { workedMs: 2400, workedRun: 2400 }),
+          reply('none', {}),
+        ],
+      },
+      running(open),
+    ]);
+    const [quiet, live] = loadConversations();
+    expect(quiet.messages.map((m) => [m.workedMs, 'workedRun' in m])).toEqual([
+      [5400, false],
+      [null, false],
+      [2400, false],
+      [undefined, false],
+    ]);
+    expect(live.messages[1]).toMatchObject({ workedMs: 3000, workedRun: 3000 });
+  });
+
+  it('reads a stored sum this build cannot read as none, and drops an open count with no sum', () => {
+    const stored = [
+      running(reply('words', { workedMs: 'four minutes' as unknown as number, workedRun: 4 })),
+      running(reply('negative', { workedMs: -1 })),
+      running(reply('unrecorded', { workedMs: null, workedRun: 3000 })),
+      running(reply('lone', { workedRun: 3000 })),
+      running(reply('odd', { workedMs: 3000, workedRun: 'x' as unknown as number })),
+      // An open count is a part of its sum, never more than all of it.
+      running(reply('over', { workedMs: 3000, workedRun: 4000 })),
+    ];
+    window.localStorage.setItem('cerebro.conversations', JSON.stringify(stored));
+    const replies = loadConversations().map((c) => c.messages[1]);
+    expect(replies.map((m) => [m.workedMs, 'workedRun' in m])).toEqual([
+      [null, false],
+      [null, false],
+      [null, false],
+      [undefined, false],
+      [3000, false],
+      [3000, false],
+    ]);
+  });
+});
+
+describe('a turn’s parts, anchor and subagents (M91.4)', () => {
+  const SESSION = '00000000-0000-4000-8000-0000000091a4';
+  const LINE = '00000000-0000-4000-8000-0000000091b2';
+  const raw = () => window.localStorage.getItem('cerebro.conversations') ?? '';
+  const call = (id: string, over: Partial<ToolCall> = {}): ToolCall => ({
+    id,
+    name: 'mcp__cerebro__get_note',
+    input: '{}',
+    output: 'read it',
+    done: true,
+    failed: false,
+    ...over,
+  });
+  const run = (over: Partial<SubagentRun> = {}): SubagentRun => ({
+    agentId: 'a0000000000000001',
+    type: 'cerebro-researcher',
+    description: 'Read the launch note',
+    status: 'done',
+    toolUses: 1,
+    durationMs: 3800,
+    model: 'claude-haiku-4-5-20251001',
+    summary: 'It is ready for review.',
+    background: false,
+    depth: 1,
+    progress: 'Reading projects/launch.md',
+    lastTool: 'mcp__cerebro__get_note',
+    parts: [
+      { kind: 'reasoning', id: 'a1:reasoning-1', text: 'INTERNAL THOUGHT', durationMs: 1600 },
+      { kind: 'tool', toolId: 'r1' },
+    ],
+    tools: [call('r1', { parent: 'a1', output: 'INTERNAL READ' })],
+    ...over,
+  });
+  const reply = (over: Partial<ChatMessage> = {}): ChatMessage => ({
+    id: 'a-1',
+    role: 'assistant',
+    text: 'Almost ready.',
+    tools: [
+      call('a1', {
+        name: 'Agent',
+        startedAt: '2026-10-22T12:00:02.400Z',
+        endedAt: '2026-10-22T12:00:06.300Z',
+        result: { type: 'agent', agent_id: 'a0000000000000001', summary: 'RESULT DATA' },
+        subagent: run(),
+      }),
+      call('b1', { name: 'Bash', failed: true, denied: 'Needs approval.' }),
+    ],
+    parts: [
+      {
+        kind: 'reasoning',
+        id: 'reasoning-1',
+        text: 'MAIN THOUGHT',
+        at: '2026-10-22T12:00:02.000Z',
+      },
+      { kind: 'text', id: 'text-1', text: 'Asking a researcher.' },
+      { kind: 'tool', toolId: 'a1' },
+      { kind: 'tool', toolId: 'b1' },
+      { kind: 'text', id: 'text-2', text: 'Almost ready.' },
+    ],
+    anchor: { sessionId: SESSION, uuid: LINE },
+    ...over,
+  });
+  const save = (...messages: ChatMessage[]) =>
+    saveConversations([{ ...newConversation(), messages: [msg('user', 'go'), ...messages] }]);
+
+  it('keeps the parts, the anchor and each subagent’s summary, and nothing else of it', () => {
+    save(reply());
+    const stored = raw();
+    for (const memoryOnly of [
+      'MAIN THOUGHT',
+      'INTERNAL THOUGHT',
+      'INTERNAL READ',
+      'RESULT DATA',
+      'Reading projects/launch.md',
+    ]) {
+      expect(stored, memoryOnly).not.toContain(memoryOnly);
+    }
+    // The answer's words are saved once, as the reply's text.
+    expect(stored.split('Almost ready.')).toHaveLength(2);
+    const [, loaded] = loadConversations()[0].messages;
+    expect(loaded.parts).toEqual([
+      { kind: 'text', id: 'text-1', text: 'Asking a researcher.' },
+      { kind: 'tool', toolId: 'a1' },
+      { kind: 'tool', toolId: 'b1' },
+      { kind: 'text', id: 'text-2', text: 'Almost ready.' },
+    ]);
+    expect(loaded.anchor).toEqual({ sessionId: SESSION, uuid: LINE });
+    const [agent, bash] = loaded.tools;
+    expect(agent.subagent).toEqual({
+      agentId: 'a0000000000000001',
+      type: 'cerebro-researcher',
+      description: 'Read the launch note',
+      status: 'done',
+      toolUses: 1,
+      durationMs: 3800,
+      model: 'claude-haiku-4-5-20251001',
+      summary: 'It is ready for review.',
+      parts: [],
+      tools: [],
+    });
+    expect(agent).toMatchObject({
+      startedAt: '2026-10-22T12:00:02.400Z',
+      endedAt: '2026-10-22T12:00:06.300Z',
+    });
+    expect('result' in agent).toBe(false);
+    expect(bash.denied).toBe('Needs approval.');
+  });
+
+  it('cuts a subagent’s saved answer to what its line shows', () => {
+    save(
+      reply({
+        tools: [call('a1', { name: 'Agent', subagent: run({ summary: 'x'.repeat(900) }) })],
+      }),
+    );
+    expect(loadConversations()[0].messages[1].tools[0].subagent?.summary).toHaveLength(500);
+  });
+
+  it('counts a saved answer by character, as Rust clips it, never splitting an emoji', () => {
+    const summary = `${'x'.repeat(498)}🙂🙂`;
+    save(reply({ tools: [call('a1', { name: 'Agent', subagent: run({ summary }) })] }));
+    expect(loadConversations()[0].messages[1].tools[0].subagent?.summary).toBe(summary);
+  });
+
+  it('heals a reloaded subagent turn back to its replay from the session file', () => {
+    const golden = JSON.parse(
+      readFileSync(join(__dirname, '../../conformance/transcript/subagent.json'), 'utf8'),
+    ) as { session: { events: AgentStreamEvent[] } };
+    const session = '00000000-0000-4000-8000-000000009500';
+    const { messages } = replayTranscript(golden.session.events, session);
+    saveConversations([{ ...newConversation(), sessionId: session, messages }]);
+    const reloaded = loadConversations()[0].messages;
+    // Memory only: the reasoning and the subagent's steps are gone.
+    expect(reloaded[1].parts?.some((part) => part.kind === 'reasoning')).toBe(false);
+    expect(reloaded[1].tools[0].subagent).toMatchObject({ status: 'done', parts: [], tools: [] });
+    const healed = healFromTranscript(reloaded, messages);
+    expect(healed[1].parts).toEqual(messages[1].parts);
+    expect(healed[1].tools).toEqual(messages[1].tools);
+    expect(healed[1].anchor).toEqual(messages[1].anchor);
+  });
+
+  it('drops what a stored reply holds that this build does not write', () => {
+    const tool = (id: string, over: Record<string, unknown>) => ({ ...call(id), ...over });
+    const stored = {
+      ...newConversation(),
+      messages: [
+        {
+          ...msg('assistant', 'answer'),
+          tools: [
+            tool('t1', { startedAt: 'yesterday', endedAt: 7, denied: 3, parent: 'x', result: {} }),
+            tool('t2', {
+              name: 'Agent',
+              subagent: { type: 'x', description: 'y', status: 'busy' },
+            }),
+            tool('t3', {
+              name: 'Agent',
+              subagent: {
+                type: 'x',
+                description: 'y',
+                status: 'done',
+                toolUses: -1,
+                durationMs: 'long',
+                parts: ['junk'],
+              },
+            }),
+          ],
+          parts: [
+            { kind: 'tool', toolId: 't1' },
+            { kind: 'tool', toolId: 't1' },
+            { kind: 'tool', toolId: 'gone' },
+            { kind: 'text', id: 'text-1', text: 7 },
+            { kind: 'text', id: 'text-1' },
+            { kind: 'text', id: 'text-1', text: 'a second text-1' },
+            { kind: 'reasoning', id: 'reasoning-1', text: 'never saved' },
+            'nonsense',
+          ],
+          anchor: { sessionId: 'mock-session', uuid: LINE },
+        },
+        { ...msg('assistant', 'b'), parts: 'nonsense', anchor: { sessionId: SESSION } },
+      ],
+    };
+    window.localStorage.setItem('cerebro.conversations', JSON.stringify([stored]));
+    const [first, second] = loadConversations()[0].messages;
+    const [t1, t2, t3] = first.tools;
+    for (const key of ['startedAt', 'endedAt', 'denied', 'parent', 'result']) {
+      expect(key in t1, key).toBe(false);
+    }
+    expect('subagent' in t2).toBe(false);
+    expect(t3.subagent).toEqual({
+      type: 'x',
+      description: 'y',
+      status: 'done',
+      parts: [],
+      tools: [],
+    });
+    // Each call once, the answer's words from the reply, and every call shown.
+    expect(first.parts).toEqual([
+      { kind: 'tool', toolId: 't1' },
+      { kind: 'text', id: 'text-1', text: 'answer' },
+      { kind: 'tool', toolId: 't2' },
+      { kind: 'tool', toolId: 't3' },
+    ]);
+    expect('anchor' in first).toBe(false);
+    expect('parts' in second).toBe(false);
+    expect('anchor' in second).toBe(false);
+  });
+
+  it('reads a subagent no turn feeds any more as stopped, and keeps the live reply’s', () => {
+    const waiting = (id: string, status: SubagentRun['status']) =>
+      call(id, { name: 'Agent', done: false, subagent: run({ status }) });
+    const old = reply({
+      id: 'a-1',
+      tools: [waiting('a1', 'running'), waiting('a2', 'waiting')],
+      parts: undefined,
+    });
+    const busy = reply({ id: 'a-2', tools: [waiting('a3', 'running')], parts: undefined });
+    saveConversations([
+      {
+        ...newConversation(),
+        messages: [msg('user', 'go'), old, msg('user', 'again'), busy],
+        live: { run: 7, attach: 'run-0007', assistantId: 'a-2' },
+      },
+    ]);
+    const [, first, , second] = loadConversations()[0].messages;
+    expect(first.tools.map((t) => t.subagent?.status)).toEqual(['interrupted', 'not_run']);
+    expect(second.tools[0].subagent?.status).toBe('running');
+  });
+
+  /** A turn that asked eight researchers, each of which read ten notes. */
+  function heavyTurn(n: number): ChatMessage {
+    const notes = (agent: string) =>
+      Array.from({ length: 10 }, (_, k) =>
+        call(`${agent}-r${k}`, { parent: agent, output: `note ${k} `.repeat(250) }),
+      );
+    const agents = Array.from({ length: 8 }, (_, k) => {
+      const id = `t${n}-a${k}`;
+      return call(id, {
+        name: 'Agent',
+        input: JSON.stringify({
+          description: `Research ${k}`,
+          subagent_type: 'cerebro-researcher',
+        }),
+        output: 'Found it. '.repeat(50),
+        result: { type: 'agent', summary: 'Found it.'.repeat(55) },
+        subagent: run({
+          summary: 'Found it. '.repeat(50),
+          parts: [
+            { kind: 'reasoning', id: `${id}:reasoning-1`, text: 'thinking '.repeat(300) },
+            ...notes(id).map((note): MessagePart => ({ kind: 'tool', toolId: note.id })),
+            { kind: 'text', id: `${id}:text-1`, text: 'report '.repeat(200) },
+          ],
+          tools: notes(id),
+        }),
+      });
+    });
+    return {
+      id: `a-${n}`,
+      role: 'assistant',
+      text: 'Here is what the researchers found.',
+      tools: agents,
+      parts: [
+        { kind: 'reasoning', id: 'reasoning-1', text: 'planning '.repeat(300) },
+        ...agents.map((agent): MessagePart => ({ kind: 'tool', toolId: agent.id })),
+        { kind: 'text', id: 'text-1', text: 'Here is what the researchers found.' },
+      ],
+    };
+  }
+
+  it('saves thirty threads of eight-subagent turns under a fixed budget', () => {
+    const threads = Array.from({ length: 30 }, (_, n) => ({
+      ...newConversation(),
+      id: `c-${n}`,
+      messages: [msg('user', `research ${n} with subagents`), heavyTurn(n)],
+    }));
+    // In memory the steps alone are several megabytes; saved, the summaries
+    // fit in well under one.
+    expect(JSON.stringify(threads).length).toBeGreaterThan(5_000_000);
+    saveConversations(threads);
+    expect(raw().length).toBeLessThan(1_000_000);
+    const loaded = loadConversations();
+    expect(loaded).toHaveLength(30);
+    expect(loaded[0].messages[1].tools.every((t) => t.subagent?.tools.length === 0)).toBe(true);
+  });
+
+  describe('when storage is full', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    /** Whatever holds the page's `setItem`: jsdom's Storage, or the stand-in
+     * src/test/setup.ts installs where Node shadows it. */
+    const storage = (): Storage => {
+      const store = window.localStorage;
+      return Object.prototype.hasOwnProperty.call(store, 'setItem')
+        ? store
+        : (Object.getPrototypeOf(store) as Storage);
+    };
+
+    /** A store that refuses anything longer than `limit`, as a full one would. */
+    function quota(limit: number) {
+      const real = storage().setItem;
+      return vi.spyOn(storage(), 'setItem').mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string,
+      ) {
+        if (value.length > limit) {
+          throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+        }
+        real.call(this, key, value);
+      });
+    }
+
+    const thread = (n: number, over: Partial<Conversation> = {}): Conversation => ({
+      ...newConversation(),
+      id: `c-${n}`,
+      updatedAt: `2026-10-${String(10 + n).padStart(2, '0')}T12:00:00.000Z`,
+      messages: [
+        msg('user', `question ${n}`),
+        { ...msg('assistant', 'x'.repeat(4000)), id: `a-${n}` },
+      ],
+      ...over,
+    });
+
+    it('trims the oldest threads’ bodies until the rest fits, and keeps every thread', () => {
+      const threads = [thread(3), thread(1), thread(2)];
+      quota(JSON.stringify(threads).length - 2000);
+      saveConversations(threads);
+      const loaded = loadConversations();
+      expect(loaded.map((c) => c.id)).toEqual(['c-3', 'c-1', 'c-2']);
+      // The oldest lost its copy (its session file rebuilds it); the rest kept theirs.
+      expect(loaded.map((c) => c.messages.length)).toEqual([2, 0, 2]);
+    });
+
+    it('trims a thread no session file can rebuild only after every thread one can', () => {
+      const session = '00000000-0000-4000-8000-000000000001';
+      // The oldest never reached Claude Code: nothing could rebuild it.
+      const threads = [thread(1), thread(2, { sessionId: session })];
+      quota(JSON.stringify(threads).length - 2000);
+      saveConversations(threads);
+      const loaded = loadConversations();
+      expect(loaded.map((c) => c.messages.length)).toEqual([2, 0]);
+      expect(loaded[1].sessionId).toBe(session);
+    });
+
+    it('trims a running turn’s thread last, down to its question and reply', () => {
+      const live = { run: 4, attach: 'run-0004', assistantId: 'a-1' };
+      const running = thread(1, {
+        live,
+        messages: [
+          msg('user', 'earlier'),
+          { ...msg('assistant', 'y'.repeat(4000)), id: 'a-0' },
+          msg('user', 'now'),
+          { ...msg('assistant', 'half'), id: 'a-1', seq: 9 },
+        ],
+      });
+      const threads = [running, thread(2)];
+      quota(1500);
+      saveConversations(threads);
+      const [kept, other] = loadConversations();
+      expect(kept.live).toEqual(live);
+      expect(kept.messages.map((m) => m.text)).toEqual(['now', 'half']);
+      expect(kept.messages[1].seq).toBe(9);
+      expect(other.messages).toEqual([]);
+    });
+
+    it('saves nothing new, and throws nothing, when even the trimmed list cannot fit', () => {
+      saveConversations([thread(1)]);
+      const before = raw();
+      quota(10);
+      expect(() => saveConversations([thread(1), thread(2)])).not.toThrow();
+      expect(raw()).toBe(before);
+    });
+
+    it('never trims for a failure that is not a full store', () => {
+      const setItem = vi.spyOn(storage(), 'setItem').mockImplementation(() => {
+        throw new DOMException('Denied.', 'SecurityError');
+      });
+      expect(() => saveConversations([thread(1), thread(2)])).not.toThrow();
+      // One try: a trim would have tried again with less.
+      expect(setItem).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('what a thread’s runs reached (M92.8)', () => {
+  const reach = (status: string, over: Partial<RunReach> = {}): RunReach => ({
+    connectors: [{ name: 'gmail', status }],
+    missing: [{ name: 'linear', reason: "not in this vault's connector list" }],
+    missing_more: 2,
+    inherits: false,
+    permission_mode: 'acceptEdits',
+    cerebro: true,
+    families: { confirmable: ['allow'], delegate: ['cli'], file_write: ['deny'], shell: ['deny'] },
+    ...over,
+  });
+  const reply = (id: string, reached?: RunReach): ChatMessage => ({
+    ...msg('assistant', id),
+    ...(reached === undefined ? {} : { reach: reached }),
+  });
+  /** The threads as storage holds them. */
+  const stored = (): Record<string, unknown>[] =>
+    JSON.parse(window.localStorage.getItem('cerebro.conversations') ?? '[]') as Record<
+      string,
+      unknown
+    >[];
+
+  it('saves the newest reply’s reach once, as the thread’s own fact, and none on its replies', () => {
+    const older = reach('needs-auth');
+    const newer = reach('connected');
+    const thread: Conversation = {
+      ...newConversation(),
+      messages: [
+        msg('user', 'a'),
+        reply('one', older),
+        msg('user', 'b'),
+        reply('two', newer),
+        msg('user', 'c'),
+        // A run its init refused says nothing: the last one that said stands.
+        reply('three'),
+      ],
+    };
+    expect(threadReach(thread)).toEqual(newer);
+    saveConversations([thread]);
+    const [saved] = stored();
+    expect(saved.reach).toEqual(newer);
+    const messages = saved.messages as Record<string, unknown>[];
+    expect(messages.some((m) => 'reach' in m)).toBe(false);
+    const [loaded] = loadConversations();
+    expect(loaded.reach).toEqual(newer);
+    expect(loaded.messages.some((m) => m.reach !== undefined)).toBe(false);
+    expect(threadReach(loaded)).toEqual(newer);
+    // A later turn's run outranks what the thread saved, and is saved in its
+    // place.
+    const later: Conversation = { ...loaded, messages: [...loaded.messages, reply('four', older)] };
+    expect(threadReach(later)).toEqual(older);
+    saveConversations([later]);
+    expect(loadConversations()[0].reach).toEqual(older);
+  });
+
+  it('reads a thread no run has said one for as not recorded, never as reaching nothing', () => {
+    const thread: Conversation = {
+      ...newConversation(),
+      messages: [msg('user', 'a'), reply('one')],
+    };
+    expect(threadReach(thread)).toBeNull();
+    saveConversations([thread]);
+    expect('reach' in stored()[0]).toBe(false);
+    expect(threadReach(loadConversations()[0])).toBeNull();
+  });
+
+  it('drops a stored reach this build cannot read, and any a reply holds', () => {
+    const good = reach('connected');
+    const unread: unknown[] = [
+      'gmail',
+      null,
+      { ...good, connectors: [{ name: 'gmail' }] },
+      { ...good, missing: [{ name: 7, reason: 'x' }] },
+      { ...good, missing_more: -1 },
+      { ...good, missing_more: 1.5 },
+      { ...good, inherits: 'no' },
+      { ...good, cerebro: undefined },
+      { ...good, permission_mode: null },
+      { ...good, families: [] },
+      { ...good, families: { shell: 'deny' } },
+      { ...good, families: { shell: ['maybe'] } },
+      { ...good, families: { shell: ['toString'] } },
+    ];
+    window.localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([
+        ...unread.map((r, n) => ({ ...newConversation(), id: `c-${n}`, reach: r })),
+        {
+          ...newConversation(),
+          id: 'kept',
+          reach: good,
+          messages: [msg('user', 'a'), reply('one', reach('failed'))],
+        },
+      ]),
+    );
+    const loaded = loadConversations();
+    expect(loaded.slice(0, unread.length).map((c) => 'reach' in c)).toEqual(
+      unread.map(() => false),
+    );
+    const kept = loaded[unread.length];
+    expect(kept.reach).toEqual(good);
+    expect('reach' in kept.messages[1]).toBe(false);
+    expect(threadReach(kept)).toEqual(good);
+  });
+
+  describe('when storage is full', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    /** A store that refuses anything longer than `limit`, as a full one
+     * would, on whatever holds the page's `setItem`. */
+    function quota(limit: number) {
+      const store = window.localStorage;
+      const holder = Object.prototype.hasOwnProperty.call(store, 'setItem')
+        ? store
+        : (Object.getPrototypeOf(store) as Storage);
+      const real = holder.setItem;
+      vi.spyOn(holder, 'setItem').mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string,
+      ) {
+        if (value.length > limit) {
+          throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+        }
+        real.call(this, key, value);
+      });
+    }
+
+    const thread = (n: number, reached?: RunReach): Conversation => ({
+      ...newConversation(),
+      id: `c-${n}`,
+      updatedAt: `2026-10-${String(10 + n).padStart(2, '0')}T12:00:00.000Z`,
+      messages: [
+        msg('user', `question ${n}`),
+        { ...reply(`a-${n}`, reached), text: 'x'.repeat(4000) },
+      ],
+    });
+
+    it('keeps a thread’s reach when its body is trimmed to fit', () => {
+      const oldest = reach('needs-auth');
+      const threads = [thread(3, reach('connected')), thread(1, oldest), thread(2)];
+      quota(JSON.stringify(threads).length - 2000);
+      saveConversations(threads);
+      const loaded = loadConversations();
+      expect(loaded.map((c) => c.messages.length)).toEqual([2, 0, 2]);
+      // The oldest lost its body, and with it the reply that said; the
+      // thread still knows what its run reached.
+      expect(threadReach(loaded[1])).toEqual(oldest);
+      expect(threadReach(loaded[0])).toEqual(reach('connected'));
+      expect(threadReach(loaded[2])).toBeNull();
+    });
+  });
+});
+
+describe('a branch’s fork (M91.6)', () => {
+  const SOURCE = '00000000-0000-4000-8000-000000000001';
+  const ANCHOR = '00000000-0000-4000-8000-000000000002';
+  const MINTED = '00000000-0000-4000-8000-000000000003';
+  const branch = (over: Partial<Conversation> = {}): Conversation => ({
+    ...newConversation(),
+    id: 'c-branch',
+    fork: { from: SOURCE, at: ANCHOR },
+    ...over,
+  });
+
+  it('keeps a branch’s fork through save and load while it has no session', () => {
+    saveConversations([branch()]);
+    expect(loadConversations()[0]).toMatchObject({
+      sessionId: null,
+      fork: { from: SOURCE, at: ANCHOR },
+    });
+  });
+
+  it('drops a malformed fork, and keeps only a fork’s two ids', () => {
+    for (const fork of [
+      { from: 'mock-session', at: ANCHOR },
+      { from: SOURCE, at: '--resume' },
+      { from: SOURCE },
+      'not a fork',
+      null,
+    ]) {
+      window.localStorage.setItem('cerebro.conversations', JSON.stringify([{ ...branch(), fork }]));
+      const [loaded] = loadConversations();
+      expect('fork' in loaded, JSON.stringify(fork)).toBe(false);
+      expect(loaded.messages).toEqual([]);
+    }
+    window.localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([{ ...branch(), fork: { from: SOURCE, at: ANCHOR, extra: 'x' } }]),
+    );
+    expect(loadConversations()[0].fork).toEqual({ from: SOURCE, at: ANCHOR });
+  });
+
+  it('drops a fork once its thread has a session of its own', () => {
+    saveConversations([branch({ sessionId: MINTED })]);
+    const [loaded] = loadConversations();
+    expect(loaded.sessionId).toBe(MINTED);
+    expect('fork' in loaded).toBe(false);
+  });
+
+  it('spends a fork when the thread takes a session, and keeps it until then', () => {
+    const pending = withSession(branch(), null);
+    expect(pending).toMatchObject({ sessionId: null, fork: { from: SOURCE, at: ANCHOR } });
+    const forked = withSession(branch(), MINTED);
+    expect(forked.sessionId).toBe(MINTED);
+    expect('fork' in forked).toBe(false);
+    // A thread that never branched only takes the session.
+    const plain = { ...newConversation(), id: 'c-plain' };
+    expect(withSession(plain, MINTED)).toEqual({ ...plain, sessionId: MINTED });
   });
 });

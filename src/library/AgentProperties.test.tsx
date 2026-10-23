@@ -10,6 +10,7 @@ import * as ipc from '@/lib/ipc';
 import type { Entry } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { makeEntry } from '@/test/factories';
 import { AgentProperties, shellWords, webWords } from './AgentProperties';
 
@@ -97,17 +98,16 @@ describe('AgentProperties', () => {
     setup([AGENT, RISK, type]);
     fireEvent.click(screen.getByTestId('agent-add-trigger'));
     const editor = screen.getByTestId('agent-editor-trigger-new');
-    fireEvent.change(within(editor).getByLabelText('Trigger 1 event'), {
-      target: { value: 'assigned' },
-    });
+    chooseOption(within(editor).getByLabelText('Trigger 1 event'), { value: 'assigned' });
     expect(within(editor).queryByLabelText('Trigger 1 value')).toBeNull();
     done(editor);
     expect(within(editor).getByRole('alert').textContent).toBe('Pick the field that assigns it.');
     expect(patch).not.toHaveBeenCalled();
-    expect(within(editor).getByRole('option', { name: 'agent (Work item)' })).toBeTruthy();
-    fireEvent.change(within(editor).getByLabelText('Trigger 1 field'), {
-      target: { value: 'agent' },
-    });
+    const field = within(editor).getByLabelText('Trigger 1 field');
+    // No field yet reads as the placeholder, not as a row anyone could pick.
+    expect(field.textContent).toBe('Pick a field');
+    expect(optionLabels(field)).toEqual(['agent (Work item)']);
+    chooseOption(field, { value: 'agent' });
     done(editor);
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
     expect(lastPatch()).toEqual({ when: [{ event: 'assigned', field: 'agent' }] });
@@ -116,7 +116,7 @@ describe('AgentProperties', () => {
   it('an assignment picker explains when no database declares an Agent relation', () => {
     setup();
     fireEvent.click(screen.getByTestId('agent-add-trigger'));
-    fireEvent.change(screen.getByLabelText('Trigger 1 event'), { target: { value: 'assigned' } });
+    chooseOption(screen.getByLabelText('Trigger 1 event'), { value: 'assigned' });
     expect(screen.getByTestId('trigger-no-agent-field').textContent).toContain(
       'No database has a relation to Agent yet.',
     );
@@ -127,15 +127,9 @@ describe('AgentProperties', () => {
     setup();
     fireEvent.click(screen.getByTestId('agent-add-trigger'));
     const editor = screen.getByTestId('agent-editor-trigger-new');
-    fireEvent.change(within(editor).getByLabelText('Trigger 1 event'), {
-      target: { value: 'created' },
-    });
-    fireEvent.change(within(editor).getByLabelText('Trigger 1 field'), {
-      target: { value: 'status' },
-    });
-    fireEvent.change(within(editor).getByLabelText('Trigger 1 value'), {
-      target: { value: 'open' },
-    });
+    chooseOption(within(editor).getByLabelText('Trigger 1 event'), { value: 'created' });
+    chooseOption(within(editor).getByLabelText('Trigger 1 field'), { value: 'status' });
+    chooseOption(within(editor).getByLabelText('Trigger 1 value'), { value: 'open' });
     // A bare `{event: changed}` is valid and fires on every change, so no
     // clause reaches the file before Done.
     expect(patch).not.toHaveBeenCalled();
@@ -345,10 +339,10 @@ describe('AgentProperties', () => {
   it('builds a schedule instead of asking for its grammar, and writes it alone', async () => {
     setup();
     const editor = openRow('schedule');
-    const repeat = within(editor).getByLabelText('Repeat') as HTMLSelectElement;
-    expect(repeat.value).toBe('weekdays');
-    fireEvent.change(repeat, { target: { value: 'weekly' } });
-    fireEvent.change(within(editor).getByLabelText('Day'), { target: { value: '5' } });
+    const repeat = within(editor).getByLabelText('Repeat');
+    expect(repeat.getAttribute('data-value')).toBe('weekdays');
+    chooseOption(repeat, 'Every week');
+    chooseOption(within(editor).getByLabelText('Day'), 'Friday');
     fireEvent.change(within(editor).getByTestId('schedule-time'), { target: { value: '17:30' } });
     expect(patch).not.toHaveBeenCalled();
     done(editor);
@@ -509,9 +503,7 @@ describe('AgentProperties', () => {
       setup([withWhen(WHEN), RISK]);
       line(1);
       line(0);
-      fireEvent.change(within(trigger(0)).getByLabelText('Trigger 2 event'), {
-        target: { value: 'created' },
-      });
+      chooseOption(within(trigger(0)).getByLabelText('Trigger 2 event'), { value: 'created' });
       fireEvent.click(within(trigger(1)).getByRole('button', { name: 'Remove trigger 1' }));
       await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
       expect(lastPatch()).toEqual({ when: [WHEN[1], WHEN[2]] });
@@ -540,9 +532,7 @@ describe('AgentProperties', () => {
     it('a rescan that reorders when: keeps Done on the right trigger', async () => {
       setup([withWhen(WHEN), RISK]);
       line(0);
-      fireEvent.change(within(trigger(0)).getByLabelText('Trigger 1 event'), {
-        target: { value: 'changed' },
-      });
+      chooseOption(within(trigger(0)).getByLabelText('Trigger 1 event'), { value: 'changed' });
       act(() => useVaultStore.setState({ entries: [withWhen([WHEN[2], WHEN[1], WHEN[0]]), RISK] }));
       done(trigger(0));
       await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
@@ -552,9 +542,7 @@ describe('AgentProperties', () => {
     it('a trigger changed outside its editor writes nothing from it, and says why', async () => {
       setup([withWhen(WHEN), RISK]);
       line(0);
-      fireEvent.change(within(trigger(0)).getByLabelText('Trigger 1 event'), {
-        target: { value: 'moved' },
-      });
+      chooseOption(within(trigger(0)).getByLabelText('Trigger 1 event'), { value: 'moved' });
       act(() =>
         useVaultStore.setState({
           entries: [withWhen([{ event: 'changed' }, WHEN[1], WHEN[2]]), RISK],
@@ -575,9 +563,7 @@ describe('AgentProperties', () => {
       rescanOnWrite();
       setup([withWhen([WHEN[2], WHEN[2]]), RISK]);
       line(1);
-      fireEvent.change(within(trigger(0)).getByLabelText('Trigger 2 event'), {
-        target: { value: 'created' },
-      });
+      chooseOption(within(trigger(0)).getByLabelText('Trigger 2 event'), { value: 'created' });
       done(trigger(0));
       await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
       expect(lastPatch()).toEqual({ when: [WHEN[2], { event: 'created' }] });

@@ -15,7 +15,7 @@
 //! which now reads the answer (CLI 2.1.250, derived from its bundle; live run
 //! owed: the D4 record's "M57.1: the gate").
 //!
-//! **A bearer can wait, never answer** (CV-27). Nothing reachable from MCP
+//! **A bearer can wait, never answer** (CV-28). Nothing reachable from MCP
 //! mints a `PersonAnswer`: the hook and any process holding the run's bearer
 //! can register a wait in that run's own conversation and read the person's
 //! decision, nothing more. A tool the gate may defer is never pre-approved in
@@ -31,6 +31,14 @@
 //! family's card offers one. Debug builds may also name cerebro tools to ask
 //! for in `CEREBRO_ASK_TOOLS` (`ask_override`), a test seam that can add asks
 //! and never allows.
+//!
+//! **A subagent starts only as a type the run may start** (M91.2b). A seated
+//! run that holds Claude Code's subagent tool has its hook match the tool by
+//! every name (`AskPlan::inspects`), and the gate reads each main-thread
+//! call's `subagent_type`: one the plan allows gets no opinion, so argv's
+//! denials still apply (never an allow), and any other is denied with the
+//! types it may start. A subagent's own calls keep MAIN_ONLY: no subagent
+//! can ask the person anything, so nothing it calls is ever deferred.
 //!
 //! **A write lands only on a person's Allow** (M57.4, CV-29). The gate's
 //! allow lets an asked page write reach dispatch, and dispatch is the
@@ -87,7 +95,8 @@ use super::AgentRequest;
 use crate::policy::tool_approval::{self, CardKind, HostAnswer, RunApproval};
 
 /// The gate's tool name on cerebro's loopback server. A hook endpoint, never
-/// a manifest row: `tools/list` never names it (`shared/policy/README.md`).
+/// a manifest row: `tools/list` never names it (`shared/policy/README.md`),
+/// and live on 2.1.250 an `mcp_tool` hook reaches a tool the list leaves out.
 pub const GATE_TOOL: &str = "ask_gate";
 
 /// The one refusal code the seam adds (policy.v3, operational transport): a
@@ -102,7 +111,12 @@ pub const MALFORMED_ARGUMENTS: &str = "malformed_arguments";
 /// The prompt tool's name on cerebro's loopback server (M57.3): Claude
 /// Code's `--permission-prompt-tool`, which 2.1.250 needs before it offers
 /// AskUserQuestion in `-p` (F9, derived). Like `ask_gate`, a hook endpoint,
-/// never a manifest row. `Interactions::host_prompt` is its answer.
+/// never a manifest row. Unlike it, the run that names it must find it in
+/// `tools/list`: live on 2.1.250, an unlisted prompt tool fails every tool
+/// call of the run. So a seat records that its run was handed it
+/// (`hand_prompt_tool`), `mcp.rs` lists it for that run alone, and the run's
+/// `--disallowedTools` hides it from the model. `Interactions::host_prompt`
+/// is its answer.
 pub const HOST_TOOL: &str = "ask_host";
 
 /// Every refusal code this module can hand the webview.
@@ -140,6 +154,12 @@ const NOBODY_WATCHING: &str =
     "Nobody is watching this run, so no one can allow this call. It did not run.";
 const MAIN_ONLY: &str =
     "Cerebro can ask the person only from the main conversation, so this call did not run.";
+/// A subagent call for a type the run may not start (M91.2b); `{types}` is
+/// the ones it may, comma-separated.
+const AGENT_TYPE_REFUSED: &str =
+    "This conversation may start only these subagent types: {types}. Start one of those, or do the work yourself.";
+/// The same, for a run whose plan names no type at all.
+const NO_AGENT_TYPE: &str = "This conversation may start no subagent, so this call did not run.";
 
 /// What the webview shows for a late click.
 pub const STALE: &str = "No longer waiting: this request was already answered or cancelled.";
@@ -194,6 +214,9 @@ pub struct Seat {
     /// The tool of a deferred call the session left open, which this run
     /// refuses before its new text runs (the settle).
     settle: Option<String>,
+    /// The run's argv names `ask_host` as its permission prompt tool, so its
+    /// `tools/list` lists it (`hand_prompt_tool`).
+    prompted: bool,
 }
 
 impl Seat {
@@ -209,6 +232,7 @@ impl Seat {
             approval: Arc::new(tool_approval::plan_for(request, true)),
             snapshot: Arc::new(snapshot),
             settle: None,
+            prompted: false,
         }
     }
 
@@ -708,25 +732,29 @@ impl Refusal {
 }
 
 /// What a run's argv and settings take from the book: the tools that may
-/// ask (out of `--allowedTools`), and a settle marker's tool, which joins
-/// the hook's matcher only.
+/// ask (out of `--allowedTools`), a settle marker's tool, which joins the
+/// hook's matcher only, and the tools the gate inspects without ever asking
+/// (M91.2b): the subagent tool a seated run holds, by every name, whose
+/// calls the gate holds to the agent types the run may start.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AskPlan {
     pub asks: Vec<String>,
     pub settle: Option<String>,
+    pub inspects: Vec<String>,
 }
 
 impl AskPlan {
     pub fn is_empty(&self) -> bool {
-        self.asks.is_empty() && self.settle.is_none()
+        self.asks.is_empty() && self.settle.is_none() && self.inspects.is_empty()
     }
 
-    /// The hook's matcher: the asks, then the settle tool.
+    /// The hook's matcher: the asks, then the settle tool, then the tools it
+    /// inspects.
     pub fn matcher(&self) -> Vec<String> {
         let mut names = self.asks.clone();
-        if let Some(settle) = &self.settle {
-            if !names.contains(settle) {
-                names.push(settle.clone());
+        for name in self.settle.iter().chain(&self.inspects) {
+            if !names.contains(name) {
+                names.push(name.clone());
             }
         }
         names
@@ -970,11 +998,13 @@ fn summary_of(tool_name: &str, input: &Value) -> String {
 /// seam may add asks, never allows. Then the tool-approval table, over the
 /// plan of the run the call came from (`seat`): its asks become cards unless
 /// `granted(family, subject)` holds a This conversation grant for the exact
-/// subject, its refusals and denials carry their message, and everything
-/// else is argv's. An ask draws the card its family's table row names: a
-/// confirmable page write draws a write card (M57.4). A call with no seat
-/// that names a CLI built-in is the gate's to refuse, since nobody is there
-/// to answer it; one that names a cerebro tool is argv's, and dispatch's.
+/// subject, its refusals and denials carry their message, a subagent start
+/// for a type the plan does not allow is denied with the ones it does
+/// (M91.2b, `agent_type_refusal`), and everything else is argv's. An ask
+/// draws the card its family's table row names: a confirmable page write
+/// draws a write card (M57.4). A call with no seat that names a CLI built-in
+/// is the gate's to refuse, since nobody is there to answer it; one that
+/// names a cerebro tool is argv's, and dispatch's.
 pub fn decide(
     asks: &[String],
     seat: Option<&Seat>,
@@ -996,7 +1026,10 @@ pub fn decide(
         };
     };
     match tool_approval::host_answer(&seat.approval, granted, &call.tool_name, &call.tool_input) {
-        HostAnswer::Pass => Decision::Argv,
+        HostAnswer::Pass => match agent_type_refusal(&seat.approval, call) {
+            Some(refusal) => Decision::Deny(refusal),
+            None => Decision::Argv,
+        },
         HostAnswer::Allow => Decision::Allow,
         HostAnswer::Deny { message } => Decision::Deny(message),
         HostAnswer::Ask { family, subject } => Decision::Ask {
@@ -1005,6 +1038,31 @@ pub fn decide(
             subject: Some(subject),
         },
     }
+}
+
+/// Why a call to the subagent tool `approval` holds may not start its agent
+/// type (M91.2b): its `subagent_type` names none of the plan's allowed
+/// types. None for an allowed type, which the gate leaves to argv (never an
+/// allow: a deny rule of argv's or the person's still binds it), and for a
+/// call to any other tool.
+fn agent_type_refusal(approval: &RunApproval, call: &GateCall) -> Option<String> {
+    let delegates = super::cli_agents::delegate_rows(approval);
+    let named = delegates
+        .iter()
+        .any(|row| row.name == call.tool_name || row.aliases.contains(&call.tool_name));
+    if !named {
+        return None;
+    }
+    let asked = call.tool_input.get("subagent_type").and_then(Value::as_str);
+    let allowed = &approval.allowed_agent_types;
+    if asked.is_some_and(|asked| allowed.iter().any(|t| t == asked)) {
+        return None;
+    }
+    Some(if allowed.is_empty() {
+        NO_AGENT_TYPE.to_string()
+    } else {
+        AGENT_TYPE_REFUSED.replace("{types}", &allowed.join(", "))
+    })
 }
 
 /// The debug override, pure: the names in `raw` (comma separated), keeping
@@ -1075,11 +1133,16 @@ fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-/// The run's settings file, pure: one PreToolUse entry whose matcher is
-/// exactly `matcher`, holding one `mcp_tool` hook on cerebro's server that
-/// hands `ask_gate` the call. Refuses an empty list and any name outside the
-/// matcher grammar.
-pub fn hook_settings(matcher: &[String]) -> Result<String, String> {
+/// The run's settings file, pure: `settings` (the hardening and environment
+/// every run but an internal one carries, M91.2b) with one PreToolUse entry
+/// added whose matcher is exactly `matcher`, holding one `mcp_tool` hook on
+/// cerebro's server that hands `ask_gate` the call. Refuses an empty list,
+/// any name outside the matcher grammar, and settings that name hooks of
+/// their own.
+pub fn hook_settings(
+    matcher: &[String],
+    mut settings: serde_json::Map<String, Value>,
+) -> Result<String, String> {
     if matcher.is_empty() {
         return Err("a gate needs at least one tool to match".into());
     }
@@ -1089,9 +1152,13 @@ pub fn hook_settings(matcher: &[String]) -> Result<String, String> {
             Value::String(bad.chars().take(64).collect())
         ));
     }
+    if settings.contains_key(HOOKS) {
+        return Err("the run's settings already name hooks, so no gate was written".into());
+    }
     let field = |name: &str| Value::String(format!("${{{name}}}"));
-    Ok(json!({
-        "hooks": {
+    settings.insert(
+        HOOKS.into(),
+        json!({
             "PreToolUse": [{
                 "matcher": matcher.join("|"),
                 "hooks": [{
@@ -1108,10 +1175,13 @@ pub fn hook_settings(matcher: &[String]) -> Result<String, String> {
                     "timeout": HOOK_TIMEOUT_SECS,
                 }],
             }],
-        },
-    })
-    .to_string())
+        }),
+    );
+    Ok(Value::Object(settings).to_string())
 }
+
+/// The settings key Claude Code reads hooks under.
+const HOOKS: &str = "hooks";
 
 // ---------------------------------------------------------------------------
 // The book
@@ -1269,9 +1339,15 @@ impl Interactions {
                     asks.push(name);
                 }
             }
+            let inspects = super::cli_agents::delegate_rows(&seat.approval)
+                .into_iter()
+                .flat_map(|row| std::iter::once(&row.name).chain(&row.aliases))
+                .cloned()
+                .collect();
             AskPlan {
                 asks,
                 settle: seat.settle.clone(),
+                inspects,
             }
         };
         if plan.is_empty() || supports_gate(version) {
@@ -1287,13 +1363,32 @@ impl Interactions {
         AskPlan::default()
     }
 
+    /// Record that the seated run's argv names `ask_host` as its permission
+    /// prompt tool (`agent::run_gate`, beside the gate it writes). A run with
+    /// no seat is handed none, so nothing is recorded.
+    pub fn hand_prompt_tool(&self, run_id: &str) {
+        if let Some(seat) = lock(&self.book).seats.get_mut(run_id) {
+            seat.prompted = true;
+        }
+    }
+
+    /// Does this run's `tools/list` list `ask_host` (`mcp.rs`)? Only while
+    /// its seat records that its argv names it.
+    pub fn lists_prompt_tool(&self, run_id: &str) -> bool {
+        lock(&self.book)
+            .seats
+            .get(run_id)
+            .is_some_and(|seat| seat.prompted)
+    }
+
     /// The hook's question (`ask_gate`). In this order: no seat turns an ask
     /// into a refusal; another session's call gets no opinion; a subagent's
     /// call is refused; a known call defers while it waits, repeats the
     /// person's answer once answered, and is refused with its reason once
     /// cancelled; a new call goes to `decide`, and an ask registers it and
     /// defers. Never allows a call no person answered, now or earlier in the
-    /// conversation for its exact subject (This conversation, M57.2).
+    /// conversation for its exact subject (This conversation, M57.2), and
+    /// never a subagent's start (M91.2b): an allowed type gets no opinion.
     pub fn gate(&self, run_id: &str, call: &GateCall) -> GateAnswer {
         let mut book = lock(&self.book);
         let Some(seat) = book.seats.get(run_id).cloned() else {
@@ -2117,15 +2212,24 @@ mod tests {
         };
         book.open_seat(seat("run-1", "s-1", "/v"), Some(marker));
         let plan = book.ask_plan("run-1", &[ASKED.into()], Some("2.1.250"));
-        assert_eq!(plan.asks, [ASKED, "AskUserQuestion", "ExitPlanMode"]);
+        assert_eq!(
+            plan.asks,
+            [ASKED, "AskUserQuestion", "ExitPlanMode", "EnterPlanMode"]
+        );
         assert_eq!(plan.settle.as_deref(), Some("mcp__cerebro__edit_note"));
+        // M91.2b: the subagent tool the seat's plan holds follows, by both
+        // its names, for the gate to inspect.
+        assert_eq!(plan.inspects, ["Agent", "Task"]);
         assert_eq!(
             plan.matcher(),
             [
                 ASKED,
                 "AskUserQuestion",
                 "ExitPlanMode",
-                "mcp__cerebro__edit_note"
+                "EnterPlanMode",
+                "mcp__cerebro__edit_note",
+                "Agent",
+                "Task"
             ]
         );
         assert_eq!(
@@ -2194,7 +2298,11 @@ mod tests {
     #[test]
     fn the_hook_matches_exactly_the_asked_tools() {
         let settings: Value = serde_json::from_str(
-            &hook_settings(&[ASKED.into(), "mcp__cerebro__edit_note".into()]).unwrap(),
+            &hook_settings(
+                &[ASKED.into(), "mcp__cerebro__edit_note".into()],
+                serde_json::Map::new(),
+            )
+            .unwrap(),
         )
         .unwrap();
         let entries = settings["hooks"]["PreToolUse"].as_array().unwrap();
@@ -2217,15 +2325,152 @@ mod tests {
                 "timeout": 10
             })
         );
-        assert!(hook_settings(&[]).is_err());
+        assert!(hook_settings(&[], serde_json::Map::new()).is_err());
+    }
+
+    // M91.2b: the hook joins the run's own settings, the hardening and the
+    // environment every run but an internal one carries, in one file, and
+    // never stands beside hooks it did not write.
+    #[test]
+    fn the_hook_joins_the_runs_settings() {
+        let base = json!({
+            "permissions": { "disableBypassPermissionsMode": "disable" },
+            "disableAutoMode": "disable",
+            "env": { "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1" },
+        });
+        let Value::Object(base) = base else {
+            unreachable!()
+        };
+        let written: Value =
+            serde_json::from_str(&hook_settings(&["Agent".into()], base.clone()).unwrap()).unwrap();
+        for (key, value) in &base {
+            assert_eq!(&written[key], value, "{key}");
+        }
+        assert_eq!(written["hooks"]["PreToolUse"][0]["matcher"], "Agent");
+        assert_eq!(written.as_object().unwrap().len(), base.len() + 1);
+        let mut hooked = base;
+        hooked.insert("hooks".into(), json!({}));
+        assert!(hook_settings(&["Agent".into()], hooked).is_err());
     }
 
     #[test]
     fn a_name_outside_the_matcher_grammar_is_refused() {
         for bad in ["a|b", "mcp__x.*", "Bash(rm *)", "a b", "", "é"] {
-            assert!(hook_settings(&[bad.into()]).is_err(), "{bad:?}");
+            assert!(
+                hook_settings(&[bad.into()], serde_json::Map::new()).is_err(),
+                "{bad:?}"
+            );
         }
-        assert!(hook_settings(&["Bash".into(), "mcp__a-b__c_d9".into()]).is_ok());
+        assert!(hook_settings(
+            &["Bash".into(), "mcp__a-b__c_d9".into()],
+            serde_json::Map::new()
+        )
+        .is_ok());
+    }
+
+    /// A main-thread call to the subagent tool, spelled `tool`, starting
+    /// `subagent_type` (left out when None).
+    fn agent_call(id: &str, tool: &str, subagent_type: Option<&str>) -> GateCall {
+        let mut input = json!({ "description": "Read the plan", "prompt": "Summarize it." });
+        if let Some(subagent_type) = subagent_type {
+            input["subagent_type"] = json!(subagent_type);
+        }
+        GateCall {
+            session_id: "s-1".into(),
+            tool_use_id: id.into(),
+            tool_name: tool.into(),
+            tool_input: input,
+            agent_id: String::new(),
+        }
+    }
+
+    // M91.2b: the gate holds a seated run's subagent calls to the types its
+    // plan allows: an allowed one gets no opinion, never an allow, so argv's
+    // denials still bind; any other type, or none, is denied with the ones
+    // it may start; a subagent's own call is refused as before.
+    #[test]
+    fn a_subagent_starts_only_as_an_allowed_type() {
+        let book = Interactions::with_asks(Vec::new());
+        book.open_seat(seat("run-1", "s-1", "/v"), None);
+        let allowed = tool_approval::table().agent_types.allowed.clone();
+        assert_eq!(allowed, ["cerebro-researcher"]);
+        let refused = AGENT_TYPE_REFUSED.replace("{types}", "cerebro-researcher");
+        assert!(refused.starts_with(
+            "This conversation may start only these subagent types: cerebro-researcher."
+        ));
+        for tool in ["Agent", "Task"] {
+            assert_eq!(
+                book.gate("run-1", &agent_call("t1", tool, Some("cerebro-researcher"))),
+                GateAnswer::NoOpinion,
+                "{tool}"
+            );
+            for odd in [Some("general-purpose"), Some("gsd-planner"), Some(""), None] {
+                assert_eq!(
+                    book.gate("run-1", &agent_call("t2", tool, odd)),
+                    GateAnswer::Deny(refused.clone()),
+                    "{tool} {odd:?}"
+                );
+            }
+            let mut sub = agent_call("t3", tool, Some("cerebro-researcher"));
+            sub.agent_id = "a0000000000000001".into();
+            assert_eq!(book.gate("run-1", &sub), GateAnswer::Deny(MAIN_ONLY.into()));
+        }
+        assert!(lock(&book.book).entries.is_empty(), "nothing registered");
+        // Another tool is no subagent's start, whatever its input says.
+        let mut other = agent_call("t4", "mcp__cerebro__get_note", Some("x"));
+        other.tool_input["path"] = json!("a.md");
+        assert_eq!(book.gate("run-1", &other), GateAnswer::NoOpinion);
+    }
+
+    // M91.2b: with the Subagents switch off, the plan denies the tool in
+    // the table's words, and its gate never inspects it.
+    #[test]
+    fn with_the_switch_off_the_gate_denies_the_tool_and_inspects_nothing() {
+        let mut req = request();
+        req.delegate = Some(tool_approval::DelegateCeiling::Off);
+        let book = Interactions::with_asks(Vec::new());
+        book.open_seat(Seat::new("run-1", "s-1", Path::new("/v"), &req), None);
+        let plan = book.ask_plan("run-1", &[], Some("2.1.250"));
+        assert!(plan.inspects.is_empty());
+        assert!(!plan.matcher().iter().any(|t| t == "Agent" || t == "Task"));
+        assert_eq!(
+            book.gate(
+                "run-1",
+                &agent_call("t1", "Agent", Some("cerebro-researcher"))
+            ),
+            GateAnswer::Deny(tool_approval::messages().denied.clone())
+        );
+        // On, the same seat inspects it by both names.
+        let book = Interactions::with_asks(Vec::new());
+        book.open_seat(seat("run-1", "s-1", "/v"), None);
+        assert_eq!(
+            book.ask_plan("run-1", &[], Some("2.1.250")).inspects,
+            ["Agent", "Task"]
+        );
+    }
+
+    // M91.2b: a plan that holds the tool but names no type refuses every
+    // start in its own words.
+    #[test]
+    fn a_plan_with_no_type_refuses_every_start() {
+        let mut approval = tool_approval::plan_for(&request(), true);
+        approval.allowed_agent_types.clear();
+        assert_eq!(
+            agent_type_refusal(
+                &approval,
+                &agent_call("t1", "Agent", Some("cerebro-researcher"))
+            ),
+            Some(NO_AGENT_TYPE.to_string())
+        );
+        approval.allowed_agent_types = vec!["a".into(), "b".into()];
+        assert_eq!(
+            agent_type_refusal(&approval, &agent_call("t1", "Task", Some("c"))),
+            Some(AGENT_TYPE_REFUSED.replace("{types}", "a, b"))
+        );
+        assert_eq!(
+            agent_type_refusal(&approval, &agent_call("t1", "Task", Some("b"))),
+            None
+        );
     }
 
     #[test]
@@ -2274,7 +2519,7 @@ mod tests {
         for new in ["2.1.250 (Claude Code)", "2.2.0", "3.0.0"] {
             assert_eq!(
                 book.ask_plan("run-1", &granted, Some(new)).asks,
-                [ASKED, "AskUserQuestion", "ExitPlanMode"]
+                [ASKED, "AskUserQuestion", "ExitPlanMode", "EnterPlanMode"]
             );
         }
         // A run with no seat asks nothing; one that holds none of the debug
@@ -2284,7 +2529,7 @@ mod tests {
         assert_eq!(
             book.ask_plan("run-1", &["mcp__cerebro__get_note".into()], Some("2.1.250"))
                 .asks,
-            ["AskUserQuestion", "ExitPlanMode"]
+            ["AskUserQuestion", "ExitPlanMode", "EnterPlanMode"]
         );
     }
 
@@ -2382,7 +2627,7 @@ mod tests {
                 "A question set holds 1 to 4 questions; this one holds 0."
             ))
         );
-        for tool in ["Read", "mcp__cerebro__get_note", "CronCreate"] {
+        for tool in ["Read", "mcp__cerebro__get_note", "mcp__toy__echo"] {
             assert_eq!(
                 book.gate(
                     "run-1",
@@ -3328,5 +3573,58 @@ mod tests {
             canonical_hash(&json!({ "a": 1 })),
             canonical_hash(&json!({ "a": 2 }))
         );
+    }
+
+    // M91.6: a branch seats as `agent::stream` seats it, in the session
+    // minted for it. A card it raises answers into the branch, whose resume
+    // never branches again; the card its source's turn was waiting on when
+    // the branch began still answers into the source.
+    #[test]
+    fn a_branch_and_its_source_each_answer_into_their_own_session() {
+        use super::super::transcript::{CliSession, ForkRequest};
+        const SOURCE: &str = "00000000-0000-4000-8000-0000000000b1";
+        const ANCHOR: &str = "00000000-0000-4000-8000-0000000000b2";
+        let vault = Path::new("/v");
+        let book = book();
+        book.open_seat(seat("run-source", SOURCE, "/v"), None);
+        assert_eq!(
+            book.gate("run-source", &call(SOURCE, "t-source", ASKED)),
+            GateAnswer::Defer
+        );
+        let source_card = book.confirm(SOURCE, "t-source").expect("the source's card");
+        book.close_seat("run-source");
+
+        let mut req = request();
+        req.fork = Some(ForkRequest {
+            from: SOURCE.into(),
+            at: ANCHOR.into(),
+        });
+        let session = CliSession::for_request(None, req.fork.as_ref()).unwrap();
+        let branch = session.id().to_string();
+        let approval = tool_approval::plan_for(&req, true);
+        book.open_seat(
+            super::super::seat_for("run-branch", vault, &req, &session, &approval),
+            None,
+        );
+        assert_eq!(
+            book.gate("run-branch", &call(&branch, "t-branch", ASKED)),
+            GateAnswer::Defer
+        );
+        let branch_card = book.confirm(&branch, "t-branch").expect("its own card");
+        assert_eq!(branch_card.session_id, branch);
+        let waiting: Vec<String> = book.pending(vault).into_iter().map(|c| c.id).collect();
+        assert_eq!(waiting, [source_card.id.clone(), branch_card.id.clone()]);
+        book.close_seat("run-branch");
+
+        let resume = book.begin_answer(vault, &branch_card.id, allow()).unwrap();
+        assert_eq!(resume.session_id, branch);
+        assert_eq!(resume.snapshot.fork, None);
+        // What the answer command builds from it resumes the branch itself.
+        assert_eq!(
+            CliSession::for_request(Some(&resume.session_id), resume.snapshot.fork.as_ref()),
+            Ok(CliSession::Resume(branch.clone()))
+        );
+        let resumed = book.begin_answer(vault, &source_card.id, allow()).unwrap();
+        assert_eq!(resumed.session_id, SOURCE);
     }
 }

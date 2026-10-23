@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { PageHeader } from '@/components/PageHeader';
 import { Icon } from '@/components/ui/Icon';
 import { fileLook } from '@/engine/fileKinds';
 import type { Selection } from '@/engine/types';
@@ -29,17 +30,12 @@ export function FilePage({ selection }: { selection: Extract<Selection, { kind: 
   );
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="file-page">
-      <header className="flex flex-none items-center gap-2 border-b border-n-200 px-4 py-3">
-        <Icon name={fileLook(path).icon} size={18} color="var(--n-500)" />
-        <div className="min-w-0">
-          {folder && (
-            <p className="truncate text-xs text-n-500" data-testid="file-crumb">
-              {folder}
-            </p>
-          )}
-          <h1 className="truncate text-base font-semibold text-n-900">{name}</h1>
-        </div>
-      </header>
+      <PageHeader
+        variant="tool"
+        title={name}
+        icon={<Icon name={fileLook(path).icon} size={18} />}
+        description={folder ? <span data-testid="file-crumb">{folder}</span> : undefined}
+      />
       <FileViewer rootId="0" path={path} onPresence={presence} />
     </div>
   );

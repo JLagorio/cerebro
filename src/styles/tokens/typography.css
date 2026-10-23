@@ -45,6 +45,20 @@
      titles use the 3xl reading scale; the token remains available to content. */
   --fs-4xl: 42px;
   --lh-4xl: 63px;
+  /* Product roles pair size with leading. Numeric steps remain available for
+     deliberately compact chrome; adopting a role is explicit at each surface. */
+  --fs-page-title: 40px;
+  --lh-page-title: 48px;
+  --fs-workspace-title: 24px;
+  --lh-workspace-title: 32px;
+  --fs-section-title: 16px;
+  --lh-section-title: 24px;
+  --fs-prose: 16px;
+  --lh-prose: 28px;
+  --fs-ui: 14px;
+  --lh-ui: 20px;
+  --fs-meta: 12px;
+  --lh-meta: 18px;
   /* weights */
   --w-regular: 400; /* @kind font */
   --w-medium: 500; /* @kind font */

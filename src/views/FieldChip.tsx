@@ -16,16 +16,16 @@ export function FieldChip({ resolved }: { resolved: ResolvedField }) {
 
   if (resolved.ghost) {
     return (
-      <span className="inline-flex flex-none items-center rounded-md border border-dashed border-n-300 px-1.5 py-0.5 text-2xs text-n-400">
-        {resolved.display}
+      <span className="inline-flex min-w-0 max-w-full [overflow-wrap:anywhere] items-center rounded-md border border-dashed border-n-300 px-1.5 py-0.5 text-2xs text-n-400">
+        <span className="min-w-0 [overflow-wrap:anywhere]">{resolved.display}</span>
       </span>
     );
   }
   if (kind === 'person') {
     return (
-      <span className="inline-flex flex-none items-center gap-1.5 text-xs text-n-700">
+      <span className="inline-flex min-w-0 max-w-full [overflow-wrap:anywhere] items-center gap-1.5 text-metadata text-n-700">
         <Avatar name={resolved.display} size={20} />
-        {resolved.display}
+        <span className="min-w-0 [overflow-wrap:anywhere]">{resolved.display}</span>
       </span>
     );
   }
@@ -34,14 +34,18 @@ export function FieldChip({ resolved }: { resolved: ResolvedField }) {
     // columnar alignment — TableView renders its own cells and keeps it — but
     // a chip sits inline on a card or list row, where mono buys no alignment
     // and only makes the one value that is not text look like code.
-    return <span className="inline-flex flex-none text-xs text-n-600">{resolved.display}</span>;
+    return (
+      <span className="inline-flex min-w-0 max-w-full [overflow-wrap:anywhere] text-metadata text-n-500">
+        <span className="min-w-0 [overflow-wrap:anywhere]">{resolved.display}</span>
+      </span>
+    );
   }
   if (kind === 'status' || kind === 'select' || kind === 'multiselect') {
     const sw = resolveOptionColor(resolved.color);
     const color = resolved.color === null ? 'var(--n-400)' : sw.solid;
     const hollow = optionHollow(resolved);
     return (
-      <span className="inline-flex flex-none items-center gap-1.5 text-xs text-n-700">
+      <span className="inline-flex min-w-0 max-w-full [overflow-wrap:anywhere] items-center gap-1.5 rounded-full bg-n-50 px-2 py-0.5 text-metadata text-n-700">
         <span
           className={TABLE_ANATOMY.selectDot}
           style={
@@ -50,9 +54,13 @@ export function FieldChip({ resolved }: { resolved: ResolvedField }) {
               : { background: color, border: `1.5px solid ${color}` }
           }
         />
-        {resolved.display}
+        <span className="min-w-0 [overflow-wrap:anywhere]">{resolved.display}</span>
       </span>
     );
   }
-  return <span className="inline-flex flex-none text-xs text-n-600">{resolved.display}</span>;
+  return (
+    <span className="inline-flex min-w-0 max-w-full [overflow-wrap:anywhere] text-metadata text-n-500">
+      <span className="min-w-0 [overflow-wrap:anywhere]">{resolved.display}</span>
+    </span>
+  );
 }

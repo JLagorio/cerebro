@@ -14,6 +14,7 @@ import { reorderItems, resizeItems, updateCards, updateEdges } from '@/engine/sc
 import { getItem } from '@/engine/scene/board';
 import type { SceneEditor } from '@/engine/scene/editor';
 import type { Board, Box, Command } from '@/engine/scene/model';
+import { Select } from '@/components/ui/Select';
 import { useUiStore } from '@/stores/uiStore';
 import type { BoardStore } from './boardState';
 import './canvasChrome.css';
@@ -24,9 +25,19 @@ import type { Preview } from './gestures/types';
 const ROW = 'w-full rounded-md border border-n-200 bg-n-0 px-2 py-1 text-xs text-n-700';
 const ACTION =
   'rounded-md border border-n-200 bg-n-0 px-2 py-1 text-xs text-n-600 hover:bg-n-50 disabled:opacity-40';
+const SHAPES = [
+  { value: 'rectangle', label: 'Rectangle' },
+  { value: 'ellipse', label: 'Ellipse' },
+  { value: 'diamond', label: 'Diamond' },
+];
+const ENDS = [
+  { value: 'none', label: 'None' },
+  { value: 'arrow', label: 'Arrow' },
+];
 export function Inspector({ editor, state }: { editor: SceneEditor; state: BoardStore }) {
   useStore(state, (s) => s.revision);
   const shapeId = useId();
+  const endId = useId();
   const open = useStore(state, (s) => s.inspectorOpen);
   const toast = useUiStore((s) => s.toast);
   const board = editor.board,
@@ -160,27 +171,23 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
               <label className="mb-1 block text-xs text-n-600" htmlFor={shapeId}>
                 Shape
               </label>
-              <select
+              <Select
                 id={shapeId}
-                className={ROW}
-                value={selectValue(
+                size="sm"
+                width="100%"
+                value={shown(
                   common(cards.flatMap((item) => (item.type === 'text' ? [item.shape] : []))),
                 )}
-                onChange={(event) =>
+                placeholder="Mixed"
+                options={SHAPES}
+                onChange={(shape) =>
                   apply(updateCards, {
                     updates: cards
                       .filter((item) => item.type === 'text')
-                      .map((item) => ({ id: item.id, set: { shape: event.target.value } })),
+                      .map((item) => ({ id: item.id, set: { shape } })),
                   })
                 }
-              >
-                <option value="mixed" disabled>
-                  Mixed
-                </option>
-                <option value="rectangle">Rectangle</option>
-                <option value="ellipse">Ellipse</option>
-                <option value="diamond">Diamond</option>
-              </select>
+              />
             </section>
           )}
           {sections.ink && (
@@ -214,31 +221,28 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
             <section className="space-y-2">
               <h3 className="mb-2 mt-0 text-xs font-medium text-n-600">Connection</h3>
               {(['fromEnd', 'toEnd'] as const).map((end) => (
-                <label key={end} className="block text-xs text-n-600">
-                  {end === 'fromEnd' ? 'Start' : 'End'}
-                  <select
-                    className={ROW}
-                    value={selectValue(
+                <div key={end}>
+                  <label className="block text-xs text-n-600" htmlFor={`${endId}-${end}`}>
+                    {end === 'fromEnd' ? 'Start' : 'End'}
+                  </label>
+                  <Select
+                    id={`${endId}-${end}`}
+                    size="sm"
+                    width="100%"
+                    value={shown(
                       common(
                         edges.map((edge) => edge[end] ?? (end === 'toEnd' ? 'arrow' : 'none')),
                       ),
                     )}
-                    onChange={(event) =>
+                    placeholder="Mixed"
+                    options={ENDS}
+                    onChange={(value) =>
                       apply(updateEdges, {
-                        updates: edges.map((edge) => ({
-                          id: edge.id,
-                          set: { [end]: event.target.value },
-                        })),
+                        updates: edges.map((edge) => ({ id: edge.id, set: { [end]: value } })),
                       })
                     }
-                  >
-                    <option value="mixed" disabled>
-                      Mixed
-                    </option>
-                    <option value="none">None</option>
-                    <option value="arrow">Arrow</option>
-                  </select>
-                </label>
+                  />
+                </div>
               ))}
               <TextSetting
                 label="Connection label"
@@ -314,8 +318,10 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
     </aside>
   );
 }
-function selectValue(value: string | typeof MIXED | undefined) {
-  return value === MIXED ? 'mixed' : value;
+/** What a select shows: no value for a mixed selection, so its placeholder
+ * says Mixed and the list offers only real choices. */
+function shown(value: string | typeof MIXED | undefined): string {
+  return value === MIXED || value === undefined ? '' : value;
 }
 function TextSetting({
   label,

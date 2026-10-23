@@ -4,6 +4,8 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { useEscapeLayer } from '@/components/ui/Popover';
+import { useGhostOnUnmount } from '@/components/ui/motion';
+import { readPortalViewport, toPortalRect } from '@/components/ui/portalGeometry';
 import { useFocusRestore } from '@/hooks/useFocusRestore';
 
 /**
@@ -60,25 +62,52 @@ export function useEscapeToClose(onClose: () => void): void {
 export function FixedBelowAnchor({
   children,
   onClose,
+  autoFocusSelector,
 }: {
   children: React.ReactNode;
   onClose?: () => void;
+  /** Focus only after the measured surface is visible; native autofocus
+   * cannot focus a control inside the initial hidden measurement wrapper. */
+  autoFocusSelector?: string;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const initialFocus = useRef(document.activeElement);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   useEscapeLayer(onClose);
   useFocusRestore();
+  // Closed, a copy of it fades where it was (components/ui/motion.ts).
+  useGhostOnUnmount(ref, 'cb-popover-leave', { strip: ['cb-menu-in'] });
   useLayoutEffect(() => {
     const node = ref.current;
     if (node === null) return;
-    const anchor = node.parentElement?.getBoundingClientRect();
-    const self = node.getBoundingClientRect();
-    if (anchor === undefined) return;
+    const anchorBounds = node.parentElement?.getBoundingClientRect();
+    if (anchorBounds === undefined) return;
+    const viewport = readPortalViewport();
+    const anchor = toPortalRect(anchorBounds, viewport.zoom);
+    const self = toPortalRect(node.getBoundingClientRect(), viewport.zoom);
     setPos({
-      left: Math.max(8, Math.min(anchor.left, window.innerWidth - self.width - 8)),
-      top: Math.max(8, Math.min(anchor.bottom + 4, window.innerHeight - self.height - 8)),
+      left: Math.max(8, Math.min(anchor.left, viewport.width - self.width - 8)),
+      top: Math.max(8, Math.min(anchor.bottom + 4, viewport.height - self.height - 8)),
     });
   }, []);
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (pos === null || autoFocusSelector === undefined || node === null) return;
+    if (document.activeElement !== initialFocus.current && !node.contains(document.activeElement))
+      return;
+    for (let parent: HTMLElement | null = node; parent !== null; parent = parent.parentElement) {
+      const style = getComputedStyle(parent);
+      if (
+        parent.hidden ||
+        parent.inert ||
+        parent.getAttribute('aria-hidden') === 'true' ||
+        style.display === 'none' ||
+        style.visibility === 'hidden'
+      )
+        return;
+    }
+    node.querySelector<HTMLElement>(autoFocusSelector)?.focus();
+  }, [pos, autoFocusSelector]);
   return (
     <div
       ref={ref}
@@ -219,13 +248,6 @@ export function FieldPopover({
         ? `${listId}-${rows[active]?.id}`
         : undefined;
 
-  // Without a search box nothing inside the popover is focusable, so no
-  // keystroke would ever reach the handler below. The surface takes focus
-  // itself; `FixedBelowAnchor` hands it back to the trigger on close.
-  useEffect(() => {
-    if (searchable !== true) surfaceRef.current?.focus();
-  }, [searchable]);
-
   const create = () => {
     onCreate?.(trimmed);
     setQuery('');
@@ -292,7 +314,7 @@ export function FieldPopover({
         onWheel={onClose}
         className="fixed inset-0 z-40 cursor-default bg-transparent"
       />
-      <FixedBelowAnchor>
+      <FixedBelowAnchor autoFocusSelector={searchable ? 'input' : '[role="listbox"]'}>
         <div
           ref={surfaceRef}
           role="listbox"
@@ -307,7 +329,6 @@ export function FieldPopover({
           {searchable && (
             <div className="pb-1.5">
               <Input
-                autoFocus
                 size="sm"
                 placeholder="Search…"
                 value={query}

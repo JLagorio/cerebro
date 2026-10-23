@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { listConcepts } from '@/engine/okf';
 import { makeEntry } from '@/engine/testHelpers';
@@ -7,7 +7,7 @@ import { useVaultStore } from '@/stores/vaultStore';
 import { KnowledgePanel, relativeDay } from './KnowledgePanel';
 
 /**
- * A person is their page (M52.3). The Details tab printed `tom-keller` under
+ * A person is their page (M52.3). The Details panel printed `tom-keller` under
  * "Verified by" and `priya-nair` beside a source — slugs, in a vault that has
  * a page for each of them. These specs are about that one thing: a stamp that
  * names a person reads as their name and opens them, and one that names
@@ -97,6 +97,50 @@ describe('KnowledgePanel — people by name (M52.3)', () => {
   });
 });
 
+// Owner, 2026-10-18: the uppercase overlines read as a form, not a panel.
+describe('KnowledgePanel — in the inspector’s voice', () => {
+  const onOpenEntity = vi.fn();
+
+  const panel = (properties: Record<string, unknown>) => {
+    const entry = makeEntry({ ...conceptEntry, properties });
+    useVaultStore.setState({ vaultPath: '/vault', entries: [entry, ...people] });
+    const concept = listConcepts(useVaultStore.getState().entries, TODAY).find(
+      (c) => c.entry.path === CONCEPT,
+    )!;
+    render(
+      <KnowledgePanel
+        concept={concept}
+        today={TODAY}
+        onOpenEntity={onOpenEntity}
+        onOpenConcept={() => {}}
+      />,
+    );
+    return screen.getByTestId('knowledge-panel');
+  };
+
+  it('names each group in sentence case, with the inspector’s subhead', () => {
+    const root = panel({ ...conceptEntry.properties, tags: ['reliability', 'offline-sync'] });
+    expect([...root.querySelectorAll('.cb-inspector-subhead')].map((el) => el.textContent)).toEqual(
+      ['Written by', 'Verified by', 'Sources', 'Tags'],
+    );
+    expect(root.querySelector('.uppercase')).toBeNull();
+  });
+
+  it('says its tags as words, not chips', () => {
+    const root = panel({ ...conceptEntry.properties, tags: ['reliability', 'offline-sync'] });
+    expect(within(root).getByTestId('concept-tags').textContent).toBe(
+      'Tags#reliability#offline-sync',
+    );
+    expect(root.querySelector('.cb-tag')).toBeNull();
+  });
+
+  it('says nobody verified it when nobody did, as a quiet line', () => {
+    const root = panel({});
+    expect(within(root).getByText('Nobody yet')).toBeTruthy();
+    expect(within(root).getByText('Not recorded')).toBeTruthy();
+  });
+});
+
 describe('KnowledgePanel — sources named by their links (M69.2)', () => {
   const LINEAR = 'https://linear.app/acme/issue/ENG-142/fix-login';
   const UNKNOWN = 'https://example.com/fix-login';
@@ -132,15 +176,104 @@ describe('KnowledgePanel — sources named by their links (M69.2)', () => {
     );
     return screen
       .getAllByRole('link')
-      .map((a) => [a.textContent, a.getAttribute('title'), a.getAttribute('href')]);
+      .map((a) => [
+        a.querySelector('[data-slot="trace-title"]')?.textContent,
+        a.getAttribute('title'),
+        a.getAttribute('href'),
+      ]);
   };
 
-  it('shows the name a link carries, a title it was given, or the URL, each with the URL on hover', () => {
+  // M91.14 — the Sources element names an untitled page it knows nothing
+  // about by its host, as every Sources list does; the URL stays on hover.
+  it('shows the name a link carries, a title it was given, or its host, each with the URL on hover', () => {
     expect(links()).toEqual([
       ['ENG-142 Fix login', LINEAR, LINEAR],
       ['The login bug', LINEAR, LINEAR],
-      [UNKNOWN, UNKNOWN, UNKNOWN],
+      ['example.com', UNKNOWN, UNKNOWN],
     ]);
+    // A link out says so, and opens in a new tab.
+    expect(
+      screen.getByRole('link', { name: /^The login bug.*\(opens in a new tab\)$/ }),
+    ).toBeTruthy();
+  });
+});
+
+// M91.14 — the concept's sources are the Sources element's rows: a web page
+// links out only when it is http(s), a vault page opens in the app through
+// the panel's own callback, never an href (CV-16), and the rest is words.
+describe('KnowledgePanel — sources as the Sources element (M91.14, CV-16)', () => {
+  const onOpenEntity = vi.fn();
+
+  const panel = (properties: Record<string, unknown>) => {
+    const entry = makeEntry({ ...conceptEntry, properties });
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [
+        entry,
+        ...people,
+        makeEntry({ path: 'records/decision.md', filename: 'decision.md', title: 'The decision' }),
+      ],
+    });
+    const concept = listConcepts(useVaultStore.getState().entries, TODAY).find(
+      (c) => c.entry.path === CONCEPT,
+    )!;
+    render(
+      <KnowledgePanel
+        concept={concept}
+        today={TODAY}
+        onOpenEntity={onOpenEntity}
+        onOpenConcept={() => {}}
+      />,
+    );
+    return screen.getByTestId('knowledge-panel');
+  };
+
+  beforeEach(() => onOpenEntity.mockClear());
+
+  it('links out only to http(s), and opens a vault page through the callback', () => {
+    const root = panel({
+      sources: [
+        { id: 'web', resource: 'https://example.com/standup', title: 'Standup' },
+        { id: 'page', resource: '/records/decision.md' },
+        { id: 'script', resource: 'javascript:alert(1)', title: 'Not a link' },
+        { id: 'file', resource: 'file:///etc/passwd' },
+        { id: 'scope', resource: 'all queries in project X' },
+      ],
+      resource: 'records/decision.md',
+    });
+    for (const link of root.querySelectorAll('a')) {
+      expect(link.getAttribute('href') ?? '', link.outerHTML).toMatch(/^https?:\/\//);
+    }
+    expect(root.querySelectorAll('a')).toHaveLength(1);
+    const rows = within(root).getAllByTestId('concept-source');
+    expect(rows.map((row) => [row.dataset.kind, row.dataset.path])).toEqual([
+      ['url', undefined],
+      ['vault', 'records/decision.md'],
+      ['url', undefined],
+      ['url', undefined],
+      ['vault', undefined],
+    ]);
+    // A vault page opens in the app, named by its page's title.
+    fireEvent.click(within(rows[1]).getByRole('button', { name: 'Open The decision' }));
+    expect(onOpenEntity).toHaveBeenCalledWith('records/decision.md');
+    // The rest are words: no link, no button.
+    for (const row of [rows[2], rows[3], rows[4]]) {
+      expect(within(row).queryByRole('link')).toBeNull();
+      expect(within(row).queryByRole('button')).toBeNull();
+    }
+    expect(rows[2].textContent).toContain('Not a link');
+    expect(rows[4].textContent).toContain('all queries in project X');
+    // The concept's own Resource reads the same way: a vault page opens.
+    fireEvent.click(within(root).getAllByRole('button', { name: 'Open The decision' })[1]);
+    expect(onOpenEntity).toHaveBeenLastCalledWith('records/decision.md');
+  });
+
+  it('keeps each row’s citation number, its author and its signals', () => {
+    const root = panel(conceptEntry.properties);
+    const [row] = within(root).getAllByTestId('concept-source');
+    expect(row.textContent).toMatch(/^1Cutover standup/);
+    expect(within(row).getByTestId('source-author').textContent).toBe('Priya Nair');
+    expect(row.querySelector('[data-slot="source"]')?.getAttribute('data-via')).toBe('text');
   });
 });
 

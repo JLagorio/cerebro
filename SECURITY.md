@@ -133,7 +133,27 @@ deliberately does not do — with your machine is most of its security story.
   Inside the vault the readers need no approval, except in the Trash, which
   every run's Read and Edit are denied, and mail, whose Read and Edit are
   denied to unattended runs (M60.8b, M69.7b, below).
-  The plan tool is refused, by the gate or in argv; the question tool asks
+  Every run names the only CLI tools it holds (M91.1): `--tools` lists the
+  built-ins its plan allows, asks for or leaves to Claude Code, so one the
+  table denies or refuses, or one a newer Claude Code adds, does not exist
+  for the run, and each denied one also rides `--disallowedTools`. Every
+  built-in Claude Code 2.1.250 offers has a row in the tool manifest, and a
+  run whose start offers one Cerebro has no row for is stopped before it
+  acts. Built-ins that reach past the conversation are denied on every run,
+  watched or not: messages to your other Claude Code sessions (SendMessage,
+  ListAgents), Claude Code's shared task list and background tasks,
+  schedules and remote triggers, your own Claude Code skills, and tools that
+  publish, notify or act outside the vault (Artifact, PushNotification,
+  DesignSync, ReportFindings, Workflow, worktrees, SendUserMessage, REPL,
+  MCP resource readers, LSP, Monitor). ToolSearch stays with every run: it
+  only loads tool definitions Claude Code defers.
+  The subagent tool (`Agent`, which an init lists as `Task`) is held only by
+  a conversation you are watching while the Subagents switch is on; every
+  other run is denied it in argv (subagents, below). A watched conversation
+  keeps its todo list (TodoWrite), and every other run is denied it. Every
+  run but an internal one carries one settings file, owner-only and removed
+  with the run, that refuses Claude Code's bypass and auto permission modes.
+  The plan tools are refused, by the gate or in argv; the question tool asks
   you only in a conversation you are watching (M57.3, below) and is denied in
   argv everywhere else. Web access is a second Settings ceiling, off by
   default (M57.7). Off denies WebFetch and WebSearch in argv, even when your
@@ -143,7 +163,8 @@ deliberately does not do — with your machine is most of its security story.
   in its URL, so give the web only to agents you trust with the outside
   world. Cerebro's
   own internal runs (ingest, maintenance, synthesis and an agent's pre-run check) are denied every CLI
-  tool, the web tools and Task included. Cerebro's MCP tools enforce the rest
+  tool that acts, the web tools and the subagent tool included, and hold only
+  ToolSearch, to load their deferred Cerebro tools. Cerebro's MCP tools enforce the rest
   themselves: a run's write scope, its read scope, the knowledge guard, the
   note-corpus doors and an ask-first agent's Allow (next items). One write crosses a run's scope on purpose (D7): a
   run may rewrite the `recent` key, and nothing else, on its own Agent record,
@@ -181,6 +202,55 @@ deliberately does not do — with your machine is most of its security story.
   off refuses the call. A call still waiting when you press Stop, switch
   vaults or quit is refused as not answered the next time its conversation
   goes on.
+- **Subagents gather; the conversation you watch acts** (M91.1–M91.2d).
+  Claude Code's subagent tool is held only by a conversation you are
+  watching, whose gate can ask you, and only while the Subagents switch in
+  Settings is on, as it is by default; each turn sends the switch as it
+  stands when the turn starts. Off denies the tool in argv to every
+  conversation, even when your own Claude Code settings allow it, and an
+  agent with an `allowed-tools:` list that names neither `Agent` nor `Task`
+  is denied it whatever the switch says, when you address it or bind the
+  panel to it; an agent with no such list is not narrowed.
+  Every other run is denied it in argv. A page's Access section says which,
+  for the panel and for each agent.
+  Such a conversation may start subagents of one type, Cerebro's
+  `cerebro-researcher`. Its definition rides argv (`--agents`): the reading
+  tools that conversation's own grant holds, its read and write scopes
+  binding them, and WebFetch and WebSearch only where Web access is on; no
+  writer, shell or connector, and no permission mode, servers, hooks,
+  skills, memory or isolation of its own. It runs on its run's bearer, so
+  every call it makes to Cerebro is the run's, under the run's grant, and
+  is recorded as the run's. Every subagent hears the product brief, the
+  server instructions and one line saying it works for the main
+  conversation and can't ask you anything.
+  Every run but an internal one starts Claude Code with the bounds in
+  `shared/policy/subagents.v1.json`, in its environment and again as its
+  settings file's `env`, which outranks your own settings' `env`: subagents
+  run in the foreground, one level deep, at most two at once and eight a
+  session, and Claude Code's built-in agent types and background tasks are
+  switched off.
+  Every other agent type is denied by name in `--disallowedTools`: Claude
+  Code's built-in ones, and every one of yours Claude Code would load under
+  `--setting-sources user`, the definitions under your Claude Code config's
+  `agents/` folder and every installed plugin's, named as Claude Code names
+  them. Cerebro reads those files for their names alone and logs nothing of
+  them. When it cannot read one, cannot spell one in a deny rule, or meets a
+  symlink in your agents folder that leads outside it, the run starts
+  without the subagent tool.
+  Three tripwires catch what argv cannot see. A run whose start offers an
+  agent type its argv neither allows nor denies (an organization's managed
+  agents, say) is stopped before it acts, on every start Claude Code
+  reports in that process, a background task's continuation included. The
+  conversation's gate holds every subagent start to the allowed type, never
+  allowing one itself (argv's denials still bind), and refuses a subagent's
+  own calls that would ask you. And one of the loopback's workers is kept
+  for that gate, so subagents' reads cannot keep it waiting.
+  What fails open is bounded: a definition you add while a run is under way
+  reaches Claude Code without a new start, so only the gate holds it, and a
+  gate that cannot answer in its ten seconds leaves the call to argv, which
+  does not name it. Such a subagent still runs inside its run: the run's
+  argv denials, its bearer and its grant bind it as they bind the run, and
+  its Write and Edit calls commit with the run, as the run's own do.
 - **An ask-first agent's page writes wait for your Allow** (M57.4). An Agent
   record that says `ask-first: true` (any value but `true` or `false` reads
   the same, failing closed) has its page writes, the tools the manifest marks
@@ -371,10 +441,16 @@ deliberately does not do — with your machine is most of its security story.
   Claude Code writes each conversation's transcript under its own config
   folder, keyed by the vault's path, outside the vault. Cerebro reads a
   vault's session file back, read-only, to rebuild a thread whose cached copy
-  is gone, folds it as it reads, and stores no new copy of it. A session id
+  is gone, folds it as it reads, and stores no new copy of it; the
+  transcripts a session's subagents keep beside it, under
+  `<session>/subagents/`, are read the same way (M91.3b). A session id
   is accepted only as a lowercase UUID, before any run starts or any path is
   built, so a stored id can neither become a Claude Code flag nor reach a
-  file outside that vault's projects folder.
+  file outside that vault's projects folder. A branch (M91.6) names the
+  session it starts from and the line it starts after in the same shape;
+  Rust checks that line against the source's file, read-only, before
+  anything runs, and mints the branch's own session, so the source is only
+  read.
 - **A run's detail folds its session file only when asked** (M56.9). Claude
   Code keeps session transcripts under its own `projects` folder, outside the
   vault, and Settings names and purges them. A run's detail reads that file,
@@ -584,6 +660,10 @@ record. Reuse leaves existing metadata unchanged, including its quarantine
 attributes; only a new copy inherits the incoming protection. Importing opens
 nothing. The editor checks its page and vault owner
 again after every asynchronous read/copy before placing root-anchored links.
+The assistant's composer copies an attached file in through the same doors
+when its message is sent (M91.17), and the run is told the copy's vault path
+and kind, never the path it was copied from; one Undo moves the send's new
+copies to the vault's Trash.
 
 ### Office extraction (M66.7)
 

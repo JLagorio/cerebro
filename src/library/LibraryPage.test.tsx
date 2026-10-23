@@ -24,6 +24,7 @@ vi.mock('@/lib/ipc', async () => {
 });
 
 import * as ipc from '@/lib/ipc';
+import { chooseOption } from '@/test/chooseOption';
 import { makeEntry } from '@/test/factories';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -197,7 +198,7 @@ describe('LibraryPage', () => {
     useNavStore.setState({ selection: { kind: 'library', tab: 'skill', path: SKILL.path } });
     render(<LibraryPage />);
     await screen.findByLabelText('Instructions');
-    fireEvent.change(screen.getByLabelText('Repeat'), { target: { value: 'daily' } });
+    chooseOption(screen.getByLabelText('Repeat'), 'Every day');
     vi.mocked(stampActivation).mockImplementationOnce(async () => {
       expect(ipc.updateFrontmatter).toHaveBeenCalled();
       return true;

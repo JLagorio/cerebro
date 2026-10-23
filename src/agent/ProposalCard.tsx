@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Button } from '@/components/ui/Button';
-import { Icon } from '@/components/ui/Icon';
+import { FILING_COPY, filingAnswers, filingState } from '@/agent/elements/decisions';
+import { Confirmation } from '@/components/ai/Confirmation';
 import type { OrganizeProposal } from '@/agent/types';
 import { humanize } from '@/detail/FieldEditor';
 import { announceExternalWrites, flushOpenPages } from '@/editor/openPages';
@@ -57,7 +57,7 @@ function rowsOf(plan: FilingPlan): { head: Row[]; rest: Row[] } {
 function Rows({ rows }: { rows: Row[] }) {
   return rows.map(([label, value]) => (
     <div key={label} className="contents">
-      <dt className="text-2xs text-n-500">{label}</dt>
+      <dt className="text-metadata text-(--text-meta)">{label}</dt>
       <dd className="m-0 min-w-0 truncate text-xs font-medium text-n-800">{value}</dd>
     </div>
   ));
@@ -87,12 +87,15 @@ function speakersNote(plan: FilingPlan): string | null {
 }
 
 /**
- * A filing the agent suggests for a capture (M7).
+ * A filing the agent suggests for a capture (M7), drawn as a Confirmation
+ * (M91.14): what Apply would write, and the two answers.
  *
  * The agent never edits a capture directly — `propose_organize` puts this
  * card in front of the user instead. The point is that an agent's judgement
  * about how your notes should be shaped is a suggestion, and a suggestion you
- * cannot see and decline is just a silent write with extra steps.
+ * cannot see and decline is just a silent write with extra steps. What the
+ * agent wrote — its reasoning, the title, a summary — shows as text, never
+ * markup.
  */
 export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
@@ -165,29 +168,32 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
     }
   };
 
+  const answers = filingAnswers({
+    onApply: () => void accept(),
+    onDismiss: () => dismissProposal(proposal.path),
+  });
+
   return (
-    <div
+    <Confirmation
       data-testid="proposal-card"
-      className="mb-3 rounded-lg border border-synapse-200 bg-synapse-50 p-3"
+      state={filingState(applying)}
+      icon="sparkles"
+      title={FILING_COPY.title}
+      approve={answers.approve}
+      deny={answers.deny}
     >
-      <div className="flex items-center gap-1.5 pb-1.5">
-        <Icon name="sparkles" size={12} color="var(--synapse-500)" />
-        <span className="text-2xs font-semibold uppercase tracking-[0.06em] text-synapse-600">
-          Suggested filing
-        </span>
-      </div>
-      <p className="m-0 mb-2 text-xs leading-[17px] text-n-700">{proposal.reasoning}</p>
+      <p className="m-0 text-xs leading-[17px] text-n-700">{proposal.reasoning}</p>
       {(head.length > 0 || rest.length > 0 || plan.transcript !== null) && (
-        <dl className="m-0 mb-2.5 grid grid-cols-[72px_1fr] gap-x-2 gap-y-1">
+        <dl className="m-0 grid grid-cols-[72px_1fr] gap-x-2 gap-y-1">
           <Rows rows={head} />
           {plan.transcript !== null && (
             <div className="contents">
-              <dt className="text-2xs text-n-500">Summary</dt>
+              <dt className="text-metadata text-(--text-meta)">Summary</dt>
               <dd
                 data-testid="proposal-summary"
                 className={
                   plan.transcript.summary === null
-                    ? 'm-0 min-w-0 text-xs italic text-n-500'
+                    ? 'm-0 min-w-0 text-xs italic text-(--text-meta)'
                     : 'm-0 min-w-0 whitespace-pre-wrap text-xs text-n-800'
                 }
               >
@@ -199,18 +205,18 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
         </dl>
       )}
       {note !== null && (
-        <p data-testid="proposal-speakers-note" className="m-0 mb-2 text-2xs text-n-600">
+        <p data-testid="proposal-speakers-note" className="m-0 text-metadata text-n-600">
           {note}
         </p>
       )}
       {plan.unfiled.length > 0 && (
-        <div data-testid="proposal-unfiled" className="mb-2.5">
-          <div className="text-2xs font-semibold text-n-600">Not filed</div>
+        <div data-testid="proposal-unfiled">
+          <div className="text-metadata font-semibold text-n-600">Not filed</div>
           <ul className="m-0 list-none p-0">
             {plan.unfiled.map((u) => (
               <li
                 key={`${u.field}:${u.target}:${u.why}`}
-                className="text-2xs text-n-600"
+                className="text-metadata text-n-600"
                 data-why={u.why}
               >
                 {u.target} in {humanize(u.field)}: {UNFILED_WORDS[u.why]}
@@ -219,20 +225,6 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
           </ul>
         </div>
       )}
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          size="sm"
-          icon="check"
-          disabled={applying}
-          onClick={() => void accept()}
-        >
-          Apply
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => dismissProposal(proposal.path)}>
-          Dismiss
-        </Button>
-      </div>
-    </div>
+    </Confirmation>
   );
 }

@@ -1,3 +1,4 @@
+import { StateMessage } from '@/components/ui/StateMessage';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
@@ -9,6 +10,7 @@ import { useVaultStore } from '@/stores/vaultStore';
 import { PendingWriteCard } from './PendingWriteCard';
 import { ProposalCard } from './ProposalCard';
 import { opVerb, reasonSentence } from './proposalText';
+import './review.css';
 
 /**
  * What waits on a person's decision, as a section of the Status hub (M33.3)
@@ -25,7 +27,8 @@ import { opVerb, reasonSentence } from './proposalText';
  * moved it once more: the card is `ProposalCard` and the approve, reject and
  * revert handlers are `useDecisions`, because a concept page shows the same
  * cards now and two copies of a decision handler are two chances to send
- * different arguments.
+ * different arguments. Both kinds of card are Confirmations (M91.14), and
+ * the grid lays each one out as a cell (`review.css`).
  *
  * **What DID change is the failure state.** `ReviewPage` collapsed a failed
  * read into an empty one — `catch` set the cards to `[]` and the surface said
@@ -117,7 +120,7 @@ export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
   }, [vaultPath, version]);
 
   if (state.kind === 'loading' || writes.kind === 'loading') {
-    return <p className="text-xs text-n-400">Reading…</p>;
+    return <StateMessage state="loading" title="Reading pending decisions…" compact />;
   }
 
   const { cards, applications } =
@@ -131,7 +134,7 @@ export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
     queued.length === 0
   ) {
     return (
-      <p data-testid="section-empty" className="text-xs text-n-500">
+      <p data-testid="section-empty" className="text-ui text-(--text-meta)">
         Nothing is waiting on a decision.
       </p>
     );
@@ -140,12 +143,12 @@ export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
   return (
     <>
       {state.kind === 'unavailable' && (
-        <p data-testid="section-unavailable" className="text-xs text-n-500">
+        <p data-testid="section-unavailable" className="text-ui text-(--text-meta)">
           The review queue could not be read, so nothing here is a statement about this vault.
         </p>
       )}
       {writes.kind === 'unavailable' && (
-        <p data-testid="pending-writes-unavailable" className="text-xs text-n-500">
+        <p data-testid="pending-writes-unavailable" className="text-ui text-(--text-meta)">
           Queued page writes could not be read, so this list may be missing some.
         </p>
       )}
@@ -154,7 +157,7 @@ export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
           three across at 2000px, two at 1440, one where there is room for
           one. A row's cards share a height, so their answers line up. */}
       {(cards.length > 0 || queued.length > 0) && (
-        <div data-testid="review-cards" className={GRID}>
+        <div data-testid="review-cards" className={`cb-review-cards ${GRID}`}>
           {cards.map((card) => (
             <ProposalCard
               key={card.proposal_id}
@@ -188,7 +191,7 @@ export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
                     (M52.5): "Revise" alone named no concept. */}
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span
-                    className="text-sm font-medium text-n-900"
+                    className="text-ui font-medium text-n-900"
                     data-op={application.op}
                     title={application.op}
                   >
@@ -199,7 +202,9 @@ export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
                       onOpen={(path) => navigate({ kind: 'doc', path })}
                     />
                   </span>
-                  <span className="text-xs text-n-500">{reasonSentence(application.reason)}</span>
+                  <span className="text-ui text-(--text-meta)">
+                    {reasonSentence(application.reason)}
+                  </span>
                 </span>
                 <Button
                   className="ml-auto"

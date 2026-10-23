@@ -1,3 +1,4 @@
+import { Select } from '@/components/ui/Select';
 import { useEffect, useState } from 'react';
 import { connectorStatus, mailGateRead, scanVault, type MailGateRead } from '@/lib/ipc';
 import { MAIL, isMailPath, isMailUrl } from '@/engine/mailPolicy';
@@ -129,13 +130,13 @@ export function MailSettings() {
     <section className="mb-6 rounded-xl border border-n-200 p-5" data-testid="settings-mail">
       <h2 className="mb-3 text-md font-semibold text-n-900">Mail</h2>
       {vault === null ? (
-        <p className="text-sm text-n-500">Open a vault to see its mail settings.</p>
+        <p className="text-ui text-(--text-meta)">Open a vault to see its mail settings.</p>
       ) : (
         <div className="space-y-3 text-sm leading-relaxed text-n-600">
           {visibleGate === null ? (
             <p>Reading the mail gate…</p>
           ) : 'error' in visibleGate ? (
-            <p data-testid="section-unavailable" className="text-warn-600">
+            <p data-testid="section-unavailable" className="text-warn-700">
               Mail gate could not be read: {visibleGate.error}
             </p>
           ) : (
@@ -146,7 +147,7 @@ export function MailSettings() {
           {visibleCache === null ? (
             <p>Reading cached mail…</p>
           ) : 'error' in visibleCache ? (
-            <p data-testid="section-unavailable" className="text-warn-600">
+            <p data-testid="section-unavailable" className="text-warn-700">
               Cached mail could not be read: {visibleCache.error}
             </p>
           ) : (
@@ -192,28 +193,25 @@ export function MailSettings() {
             {visibleConnectors === null ? (
               <p>Reading connector status…</p>
             ) : 'error' in visibleConnectors ? (
-              <p data-testid="section-unavailable" className="text-warn-600">
+              <p data-testid="section-unavailable" className="text-warn-700">
                 Mail connector status could not be read: {visibleConnectors.error}
               </p>
             ) : (
               <>
-                <label className="flex items-center gap-2">
+                <label className="flex flex-wrap items-center gap-2">
                   Gmail connector
-                  <select
-                    aria-label="Gmail connector"
+                  <Select
+                    ariaLabel="Gmail connector"
                     value={connector?.connector ?? ''}
-                    onChange={(event) => setChosen({ vault, name: event.target.value })}
-                    className="rounded-sm border border-n-300 bg-surface-base px-2 py-1"
-                  >
-                    {connectorRows.length === 0 && (
-                      <option value="">No connectors configured</option>
-                    )}
-                    {connectorRows.map((row) => (
-                      <option key={row.connector} value={row.connector}>
-                        {row.connector}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(name) => setChosen({ vault, name })}
+                    options={connectorRows.map((row) => ({
+                      value: row.connector,
+                      label: row.connector,
+                    }))}
+                    placeholder="No connectors configured"
+                    disabled={connectorRows.length === 0}
+                    className="min-w-0 max-w-full"
+                  />
                 </label>
                 <p>
                   {visibleCache && 'value' in visibleCache
@@ -245,26 +243,23 @@ export function MailSettings() {
                 Add Mail sweep
               </Button>
             )}
-            <p className="text-xs text-n-500">
+            <p className="text-xs text-(--text-meta)">
               Ask @mail-sweep in the assistant to cache your recent mail headers.
             </p>
           </div>
           <div data-testid="mail-prune" className="space-y-2 border-t border-n-200 pt-3">
             <h3 className="font-medium text-n-900">Remove older cached mail</h3>
-            <label className="flex items-center gap-2">
+            <label className="flex flex-wrap items-center gap-2">
               Older than
-              <select
-                aria-label="Mail retention window"
-                value={windowDays}
-                onChange={(event) => setWindowDays(Number(event.target.value))}
-                className="rounded-sm border border-n-300 bg-surface-base px-2 py-1"
-              >
-                {[30, 90, 365].map((days) => (
-                  <option key={days} value={days}>
-                    {days} days
-                  </option>
-                ))}
-              </select>
+              <Select
+                ariaLabel="Mail retention window"
+                value={String(windowDays)}
+                onChange={(days) => setWindowDays(Number(days))}
+                options={[30, 90, 365].map((days) => ({
+                  value: String(days),
+                  label: `${days} days`,
+                }))}
+              />
             </label>
             {visibleCache && 'value' in visibleCache ? (
               <>

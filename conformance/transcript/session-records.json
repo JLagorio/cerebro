@@ -7,16 +7,24 @@
     "events": [
       {
         "kind": "UserPrompt",
-        "text": "Open a pull request for the meeting notes."
+        "text": "Open a pull request for the meeting notes.",
+        "uuid": "00000000-0000-4000-8000-000000000401"
       },
       {
         "kind": "ModelChanged",
         "model": "claude-haiku-4-5-20251001"
       },
       {
+        "kind": "Thinking",
+        "message_id": "msg_000000000000000000000041",
+        "text": "(thinking)",
+        "at": "2026-07-28T12:00:05.000Z"
+      },
+      {
         "kind": "Text",
         "message_id": "msg_000000000000000000000041",
-        "text": "Opened pull request 7."
+        "text": "Opened pull request 7.",
+        "at": "2026-07-28T12:00:06.000Z"
       },
       {
         "kind": "PrLink",
@@ -26,11 +34,13 @@
       },
       {
         "kind": "TurnEnded",
-        "stop_reason": "end_turn"
+        "stop_reason": "end_turn",
+        "last_uuid": "00000000-0000-4000-8000-000000000404"
       },
       {
         "kind": "UserPrompt",
-        "text": "Thanks. Now tidy the inbox."
+        "text": "Thanks. Now tidy the inbox.",
+        "uuid": "00000000-0000-4000-8000-000000000410"
       },
       {
         "kind": "ModelChanged",
@@ -40,19 +50,22 @@
         "kind": "ToolStart",
         "tool_name": "mcp__cerebro__list_inbox",
         "tool_id": "toolu_000000000000000000000041",
-        "input": "{}"
+        "input": "{}",
+        "at": "2026-07-28T12:00:18.000Z"
       },
       {
         "kind": "ToolDone",
         "tool_id": "toolu_000000000000000000000041",
         "output": "Two captures.",
-        "is_error": false
+        "is_error": false,
+        "at": "2026-07-28T12:00:19.000Z"
       },
       {
         "kind": "ToolStart",
         "tool_name": "mcp__cerebro__get_note",
         "tool_id": "toolu_000000000000000000000042",
-        "input": "{\"path\":\"inbox/one.md\"}"
+        "input": "{\"path\":\"inbox/one.md\"}",
+        "at": "2026-07-28T12:00:20.000Z"
       },
       {
         "kind": "TurnInterrupted",
@@ -60,7 +73,8 @@
       },
       {
         "kind": "UserPrompt",
-        "text": "Check the build."
+        "text": "Check the build.",
+        "uuid": "00000000-0000-4000-8000-000000000420"
       },
       {
         "kind": "ModelChanged",
@@ -69,14 +83,17 @@
       {
         "kind": "Text",
         "message_id": "msg_000000000000000000000045",
-        "text": "The build is green."
+        "text": "The build is green.",
+        "at": "2026-07-28T12:00:27.000Z"
       },
       {
-        "kind": "TurnEnded"
+        "kind": "TurnEnded",
+        "last_uuid": "00000000-0000-4000-8000-000000000421"
       },
       {
         "kind": "UserPrompt",
-        "text": "And the release notes?"
+        "text": "And the release notes?",
+        "uuid": "00000000-0000-4000-8000-000000000430"
       },
       {
         "kind": "ModelChanged",
@@ -86,7 +103,8 @@
         "kind": "ToolStart",
         "tool_name": "Read",
         "tool_id": "toolu_000000000000000000000043",
-        "input": "{\"file_path\":\"/vault/release.md\"}"
+        "input": "{\"file_path\":\"/vault/release.md\"}",
+        "at": "2026-07-28T12:00:33.000Z"
       },
       {
         "kind": "TurnInterrupted",
@@ -94,7 +112,7 @@
       }
     ],
     "classes": {
-      "translated": 12,
+      "translated": 13,
       "ignored": {
         "a command typed into the CLI's own UI, never a panel turn": 1,
         "a line already folded under the same uuid": 2,
@@ -102,14 +120,13 @@
         "a placeholder reply no model wrote": 1,
         "a pr-link record without a usable number, https url or owner/repo": 1,
         "a prompt entering or leaving the CLI's queue; the prompt line follows": 8,
-        "a subagent's line, which belongs to its own transcript": 1,
+        "a subagent's line that names no Agent call, so no sub-fold can hold it": 1,
         "a title set in the CLI's own picker; the panel keeps its own": 1,
         "context the CLI attached for the model, such as tool and skill listings, other than a deferral": 1,
         "the CLI compacted its context, which the transcript does not show": 1,
         "the CLI's copies of files its own edits changed, for its rewind": 1,
         "the CLI's own bookkeeping for the session, with nothing to show": 1,
         "the last prompt again, for the CLI's own resume picker": 2,
-        "the model's reasoning, which the panel never shows as the reply; live, it arrives as thinking_delta events": 1,
         "the permission mode the CLI's own UI was in": 1,
         "the summary the CLI wrote when it compacted, never shown as a turn": 1,
         "the title the CLI's own picker shows; the panel titles the thread itself": 1,
@@ -123,11 +140,17 @@
       "model": "claude-haiku-4-5-20251001",
       "events": [
         {
+          "kind": "Thinking",
+          "text": "(thinking)",
+          "redacted": false
+        },
+        {
           "kind": "Text",
           "text": "Opened pull request 7."
         },
         {
-          "kind": "TurnEnded"
+          "kind": "TurnEnded",
+          "last_uuid": "00000000-0000-4000-8000-000000000404"
         }
       ]
     },
@@ -165,7 +188,8 @@
           "text": "The build is green."
         },
         {
-          "kind": "TurnEnded"
+          "kind": "TurnEnded",
+          "last_uuid": "00000000-0000-4000-8000-000000000421"
         }
       ]
     },

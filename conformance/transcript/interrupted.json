@@ -42,7 +42,8 @@
     "events": [
       {
         "kind": "UserPrompt",
-        "text": "Call slow_echo once with text 'stop' and seconds 30, then reply done."
+        "text": "Call slow_echo once with text 'stop' and seconds 30, then reply done.",
+        "uuid": "00000000-0000-4000-8000-00000000000c"
       },
       {
         "kind": "ModelChanged",
@@ -52,7 +53,8 @@
         "kind": "ToolStart",
         "tool_name": "mcp__probe__slow_echo",
         "tool_id": "toolu_000000000000000000000001",
-        "input": "{\"text\":\"stop\",\"seconds\":30}"
+        "input": "{\"text\":\"stop\",\"seconds\":30}",
+        "at": "2026-01-01T00:00:00.011Z"
       },
       {
         "kind": "TurnInterrupted",

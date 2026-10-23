@@ -132,14 +132,33 @@ describe('HomePage', () => {
     expect(screen.queryByTestId('starter-offer')).toBeNull();
   });
 
-  it('opens the assistant canvas and the existing create and search flows', async () => {
+  // M91.14 — Home's ask is a Suggestion that sends nothing: it opens the
+  // conversation on its question, named by it and described by its line.
+  it('draws its ask as a Suggestion that opens the conversation and sends nothing', async () => {
+    useUiStore.setState({ handoffs: [] });
+    await act(async () => {
+      render(<HomePage />);
+    });
+    const ask = screen.getByRole('button', { name: 'What would you like to work on?' });
+    expect(ask.dataset.slot).toBe('suggestion');
+    expect(ask.className).toContain('cb-home-ask');
+    expect(ask.getAttribute('aria-describedby')).not.toBeNull();
+    const described = document.getElementById(ask.getAttribute('aria-describedby') ?? '');
+    expect(described?.textContent).toBe('Think it through with your assistant');
+    fireEvent.click(ask);
+    expect(useUiStore.getState().aiPanelOpen).toBe(true);
+    expect(useUiStore.getState().handoffs).toEqual([]);
+  });
+
+  it('opens the floating assistant and the existing create and search flows', async () => {
     await act(async () => {
       render(<HomePage />);
     });
     fireEvent.click(screen.getByRole('button', { name: /What would you like to work on/ }));
     expect(useUiStore.getState()).toMatchObject({
       aiPanelOpen: true,
-      aiPanelPresentation: 'canvas',
+      aiPanelPresentation: 'floating',
+      aiPanelMinimized: false,
     });
     fireEvent.click(screen.getByRole('button', { name: 'New page' }));
     expect(useLauncherStore.getState().flow).toMatchObject({ id: 'page', vault: '/demo-vault' });

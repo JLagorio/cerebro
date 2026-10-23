@@ -1,0 +1,19 @@
+{
+  "recorded_utc": "2026-10-17T18:52:34.117845+00:00",
+  "bundle_path": "/Users/joseflagorio/Development/cerebro/src-tauri/target/release/bundle/macos/Cerebro Polish Audit.app",
+  "bundle_identifier": "com.cerebro.polish-audit.audit20261017",
+  "product_name": "Cerebro Polish Audit",
+  "url_types": [],
+  "build_exit_code": 0,
+  "signature_verification": {
+    "command": "codesign --verify --deep --strict",
+    "exit_code": 0,
+    "signing": "ad-hoc, local audit only"
+  },
+  "executable_sha256": "d92d0218714178e48b56e4a3c2585be3aede000a48adf91fe62f4f949aaf28ea",
+  "code_directory": "CDHash=c0180b4c35de34f7158e1e5f35d704f8afe5372c",
+  "installed_over_owner_app": false,
+  "native_interaction": "outstanding: repeated cgWindowNotFound; see native-evidence.md",
+  "build_log": "native-build.log",
+  "build_configuration": "native-build-config.json"
+}

@@ -262,10 +262,18 @@ mod tests {
             .unwrap()
     }
 
+    /// A run's argv in `build_args`' shape: the message last, after `--`
+    /// (M92.0).
     fn args() -> Vec<String> {
-        ["-p", "hello", "--mcp-config", "/app/mcp-config-7.json"]
-            .map(String::from)
-            .to_vec()
+        [
+            "-p",
+            "--mcp-config",
+            "/app/mcp-config-7.json",
+            "--",
+            "hello",
+        ]
+        .map(String::from)
+        .to_vec()
     }
 
     fn files(dir: &Path) -> Vec<String> {

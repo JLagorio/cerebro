@@ -1,78 +1,48 @@
+import { useCallback, useLayoutEffect, useState, type ReactNode, type Ref } from 'react';
+import { PANEL_LABELS } from '@/components/PageToolbar';
 import { useDrawerFocus } from '@/components/ui/DrawerScrim';
-import { EmptyState } from '@/components/ui/EmptyState';
+import { useArrival } from '@/components/ui/motion';
 import { Icon } from '@/components/ui/Icon';
 import { DocProperties } from '@/detail/DocProperties';
+import { InspectorSection } from '@/detail/InspectorSection';
 import { LastChange } from '@/detail/LastChange';
-import { PageAccess } from '@/detail/PageAccess';
-import { OutlineTab } from '@/editor/DocOutline';
-import type { CerebroEditor } from '@/editor/MarkdownEditor';
+import { AccessSummary, PageAccess } from '@/detail/PageAccess';
 import { agentRef, isAgentEntry } from '@/engine/agents';
+import { formatDate, localDateOf } from '@/engine/dates';
 import { backlinksFor, outgoingFor, type DocLink } from '@/engine/links';
 import type { Concept } from '@/engine/okf';
 import type { Entry, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
 import { typeStyle } from '@/engine/typeCatalog';
-import { ConceptDetailsTab } from '@/knowledge/ConceptDetailsTab';
-import { CommentsTab } from '@/detail/CommentsTab';
+import { ConceptDetails } from '@/knowledge/ConceptDetails';
+import { CommentsPanel } from '@/detail/CommentsPanel';
 import type { PageCommentsController } from '@/detail/usePageComments';
 import { PageHistory } from '@/history/PageHistory';
-import { FileNote } from '@/library/chrome';
 import { PageKnowledge } from '@/knowledge/PageKnowledge';
-import {
-  DOC_PANEL_MIN_WIDTH,
-  DOC_PANEL_WIDTH,
-  useUiStore,
-  type ConceptPanelTab,
-  type DocPanelTab,
-} from '@/stores/uiStore';
+import type { PagePanel } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
+import './inspector.css';
 
-const TABS: { id: DocPanelTab; label: string }[] = [
-  { id: 'outline', label: 'Outline' },
-  { id: 'info', label: 'Info' },
-  { id: 'links', label: 'Links' },
-  // M8.3 — the PRD case. A tab rather than an inline suggestion: opening it
-  // is the ask, so the assistant never speaks first while you are writing.
-  { id: 'knowledge', label: 'Knowledge' },
-  // M70.2b — the page's threads: on its text, and about the whole page.
-  { id: 'comments', label: 'Comments' },
-  // M58.4 (D18) — the page's versions, as prose, with Restore, merged with
-  // its recorded edits (M64.2b).
-  { id: 'history', label: 'History' },
-];
-
-/** A concept's panel (M50.1): its provenance first. The review itself is the
- *  bar under the title (M51.3). */
-const CONCEPT_TABS: { id: ConceptPanelTab; label: string }[] = [
-  { id: 'details', label: 'Details' },
-  { id: 'outline', label: 'Outline' },
-  { id: 'links', label: 'Links' },
-  // A concept takes comments like any page (M70.2b, Q5): the sidecar sits
-  // outside the bundle, and a thread can neither write nor verify it.
-  { id: 'comments', label: 'Comments' },
-  // Its versions read like any page's (M58.4), beside what the ledger
-  // recorded about it (M64.2b); Restore is not offered there.
-  { id: 'history', label: 'History' },
-];
-
-function LinkRow({ link }: { link: DocLink }) {
+/** One linked page: its type's icon, its title, and — when the link rides a
+ *  property rather than the text — that property's name, quietly, at the
+ *  right. */
+function LinkRow({ link, more = false }: { link: DocLink; more?: boolean }) {
   const open = useOpenPath();
   const schema = useSchema();
+  const style = typeStyle(link.entry.type, schema);
   return (
     <button
       type="button"
       data-testid="doc-link-row"
+      // One a "Show more" added, which arrives under the rest (inspector.css).
+      data-more={more || undefined}
       onClick={() => open(link.entry.path)}
-      className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-1 text-left hover:bg-n-50"
+      className="flex h-7 w-full min-w-0 items-center gap-2 rounded-sm border-0 bg-transparent px-2 text-left text-ui motion-hover hover:bg-n-50"
     >
-      <Icon
-        name={typeStyle(link.entry.type, schema).icon}
-        size={13}
-        color={typeStyle(link.entry.type, schema).color ?? 'var(--n-500)'}
-      />
-      <span className="min-w-0 flex-1 truncate text-sm text-n-800">{link.entry.title}</span>
+      <Icon name={style.icon} size={14} color={style.color ?? 'var(--n-500)'} />
+      <span className="min-w-0 flex-1 truncate text-n-800">{link.entry.title}</span>
       {link.via !== 'body' && (
-        <span className="flex-none rounded-sm bg-n-50 px-1 py-px text-2xs text-n-500">
+        <span data-testid="doc-link-via" className="flex-none text-metadata text-n-400">
           {link.via}
         </span>
       )}
@@ -80,89 +50,251 @@ function LinkRow({ link }: { link: DocLink }) {
   );
 }
 
-function LinksTab({ entry }: { entry: Entry }) {
+/** How many links a list shows before it folds the rest behind one row. */
+const LINK_ROWS_SHOWN = 6;
+
+/** Rows that bleed their hover past the section's text edge, aligned with it.
+ *  A long list shows its first rows and folds the rest behind one quiet row. */
+function LinkRows({ links }: { links: DocLink[] }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? links : links.slice(0, LINK_ROWS_SHOWN);
+  return (
+    <div className="-mx-2 flex flex-col gap-px">
+      {shown.map((l, i) => (
+        <LinkRow key={`${l.entry.path}:${l.via}`} link={l} more={i >= LINK_ROWS_SHOWN} />
+      ))}
+      {links.length > LINK_ROWS_SHOWN && (
+        <button
+          type="button"
+          data-testid="doc-links-more"
+          aria-expanded={all}
+          onClick={() => setAll((v) => !v)}
+          className="flex h-7 w-full items-center gap-2 rounded-sm border-0 bg-transparent px-2 text-left text-ui text-n-400 motion-hover hover:bg-n-50 hover:text-n-700"
+        >
+          <Icon name={all ? 'chevron-up' : 'chevron-down'} size={14} />
+          {all ? 'Show fewer' : `Show ${links.length - LINK_ROWS_SHOWN} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The page's connections: the pages it links to and the pages that link to
+ * it, a section each, and a section only when it has a row. With neither,
+ * one header says None, and its tooltip how to make one.
+ */
+function LinkSections({ entry }: { entry: Entry }) {
   const entries = useVaultStore((s) => s.entries);
   const outgoing = outgoingFor(entry, entries);
   const backlinks = backlinksFor(entry, entries);
 
-  if (outgoing.length === 0 && backlinks.length === 0) {
-    return (
-      <div data-testid="doc-links" className="px-2 py-6">
-        <EmptyState
-          icon="link"
-          title="No connections yet"
-          description="Type [[ in the page to link another page. Links to this page show up here too."
-        />
-      </div>
-    );
-  }
-
-  const section = (label: string, links: DocLink[]) =>
-    links.length === 0 ? null : (
-      <>
-        <h3 className="mb-1 mt-3 px-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500 first:mt-1">
-          {label}
-        </h3>
-        <div className="flex flex-col gap-px">
-          {links.map((l) => (
-            <LinkRow key={`${l.entry.path}:${l.via}`} link={l} />
-          ))}
-        </div>
-      </>
-    );
-
   return (
-    <div data-testid="doc-links" className="pb-2">
-      {section('Links on this page', outgoing)}
-      {section(`Backlinks (${backlinks.length})`, backlinks)}
+    <div data-testid="doc-links">
+      {outgoing.length === 0 && backlinks.length === 0 ? (
+        <InspectorSection
+          id="links"
+          label="Links"
+          summary={<span title="Type [[ in the page to link another">None</span>}
+        />
+      ) : (
+        <>
+          {outgoing.length > 0 && (
+            <InspectorSection id="links" label="Links" count={outgoing.length}>
+              <LinkRows links={outgoing} />
+            </InspectorSection>
+          )}
+          {backlinks.length > 0 && (
+            <InspectorSection id="backlinks" label="Backlinks" count={backlinks.length}>
+              <LinkRows links={backlinks} />
+            </InspectorSection>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
 /**
- * An agent page's Info (M55.12): read-only. Its settings are the page's own
- * property rows, which write one grant on Done; the generic property editor
- * would offer free-text edits and remove-X on `scope:`, `tools:` and
- * `schedule:`, the hazard M18 named.
+ * An agent page's Details (M55.12): read-only facts. Its settings are the
+ * page's own property rows, which write one grant on Done; the generic
+ * property editor would offer free-text edits and remove-X on `scope:`,
+ * `tools:` and `schedule:`, the hazard M18 named.
  */
 function AgentInfo({ entry }: { entry: Entry }) {
   const { handle, actor } = agentRef(entry);
   return (
-    <div data-testid="agent-info" className="flex flex-col gap-2 px-1.5 py-2 text-sm text-n-700">
-      <FileNote path={entry.path} />
-      <p className="m-0">
-        Answers to @{handle}; writes as {actor}
-      </p>
-      <p className="m-0 text-n-500">Its settings are this page&rsquo;s properties</p>
+    <dl
+      data-testid="agent-info"
+      title="Its settings are this page’s properties"
+      className="cb-inspector-facts"
+    >
+      <dt>Handle</dt>
+      <dd>@{handle}</dd>
+      <dt>Writes as</dt>
+      <dd>
+        <span className="truncate" title={actor}>
+          {actor}
+        </span>
+      </dd>
+      <dt>File</dt>
+      <dd>
+        <span className="truncate" title={entry.path}>
+          {entry.path}
+        </span>
+      </dd>
+    </dl>
+  );
+}
+
+/** A day as the Info section says it, "Jul 23, 2026": the day this
+ *  machine's clock said (M61.8). Text that reads as no date shows as it is. */
+function dayOf(iso: string): string {
+  const day = localDateOf(iso).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? formatDate(day, 'short', day) : iso;
+}
+
+/** When the page was made and last changed: two rows of the Info section. */
+export function PageDates({ entry }: { entry: Entry }) {
+  return (
+    <div data-testid="page-dates" className="contents">
+      <dt>Created</dt>
+      <dd data-testid="page-created">
+        <time dateTime={entry.createdAt}>{dayOf(entry.createdAt)}</time>
+      </dd>
+      <dt>Modified</dt>
+      <dd data-testid="page-modified">
+        <time dateTime={entry.modifiedAt}>{dayOf(entry.modifiedAt)}</time>
+      </dd>
     </div>
   );
 }
 
 /**
- * Right-hand doc side panel (M2.x docs polish — Plane's pane pattern): one
- * panel, its tabs in TABS (CONCEPT_TABS on a concept). Outline replaces the
- * old floating TOC; Info leads with who last changed the page (M58.1b),
- * hosts the properties editor (on an agent page, a read-only note — M55.12)
- * and ends with who else can change it (M58.6); a concept's panel has no
- * Info; Links shows resolved connections and backlinks;
- * Comments holds the page's threads (M70.2b); History is `PageHistory`
- * (M64.2b): its versions, each opening the version lens in place of the
- * editor (M58.4, D18), merged with its recorded edits, the runs that wrote
- * it and, on a concept, the ledger's events.
+ * The page's facts, last (M58.1b, M61.8): when it was made and changed, and
+ * who changed it — label and value on the property grid, where the old
+ * footer said them in sentences. Who changed it needs a vault to ask.
+ */
+function PageInfo({ entry }: { entry: Entry }) {
+  const vaultOpen = useVaultStore((s) => s.vaultPath !== null);
+  return (
+    <InspectorSection id="info" label="Info" testId="page-info">
+      <dl className="cb-inspector-facts">
+        <PageDates entry={entry} />
+        {vaultOpen && (
+          <>
+            <dt>Changed by</dt>
+            <dd>
+              <LastChange entry={entry} />
+            </dd>
+          </>
+        )}
+      </dl>
+    </InspectorSection>
+  );
+}
+
+/**
+ * The Details panel: folding sections, each under a hairline. A page's sections
+ * are its properties (on an agent page, its facts — M55.12), its links and
+ * backlinks, what Knowledge holds about it — the record peek's Knowledge,
+ * component for component (M52.3) — Access, which agents can change it
+ * (M58.6), folded until asked with its count on the header, and Info: when it
+ * was made and changed, and who changed it last (M58.1b). An Inbox capture's
+ * `organize` section stands in for the properties and comes first, with what
+ * Knowledge holds ahead of the links. A concept's details are its provenance,
+ * then its links and Info: it has no properties, no Knowledge section and no
+ * access rows.
+ */
+function DetailsPanel({
+  entry,
+  schema,
+  concept,
+  organize,
+}: {
+  entry: Entry;
+  schema: Schema;
+  concept: Concept | null;
+  organize: ReactNode;
+}) {
+  const info = <PageInfo entry={entry} />;
+  if (concept !== null) {
+    return (
+      <>
+        <ConceptDetails concept={concept} />
+        <LinkSections entry={entry} />
+        {info}
+      </>
+    );
+  }
+  const knowledge = (
+    <InspectorSection id="knowledge" label="Knowledge">
+      <PageKnowledge entry={entry} />
+    </InspectorSection>
+  );
+  const organizing = organize !== undefined && organize !== null && organize !== false;
+  const agent = isAgentEntry(entry);
+  return (
+    <>
+      {organizing ? (
+        <>
+          {organize}
+          {knowledge}
+          <LinkSections entry={entry} />
+        </>
+      ) : (
+        <>
+          <InspectorSection id="properties" label={agent ? 'Agent' : 'Properties'}>
+            {agent ? <AgentInfo entry={entry} /> : <DocProperties entry={entry} schema={schema} />}
+          </InspectorSection>
+          <LinkSections entry={entry} />
+          {knowledge}
+        </>
+      )}
+      <InspectorSection
+        id="access"
+        label="Access"
+        defaultOpen={false}
+        summary={<AccessSummary entry={entry} />}
+      >
+        <PageAccess entry={entry} />
+      </InspectorSection>
+      {info}
+    </>
+  );
+}
+
+/**
+ * The page's side panel (M2.x docs polish — Plane's pane pattern), one slot
+ * for docs, records, agents, concepts and Inbox captures, showing one panel
+ * at a time, each opened by its own button in the toolbar (owner, 2026-10-19
+ * — Notion's properties, discussions and updates; `PanelButtons`). It runs
+ * the page's full height in the page's frame (components/pageFrame.css),
+ * under the toolbar's actions and the Close that leads them.
+ *
+ * Details is a stack of folding sections, ruled apart, ending with Info
+ * (`DetailsPanel`). Comments holds the page's threads (M70.2b). History is
+ * `PageHistory` (M64.2b): its versions, each opening the version lens in
+ * place of the editor (M58.4, D18), merged with its recorded edits, the runs
+ * that wrote it and, on a concept, the ledger's events. The outline is on the
+ * page itself (`DocOutline`).
  */
 export function DocSidePanel({
   entry,
   schema,
-  editor,
-  scrollRef,
+  panel,
   concept = null,
   overlay = false,
   comments = null,
+  organize,
+  ariaLabel = 'Document panel',
+  closing = false,
+  ref,
 }: {
   entry: Entry;
   schema: Schema;
-  editor: CerebroEditor | null;
-  scrollRef: React.RefObject<HTMLDivElement | null>;
+  /** Which panel it shows: the host holds it (`docPanel`, `inboxPanel`, …). */
+  panel: PagePanel;
   /** Set on a concept page: the panel leads with the concept's details. */
   concept?: Concept | null;
   /**
@@ -171,104 +303,100 @@ export function DocSidePanel({
    * asked for it anyway. The page decides; the stored open flag is not asked.
    */
   overlay?: boolean;
-  /** The page's comments (M70.2b), which DocPage drives. */
+  /** The page's comments (M70.2b), which the page drives. */
   comments?: PageCommentsController | null;
+  /** The Inbox's Organize section: first in Details, in place of the generic
+   *  Properties section, which it is the capture's editor for. */
+  organize?: ReactNode;
+  /** The Details panel's name; Comments and History are named by their titles. */
+  ariaLabel?: string;
+  /**
+   * Closed, and on its way out (`Presence`, components/ui/motion.ts): it
+   * plays its exit and takes nothing — no pointer, no focus, no reading.
+   */
+  closing?: boolean;
+  /** The host's hold on it while it leaves. */
+  ref?: Ref<HTMLElement>;
 }) {
-  const docTab = useUiStore((s) => s.docPanelTab);
-  const setDocTab = useUiStore((s) => s.setDocPanelTab);
-  const conceptTab = useUiStore((s) => s.conceptPanelTab);
-  const setConceptTab = useUiStore((s) => s.setConceptPanelTab);
-  const tabs: { id: DocPanelTab | ConceptPanelTab; label: string }[] =
-    concept !== null ? CONCEPT_TABS : TABS;
-  const tab: DocPanelTab | ConceptPanelTab = concept !== null ? conceptTab : docTab;
-  const drawerRef = useDrawerFocus<HTMLElement>(overlay);
-  const setTab = (next: DocPanelTab | ConceptPanelTab) => {
-    if (concept !== null) setConceptTab(next as ConceptPanelTab);
-    else setDocTab(next as DocPanelTab);
-  };
+  // A drawer takes focus as it opens — again if it is opened again on its
+  // way out, when the same panel simply stays.
+  const drawerRef = useDrawerFocus<HTMLElement>(overlay && !closing);
+  // It arrives once, as it mounts: a docked panel folding into a drawer, or
+  // a pane shown again, replays nothing (pageFrame.css).
+  const arrival = useArrival(true);
+  const setAside = useCallback(
+    (el: HTMLElement | null) => {
+      drawerRef.current = el;
+      if (typeof ref === 'function') ref(el);
+      else if (ref) ref.current = el;
+    },
+    [drawerRef, ref],
+  );
+  // Leaving, it lets go of focus first: inert alone moves it nowhere in
+  // particular, and a drawer's scrim hands it back to the drawer's opener
+  // only when it finds it on nothing (DrawerScrim).
+  useLayoutEffect(() => {
+    const focused = document.activeElement;
+    if (
+      closing &&
+      focused instanceof HTMLElement &&
+      drawerRef.current?.contains(focused) === true
+    ) {
+      focused.blur();
+    }
+  }, [drawerRef, closing]);
+  // A panel changed in place on the same page arrives the way a page does
+  // (`data-switched`, inspector.css); the one it opened on came in with the
+  // panel itself, and moving to another page with it open replays nothing.
+  const [shown, setShown] = useState({ panel, path: entry.path, switched: false });
+  if (shown.panel !== panel || shown.path !== entry.path) {
+    setShown({ panel, path: entry.path, switched: shown.path === entry.path });
+  }
+  const switched = shown.switched;
+  // Counted once the threads are read, and only when there are any open.
+  const openComments = comments?.slot?.kind === 'ready' ? (comments.sections?.openCount ?? 0) : 0;
 
   return (
     <aside
-      ref={drawerRef}
+      ref={setAside}
       data-testid="doc-side-panel"
-      aria-label="Document panel"
+      data-panel={panel}
+      data-state={closing ? 'closed' : 'open'}
+      data-switched={switched || undefined}
+      {...arrival}
+      aria-label={panel === 'details' ? ariaLabel : PANEL_LABELS[panel]}
       data-overlay={overlay || undefined}
       tabIndex={overlay ? -1 : undefined}
-      // A preference, not a wall (M52): it gives from its width down to its
-      // floor once the reading column beside it has reached its own. Past
-      // that the page folds it, and a drawer is how it comes back.
-      className={[
-        'flex flex-col border-l border-n-200 bg-n-0',
-        overlay ? 'absolute inset-y-0 right-0 z-20 shadow-[var(--shadow-lg)] outline-none' : '',
-      ].join(' ')}
-      style={
-        overlay
-          ? { width: DOC_PANEL_WIDTH, maxWidth: '85%' }
-          : { flex: `0 1 ${DOC_PANEL_WIDTH}px`, minWidth: DOC_PANEL_MIN_WIDTH }
-      }
+      inert={closing || undefined}
+      className="cb-inspector"
     >
-      {/* Wraps rather than clips: at the panel's floor the tabs can be wider
-          than the panel. */}
-      <div className="flex flex-none flex-wrap items-center gap-1 border-b border-n-100 px-2 py-1.5">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            data-testid={`doc-panel-tab-${t.id}`}
-            onClick={() => setTab(t.id)}
-            className={[
-              'rounded-md border-0 px-2.5 py-1 text-xs',
-              tab === t.id
-                ? 'bg-n-100 font-medium text-n-900'
-                : 'bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800',
-            ].join(' ')}
-          >
-            {t.label}
-            {/* A quiet count of open threads, only once it is known and
-                above zero (CV-05: loading and unavailable are not 0). It
-                stays in the panel and never reaches the nav. */}
-            {t.id === 'comments' &&
-              comments?.slot?.kind === 'ready' &&
-              (comments.sections?.openCount ?? 0) > 0 && (
-                <span
-                  data-testid="doc-panel-comment-count"
-                  className="ml-1 font-mono text-2xs text-[var(--text-meta)]"
-                >
-                  {comments.sections?.openCount}
-                </span>
-              )}
-          </button>
-        ))}
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
-        {tab === 'details' && concept !== null && <ConceptDetailsTab concept={concept} />}
-        {tab === 'outline' &&
-          (editor !== null ? (
-            <OutlineTab editor={editor} scrollRef={scrollRef} />
-          ) : (
-            <div data-testid="outline-loading" />
-          ))}
-        {tab === 'info' && (
-          <>
-            <LastChange entry={entry} />
-            {isAgentEntry(entry) ? (
-              <AgentInfo entry={entry} />
-            ) : (
-              <DocProperties entry={entry} schema={schema} />
-            )}
-            <PageAccess entry={entry} />
-          </>
+      {/* Details opens on its sections, each headed; the other two are one
+          list each, under a title that says which panel this is. Keyed by
+          the panel, so a switch remounts them and they play their arrival. */}
+      {panel !== 'details' && (
+        <div key={`title:${panel}`} className="cb-inspector-title">
+          <h2>{PANEL_LABELS[panel]}</h2>
+          {panel === 'comments' && openComments > 0 && (
+            <span title={`${openComments} open comments`} className="cb-inspector-title-count">
+              {openComments}
+            </span>
+          )}
+        </div>
+      )}
+      <div key={`body:${panel}`} className="cb-inspector-body">
+        {panel === 'details' && (
+          <DetailsPanel entry={entry} schema={schema} concept={concept} organize={organize} />
         )}
-        {tab === 'links' && <LinksTab entry={entry} />}
-        {tab === 'comments' && comments !== null && <CommentsTab controller={comments} />}
-        {tab === 'history' && <PageHistory path={entry.path} />}
-        {/* The record peek's Knowledge, component for component (M52.3).
-            What this note gave Knowledge comes before what Knowledge can give
-            the note: every doc is a candidate source, not just the ones that
-            happened to arrive through the Inbox. */}
-        {tab === 'knowledge' && (
-          <div className="pb-2 pt-1.5">
-            <PageKnowledge entry={entry} />
+        {/* Each pane names itself, so inspector.css fits the panel it holds
+            to the slot's gutter here and nowhere else it is drawn. */}
+        {panel === 'comments' && comments !== null && (
+          <div className="cb-inspector-pane" data-pane="comments">
+            <CommentsPanel controller={comments} />
+          </div>
+        )}
+        {panel === 'history' && (
+          <div className="cb-inspector-pane" data-pane="history">
+            <PageHistory path={entry.path} />
           </div>
         )}
       </div>

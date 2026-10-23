@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPromoted, type PromotionResult } from '@/app/promoteActions';
 import { Dialog } from '@/components/ui/Dialog';
 import { Select } from '@/components/ui/Select';
@@ -44,6 +44,7 @@ export function PromoteDialog({
   const pending = useRef(false);
   const mounted = useRef(true);
   const openedVault = useRef(vault);
+  const ids = useId();
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -108,37 +109,40 @@ export function PromoteDialog({
           </p>
         ) : (
           <>
-            <label className="flex flex-col gap-1 text-xs text-n-600">
-              Database
+            <div className="flex flex-col gap-1 text-xs text-n-600">
+              <label htmlFor={`${ids}-target`}>Database</label>
               <Select
+                id={`${ids}-target`}
                 testId="promote-target"
                 value={target}
                 options={targets.map((type) => ({ value: type.name, label: type.name }))}
-                onChange={(event) => chooseTarget(event.target.value)}
+                onChange={chooseTarget}
                 disabled={busy || results !== null}
                 width="100%"
               />
-            </label>
+            </div>
             {mapping !== null && mapping.people.length > 1 && (
-              <label className="flex flex-col gap-1 text-xs text-n-600">
-                People
+              <div className="flex flex-col gap-1 text-xs text-n-600">
+                <label htmlFor={`${ids}-person`}>People</label>
                 <Select
+                  id={`${ids}-person`}
                   testId="promote-person"
                   value={person ?? ''}
                   options={mapping.people.map((field) => ({
                     value: field.name,
                     label: humanize(field.name),
                   }))}
-                  onChange={(event) => setPerson(event.target.value)}
+                  onChange={setPerson}
                   disabled={busy || results !== null}
                   width="100%"
                 />
-              </label>
+              </div>
             )}
             {mapping !== null && mapping.parents.length > 1 && (
-              <label className="flex flex-col gap-1 text-xs text-n-600">
-                Parent
+              <div className="flex flex-col gap-1 text-xs text-n-600">
+                <label htmlFor={`${ids}-parent`}>Parent</label>
                 <Select
+                  id={`${ids}-parent`}
                   testId="promote-parent"
                   value={parent ?? ''}
                   options={[
@@ -148,11 +152,11 @@ export function PromoteDialog({
                       label: humanize(field.name),
                     })),
                   ]}
-                  onChange={(event) => setParent(event.target.value || null)}
+                  onChange={(field) => setParent(field || null)}
                   disabled={busy || results !== null}
                   width="100%"
                 />
-              </label>
+              </div>
             )}
           </>
         )}

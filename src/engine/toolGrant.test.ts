@@ -8,6 +8,7 @@ import {
   editsNotes,
   grantedTools,
   holds,
+  holdsRead,
   holdsShell,
   holdsWeb,
   mentionedTools,
@@ -108,6 +109,20 @@ describe('cliGrant replays tool-grants.json cli_cases', () => {
     expect(
       holdsShell({ shell: 'off', web: 'on', attended: true, readScoped: false, narrowing: null }),
     ).toBe(false);
+  });
+
+  it('holds Read at every ceiling until a read limit withdraws it (M91.17)', () => {
+    for (const shell of ['off', 'ask', 'on'] as const) {
+      for (const attended of [true, false]) {
+        expect(holdsRead({ shell, attended, readScoped: false, narrowing: null })).toBe(true);
+        expect(holdsRead({ shell, attended, readScoped: true, narrowing: null })).toBe(false);
+      }
+    }
+    // A record naming only cerebro's tools leaves Read to the CLI, which
+    // opens a file in the vault without asking: still held.
+    expect(
+      holdsRead({ shell: 'on', attended: true, readScoped: false, narrowing: ['get_note'] }),
+    ).toBe(true);
   });
 
   it('hears a name as names_tool does', () => {

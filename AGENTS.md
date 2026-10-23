@@ -53,6 +53,22 @@ enforced: `.github/workflows/mac-app.yml`
   `lib/gitIpc.ts`, `lib/rootsIpc.ts`, `agent/agentIpc.ts`), and only
   `lib/mockIpc.ts` reads `lib/mockParse.ts` (M53.20). `lab/` is the dev-only
   state lab (`state-lab.html`, M64.1), which Vite never builds.
+- **Page titles share the body editor** (M85–M86). `editor/pageTitleProjection.ts`
+  presents the first top-level H1 above the body without reordering its Markdown
+  or creating another writer. `NoteBodyEditor` owns the stable metadata portal;
+  properties and related tabs must not remount when the lazy editor becomes ready.
+  `PageTitleFallback` displays a filename without writing until explicit adoption.
+  Concepts retain their guarded frontmatter title. `styles/surface-system.css`
+  defines the shared type roles (40/48 page title, 24/32 peek/workspace title,
+  16/28 prose, 14/20 UI, 12/18 metadata). Table corrections use
+  `detail/AnchoredFieldStatus`: a persistent accessible status and a passive
+  viewport-positioned bubble; do not raise editing cells over frozen columns.
+  The implementation and remaining native/performance acceptance live in
+  `docs/superpowers/plans/2026-10-17-m84-m90-implementation-record.md`.
+  A page's side panel is one slot the page frame's full height
+  (`components/pageFrame.css`), under the toolbar's actions: Details,
+  Comments and History each open from their own toolbar button, one at a
+  time, and the outline sits on the page (`editor/DocOutline.tsx`).
 - **Knowledge is three tabs, and a concept is a page** (M50–M51). The page
   (`pages/KnowledgePage.tsx`) is Concepts (every concept, filed by folder),
   Review (the queue — `engine/okf.ts` `reviewQueue` orders it and names each
@@ -64,17 +80,32 @@ enforced: `.github/workflows/mac-app.yml`
   sections from `src/status/`, each owning its own read and its own failure.
   A concept opens in `DocPage` like any page: its review is the bar under its
   title (`knowledge/ConceptReviewBar.tsx`, which alone may Verify), and its
-  evidence is the side panel's Details tab, closed until asked.
+  evidence is its Details panel, closed until asked.
   `ReviewPage`, `PipelinePage` and `EpistemicStatusPage` are all gone.
   **The shell design is a persistent icon rail plus contextual sidebar**
   (M71–M79; see
   `docs/superpowers/plans/2026-10-16-m71-m74-visual-redesign.md`). The owner
   explicitly superseded M37.3/M43's one-column geometry on 2026-10-16. The
   shell has a 54px rail, a 240px default resizable/collapsible context
-  sidebar and a broad canvas. Global navigation stays available when the
-  context sidebar closes. The assistant has panel and roomy canvas
-  presentations of one instance; presentation changes preserve its thread,
-  draft, streaming turn and pending approvals. `app/PageNavigation.tsx` lets
+  sidebar and a broad canvas. The canvas meets the window's right and bottom
+  edges without a border or gutter; its sole rounded top-left corner rests on
+  the sidebar's navigation background. Shell width budgets reserve no outside
+  frame. Global navigation stays available when the
+  context sidebar closes. Knowledge, Agents, Databases and fallback Work each
+  use one contextual heading for their existing fold and actions, followed
+  directly by their rows; the rail owns the global New launcher. Pages' physical
+  tree is labeled Folders and retains its `pages` fold preference. Pages shows
+  either Collections or Folders, selected by the persisted `pageTreeMode`, so
+  the same paths do not appear twice. Existing folds remain intact; the legacy
+  both-open state initially shows Collections. Home's Collections is independent.
+  Folder creation actions select and open Folders before invoking the existing
+  dialog controller.
+  The assistant defaults to a floating conversation that rests minimized as one
+  48px round button, its header and body hidden but mounted, and expands over
+  the page without taking canvas width. Floating, docked panel
+  and roomy canvas presentations share one instance; minimizing and presentation
+  changes preserve its thread, draft, streaming turn and pending approvals.
+  `app/PageNavigation.tsx` lets
   Inbox, Settings, Work and open Studio projects lend their existing navigation
   to the active pane's context sidebar; Assistant canvas takes priority.
   Inactive panes retain local navigation. Narrow drawers restore focus to an
@@ -82,6 +113,12 @@ enforced: `.github/workflows/mac-app.yml`
   outstanding native acceptance are tracked in the plan.
   Keep Cerebro's Instrument Sans/IBM Plex Mono and cortex/synapse tokens,
   readable selection/focus and light/dark themes.
+  `pages/PagesPage.tsx` is the Pages browser: untyped documents and ordinary
+  records share All pages, Recently opened and Favorites shelves, with list
+  and grid display. It reads the existing vault snapshot and personal open
+  log, opens records as full pages through `useOpenPath`, and keeps its search,
+  display and shelf in the pane's visit state. `pages` is a real destination
+  (`g p`, Quick Open and assistant navigation), not an alias for Home.
   All existing places remain reachable: Inbox, Home, My work, Studio,
   History, Library and Settings, plus Collections, Pages, Work repositories,
   Knowledge folders/review, Agents, Databases and Favorites. The selection
@@ -123,6 +160,27 @@ enforced: `.github/workflows/mac-app.yml`
   and a related tab files new records under its host. New records live in the
   database's home folder; a task-like type under a host with a key prefix takes
   its next item key. Cycles are saved views over the work's date range.
+- **Every AI interaction draws with the AI elements** (M91). `components/ai/`
+  is shadcn's AI Elements and the base components under them, ported under
+  MIT onto the DS primitives (THIRD_PARTY_NOTICES.md), each element group
+  importing its own stylesheet, and it is presentation only (CV-64).
+  `agent/elements/` adapts the agent model, the stores and IPC answers into
+  its view models, and `engine/ai/` holds the pure parsers beneath them
+  (`types.ts` owns the tool-result shapes Rust mirrors; test reports, stack
+  frames, file trees, sources, todos and steps). `agent/ChatTurn.tsx` draws
+  one turn in every presentation of the conversation, its calls through
+  `agent/toolRenderers.tsx`'s `StepItem` by the manifest's renderer;
+  `status/runs.css` and `status/review.css` style the run lists, run
+  transcripts and Review's cards on the same elements.
+  `agent/transcript.ts` keeps a reply's reasoning, words and calls in order
+  as `parts` and nests a subagent's steps under the Agent call that started
+  it; a thread saves a subagent's summary only, and reasoning heals from the
+  session file. The composer's Context pulls `agent_context_usage`
+  (`agent/useContextUse.ts`); Branch from here starts a conversation Rust
+  forks at that turn's anchor (M91.6); attached files copy in through the
+  CV-56 doors on send (`agent/attachments.ts`); and Settings' Subagents
+  switch (`cerebro.agentDelegate`, on by default) sends the delegate ceiling
+  with every panel turn (CV-29).
 - `src-tauri/src/` — Rust: `vault/` (scan/parse/write, and `comments.rs`,
   each page's comment sidecar under `.comments/`; `receipt.rs` is the
   receipt every write carries, minted only by its door's guard, M58.1;
@@ -164,12 +222,22 @@ enforced: `.github/workflows/mac-app.yml`
   `git/`, `forge.rs` (the human page's read-only GitHub PR state, through the
   person's own `gh`, with bounded children and an in-memory cache; shared
   `pr-urls.json` and `pr-cases.json` hold its frontend contract, M69.11), `mcp.rs`
-  (the runs' loopback MCP server), `client_access.rs` (the optional second
+  (the runs' loopback MCP server, one of whose workers `SeamReserve` keeps
+  for the ask seam, M91.2b), `client_access.rs` (the optional second
   loopback listener for other apps, authenticated by personal tokens; token
   metadata and SHA-256 fingerprints live in `runtime/client_tokens.rs`,
   and each client session has its own run, M62.5–.5c), `agent/` (CLI spawn; `fold.rs` folds the live
-  stream and Claude Code's session file into one event vocabulary, and
-  `transcript.rs` finds that file and reads it back; `interaction.rs` is the
+  stream and Claude Code's session file into one event vocabulary, a
+  subagent's lines in a sub-fold per Agent call (M91.3b), and
+  `transcript.rs` finds that file and the `subagents/` transcripts beside it
+  and reads them back, and checks a branch's anchor (`check_fork`) before a
+  run goes on in the session Rust minted for it (`CliSession::Fork`, M91.6);
+  `cli_agents.rs` names the agent types a run's Claude Code may start, its
+  `cerebro-researcher` defined in `--agents` and every other type denied by
+  name (M91.2b); `meter.rs`'s `ContextBook` holds each attended session's
+  latest context reading in memory only, never emitted, journaled, logged or
+  stored, for `agent_context_usage` to answer when the composer asks (M91.5,
+  the owner's Q7 narrowing of M25.2); `interaction.rs` is the
   ask seam's book, where a run waits on a call and only a person's answer
   resumes it, and where the Allow of an ask-first agent's page write waits
   for dispatch: an Agent record's `ask-first:` and the tool manifest's
@@ -207,6 +275,14 @@ enforced: `.github/workflows/mac-app.yml`
   commit.
 - `shared/policy/mail.v1.json` — mail folders excluded from git and the scoped,
   default-closed Gmail admission gate; Rust and TS replay its shared cases.
+- `shared/policy/subagents.v1.json` — how far Claude Code's subagents may go
+  (M91.1–.2a): the `env` every run but an internal one starts with
+  (foreground, one level deep, two at once, eight a session, no built-in
+  agent types), what a seated run adds (`seated_env`: the todo list, never
+  the shared task list), the types Cerebro defines (`presets`:
+  `cerebro-researcher`, its prompt in `shared/prompt/subagents/`) and the
+  hardening every run's settings file carries. Rust `policy/subagents.rs`
+  and TS `lib/policy/subagents.ts` load the same bytes against one digest.
 - `shared/prompt/` — prose the model reads, which Rust compiles in and TS
   imports `?raw` (M54.7). `server-instructions.md` is the MCP `instructions`
   every run hears, whatever it holds; its README holds the rules (CV-19).
@@ -471,11 +547,15 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
 - **CV-27 One fold, one reducer** (M56.3). Claude Code's live stream and its
   session file fold through `src-tauri/src/agent/fold.rs` into one event
   vocabulary, and `src/agent/transcript.ts` is the one reducer from events to
-  messages, live and restored. A third reader of either format is a defect;
-  the meter's Tally reads raw lines for accounting only, and
-  `transcript::pending_deferral` reads the session file's tail only for an
-  open deferral marker (M57.1).
-  enforced: `src-tauri/src/agent/fold.rs::every_recorded_line_is_classified`, `src/agent/transcript.test.ts::replays the transcript goldens`
+  messages, live and restored. A subagent's lines fold apart, in one sub-fold
+  per Agent call whose events name that call as their `parent` (M91.3b);
+  replayed, `transcript.rs` hands the fold the `<session>/subagents/`
+  transcripts beside the session file, and the fold merges them by time. A
+  third reader of either format is a defect; the meter's Tally reads raw
+  lines for accounting and the context reading only (M91.5), and
+  `transcript::pending_deferral` and `cli_writes::held_call` read the session
+  file's tail only for an open deferral and the call it holds (M57.1, M58.3).
+  enforced: `src-tauri/src/agent/fold.rs::every_recorded_line_is_classified`, `src/agent/transcript.test.ts::replays the transcript goldens`, `src-tauri/src/agent/fold.rs::a_subagent_replays_from_its_own_transcript_as_it_streamed`
 - **CV-28 A run waits; only a person answers** (M57.1). A run asks through
   its own loopback connection and can only wait: no MCP tool, hook or bearer
   records an answer; answers enter through `answer_interaction`, a Tauri
@@ -483,16 +563,26 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   that fails or never runs leaves the call refused.
   enforced: `src-tauri/src/agent/interaction.rs::only_the_answer_command_mints_a_person_answer`, `src-tauri/src/agent/mod.rs::a_tool_the_gate_may_defer_is_never_pre_approved`
 - **CV-29 One table decides what Claude Code may run** (M57.2). Whether one
-  of the CLI's own tools runs, asks the person or is refused, and which vault
-  folders its readers may not open (M60.8b, the Trash), is decided only by
+  of the CLI's own tools runs, asks the person or is refused, which vault
+  folders its readers may not open (M60.8b, the Trash), and which agent types
+  its subagent tool may start (M91.2a), is decided only by
   `shared/policy/tool-approval.v1.json`, by tool family (the manifest's
-  `family` column), run kind and ceiling. Allow and deny ride argv; ask and
-  refuse meet the gate on a seated run and are never pre-approved, and
-  refuse rides `--disallowedTools` where no gate sits, so a hook outage fails
-  closed. A writer or the shell that an agent's record narrows out is denied
-  in argv, so acceptEdits can't approve it. A run nobody watches never asks:
+  `family` column), run kind and ceiling. A run's `--tools` names only the
+  built-ins its plan allows, asks for or leaves to the CLI, and an init that
+  offers a built-in the manifest has no row for stops the run (M91.1). Allow
+  and deny ride argv; ask and refuse meet the gate on a seated run and are
+  never pre-approved, and refuse rides `--disallowedTools` where no gate
+  sits, so a hook outage fails closed. A writer or the shell that an agent's
+  record narrows out is denied in argv, so acceptEdits can't approve it, and
+  so is every tool of a family whose `narrowed_out` is deny when the
+  narrowing names none of them. The subagent tool's family reads the
+  `delegate` ceiling (Settings' Subagents switch) and `needs_gate`, so no
+  run without a gate holds it; every agent type but `agent_types.allowed` is
+  denied by name, Claude Code's built-in ones and the person's own
+  (`agent/cli_agents.rs`) alike, and an init that offers a type argv neither
+  allows nor denies stops the run (M91.2b). A run nobody watches never asks:
   its asks become denials, recorded as one `capability_unavailable` row.
-  enforced: `src-tauri/src/policy/tool_approval.rs::replays_the_tool_approval_goldens`, `src/lib/policy/toolApproval.test.ts::replays the tool-approval goldens`
+  enforced: `src-tauri/src/policy/tool_approval.rs::replays_the_tool_approval_goldens`, `src/lib/policy/toolApproval.test.ts::replays the tool-approval goldens`, `src-tauri/src/agent/mod.rs::an_init_offering_an_unknown_built_in_ends_the_run`, `src-tauri/src/agent/mod.rs::an_init_offering_an_unexpected_agent_type_ends_the_run`
 - **CV-30 A turn outlives its panel** (M57.6). Closing the assistant,
   switching threads or starting a new one detaches a running turn and never
   stops it; only Stop, Steer, deleting its thread, a vault switch and quit
@@ -526,11 +616,12 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   enforced: `src-tauri/src/vault/receipt.rs::receipts_are_minted_only_at_their_doors`, `src/lib/mockIpc.test.ts::replays the shared write doors`
 - **CV-34 A run commits only what it wrote** (M58.3). When a run ends, Rust
   commits exactly the paths its `vault_writes` rows and its own completed
-  Write and Edit calls name (a deferred call's commits with the run that
-  resumes it), one commit at a time per repository, with `Cerebro-Run` and
-  `Cerebro-Actor` trailers. Every other commit leaves a live run's paths
+  Write and Edit calls name, its subagents' among them, since a subagent
+  works for its run (M91.3b), and a deferred call's commits with the run
+  that resumes it; one commit at a time per repository, with `Cerebro-Run`
+  and `Cerebro-Actor` trailers. Every other commit leaves a live run's paths
   alone.
-  enforced: `src-tauri/src/git/changeset.rs::a_run_commit_takes_only_its_paths`, `src-tauri/src/git/commit.rs::commit_all_leaves_a_live_runs_paths_alone`, `src-tauri/src/agent/mod.rs::a_deferred_write_commits_with_the_run_that_resumes_it`
+  enforced: `src-tauri/src/git/changeset.rs::a_run_commit_takes_only_its_paths`, `src-tauri/src/git/commit.rs::commit_all_leaves_a_live_runs_paths_alone`, `src-tauri/src/agent/mod.rs::a_deferred_write_commits_with_the_run_that_resumes_it`, `src-tauri/src/agent/mod.rs::a_subagents_write_is_committed_with_its_run`
 - **CV-35 Attribution is recorded, never inferred** (M58.4). History names
   an agent for a commit only when runtime.db's `run_commits` record says
   that agent's run made it; a run's commit writes that row and nothing else
@@ -726,6 +817,18 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
 
 ## Verifying UI work
 
+Surfaces arrive on the arrival pairs in `styles/tokens/spacing.css` and leave
+through `components/ui/motion.ts`: `Presence` keeps a panel mounted while it
+plays its exit, and `leaveGhost` leaves an inert copy of a menu, tooltip,
+dialog, toast, row or drawer fading where it was, so focus, layers and Escape
+still go with the real one at once. What arrives while a view is open is
+marked by `useArrival`/`Arrival`, and a view that swaps its content in place
+fades through `usePageTurn`; both marks come off once played, so showing a
+view again replays nothing. Every duration but hover collapses under reduced
+motion (Tailwind's own `transition-*` too), which `playwright.config.ts`
+emulates for every spec, so geometry is read where things land;
+`e2e/motion.spec.ts` alone opts back in to prove the motion plays.
+
 OS file-drop specs use `window.__cerebroMockDrop({at, files, hold?})` and
 `__cerebroMockDragLeave()`. Synthetic HTML5 drops exercise the browser route
 only; Tauri consumes native drags and delivers paths through the shared
@@ -735,6 +838,12 @@ on their React wrappers.
 Whiteboard gesture proofs use a real pointer down, two moves past 3 px, then
 up; a single event is a click. Plane controls are tested with `page.mouse`
 at their measured bounds because the canvas input plane receives the gesture.
+
+A mock assistant turn's mid-states (a subagent at work, a plan half done) are
+read on a held clock, never by sleeping: `holdClock` after `boot`, then
+`stepUntil` runs one mock step at a time until the state holds, and
+`stepUntilSettled` ends the turn. `askAssistant` sends as a person does and
+`assistantSettled` waits on a running clock (all in `e2e/boot.ts`, M91.15).
 
 **CV-14 Only `*.mermaid.test.ts` may `import mermaid`.** Those files exist to measure
 claims about the bundled renderer — the shape registry, the `style`/arrow syntax
@@ -813,6 +922,24 @@ disabled reuse there).
   server and never claim a vault diff. SECURITY.md records the exact-name and
   inherited-connector limits.
   enforced: `src-tauri/src/agent/mod.rs::a_connector_run_is_denied_every_send_tool_by_name`, `src-tauri/src/policy/tools.rs::no_tool_reaches_outside_the_app`
+
+- **CV-63 No native selects** (owner, 2026-10-18). Every select is the design
+  system's `Select` (`src/components/ui/Select.tsx`), or `Dropdown`, which
+  renders it. Lint refuses a `<select>` element and `createElement('select')`
+  in every source class, with no exemption. Third-party UI that builds one is
+  wrapped where it is wired in: BlockNote's code block mounts the `Select` as
+  its language picker (`src/editor/codeBlock.tsx`), and its fences save as
+  before.
+  enforced: `eslint.config.js::select: {`, `scripts/lint-rails.test.ts::no native select draws anywhere`, `src/editor/codeBlock.test.tsx::draws no native select in a rendered code block`
+
+- **CV-64 The AI elements are presentation only** (M91.7).
+  `src/components/ai/` draws what it is handed: plain props, the view models
+  `src/agent/elements/` and each surface build. No element reads a store,
+  the app's theme (`theme` is a prop), an IPC adapter, Tauri or the agent
+  model (`@/agent/*`), so every AI surface can draw with them. An AST test
+  walks every module the layer names, aliased or relative, types included,
+  and every app module it loads at run time, however indirectly.
+  enforced: `src/components/ai/boundary.test.ts::the AI element layer is presentation only (CV-64)`
 
 ## Dev skills
 

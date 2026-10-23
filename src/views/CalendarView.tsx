@@ -366,7 +366,7 @@ export function CalendarView({
                   className={[
                     'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-2xs',
                     day === today
-                      ? 'bg-cortex-500 font-semibold text-n-0'
+                      ? 'bg-cortex-500 font-semibold text-inverse'
                       : inMonth
                         ? 'text-n-700'
                         : 'text-n-400',
@@ -492,28 +492,33 @@ export function CalendarView({
       data-date-field={dateField}
       data-span={span}
       data-week-start={weekStart === 1 ? 'monday' : 'sunday'}
-      className="flex min-h-0 min-w-0 flex-1 flex-col"
+      className="@container/calendar flex min-h-0 min-w-0 flex-1 flex-col"
     >
-      <div className="flex flex-none items-center gap-2 border-b border-n-200 px-5 py-2">
-        <IconButton icon="chevron-left" label={`Previous ${unit}`} onClick={() => step(-1)} />
-        <IconButton icon="chevron-right" label={`Next ${unit}`} onClick={() => step(1)} />
-        <span data-testid="calendar-month" className="ml-1 text-sm font-semibold text-n-900">
-          {span === 'day'
-            ? dayLabel(anchor)
-            : span === 'week'
-              ? weekLabel(weekGrid(anchor, weekStart))
-              : monthLabel(anchor)}
-        </span>
-        {!onScreen && (
-          <button
-            type="button"
-            onClick={() => setAnchor(today)}
-            className="rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-xs text-n-600 hover:border-n-400"
+      <div className="flex flex-none flex-wrap items-center gap-2 border-b border-n-200 px-4 py-2 @min-[720px]/calendar:px-6">
+        <div className="flex w-full min-w-0 items-center gap-2 @min-[720px]/calendar:w-auto">
+          <IconButton icon="chevron-left" label={`Previous ${unit}`} onClick={() => step(-1)} />
+          <IconButton icon="chevron-right" label={`Next ${unit}`} onClick={() => step(1)} />
+          <span
+            data-testid="calendar-month"
+            className="ml-1 min-w-0 text-ui font-medium text-n-900"
           >
-            Today
-          </button>
-        )}
-        <span className="flex-1" />
+            {span === 'day'
+              ? dayLabel(anchor)
+              : span === 'week'
+                ? weekLabel(weekGrid(anchor, weekStart))
+                : monthLabel(anchor)}
+          </span>
+          {!onScreen && (
+            <button
+              type="button"
+              onClick={() => setAnchor(today)}
+              className="rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-xs text-n-600 hover:border-n-400"
+            >
+              Today
+            </button>
+          )}
+        </div>
+        <span className="hidden flex-1 @min-[720px]/calendar:block" />
         <SegmentedControl
           size="sm"
           ariaLabel="Calendar span"

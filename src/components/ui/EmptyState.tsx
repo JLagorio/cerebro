@@ -55,7 +55,7 @@ export function EmptyState({
       </div>
       <div
         style={{
-          fontSize: compact ? 'var(--fs-sm)' : 'var(--fs-lg)',
+          fontSize: compact ? 'var(--fs-ui)' : 'var(--fs-section-title)',
           fontWeight: 600,
           letterSpacing: 'var(--track-tight)',
           color: 'var(--n-800)',
@@ -66,7 +66,7 @@ export function EmptyState({
       {description ? (
         <div
           style={{
-            fontSize: compact ? 'var(--fs-xs)' : 'var(--fs-sm)',
+            fontSize: 'var(--fs-ui)',
             color: 'var(--text-muted)',
             maxWidth: 340,
             lineHeight: 1.5,

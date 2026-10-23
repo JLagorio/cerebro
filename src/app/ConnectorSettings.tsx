@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import {
   approvalKey,
@@ -180,7 +181,7 @@ export function ConnectorSettings() {
   if (loadError !== null) {
     return (
       <div className="mt-1" data-testid="connector-settings-blocked">
-        <p className="m-0 text-2xs leading-[14px] text-warn-600">
+        <p className="m-0 text-2xs leading-[14px] text-warn-700">
           The connector list can’t be read, so agent runs are pinned to no connectors until this is
           fixed: {loadError}{' '}
           <button
@@ -364,8 +365,8 @@ export function ConnectorSettings() {
                           said.key === 'working' ||
                           said.key === 'off' ||
                           said.key === 'not_observed'
-                            ? 'text-n-500'
-                            : 'text-warn-600'
+                            ? 'text-(--text-meta)'
+                            : 'text-warn-700'
                         }
                       >
                         {said.words}
@@ -375,7 +376,7 @@ export function ConnectorSettings() {
                 </span>
                 <div
                   title={shown}
-                  className="truncate text-2xs text-n-500 [font-family:var(--font-mono)]"
+                  className="truncate text-2xs text-(--text-meta) [font-family:var(--font-mono)]"
                 >
                   {shown}
                 </div>
@@ -406,7 +407,7 @@ export function ConnectorSettings() {
               />
             </div>
             {(observedAt !== null || hint !== undefined) && (
-              <p className="m-0 mt-0.5 text-2xs leading-[14px] text-n-500">
+              <p className="m-0 mt-0.5 text-2xs leading-[14px] text-(--text-meta)">
                 {observedAt !== null && (
                   <span data-testid="connector-seen" title={observedAt}>
                     seen {relativeWhen(observedAt, new Date())}
@@ -438,13 +439,13 @@ export function ConnectorSettings() {
                         {copied === spec.name ? 'Copied' : 'Copy'}
                       </Button>
                     </div>
-                    <p className="m-0 text-2xs leading-[14px] text-n-500">
+                    <p className="m-0 text-2xs leading-[14px] text-(--text-meta)">
                       Then run claude, type /mcp, and sign in to {spec.name}. The sign-in stays in
                       Claude Code; Cerebro never holds the token.
                     </p>
                   </>
                 ) : (
-                  <p className="m-0 text-2xs leading-[14px] text-n-500">
+                  <p className="m-0 text-2xs leading-[14px] text-(--text-meta)">
                     {withoutCommand(spec)} The sign-in stays in Claude Code; Cerebro never holds the
                     token.
                   </p>
@@ -463,13 +464,13 @@ export function ConnectorSettings() {
         </p>
       )}
       {specs.length > 0 && status.kind === 'unavailable' && (
-        <p className="m-0 text-2xs leading-[14px] text-warn-600" data-testid="section-unavailable">
+        <p className="m-0 text-2xs leading-[14px] text-warn-700" data-testid="section-unavailable">
           Connector status can’t be read, so these rows don’t say whether each connector works:{' '}
           {status.reason}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-1.5" data-testid="connector-presets">
-        <span className="text-2xs text-n-500">Add a connector:</span>
+        <span className="text-2xs text-(--text-meta)">Add a connector:</span>
         {CONNECTOR_PRESETS.map((preset) => {
           const holder = presetHolder(preset, specs);
           // A native button in Button's own classes: Button carries no
@@ -491,19 +492,29 @@ export function ConnectorSettings() {
       </div>
       <div className="flex items-center gap-1.5">
         <div className="w-28 flex-none">
-          <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input
+            size="sm"
+            width="100%"
+            placeholder="Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
         </div>
-        <select
-          aria-label="Connector transport"
+        <Select
+          ariaLabel="Connector transport"
+          size="sm"
           value={transport}
-          onChange={(e) => setTransport(e.target.value as 'http' | 'stdio')}
-          className="h-[28px] flex-none rounded-md border border-n-200 bg-n-0 px-1.5 text-xs text-n-800"
-        >
-          <option value="http">http</option>
-          <option value="stdio">stdio</option>
-        </select>
+          options={[
+            { value: 'http', label: 'http' },
+            { value: 'stdio', label: 'stdio' },
+          ]}
+          onChange={(next) => setTransport(next === 'stdio' ? 'stdio' : 'http')}
+          className="flex-none"
+        />
         <div className="min-w-0 flex-1">
           <Input
+            size="sm"
+            width="100%"
             placeholder={transport === 'http' ? 'https://…/mcp' : 'npx -y @some/mcp'}
             value={target}
             onChange={(e) => setTarget(e.target.value)}
@@ -517,7 +528,7 @@ export function ConnectorSettings() {
         </Button>
       </div>
       {specs.length === 0 && filePresent && (
-        <p className="m-0 text-2xs leading-[14px] text-warn-600">
+        <p className="m-0 text-2xs leading-[14px] text-warn-700">
           The list exists but is empty — runs are pinned to no connectors at all.{' '}
           <button
             type="button"

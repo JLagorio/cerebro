@@ -93,13 +93,22 @@ describe('KnowledgeStrip (M50.2)', () => {
     });
   });
 
-  it('names three and sends the rest to the side panel', () => {
+  it("names three and sends the rest to the inspector's Knowledge section", () => {
     useVaultStore.setState({ entries: [project, ...[1, 2, 3, 4, 5].map(aboutIt)] });
-    useUiStore.setState({ docPanelOpen: false, docPanelTab: 'outline' });
+    useUiStore.setState({
+      docPanelOpen: false,
+      docPanel: 'history',
+      inspectorCollapsed: ['knowledge'],
+      inspectorReveal: null,
+    });
     render(<KnowledgeStrip entry={project} />);
     expect(screen.getAllByTestId('knowledge-strip-concept')).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: '+2 more' }));
-    expect(useUiStore.getState().docPanelOpen).toBe(true);
-    expect(useUiStore.getState().docPanelTab).toBe('knowledge');
+    const ui = useUiStore.getState();
+    expect(ui.docPanelOpen).toBe(true);
+    // Details, with its Knowledge section unfolded and brought into view.
+    expect(ui.docPanel).toBe('details');
+    expect(ui.inspectorCollapsed).not.toContain('knowledge');
+    expect(ui.inspectorReveal?.id).toBe('knowledge');
   });
 });

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import YAML from 'yaml';
 import { boot, readMockFile } from './boot';
+import { chooseOption } from './select';
 
 const SCHEDULE = 'delivery/how-we-schedule.md';
 const EPIC = 'records/epics/epic-first-week-activation.md';
@@ -47,7 +48,7 @@ test('the checklist grip promotes a record with deadline and owner, then saves a
   await page.locator('[data-testid="block-grip"] button').click();
   await page.getByTestId('promote-line-item').click();
   const dialog = page.getByRole('dialog', { name: 'Promote to records' });
-  await dialog.getByTestId('promote-target').selectOption('Work item');
+  await chooseOption(dialog.getByRole('button', { name: 'Database', exact: true }), 'Work item');
   await expect(dialog.getByTestId('promote-line')).toHaveCount(1);
   const box = await dialog.boundingBox();
   expect(box).not.toBeNull();
@@ -98,7 +99,7 @@ test('selection promotion reports created, empty and linked lines, with the task
   await page.keyboard.press('ControlOrMeta+a');
   await page.getByTestId('selection-promote').click();
   const dialog = page.getByRole('dialog', { name: 'Promote to records' });
-  await dialog.getByTestId('promote-target').selectOption('Work item');
+  await chooseOption(dialog.getByRole('button', { name: 'Database', exact: true }), 'Work item');
   await expect(dialog.getByTestId('promote-line')).toHaveCount(3);
   await dialog.getByRole('button', { name: 'Promote 3 lines', exact: true }).click();
   const results = dialog.getByTestId('promote-result');

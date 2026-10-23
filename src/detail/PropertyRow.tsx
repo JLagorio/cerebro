@@ -40,6 +40,25 @@ import type { FieldKind } from '@/engine/types';
  */
 export const PROPERTY_LABEL_W = 120;
 
+/**
+ * The label column as CSS: `PROPERTY_LABEL_W` unless a host narrows it with
+ * `--property-label-w` — the inspector does, for a 300px panel (2026-10-18).
+ * A control laid out to line up with property rows uses this, not the number.
+ */
+export const PROPERTY_LABEL_WIDTH = `var(--property-label-w, ${PROPERTY_LABEL_W}px)`;
+
+/**
+ * A quiet act drawn as a property row (owner, 2026-10-18): its glyph in the
+ * row's 18px icon slot, its words where a property's name sits, one row's
+ * height, and a wash that bleeds as far as a label cell's. Add property and
+ * the hidden-properties toggle read as the list's own last rows rather than
+ * as links hung under it — in the inspector, the record page and the peek.
+ */
+export const PROPERTY_GHOST_ROW =
+  '-mx-1.5 flex h-[var(--property-row-h,34px)] min-w-0 items-center gap-1.5 rounded-sm border-0 bg-transparent px-1.5 text-left text-ui text-n-400 motion-hover hover:bg-n-50 hover:text-n-700';
+/** PropertyRow's icon cell, so a ghost row's glyph sits on the icons above it. */
+export const PROPERTY_GHOST_ICON = 'flex h-6 w-[18px] flex-none items-center justify-center';
+
 export interface PropertyRowProps {
   /**
    * Chooses the leading icon. Undeclared keys have no declared kind — pass
@@ -144,19 +163,7 @@ export function PropertyRow({
   // the label is the same size as its value in Notion and reads as secondary
   // by COLOUR, not by size.
   //
-  // Ours sets values at 13, so a 14px label is one step ABOVE the thing it
-  // names. Task 8 ruled on that in the browser rather than on the number: at
-  // 1x the panel reads correctly, because `--n-500` against `--n-800` is a far
-  // stronger cue than 1px of size and the value still leads; at 2.2x the
-  // inversion is visible but nobody reads a panel at 2.2x. It STAYS, as
-  // recorded debt — closing it properly means 14px values, which reaches every
-  // `FieldEditor` control including the grid's, and that is a type-ramp
-  // decision, not a drag-slice one.
-  //
-  // What the ruling did surface is the real cost of the 84px name box: it
-  // clips two of the demo vault's 52 panel labels where 96px clipped none —
-  // and the tooltip that covers them was broken. See `nameRef` above.
-  const nameClass = 'min-w-0 flex-1 truncate text-left text-md leading-md text-n-500';
+  const nameClass = 'min-w-0 flex-1 truncate text-left text-ui text-n-500';
 
   return (
     <div
@@ -170,7 +177,7 @@ export function PropertyRow({
         'group -mx-1.5 flex min-w-0',
         // 34px of content; the 4px that makes the 38px pitch is the
         // CONTAINER's gap, so it stays outside every hover target (§A1).
-        'min-h-[34px]',
+        'min-h-[var(--property-row-h,34px)]',
         align === 'center' ? 'items-center' : 'items-start',
       ].join(' ')}
     >
@@ -184,14 +191,14 @@ export function PropertyRow({
         // 20ms, declared (M46.2 Task 3): a property list is read by running
         // the pointer down it, and an undeclared wash strobes on the way past.
         className={[
-          'flex min-h-[34px] min-w-0 flex-none items-center gap-1.5 rounded-sm px-1.5',
+          'flex min-h-[var(--property-row-h,34px)] min-w-0 flex-none items-center gap-1.5 rounded-sm px-1.5',
           'select-none text-n-500 motion-hover hover:bg-n-50',
           // A label with no menu behind it opens nothing, so it does not
           // claim a pointer. Notion has no such row; every one of its labels
           // is a menu trigger.
           menu === undefined ? '' : 'cursor-pointer',
         ].join(' ')}
-        style={{ width: PROPERTY_LABEL_W }}
+        style={{ width: PROPERTY_LABEL_WIDTH }}
       >
         {/* Icon and grip occupy the same 18 x 24 cell (§A10, §B1) — Notion
             swaps them in place, and a grip that appended itself would shove
@@ -230,7 +237,7 @@ export function PropertyRow({
             the very thing it opened. */}
         <Tooltip label={label} disabled={menuOpen || !clipped}>
           {menu === undefined ? (
-            <span ref={nameRef} className={nameClass}>
+            <span ref={nameRef} className={nameClass} tabIndex={clipped ? 0 : undefined}>
               {label}
             </span>
           ) : (

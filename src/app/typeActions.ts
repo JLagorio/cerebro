@@ -1082,7 +1082,7 @@ export async function applyTypeLayout(
 }
 
 /**
- * Shared "+ Add property" behavior: a TYPED doc extends its type's schema
+ * Shared "Add property" behavior: a TYPED doc extends its type's schema
  * (creating the Type doc when missing — previously this silently wrote a
  * loose key); an untyped doc gets plain frontmatter seeded by kind.
  */

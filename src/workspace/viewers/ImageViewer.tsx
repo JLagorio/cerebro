@@ -1,3 +1,4 @@
+import { StateMessage } from '@/components/ui/StateMessage';
 import { useState } from 'react';
 import { FileImage } from '@/components/FileImage';
 import { Button } from '@/components/ui/Button';
@@ -18,7 +19,11 @@ export function ImageViewer({
     { id: 'viewer.actual', run: () => setFit(false) },
   ]);
   if (probe.size > FILE_BYTES.limits.body_bytes)
-    return <p data-testid="viewer-too-large">This image is over the 64 MiB preview limit.</p>;
+    return (
+      <StateMessage state="partial" title="Image preview unavailable" testId="viewer-too-large">
+        This image is over the 64 MiB preview limit.
+      </StateMessage>
+    );
   return (
     <div data-testid="image-viewer" className="image-viewer" data-fit={fit ? 'fit' : 'actual'}>
       <div className="file-viewer-controls" role="group" aria-label="Image zoom">

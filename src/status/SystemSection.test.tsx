@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PipelineOverview } from '@/lib/ipc';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { SystemSection } from './SystemSection';
 
 /**
@@ -79,22 +80,26 @@ describe('the background concurrency ceiling', () => {
     const state = await screen.findByTestId('concurrency-state');
     expect(state.getAttribute('data-ceiling')).toBe('1');
     expect(state.textContent).toContain('one job at a time');
-    const select = screen.getByTestId('ambient-concurrency') as HTMLSelectElement;
-    expect(select.value).toBe('1');
+    const select = screen.getByTestId('ambient-concurrency');
+    expect(select.getAttribute('data-value')).toBe('1');
+    // Named by the sentence beside it, which says the ceiling in words.
+    expect(screen.getByRole('button', { name: 'Background work runs one job at a time.' })).toBe(
+      select,
+    );
   });
 
   it('offers exactly the range Rust sent, never a number the backend would refuse', async () => {
     pipelineOverview.mockResolvedValue(overview({ ambient_concurrency_max: 2 }));
     render(<SystemSection vaultPath={VAULT} />);
-    const select = (await screen.findByTestId('ambient-concurrency')) as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(['1', '2']);
+    const select = await screen.findByTestId('ambient-concurrency');
+    expect(optionLabels(select)).toEqual(['1 at a time', '2 at a time']);
   });
 
   it('raising it asks the backend, and the sentence changes with the answer', async () => {
     render(<SystemSection vaultPath={VAULT} />);
     const select = await screen.findByTestId('ambient-concurrency');
     pipelineOverview.mockResolvedValue(overview({ ambient_concurrency: 3 }));
-    fireEvent.change(select, { target: { value: '3' } });
+    chooseOption(select, { value: '3' });
 
     await waitFor(() => expect(setAmbientConcurrency).toHaveBeenCalledWith(3));
     await waitFor(() =>
@@ -110,7 +115,7 @@ describe('the background concurrency ceiling', () => {
     setAmbientConcurrency.mockRejectedValue(new Error('that ceiling is not allowed'));
     render(<SystemSection vaultPath={VAULT} />);
     const select = await screen.findByTestId('ambient-concurrency');
-    fireEvent.change(select, { target: { value: '4' } });
+    chooseOption(select, '4 at a time');
 
     await waitFor(() => expect(setAmbientConcurrency).toHaveBeenCalledWith(4));
     await waitFor(() =>

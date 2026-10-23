@@ -3212,7 +3212,7 @@ enum AnswerResult {
 }
 
 /// A person's answer to a waiting call (M57.1), the one door an answer
-/// enters by (CV-27): no MCP tool, hook or bearer reaches it. The answer is
+/// enters by (CV-28): no MCP tool, hook or bearer reaches it. The answer is
 /// taken only while its card waits in this vault, then the run's request
 /// resumes on the same Claude Code session with no new text, where the
 /// call's hook reads the answer. The resume passes the same pause gate any
@@ -3640,6 +3640,7 @@ pub fn run() {
             run_agent,
             stop_agent,
             agent_events_since,
+            agent::agent_context_usage,
             stop_all_agents,
             answer_interaction,
             cancel_interaction,
@@ -3861,9 +3862,11 @@ mod tests {
             message: "hi".into(),
             system_prompt: None,
             session_id: None,
+            fork: None,
             model: None,
             shell: None,
             web: None,
+            delegate: None,
             connectors: None,
             connector_names: None,
             attended: None,

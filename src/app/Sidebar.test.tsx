@@ -2,7 +2,16 @@ import { beginPointerRename, followRename } from './pointers';
 import { installOpenIntent } from './openIntent';
 import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  isInaccessible,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DESTINATIONS, destination } from '@/engine/destinations';
 import type { Entry, Selection } from '@/engine/types';
@@ -11,7 +20,7 @@ import { useRootsStore } from '@/stores/rootsStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { Sidebar } from './Sidebar';
-import { createRef } from 'react';
+import { createRef, StrictMode } from 'react';
 import type { PageNavigationControls } from './PageNavigation';
 
 function mkEntry(partial: Partial<Entry> & { path: string }): Entry {
@@ -145,10 +154,10 @@ describe('Sidebar', () => {
     useUiStore.setState({
       typesOpen: true,
       inboxEnabled: true,
-      inboxPeriod: 'all',
       aiPanelOpen: false,
       aiPanelPresentation: 'panel',
       sidebarCollapsed: false,
+      pageTreeMode: 'collections',
       // The nav groups open (M42.2) — a fold left behind by another test is
       // state, not a default.
       navClosed: [],
@@ -156,6 +165,250 @@ describe('Sidebar', () => {
   });
 
   afterEach(cleanup);
+
+  describe('contextual navigation without repeated sections', () => {
+    const closedGroups = ['base', 'agents', 'work', 'pages', 'favorites', 'collections', 'recents'];
+    const seedSubjects = () => {
+      useVaultStore.setState({
+        entries: [
+          project,
+          mkEntry({ path: 'knowledge/metrics/retention.md', title: 'Retention', type: 'Metric' }),
+          mkEntry({ path: 'records/agents/scout.md', title: 'Scout', type: 'Agent' }),
+        ],
+      });
+      useRootsStore.setState({
+        roots: [
+          {
+            id: 'repo',
+            label: 'Repo',
+            path: '/repos/repo',
+            alias: '',
+            color: null,
+            caps: { knowledge: false, git: false, writable: false },
+          },
+        ],
+      });
+    };
+
+    it.each(['Knowledge', 'Agents', 'Databases', 'Work'])(
+      '%s has one visible area label and direct subject rows',
+      (area) => {
+        seedSubjects();
+        render(<Sidebar />);
+        chooseArea(area);
+        const sidebar = within(screen.getByRole('navigation', { name: 'Sidebar' }));
+        // Include passive text as well as buttons: the former duplicate was
+        // a plain area label above a second, identically named fold control.
+        expect(
+          sidebar.getAllByText(area, { exact: true }).filter((node) => !isInaccessible(node)),
+        ).toHaveLength(1);
+        expect(sidebar.getByRole('button', { name: area, expanded: true })).toBeTruthy();
+        const subject =
+          area === 'Knowledge'
+            ? /^Metrics/
+            : area === 'Agents'
+              ? 'Scout'
+              : area === 'Databases'
+                ? /^Project/
+                : 'Repo';
+        expect(sidebar.getByRole('button', { name: subject })).toBeTruthy();
+        expect(sidebar.queryByRole('button', { name: 'New' })).toBeNull();
+        expect(railButton('New')).toBeTruthy();
+      },
+    );
+
+    it.each([
+      ['Knowledge', 'base', /^Metrics/, 'Open Knowledge'],
+      ['Agents', 'agents', /^Scout$/, 'Open all agents'],
+      ['Work', 'work', /^Repo$/, 'Open all repositories'],
+    ] as const)(
+      '%s retains its stored fold and action without changing the other folds',
+      (area, key, subject, door) => {
+        seedSubjects();
+        useUiStore.setState({ navClosed: closedGroups });
+        render(<Sidebar />);
+        chooseArea(area);
+        const sidebar = within(screen.getByRole('navigation', { name: 'Sidebar' }));
+        const head = sidebar.getByRole('button', { name: area, expanded: false });
+        expect(sidebar.queryByRole('button', { name: subject })).toBeNull();
+        expect(sidebar.getByRole('button', { name: door })).toBeTruthy();
+        const selection = useNavStore.getState().selection;
+        fireEvent.click(head);
+        expect(useNavStore.getState().selection).toEqual(selection);
+        expect(useUiStore.getState().navClosed).toEqual(
+          closedGroups.filter((group) => group !== key),
+        );
+        expect(sidebar.getByRole('button', { name: subject })).toBeTruthy();
+        fireEvent.click(sidebar.getByRole('button', { name: area, expanded: true }));
+        fireEvent.click(sidebar.getByRole('button', { name: door }));
+        expect(useUiStore.getState().navClosed).toContain(key);
+        expect(sidebar.queryByRole('button', { name: subject })).toBeNull();
+        if (area === 'Agents') {
+          fireEvent.click(sidebar.getByRole('button', { name: 'New agent' }));
+          expect(useNavStore.getState().selection).toEqual({ kind: 'library', tab: 'agent' });
+        }
+      },
+    );
+
+    it('Databases keeps its separate persisted fold and every action while folded', () => {
+      seedSubjects();
+      useUiStore.setState({ typesOpen: false, navClosed: closedGroups });
+      render(<Sidebar />);
+      chooseArea('Databases');
+      const sidebar = within(screen.getByRole('navigation', { name: 'Sidebar' }));
+      const head = sidebar.getByRole('button', { name: 'Databases', expanded: false });
+      expect(sidebar.queryByRole('button', { name: /^Project/ })).toBeNull();
+      for (const action of ['Adopt vault schema', 'Import CSV', 'New database']) {
+        expect(sidebar.getByRole('button', { name: action })).toBeTruthy();
+      }
+      fireEvent.click(head);
+      expect(useUiStore.getState().typesOpen).toBe(true);
+      expect(useUiStore.getState().navClosed).toEqual(closedGroups);
+      expect(sidebar.getByRole('button', { name: /^Project/ })).toBeTruthy();
+      fireEvent.click(sidebar.getByRole('button', { name: 'Databases', expanded: true }));
+      fireEvent.click(sidebar.getByRole('button', { name: 'New database' }));
+      expect(screen.getByRole('dialog', { name: 'New database' })).toBeTruthy();
+      expect(useUiStore.getState().typesOpen).toBe(false);
+    });
+
+    it('Home keeps its destination row without repeating its name in a passive area heading', () => {
+      render(<Sidebar />);
+      const sidebar = within(screen.getByRole('navigation', { name: 'Sidebar' }));
+      expect(
+        sidebar.getAllByText('Home', { exact: true }).filter((node) => !isInaccessible(node)),
+      ).toHaveLength(1);
+      expect(sidebar.getByRole('button', { name: 'Home' })).toBeTruthy();
+      expect(sidebar.queryByRole('button', { name: 'New' })).toBeNull();
+      expect(railButton('New')).toBeTruthy();
+    });
+
+    it.each(['New page', 'New folder'])(
+      '%s opens the tree dialog even when Folders was stored closed',
+      async (action) => {
+        useUiStore.setState({ navClosed: closedGroups });
+        render(<Sidebar />);
+        chooseArea('Pages');
+        const sidebar = within(screen.getByRole('navigation', { name: 'Sidebar' }));
+        expect(sidebar.getByRole('button', { name: 'Folders', expanded: false })).toBeTruthy();
+        expect(sidebar.getByRole('button', { name: 'All pages' })).toBeTruthy();
+        expect(sidebar.queryByRole('button', { name: 'Open pages' })).toBeNull();
+        expect(sidebar.queryByRole('button', { name: 'Pages' })).toBeNull();
+        expect(sidebar.queryByRole('button', { name: 'New' })).toBeNull();
+        fireEvent.click(sidebar.getByRole('button', { name: action }));
+        const dialog = await screen.findByRole('dialog', { name: action });
+        // It opens as the fold arrives, so nothing it is drawn inside may be
+        // moving: a moving ancestor would hold the fixed dialog in the sidebar.
+        expect(dialog.closest('.cb-fold-in')).toBeNull();
+        expect(useUiStore.getState().pageTreeMode).toBe('folders');
+        expect(useUiStore.getState().navClosed).toEqual(
+          closedGroups.filter((group) => group !== 'pages'),
+        );
+        // Opening a creation flow keeps the browser's current place.
+        expect(useNavStore.getState().selection).toEqual({ kind: 'pages' });
+      },
+    );
+
+    const seedOverlappingTrees = () => {
+      useVaultStore.setState({
+        entries: [
+          mkEntry({ path: 'delivery/brief.md', title: 'Delivery brief' }),
+          mkEntry({ path: 'strategy/plan.md', title: 'Strategy plan' }),
+        ],
+        folders: ['delivery', 'strategy'],
+        views: [],
+        collections: ['delivery', 'strategy'].map((folder) => ({
+          folder,
+          declared: true,
+          definition: {
+            name: folder === 'delivery' ? 'Delivery' : 'Strategy',
+            icon: null,
+            color: null,
+            order: null,
+            description: null,
+          },
+        })),
+      });
+      useUiStore.setState({ expandedFolders: {}, favorites: {} });
+    };
+
+    it('shows shared folder paths once while switching Collections and Folders without rewriting folds', () => {
+      seedOverlappingTrees();
+      const preserved = ['base', 'agents', 'favorites', 'recents'];
+      useUiStore.setState({ navClosed: preserved });
+      render(<Sidebar />);
+      chooseArea('Pages');
+      const sidebar = within(screen.getByRole('navigation', { name: 'Sidebar' }));
+      const assertTree = (mode: 'collections' | 'folders') => {
+        expect(useUiStore.getState().pageTreeMode).toBe(mode);
+        expect(
+          sidebar.getByRole('button', { name: 'Collections', expanded: mode === 'collections' }),
+        ).toBeTruthy();
+        expect(
+          sidebar.getByRole('button', { name: 'Folders', expanded: mode === 'folders' }),
+        ).toBeTruthy();
+        for (const label of ['Delivery', 'Strategy']) {
+          expect(
+            sidebar.getAllByText(label, { exact: true }).filter((node) => !isInaccessible(node)),
+          ).toHaveLength(1);
+        }
+        const visibleCollections = sidebar
+          .queryAllByTestId('collection-node-collection')
+          .filter((node) => !isInaccessible(node));
+        const visibleFolders = sidebar
+          .queryAllByTestId('tree-folder')
+          .filter((node) => !isInaccessible(node));
+        expect(visibleCollections).toHaveLength(mode === 'collections' ? 2 : 0);
+        expect(visibleFolders).toHaveLength(mode === 'folders' ? 2 : 0);
+        expect(useUiStore.getState().navClosed).toEqual(preserved);
+      };
+      assertTree('collections');
+      fireEvent.click(sidebar.getByRole('button', { name: 'Folders', expanded: false }));
+      assertTree('folders');
+      fireEvent.click(sidebar.getByRole('button', { name: 'Collections', expanded: false }));
+      assertTree('collections');
+      expect(useNavStore.getState().selection).toEqual({ kind: 'pages' });
+    });
+
+    it('Home Collections remains independent of the selected Pages tree mode', () => {
+      seedOverlappingTrees();
+      useUiStore.setState({ pageTreeMode: 'folders' });
+      render(<Sidebar />);
+      const sidebar = within(screen.getByRole('navigation', { name: 'Sidebar' }));
+      expect(sidebar.getByRole('button', { name: 'Collections', expanded: true })).toBeTruthy();
+      expect(sidebar.getByRole('button', { name: 'Delivery' })).toBeTruthy();
+      expect(sidebar.queryByRole('button', { name: 'Folders' })).toBeNull();
+      fireEvent.click(sidebar.getByRole('button', { name: 'Collections', expanded: true }));
+      expect(sidebar.queryByRole('button', { name: 'Delivery' })).toBeNull();
+      expect(useUiStore.getState().pageTreeMode).toBe('folders');
+      expect(useUiStore.getState().navClosed).toContain('collections');
+      chooseArea('Pages');
+      expect(sidebar.getByRole('button', { name: 'Folders', expanded: true })).toBeTruthy();
+      expect(sidebar.getByRole('button', { name: 'Collections', expanded: false })).toBeTruthy();
+      expect(sidebar.getByRole('button', { name: /^Delivery/ })).toBeTruthy();
+      chooseArea('Home');
+      expect(sidebar.getByRole('button', { name: 'Collections', expanded: false })).toBeTruthy();
+      expect(sidebar.queryByRole('button', { name: 'Delivery' })).toBeNull();
+      expect(useUiStore.getState().pageTreeMode).toBe('folders');
+    });
+
+    it.each(['New page', 'New folder'])(
+      '%s selects Folders and opens its existing dialog while Collections is visible',
+      async (action) => {
+        seedOverlappingTrees();
+        useUiStore.setState({ navClosed: ['base', 'pages', 'favorites'] });
+        render(<Sidebar />);
+        chooseArea('Pages');
+        const sidebar = within(screen.getByRole('navigation', { name: 'Sidebar' }));
+        expect(sidebar.getByRole('button', { name: 'Collections', expanded: true })).toBeTruthy();
+        expect(sidebar.getByRole('button', { name: 'Delivery' })).toBeTruthy();
+        fireEvent.click(sidebar.getByRole('button', { name: action }));
+        expect(await screen.findByRole('dialog', { name: action })).toBeTruthy();
+        expect(useUiStore.getState().pageTreeMode).toBe('folders');
+        expect(useUiStore.getState().navClosed).toEqual(['base', 'favorites']);
+        expect(useNavStore.getState().selection).toEqual({ kind: 'pages' });
+      },
+    );
+  });
 
   /**
    * The shell's destinations, asserted rather than assumed.
@@ -330,7 +583,7 @@ describe('Sidebar', () => {
       }
     });
 
-    it('marks Settings alone, then Assistant alone when its canvas opens over Settings', () => {
+    it('keeps Settings selected while its floating assistant is open', () => {
       useNavStore.setState({ selection: { kind: 'settings' } });
       render(<Sidebar />);
       const rail = screen.getByTestId('app-rail');
@@ -338,10 +591,10 @@ describe('Sidebar', () => {
       expect([...selected()]).toEqual([railButton('Settings')]);
       expect(rail.querySelectorAll('[data-active]')).toHaveLength(0);
       fireEvent.click(railButton('Assistant'));
-      expect([...selected()]).toEqual([railButton('Assistant')]);
+      expect([...selected()]).toEqual([railButton('Assistant'), railButton('Settings')]);
       expect([...rail.querySelectorAll('[data-active]')]).toEqual([railButton('Assistant')]);
       fireEvent.click(railButton('Settings'));
-      expect([...selected()]).toEqual([railButton('Settings')]);
+      expect([...selected()]).toEqual([railButton('Assistant'), railButton('Settings')]);
     });
 
     it('marks the current destination with aria-current and the assistant with aria-pressed', () => {
@@ -365,9 +618,10 @@ describe('Sidebar', () => {
       );
     });
 
-    // M15: the badge counted every period while the page opened on a persisted
-    // one, so a nav reading "Inbox 2" could land on an empty screen.
-    it('counts the period the Inbox will actually open on', () => {
+    // M15: the badge counts what the Inbox will show. The Inbox has no period
+    // to narrow it, so an old capture counts like a new one and a filed note
+    // never counts.
+    it('counts every capture the Inbox will show, however old', () => {
       const capture = (path: string, daysAgo: number): Entry =>
         mkEntry({
           path,
@@ -375,14 +629,15 @@ describe('Sidebar', () => {
           createdAt: new Date(Date.now() - daysAgo * 86_400_000).toISOString(),
           modifiedAt: new Date(Date.now() - daysAgo * 86_400_000).toISOString(),
         });
-      useVaultStore.setState({ entries: [capture('inbox/a.md', 1), capture('inbox/b.md', 40)] });
+      useVaultStore.setState({
+        entries: [
+          capture('inbox/a.md', 1),
+          capture('inbox/b.md', 40),
+          { ...capture('inbox/filed.md', 1), properties: { _organized: true } },
+        ],
+      });
       render(<Sidebar />);
       expect(screen.getByRole('button', { name: 'Inbox (2)' })).toBeTruthy();
-      cleanup();
-
-      useUiStore.setState({ inboxPeriod: 'week' });
-      render(<Sidebar />);
-      expect(screen.getByRole('button', { name: 'Inbox (1)' })).toBeTruthy();
     });
 
     it('keeps the Base rows available on every surface, lighting none while elsewhere (M42.2)', () => {
@@ -609,8 +864,20 @@ describe('Sidebar', () => {
     // Collapsed: the Collection shows, its contents do not.
     expect(screen.getByText('Product')).toBeTruthy();
     expect(screen.queryByText('Roadmap')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Expand Product' }));
+    const caret = screen.getByRole('button', { name: 'Expand Product' });
+    // One chevron, turned by its state rather than traded for another glyph.
+    const chevron = () => caret.querySelector('[data-icon="chevron-right"]');
+    expect(caret.querySelector('[data-icon="chevron-down"]')).toBeNull();
+    expect(chevron()?.classList.contains('cb-chevron--open')).toBe(false);
+    fireEvent.click(caret);
     expect(screen.getByText('Roadmap')).toBeTruthy();
+    expect(caret.getAttribute('aria-expanded')).toBe('true');
+    expect(caret.querySelector('[data-icon="chevron-down"]')).toBeNull();
+    expect(chevron()?.classList.contains('cb-chevron--open')).toBe(true);
+    // What it holds drops in under it, the Collection's own row staying put.
+    const fold = screen.getByText('Roadmap').closest('.cb-fold-in');
+    expect(fold).not.toBeNull();
+    expect(fold?.contains(screen.getByText('Product'))).toBe(false);
   });
 
   it("offers a page and a database, and no longer a list, from a Collection's +", () => {
@@ -757,7 +1024,7 @@ describe('Sidebar', () => {
     it('keeps expand, ask and search in a strip of its own', () => {
       render(<Sidebar rail railBand="band" />);
       const rail = screen.getByTestId('app-rail');
-      // Both mounted; the media query shows the rail in 1084–1219 and the
+      // Both mounted; the media query shows the rail in 1094–1273 and the
       // column either side of it.
       expect(rail.className).toContain('m71-app-rail');
       expect(screen.getByTestId('sidebar').className).toContain('min-[1094px]:max-[1274px]:hidden');
@@ -843,6 +1110,7 @@ describe('Sidebar', () => {
     useVaultStore.setState({ entries: [project, doc], folders: ['inbox', 'projects'] });
     render(<Sidebar />);
     chooseArea('Pages');
+    fireEvent.click(screen.getByRole('button', { name: 'Folders', expanded: false }));
     const fileTree = screen.getByTestId('file-tree');
     expect(screen.queryByTestId('sidebar-project')).toBeNull();
     // Scoped into the tree: the Inbox DESTINATION row shares the accessible
@@ -853,11 +1121,13 @@ describe('Sidebar', () => {
     fireEvent.click(within(fileTree).getByRole('button', { name: /^Welcome/ }));
     expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'inbox/welcome.md' });
     cleanup();
-    // And it does NOT withdraw off the doc surfaces — that was the mode the
-    // Docs destination gated, and both retired together.
+    // The same selected Folders mode remains reachable when returning from
+    // another surface through Pages; it does not silently revert to Collections.
     useNavStore.setState({ selection: { kind: 'settings' } });
     render(<Sidebar />);
-    expect(screen.getByTestId('file-tree')).toBeTruthy();
+    chooseArea('Pages');
+    expect(screen.getByRole('button', { name: 'Folders', expanded: true })).toBeTruthy();
+    expect(isInaccessible(screen.getByTestId('file-tree'))).toBe(false);
   });
 
   // M3: collapsible Types section above Views.
@@ -1130,12 +1400,12 @@ describe('Sidebar', () => {
       });
     });
 
-    it("creates pages from the Pages header through the tree's own dialog", () => {
+    it("creates pages from the Folders header through the tree's own dialog", async () => {
       render(<Sidebar />);
       chooseArea('Pages');
       fireEvent.click(screen.getByRole('button', { name: 'New page' }));
       // The FileTree's dialog — one creation flow, now opened from the header.
-      expect(screen.getByRole('dialog', { name: 'New page' })).toBeTruthy();
+      expect(await screen.findByRole('dialog', { name: 'New page' })).toBeTruthy();
     });
 
     it('lists mounted repos in the Work SECTION, whose ↗ opens the surface (M43.10)', () => {
@@ -1184,6 +1454,140 @@ describe('Sidebar', () => {
       expect(useUiStore.getState().themeMode).toBe('dark');
       fireEvent.click(theme);
       expect(useUiStore.getState().themeMode).toBe('system');
+    });
+  });
+
+  /**
+   * Arriving and leaving (owner, 2026-10-19). jsdom plays nothing, so these
+   * hold the DOM the motion keys on — and, where a case stands in for Web
+   * Animations, the drawer's way out (app/shellMotion.ts).
+   */
+  describe('motion', () => {
+    /** A window that plays motion: Web Animations present, none of them running. */
+    const allowMotion = () =>
+      Object.defineProperty(Element.prototype, 'getAnimations', {
+        configurable: true,
+        writable: true,
+        value: () => [],
+      });
+    afterEach(() => {
+      delete (Element.prototype as { getAnimations?: unknown }).getAnimations;
+      delete (document.documentElement as { animate?: unknown }).animate;
+      delete (document as { startViewTransition?: unknown }).startViewTransition;
+      // A case that changed the theme leaves none behind, pass or fail.
+      document.documentElement.removeAttribute('data-theme-reveal');
+      document.documentElement.removeAttribute('data-theme');
+    });
+
+    it('drops a section’s contents in under a header that turns one chevron', () => {
+      useUiStore.setState({ favorites: {} });
+      render(<Sidebar />);
+      const header = within(screen.getByTestId('sidebar')).getByRole('button', {
+        name: 'Favorites',
+        expanded: true,
+      });
+      expect(header.querySelector('[data-icon="chevron-down"]')).toBeNull();
+      expect(header.querySelector('.cb-chevron--open [data-icon="chevron-right"]')).not.toBeNull();
+      const body = () => screen.queryByText('No favorites yet')?.closest('.cb-fold-in');
+      expect(body()?.contains(header)).toBe(false);
+      fireEvent.click(header);
+      expect(header.getAttribute('aria-expanded')).toBe('false');
+      expect(header.querySelector('.cb-chevron--open')).toBeNull();
+      expect(body()).toBeUndefined();
+      fireEvent.click(header);
+      expect(body()).not.toBeNull();
+    });
+
+    it('brings the docked column back in only after it has been away', () => {
+      useUiStore.setState({ sidebarWidth: 300 });
+      render(<Sidebar />);
+      const nav = screen.getByTestId('sidebar');
+      // The app's first draw is not a return.
+      expect(nav.dataset.returns).toBeUndefined();
+      fireEvent.click(within(nav).getByTestId('sidebar-collapse'));
+      expect(nav.hidden).toBe(true);
+      fireEvent.click(railButton('Show sidebar'));
+      expect(nav.hidden).toBe(false);
+      expect(nav.dataset.returns).toBe('true');
+      // Only the drawing changes: the stored width and the fold are the user's.
+      expect(useUiStore.getState().sidebarWidth).toBe(300);
+      expect(useUiStore.getState().sidebarCollapsed).toBe(false);
+    });
+
+    it('leaves the drawer as a copy once it has closed, and never as it opens', async () => {
+      // A window that plays motion, where the drawer's copy plays its way
+      // out until the case ends it.
+      let end: () => void = () => undefined;
+      const finished = new Promise<void>((done) => (end = done));
+      const exit = {
+        playState: 'running',
+        finished,
+        finish: () => undefined,
+        effect: { getComputedTiming: () => ({ iterations: 1 }) },
+      } as unknown as Animation;
+      Object.defineProperty(Element.prototype, 'getAnimations', {
+        configurable: true,
+        writable: true,
+        value(this: Element) {
+          return this.classList.contains('m71-sidebar-leave') ? [exit] : [];
+        },
+      });
+      render(
+        <StrictMode>
+          <Sidebar rail railBand="band" />
+        </StrictMode>,
+      );
+      const nav = screen.getByTestId('sidebar');
+      const copy = () => document.querySelector<HTMLElement>('.m71-sidebar-leave');
+      fireEvent.click(railButton('Show sidebar'));
+      expect(nav.dataset.overlay).toBe('true');
+      // Development mode unmounts and remounts on mount: no copy for that.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(copy()).toBeNull();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      // The real nav closed in the commit (so the scrim, Escape and focus
+      // return are as before); a nameless copy of the drawer plays the exit.
+      expect(nav.dataset.overlay).toBeUndefined();
+      expect(screen.queryByTestId('sidebar-drawer-scrim')).toBeNull();
+      // Under the nav, which draws over it if opened again at once.
+      expect(copy()?.nextElementSibling).toBe(nav);
+      expect(copy()?.classList.contains('m71-sidebar-drawer')).toBe(true);
+      expect(copy()?.hasAttribute('inert')).toBe(true);
+      expect(screen.getAllByTestId('sidebar')).toHaveLength(1);
+      end();
+      await act(async () => {
+        await finished;
+        await Promise.resolve();
+      });
+      expect(copy()).toBeNull();
+    });
+
+    it('changes the theme inside the reveal its control starts, not before it', () => {
+      allowMotion();
+      useUiStore.setState({ themeMode: 'light' });
+      document.documentElement.setAttribute('data-theme', 'light');
+      let update: () => void = () => undefined;
+      const start = vi.fn((callback: () => void) => {
+        update = callback;
+        return { ready: new Promise(() => undefined), finished: new Promise(() => undefined) };
+      });
+      Object.defineProperty(document, 'startViewTransition', {
+        configurable: true,
+        writable: true,
+        value: start,
+      });
+      render(<Sidebar />);
+      fireEvent.click(railButton('Theme: light'));
+      expect(start).toHaveBeenCalledOnce();
+      expect(useUiStore.getState().themeMode).toBe('light');
+      act(() => update());
+      expect(useUiStore.getState().themeMode).toBe('dark');
+      expect(railButton('Theme: dark')).toBeTruthy();
     });
   });
 });

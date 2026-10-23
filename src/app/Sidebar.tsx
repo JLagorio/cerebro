@@ -6,10 +6,12 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type Ref,
+  type RefObject,
 } from 'react';
 import type { PageNavigationControls, PageNavigationKind } from './PageNavigation';
 import { FileTree } from '@/components/FileTree';
@@ -28,20 +30,21 @@ import { AdoptSchemaDialog } from '@/app/AdoptSchemaDialog';
 import { CsvImportDialog } from '@/app/CsvImportDialog';
 import { CollectionTree } from '@/app/CollectionTree';
 import { CollectionDialog } from '@/app/CollectionDialog';
-import { CreateMenu } from '@/app/CreateMenu';
 import { createPageIn, deleteCollection, deleteList } from '@/app/listActions';
 import { createDatabase } from '@/app/typeActions';
 import { SectionHeader } from '@/app/SectionHeader';
 import { SHELL_CLASSES, type ShellBands } from '@/app/shellLayout';
 import { useOpenPath } from '@/app/useOpenPath';
-import { rowClass } from '@/app/sidebarChrome';
+import { FOLD_IN, rowClass } from '@/app/sidebarChrome';
+import { leaveDrawer } from '@/app/shellMotion';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { collectionsTree, effectiveCollections } from '@/engine/collections';
 import { destination, visibleDestinations, type DestinationKind } from '@/engine/destinations';
-import { inboxCounts } from '@/engine/inbox';
+import { inboxCount } from '@/engine/inbox';
 import { isPaused } from '@/engine/jobs';
 import { openWork } from '@/engine/myWork';
 import { isKnowledgePath, RESERVED_FILENAMES, sectionOfPath } from '@/engine/okf';
+import { isBrowserPage } from '@/engine/pageBrowser';
 import { listTypes, typeStyle, type TypeListing } from '@/engine/typeCatalog';
 import type {
   CollectionFile,
@@ -51,6 +54,7 @@ import type {
 import { SyncBadge } from '@/git/SyncBadge';
 import { KnowledgeNav } from '@/knowledge/KnowledgeNav';
 import { useNavStore } from '@/stores/navStore';
+import { useOpenLogStore } from '@/stores/openLogStore';
 import { useRootsStore } from '@/stores/rootsStore';
 import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -152,6 +156,19 @@ function SurfaceRow({
   );
 }
 
+/**
+ * Mounted inside the nav while it is a drawer, for the moment it stops being
+ * one: a child's unmount runs before the nav's own update is written, so the
+ * copy `leaveDrawer` takes is still the drawer (app/shellMotion.ts).
+ */
+function DrawerExit({ nav }: { nav: RefObject<HTMLElement | null> }) {
+  useLayoutEffect(() => {
+    const el = nav.current;
+    return () => leaveDrawer(el);
+  }, [nav]);
+  return null;
+}
+
 /** M71: a persistent application rail and one contextual navigation panel.
  * Existing trees and their actions keep their owners; choosing a rail area
  * changes which shelf is visible, without changing the underlying corpus. */
@@ -183,13 +200,23 @@ export function Sidebar({
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const setCollapsed = useUiStore((s) => s.setSidebarCollapsed);
   const inboxEnabled = useUiStore((s) => s.inboxEnabled);
-  const inboxPeriod = useUiStore((s) => s.inboxPeriod);
   const favoritesByVault = useUiStore((s) => s.favorites);
   const renamePending = useUiStore(
     (s) => vaultPath !== null && (s.pendingRenames[vaultPath] ?? 0) > 0,
   );
   const pruneFavorites = useUiStore((s) => s.pruneFavorites);
   const openPath = useOpenPath();
+  const openPage = useOpenPath('navigate', { fullPage: true });
+  const recentLog = useOpenLogStore((s) => (vaultPath === null ? undefined : s.logs[vaultPath]));
+  const recentPages = useMemo(() => {
+    const byPath = new Map(entries.filter(isBrowserPage).map((entry) => [entry.path, entry]));
+    return (recentLog ?? [])
+      .flatMap((row) => {
+        const entry = byPath.get(row.path);
+        return entry ? [entry] : [];
+      })
+      .slice(0, 6);
+  }, [entries, recentLog]);
 
   const collections = useVaultStore((s) => s.collections);
   const [collectionDialog, setCollectionDialog] = useState<CollectionDialogState | null>(null);
@@ -216,6 +243,11 @@ export function Sidebar({
   const [drawerAt, setDrawerAt] = useState<typeof selection | null>(null);
   if (!compact && drawerAt !== null) setDrawerAt(null);
   const drawer = compact && drawerAt === selection;
+  // Once the column has been away — folded, or stepped down to the rail —
+  // it brings its contents back in each time it returns (shell.css). The
+  // app's first draw is not a return, so a wide window never plays it.
+  const [returns, setReturns] = useState(compact);
+  if (compact && !returns) setReturns(true);
   const drawerRef = useDrawerFocus<HTMLElement>(drawer);
   const navigationOpener = useRef<HTMLElement | null>(null);
   const hidePageNavigation = useCallback(() => {
@@ -255,7 +287,9 @@ export function Sidebar({
     [compact, hidePageNavigation, selection],
   );
   const chooseArea = (next: NavArea) => {
-    useUiStore.getState().setAiPanelPresentation('panel');
+    if (useUiStore.getState().aiPanelPresentation === 'canvas') {
+      useUiStore.getState().setAiPanelPresentation('floating');
+    }
     const target = NAV_AREAS.find((item) => item.id === next)?.destination;
     if (target !== undefined) navigate(destination(target).selection);
     const current = useNavStore.getState().selection;
@@ -296,7 +330,35 @@ export function Sidebar({
   // section shelves (collections/pages/agents/favorites).
   const navClosed = useUiStore((s) => s.navClosed);
   const setNavGroupOpen = useUiStore((s) => s.setNavGroupOpen);
+  const pageTreeMode = useUiStore((s) => s.pageTreeMode);
+  const setPageTreeMode = useUiStore((s) => s.setPageTreeMode);
   const groupOpen = (key: string) => !navClosed.includes(key);
+  // Collections and the physical folder tree can describe the same paths.
+  // Pages draws one browse mode at a time, retaining each tree's own folds.
+  // Home's Collections shelf is independent of the Pages browse mode.
+  const collectionsShown =
+    groupOpen('collections') && (area !== 'pages' || pageTreeMode === 'collections');
+  const foldersShown = groupOpen('pages') && pageTreeMode === 'folders';
+
+  // The folder tree unmounts when folded. Open it before handing creation to
+  // its existing dialog controller, so the header actions work in either state.
+  const [pendingPageCreate, setPendingPageCreate] = useState<'newPage' | 'newFolder' | null>(null);
+  const requestPageCreate = (action: 'newPage' | 'newFolder') => {
+    setPageTreeMode('folders');
+    setNavGroupOpen('pages', true);
+    setPendingPageCreate(action);
+  };
+  useEffect(() => {
+    if (
+      pendingPageCreate === null ||
+      pageTreeMode !== 'folders' ||
+      navClosed.includes('pages') ||
+      pagesCreate.current === null
+    )
+      return;
+    pagesCreate.current[pendingPageCreate]();
+    setPendingPageCreate(null);
+  }, [pendingPageCreate, navClosed, pageTreeMode]);
 
   const agents = useMemo(
     () => entries.filter(isAgentEntry).map((e) => ({ ref: agentRef(e), paused: isPaused(e) })),
@@ -310,12 +372,9 @@ export function Sidebar({
   useEffect(() => {
     void loadRoots();
   }, [loadRoots]);
-  // M15: the badge counts what the page will SHOW — the persisted period, not
-  // the unfiltered total.
-  const queued = useMemo(
-    () => (inboxEnabled ? inboxCounts(entries)[inboxPeriod] : 0),
-    [entries, inboxEnabled, inboxPeriod],
-  );
+  // M15: the badge counts what the page will SHOW. The Inbox has no period to
+  // narrow it, so that is every capture still waiting to be organized.
+  const queued = useMemo(() => (inboxEnabled ? inboxCount(entries) : 0), [entries, inboxEnabled]);
 
   // M43: the same contract as the Inbox badge — the count is the page's own
   // membership rule, so the nav never promises work the page cannot show.
@@ -509,6 +568,7 @@ export function Sidebar({
       // Neutral chrome for the keymap, like the rail above (M65.1).
       data-key-neutral
       data-overlay={drawer || undefined}
+      data-returns={returns || undefined}
       tabIndex={drawer ? -1 : undefined}
       // `relative` hosts the drag handle; the width is a stored preference
       // rather than a constant, because 240px is only right for some vaults
@@ -532,6 +592,7 @@ export function Sidebar({
           : { width, minWidth: SIDEBAR_WIDTH_MIN }
       }
     >
+      {drawer && <DrawerExit nav={drawerRef} />}
       {/* Withdrawn while narrow: the sidebar opens as a drawer,
           so a handle there would
           overwrite the width the user chose for a wide window. Withdrawn from
@@ -567,39 +628,113 @@ export function Sidebar({
           </button>
         </Tooltip>
       </div>
-      <div className="m71-context-heading">
-        <span>
-          {chat
-            ? 'Assistant'
-            : pageContext === 'inbox'
-              ? 'Inbox'
-              : pageContext === 'settings'
-                ? 'Settings'
-                : pageContext === 'workspace'
-                  ? 'Work'
-                  : pageContext === 'studio'
-                    ? 'Studio'
-                    : NAV_AREAS.find((item) => item.id === area)?.label}
-        </span>
-      </div>
+      {chat || pageContext !== null ? (
+        <div className="m71-context-heading">
+          <span>
+            {chat
+              ? 'Assistant'
+              : pageContext === 'inbox'
+                ? 'Inbox'
+                : pageContext === 'settings'
+                  ? 'Settings'
+                  : pageContext === 'workspace'
+                    ? 'Work'
+                    : 'Studio'}
+          </span>
+        </div>
+      ) : area === 'knowledge' ? (
+        <SectionHeader
+          variant="context"
+          label={knowledge.label}
+          open={groupOpen('base')}
+          onToggle={() => setNavGroupOpen('base', !groupOpen('base'))}
+          actions={[
+            {
+              icon: 'arrow-up-right',
+              label: knowledge.door ?? knowledge.label,
+              command: `go.${knowledge.id}`,
+              onClick: () => navigate(knowledge.selection),
+            },
+          ]}
+        />
+      ) : area === 'agents' ? (
+        <SectionHeader
+          variant="context"
+          label={fleet.label}
+          open={groupOpen('agents')}
+          onToggle={() => setNavGroupOpen('agents', !groupOpen('agents'))}
+          actions={[
+            {
+              icon: 'arrow-up-right',
+              label: fleet.door ?? fleet.label,
+              command: `go.${fleet.id}`,
+              onClick: () => navigate(fleet.selection),
+            },
+            {
+              icon: 'plus',
+              label: 'New agent',
+              testId: 'nav-agent-new',
+              onClick: () => navigate({ kind: 'library', tab: 'agent' }),
+            },
+          ]}
+        />
+      ) : area === 'databases' ? (
+        <SectionHeader
+          variant="context"
+          label="Databases"
+          open={typesOpen}
+          onToggle={() => setTypesOpen(!typesOpen)}
+          actions={[
+            // M12.6: the schema doctor — adopt an existing vault's freeform
+            // frontmatter into declared types, one reviewed pass.
+            {
+              icon: 'wand-sparkles',
+              label: 'Adopt vault schema',
+              onClick: () => setAdopting(true),
+            },
+            { icon: 'upload', label: 'Import CSV', onClick: () => setImportingCsv(true) },
+            {
+              icon: 'plus',
+              label: 'New database',
+              onClick: () => setTypeDialog({ mode: 'new' }),
+            },
+          ]}
+        />
+      ) : area === 'work' ? (
+        <SectionHeader
+          variant="context"
+          label={work.label}
+          open={groupOpen('work')}
+          onToggle={() => setNavGroupOpen('work', !groupOpen('work'))}
+          actions={[
+            {
+              icon: 'arrow-up-right',
+              label: work.door ?? work.label,
+              command: `go.${work.id}`,
+              onClick: () => navigate(work.selection),
+            },
+          ]}
+        />
+      ) : area === 'pages' ? (
+        <div className="m71-context-heading">
+          <span>Pages</span>
+        </div>
+      ) : null}
       <div className="m71-context-body flex-1 overflow-y-auto px-3 pb-4">
         <div ref={onAssistantNavigationTarget} data-testid="assistant-navigation" hidden={!chat} />
         <div
           ref={onPageNavigationTarget}
+          className="m71-page-navigation-slot"
           data-testid="page-navigation"
           hidden={pageContext === null}
         />
 
-        {/* The New button (M43) — the CreateMenu, rehomed from the Topbar. */}
-        <div className="m81-context-create" hidden={chat || pageContext !== null}>
-          <CreateMenu />
-        </div>
         {/* The destination rows, from engine/destinations.ts (M59.1) — each
             row's rationale lives on its row there. Nested rows live OUTSIDE
             `nav-surfaces`, because nested labels are not destinations and an
             agent named "Home" must never be caught by a spec scoped to the
             destinations. */}
-        <div data-testid="nav-surfaces" hidden={!show('home')}>
+        <div data-testid="nav-surfaces" className={FOLD_IN} hidden={!show('home')}>
           {rows.map((d) => (
             <SurfaceRow
               key={d.kind}
@@ -613,14 +748,65 @@ export function Sidebar({
             />
           ))}
         </div>
+        <div hidden={!show('pages')} data-section="nav-pages-browser">
+          <SurfaceRow
+            icon={destination('pages').icon}
+            label="All pages"
+            command="go.pages"
+            active={selection.kind === 'pages'}
+            onClick={() => navigate(destination('pages').selection)}
+          />
+          {recentPages.length > 0 && (
+            <>
+              <SectionHeader
+                label="Recents"
+                open={groupOpen('recents')}
+                onToggle={() => setNavGroupOpen('recents', !groupOpen('recents'))}
+              />
+              {groupOpen('recents') && (
+                <div className={FOLD_IN}>
+                  {recentPages.map((entry) => (
+                    <button
+                      key={entry.path}
+                      type="button"
+                      className={rowClass(
+                        selection.kind === 'doc' && selection.path === entry.path,
+                      )}
+                      onClick={() => openPage(entry.path)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && event.shiftKey) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openPage(entry.path, { newPane: true });
+                        }
+                      }}
+                      aria-current={
+                        selection.kind === 'doc' && selection.path === entry.path
+                          ? 'page'
+                          : undefined
+                      }
+                      title={entry.title}
+                    >
+                      <Icon name={typeStyle(entry.type, schema).icon} size={15} />
+                      <span className="truncate">{entry.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
         <div hidden={!show('home', 'pages')}>
           {/* M10: Collections are the top-level navigation of the item world. A
             Collection is a container — it holds Lists, Folders and Docs —
             where a "view" used to be both the container and the query at once. */}
           <SectionHeader
             label="Collections"
-            open={groupOpen('collections')}
-            onToggle={() => setNavGroupOpen('collections', !groupOpen('collections'))}
+            open={collectionsShown}
+            onToggle={() => {
+              if (area === 'pages' && !collectionsShown) setPageTreeMode('collections');
+              setNavGroupOpen('collections', !collectionsShown);
+            }}
             actions={[
               {
                 icon: 'plus',
@@ -630,8 +816,8 @@ export function Sidebar({
               },
             ]}
           />
-          {groupOpen('collections') && (
-            <>
+          {collectionsShown && (
+            <div className={FOLD_IN}>
               {tree.length === 0 ? (
                 <div className="px-2 py-1 text-xs leading-[17px] text-n-400">
                   No collections yet — make one to hold lists, folders, and docs.
@@ -650,36 +836,36 @@ export function Sidebar({
                 // and why the third door closed (M47.5, M47.6).
                 onAdd={(node, at) => setAddMenu({ ...at, folder: node.id })}
               />
-            </>
+            </div>
           )}
         </div>
         <div hidden={!show('pages')}>
-          {/* M38.3 — the Docs destination died with its surface; the tree it
-            used to gate is a standing section, because in a shell where
-            everything is a page the pages ARE navigation, not a mode. Outside
-            the destinations containers on purpose: the tree's folder rows
-            share accessible names with destination rows (`inbox/` vs Inbox),
-            and a spec scoped to `nav-surfaces` must never catch a folder.
-            M43: creation moved into the header's reveals — the tree's own
-            openers, through createRef, so there is exactly one dialog. */}
+          {/* The folder tree remains beside the Pages browser. Nested names
+            stay outside nav-surfaces so global destinations are unambiguous.
+            Creation still uses the tree's one dialog through createRef. */}
           <SectionHeader
-            label="Pages"
-            open={groupOpen('pages')}
-            onToggle={() => setNavGroupOpen('pages', !groupOpen('pages'))}
+            label="Folders"
+            open={foldersShown}
+            onToggle={() => {
+              if (!foldersShown) setPageTreeMode('folders');
+              setNavGroupOpen('pages', !foldersShown);
+            }}
             actions={[
               {
                 icon: 'folder-plus',
                 label: 'New folder',
-                onClick: () => pagesCreate.current?.newFolder(),
+                onClick: () => requestPageCreate('newFolder'),
               },
               {
                 icon: 'file-plus',
                 label: 'New page',
-                onClick: () => pagesCreate.current?.newPage(),
+                onClick: () => requestPageCreate('newPage'),
               },
             ]}
           />
-          {groupOpen('pages') && (
+          {/* The tree drops its own list in: its dialogs must not ride a
+              moving wrapper (FileTree). */}
+          {foldersShown && (
             <FileTree
               root=""
               docsOnly
@@ -691,28 +877,14 @@ export function Sidebar({
           )}
         </div>
         <div hidden={!show('work')}>
-          {/* M30 — mounted repositories, worn as a section since M43.10: each
-            mounted folder is a row, the way every other shelf lists its
-            subjects. The label and the ↗ door to the Work surface are the
-            table's (M59.1). */}
-          <SectionHeader
-            label={work.label}
-            open={groupOpen('work')}
-            onToggle={() => setNavGroupOpen('work', !groupOpen('work'))}
-            actions={[
-              {
-                icon: 'arrow-up-right',
-                label: work.door ?? work.label,
-                command: `go.${work.id}`,
-                onClick: () => navigate(work.selection),
-              },
-            ]}
-          />
+          {/* Repositories sit directly under the area's header. */}
           {groupOpen('work') &&
             (roots.length === 0 ? (
-              <div className="px-2 py-1 text-xs text-n-400">No repositories mounted</div>
+              <div className={`px-2 py-1 text-xs text-n-400 ${FOLD_IN}`}>
+                No repositories mounted
+              </div>
             ) : (
-              <div data-section="nav-work">
+              <div data-section="nav-work" className={FOLD_IN}>
                 {roots.map((root) => {
                   const on = selection.kind === 'workspace' && selection.root === root.id;
                   return (
@@ -735,60 +907,17 @@ export function Sidebar({
             ))}
         </div>
         <div hidden={!show('knowledge')}>
-          {/* M5: the agent's corpus — different author, different rules — worn
-            as a section since M43.10, the same anatomy as Pages. M50.5 named
-            it Knowledge (it was "Base"; the group key and `data-section` keep
-            the old word); M51 made its rows the bundle's folders and the
-            review queue, and the ↗ opens every concept. Still no badge,
-            deliberately (M8.1/M27.8): a shelf may say how big it is; nothing
-            counts up at you from the chrome. `current` keeps an un-current
-            nav from lighting a row for a canvas some other surface owns. */}
-          <SectionHeader
-            label={knowledge.label}
-            open={groupOpen('base')}
-            onToggle={() => setNavGroupOpen('base', !groupOpen('base'))}
-            actions={[
-              {
-                icon: 'arrow-up-right',
-                label: knowledge.door ?? knowledge.label,
-                command: `go.${knowledge.id}`,
-                onClick: () => navigate(knowledge.selection),
-              },
-            ]}
-          />
+          {/* The area header owns the saved base fold; folders need no second label. */}
           {groupOpen('base') && (
-            <div data-section="nav-base">
+            <div data-section="nav-base" className={FOLD_IN}>
               <KnowledgeNav nav={knowledgeNav} current={knowledgeMode} />
             </div>
           )}
         </div>
         <div hidden={!show('agents')}>
-          {/* M43 — Agents is a SECTION now, the design's sec(): the fleet is a
-            roster of subjects, and the ↗ is the door to the fleet surface the
-            M41 destination row used to be. Each row opens that agent's page
-            (M55.12). Rows keep their testids and stay outside `nav-surfaces`
-            (the e2e scoping rule survives the move). */}
-          <SectionHeader
-            label={fleet.label}
-            open={groupOpen('agents')}
-            onToggle={() => setNavGroupOpen('agents', !groupOpen('agents'))}
-            actions={[
-              {
-                icon: 'arrow-up-right',
-                label: fleet.door ?? fleet.label,
-                command: `go.${fleet.id}`,
-                onClick: () => navigate(fleet.selection),
-              },
-              {
-                icon: 'plus',
-                label: 'New agent',
-                testId: 'nav-agent-new',
-                onClick: () => navigate({ kind: 'library', tab: 'agent' }),
-              },
-            ]}
-          />
+          {/* Agent pages share the area's one heading and creation action. */}
           {groupOpen('agents') && (
-            <div data-section="nav-agents">
+            <div data-section="nav-agents" className={FOLD_IN}>
               {agents.map(({ ref, paused }) => {
                 const on = selection.kind === 'doc' && selection.path === ref.path;
                 return (
@@ -823,55 +952,36 @@ export function Sidebar({
           )}
         </div>
         <div hidden={!show('databases')}>
-          {/* M3's collapsible Types section, wearing what it always was
-            (M39.2): the databases. The `type:` key, the metamodel, and every
-            internal identifier keep the old word — labels spend, kinds stay,
-            same rule as M37.2. Open state stays on `typesOpen` — it was
-            persisted long before the closed set existed. */}
-          <SectionHeader
-            label="Databases"
-            open={typesOpen}
-            onToggle={() => setTypesOpen(!typesOpen)}
-            actions={[
-              // M12.6: the schema doctor — adopt an existing vault's freeform
-              // frontmatter into declared types, one reviewed pass.
-              {
-                icon: 'wand-sparkles',
-                label: 'Adopt vault schema',
-                onClick: () => setAdopting(true),
-              },
-              { icon: 'upload', label: 'Import CSV', onClick: () => setImportingCsv(true) },
-              {
-                icon: 'plus',
-                label: 'New database',
-                onClick: () => setTypeDialog({ mode: 'new' }),
-              },
-            ]}
-          />
-          {typesOpen &&
-            types.map((t) => {
-              const typeActive = selection.kind === 'type' && selection.name === t.name;
-              return (
-                <button
-                  key={t.name}
-                  type="button"
-                  data-testid="sidebar-type"
-                  aria-current={typeActive ? 'page' : undefined}
-                  onClick={() => navigate({ kind: 'type', name: t.name })}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setTypeMenu({ x: e.clientX, y: e.clientY, listing: t });
-                  }}
-                  className={rowClass(typeActive)}
-                >
-                  <Icon name={t.icon} size={15} color={t.color ?? 'var(--n-500)'} />
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">{t.name}</span>
-                  <span className="ml-auto [font-family:var(--font-mono)] text-2xs text-n-400">
-                    {t.count}
-                  </span>
-                </button>
-              );
-            })}
+          {/* The area header retains the existing typesOpen preference and actions. */}
+          {typesOpen && (
+            <div className={FOLD_IN}>
+              {types.map((t) => {
+                const typeActive = selection.kind === 'type' && selection.name === t.name;
+                return (
+                  <button
+                    key={t.name}
+                    type="button"
+                    data-testid="sidebar-type"
+                    aria-current={typeActive ? 'page' : undefined}
+                    onClick={() => navigate({ kind: 'type', name: t.name })}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setTypeMenu({ x: e.clientX, y: e.clientY, listing: t });
+                    }}
+                    className={rowClass(typeActive)}
+                  >
+                    <Icon name={t.icon} size={15} color={t.color ?? 'var(--n-500)'} />
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                      {t.name}
+                    </span>
+                    <span className="ml-auto [font-family:var(--font-mono)] text-2xs text-n-400">
+                      {t.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
         <div hidden={!show('home', 'pages')}>
           {/* M43 — pinned pages, records, and agents. An empty list IS
@@ -883,34 +993,37 @@ export function Sidebar({
             open={groupOpen('favorites')}
             onToggle={() => setNavGroupOpen('favorites', !groupOpen('favorites'))}
           />
-          {groupOpen('favorites') &&
-            (favoriteRows.length === 0 ? (
-              <div className="px-2 py-1 text-xs text-n-400">No favorites yet</div>
-            ) : (
-              favoriteRows.map(({ entry, icon, color, onOpen }) => (
-                <button
-                  key={entry.path}
-                  type="button"
-                  data-testid="nav-favorite"
-                  onClick={onOpen}
-                  className={rowClass(false)}
-                >
-                  {/* A page's own icon first (M55.11); an agent keeps its bot. */}
-                  {isAgentEntry(entry) ? (
-                    <Icon name={icon} size={15} color={color} />
-                  ) : (
-                    <EntryIcon entry={entry} size={15} fallback={{ name: icon, color }} />
-                  )}
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                    {entry.title}
-                  </span>
-                </button>
-              ))
-            ))}
+          {groupOpen('favorites') && (
+            <div className={FOLD_IN}>
+              {favoriteRows.length === 0 ? (
+                <div className="px-2 py-1 text-xs text-n-400">No favorites yet</div>
+              ) : (
+                favoriteRows.map(({ entry, icon, color, onOpen }) => (
+                  <button
+                    key={entry.path}
+                    type="button"
+                    data-testid="nav-favorite"
+                    onClick={onOpen}
+                    className={rowClass(false)}
+                  >
+                    {/* A page's own icon first (M55.11); an agent keeps its bot. */}
+                    {isAgentEntry(entry) ? (
+                      <Icon name={icon} size={15} color={color} />
+                    ) : (
+                      <EntryIcon entry={entry} size={15} fallback={{ name: icon, color }} />
+                    )}
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                      {entry.title}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className="m71-sidebar-footer">
-        <SyncBadge />
+        <SyncBadge quiet />
       </div>
       {typeMenu !== null && (
         <ContextMenu

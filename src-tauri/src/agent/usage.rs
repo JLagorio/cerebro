@@ -8,18 +8,41 @@
 //!
 //! **Usage does not travel on the UI event channel, deliberately.** Widening
 //! `AgentEvent` would push token counts through the Tauri emitter, the TS
-//! event union, the mock agent, and every panel listener — and a number that
-//! is available in the renderer is a number that ends up in a run log and
-//! then in a portable receipt. The reader thread already owns a run's
-//! lifetime; it parses usage here and writes it straight to the runtime DB.
-//! Telemetry stays on the operational side of D5 by construction rather than
-//! by everyone remembering.
+//! event union, the mock agent, every panel listener and the re-attach
+//! journal — and a number that rides the channel is a number that ends up in
+//! a run log and then in a portable receipt. The reader thread already owns
+//! a run's lifetime; it parses usage here and writes it straight to the
+//! runtime DB. What a run spent stays on the operational side of D5 by
+//! construction rather than by everyone remembering.
+//!
+//! **Two of a run's numbers reach the renderer, and neither is a token count
+//! or a cost** (the owner's narrowings of the rule above). How much of its
+//! model's context window a conversation has used, [`context_used`] of the
+//! run's latest turn (M91.5), reaches it only when it asks: the reader files
+//! it in a memory-only book (`meter::ContextBook`), and the composer pulls it
+//! with `agent_context_usage` when a turn ends, a thread opens or a branch
+//! starts, so it is never emitted, journaled, logged or stored. How long
+//! Claude Code worked on a turn, its result's `duration_ms` (M92.2, O4), does
+//! ride the channel: the fold carries it on the event the result folds to,
+//! so it is journaled with that event, and a thread saves each reply's sum
+//! for its "Worked for" line. [`RunFacts::duration_ms`] is the same count,
+//! booked on the run's row.
 //!
 //! **The wire format is external and drifts.** Every field is optional, a
 //! non-numeric value is ignored rather than fatal, and a key this build has
 //! never heard of is recorded in `operational_log` — once per run, not once
 //! per event — so a CLI upgrade that starts reporting something new is
 //! visible without being an outage.
+//!
+//! **A run's subagents spend outside its `usage`** (M91.2c). The result's
+//! `usage` counts the run's own thread; its `modelUsage`, one entry per
+//! model, counts every call the run made, its subagents' included. The meter
+//! books the sum over `modelUsage` when that is a measurement of this run
+//! alone, else `usage`; a run that called the subagent tool without one
+//! spent an amount nobody recorded, booked as neither its own thread's share
+//! nor zero. From 2.1.277 a resumed session's `modelUsage` starts from the
+//! totals its transcript saved, so it is this run's alone only on a CLI
+//! before that release.
 
 use serde_json::Value;
 
@@ -42,6 +65,16 @@ impl Usage {
             .saturating_add(self.output_tokens)
             .saturating_add(self.cache_read)
             .saturating_add(self.cache_write)
+    }
+
+    /// Field by field, saturating like [`Usage::total`].
+    fn plus(self, other: Usage) -> Usage {
+        Usage {
+            input_tokens: self.input_tokens.saturating_add(other.input_tokens),
+            output_tokens: self.output_tokens.saturating_add(other.output_tokens),
+            cache_read: self.cache_read.saturating_add(other.cache_read),
+            cache_write: self.cache_write.saturating_add(other.cache_write),
+        }
     }
 }
 
@@ -75,6 +108,51 @@ pub const DEFERRED_STOPS: [&str; 2] = ["tool_deferred", "tool_deferred_unavailab
 /// visible, and so the next suppressed key has a place to land with a
 /// reason.
 const KNOWN_UNCOUNTED: [&str; 0] = [];
+
+/// The result's per-model counts (M91.2c), keyed by model, and the prefix
+/// `unknown_fields` names an unread key of theirs under.
+const MODEL_USAGE: &str = "modelUsage";
+
+/// A `modelUsage` entry's spelling of the four counts → our field.
+const MODEL_COUNTED: [Counted; 4] = [
+    ("inputTokens", |u, v| u.input_tokens = v),
+    ("outputTokens", |u, v| u.output_tokens = v),
+    ("cacheReadInputTokens", |u, v| u.cache_read = v),
+    ("cacheCreationInputTokens", |u, v| u.cache_write = v),
+];
+
+/// The first Claude Code release whose headless `--resume` and fork restore
+/// a session's saved totals (changelog 2.1.277): from it on, a resumed run's
+/// `modelUsage` already carries the session's earlier turns, and booking it
+/// would charge every thread turn for all the turns before it again.
+const RESUME_RESTORES_TOTALS: (u64, u64, u64) = (2, 1, 277);
+
+/// The rest of a `modelUsage` entry, as 2.1.250's schema declares it, known
+/// and not stored: what the calls cost and how they were priced, the web
+/// searches among them, and the model's output limit. The budget books
+/// tokens, and the run's cost is already the result's `total_cost_usd`.
+const MODEL_KNOWN_UNCOUNTED: [&str; 6] = [
+    "webSearchRequests",
+    "costUSD",
+    "maxOutputTokens",
+    "canonicalModel",
+    "provider",
+    "costBasis",
+];
+
+/// A `modelUsage` entry's model context window (M91.5), which
+/// [`context_window`] reads for the composer's Context: known and read, so
+/// `unknown_fields` must not report it, and never booked.
+const CONTEXT_WINDOW: &str = "contextWindow";
+
+/// An `assistant` line's counts of what its request sent (M91.5): together,
+/// everything the model had in its context window for that turn. Its output
+/// is not among them; it joins the context on the next request.
+const CONTEXT_COUNTED: [&str; 3] = [
+    "input_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+];
 
 /// The non-count facts a run's stream already carries (M31.5).
 ///
@@ -176,9 +254,11 @@ impl RunFacts {
         })
     }
 
-    /// The assistant-turn fields. `None` when the event is not a turn.
+    /// The assistant-turn fields. `None` when the event is not a turn of the
+    /// run's own: a subagent's line (M91.3b) names the model and stop reason
+    /// of the subagent, never the run's.
     pub fn from_assistant(event: &Value) -> Option<RunFacts> {
-        if event.get("type").and_then(Value::as_str) != Some("assistant") {
+        if !is_own_turn(event) {
             return None;
         }
         let message = event.get("message")?;
@@ -243,21 +323,156 @@ pub fn parse(event: &Value) -> Option<Usage> {
     Some(usage)
 }
 
-/// Keys inside the `usage` object this build does not recognize, sorted and
-/// duplicate-free.
-pub fn unknown_fields(event: &Value) -> Vec<String> {
-    let Some(object) = usage_object(event).and_then(Value::as_object) else {
-        return Vec::new();
+/// The whole tree's counts (M91.2c): the sum over a result's `modelUsage`,
+/// which counts every call the run made, its subagents' included. `None`
+/// unless that is a measurement: a non-empty object whose every entry
+/// carries all four counts as token counts, summing above zero. An empty or
+/// missing one never sums to zero, a sum that skipped an unreadable entry
+/// would read as a smaller bill than the one paid, and a crash or startup
+/// error's result may carry zeroed counts for calls that were made.
+pub fn whole_tree(event: &Value) -> Option<Usage> {
+    let models = event.get(MODEL_USAGE)?.as_object()?;
+    let sum = models.values().try_fold(Usage::default(), |sum, entry| {
+        let entry = entry.as_object()?;
+        let mut usage = Usage::default();
+        for (key, set) in MODEL_COUNTED {
+            set(&mut usage, entry.get(key)?.as_u64()?);
+        }
+        Some(sum.plus(usage))
+    })?;
+    (sum.total() > 0).then_some(sum)
+}
+
+/// Does a run on Claude Code `version` (its init's `claude_code_version`)
+/// report a `modelUsage` that counts this run alone? Only a release before
+/// [`RESUME_RESTORES_TOTALS`] does for a resumed session; a version nobody
+/// could read is not known to.
+pub(crate) fn model_usage_is_the_runs(version: Option<&str>) -> bool {
+    version
+        .and_then(crate::policy::tool_approval::version_triple)
+        .is_some_and(|found| found < RESUME_RESTORES_TOTALS)
+}
+
+/// Does `event` belong to a subagent? A session file marks its sidechain
+/// lines, and the stream names the Agent call each of a subagent's lines
+/// came from. The fold's rule (M91.3b), so the meter and the fold agree on
+/// whose a line is.
+pub(crate) fn from_a_subagent(event: &Value) -> bool {
+    event.get("isSidechain").and_then(Value::as_bool) == Some(true)
+        || event
+            .get("parent_tool_use_id")
+            .is_some_and(|parent| !parent.is_null())
+}
+
+/// Is `event` an `assistant` turn of the run's own thread?
+fn is_own_turn(event: &Value) -> bool {
+    event.get("type").and_then(Value::as_str) == Some("assistant") && !from_a_subagent(event)
+}
+
+/// How much of its model's context window the run's own thread used at
+/// `event` (M91.5): the sum of an `assistant` line's [`CONTEXT_COUNTED`],
+/// which is everything that turn's request sent. `None` unless `event` is a
+/// turn of the run's own thread whose three counts are all token counts
+/// summing above zero. A subagent's line measures its own context, never
+/// the run's (M91.3b, [`from_a_subagent`]); a `<synthetic>` line is the
+/// CLI's own reply to an API error, which no model read; and a line that
+/// left a count out, or counts nothing, would read smaller than the context
+/// was, which is worse than no reading (CV-05).
+///
+/// A line's own usage is that one request's, so this holds on any release:
+/// the totals Claude Code 2.1.277 restores into a resumed session's result
+/// (see [`model_usage_is_the_runs`]) never reach a line.
+pub(crate) fn context_used(event: &Value) -> Option<u64> {
+    if !is_own_turn(event) {
+        return None;
+    }
+    let message = event.get("message")?;
+    if message
+        .get("model")
+        .and_then(Value::as_str)
+        .is_some_and(|model| model.starts_with('<'))
+    {
+        return None;
+    }
+    let usage = message.get("usage")?.as_object()?;
+    let used = CONTEXT_COUNTED.iter().try_fold(0u64, |sum, key| {
+        Some(sum.saturating_add(usage.get(*key)?.as_u64()?))
+    })?;
+    (used > 0).then_some(used)
+}
+
+/// The context window `model` ran in, as a terminal result's `modelUsage`
+/// reports it (M91.5): the entry keyed by `model` itself, when its
+/// `contextWindow` is a token count above zero. `None` for any other event,
+/// another model's entry, or a window nobody could read. The window is the
+/// model's limit, not a total, so a resumed session's restored totals
+/// (2.1.277) leave it as it was.
+pub(crate) fn context_window(event: &Value, model: &str) -> Option<u64> {
+    if !is_result(event) {
+        return None;
+    }
+    event
+        .get(MODEL_USAGE)?
+        .get(model)?
+        .get(CONTEXT_WINDOW)?
+        .as_u64()
+        .filter(|window| *window > 0)
+}
+
+/// Does `event`, a turn of the run's own thread, call the subagent tool, by
+/// any name the manifest gives it (M91.2c)? What its subagents spend is
+/// then outside the result's `usage`.
+pub(crate) fn calls_subagent_tool(event: &Value) -> bool {
+    if !is_own_turn(event) {
+        return false;
+    }
+    let Some(subagent) = super::cli_agents::delegate_tool() else {
+        return false;
     };
-    let mut unknown: Vec<String> = object
-        .keys()
+    event
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| {
+            blocks.iter().any(|block| {
+                block.get("type").and_then(Value::as_str) == Some("tool_use")
+                    && block
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .and_then(crate::policy::tools::cli_tool)
+                        .is_some_and(|tool| tool.name == subagent.name)
+            })
+        })
+}
+
+/// Keys this build does not recognize, sorted and duplicate-free: inside the
+/// `usage` object, and inside each `modelUsage` entry, named
+/// `modelUsage.<key>` (M91.2c).
+pub fn unknown_fields(event: &Value) -> Vec<String> {
+    let usage = usage_object(event)
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|object| object.keys())
         .filter(|key| {
             !COUNTED.iter().any(|(known, _)| known == *key)
                 && !FACTS_CONSUMED.contains(&key.as_str())
                 && !KNOWN_UNCOUNTED.contains(&key.as_str())
         })
-        .cloned()
-        .collect();
+        .cloned();
+    let models = event
+        .get(MODEL_USAGE)
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|models| models.values())
+        .filter_map(Value::as_object)
+        .flat_map(|entry| entry.keys())
+        .filter(|key| {
+            !MODEL_COUNTED.iter().any(|(known, _)| known == *key)
+                && !MODEL_KNOWN_UNCOUNTED.contains(&key.as_str())
+                && key.as_str() != CONTEXT_WINDOW
+        })
+        .map(|key| format!("{MODEL_USAGE}.{key}"));
+    let mut unknown: Vec<String> = usage.chain(models).collect();
     unknown.sort();
     unknown.dedup();
     unknown
@@ -265,11 +480,16 @@ pub fn unknown_fields(event: &Value) -> Vec<String> {
 
 /// Where usage lives on the two event shapes that carry it: a terminal
 /// `result` event holds it at the top level, an `assistant` turn holds it
-/// under `message`.
+/// under `message`. Any other line's `usage` is not one: a subagent's
+/// `system/task_progress` and `task_notification` (M91.3b) carry its running
+/// total, tool uses and time, and its tokens reach the books through the
+/// result's `modelUsage`.
 fn usage_object(event: &Value) -> Option<&Value> {
-    event
-        .get("usage")
-        .or_else(|| event.get("message").and_then(|m| m.get("usage")))
+    match event.get("type").and_then(Value::as_str) {
+        Some("result") => event.get("usage"),
+        Some("assistant") => event.get("message").and_then(|m| m.get("usage")),
+        _ => None,
+    }
 }
 
 /// Is this the CLI's terminal event for a run?
@@ -348,6 +568,28 @@ mod tests {
         assert_eq!(facts.model_id.as_deref(), Some("claude-sonnet-5"));
         // A run whose only line was the error names no model at all.
         assert_eq!(RunFacts::from_assistant(&synthetic).unwrap().model_id, None);
+    }
+
+    #[test]
+    fn a_subagents_line_never_names_the_runs_model() {
+        // M91.3b: the stream forwards a subagent's lines beside the run's,
+        // and the last assistant line can be one of them; a session file's
+        // sidechain line is one too.
+        let mut facts = RunFacts::default();
+        for line in [
+            json!({ "type": "assistant", "parent_tool_use_id": null,
+                "message": { "model": "claude-sonnet-5", "stop_reason": "end_turn" } }),
+            json!({ "type": "assistant", "parent_tool_use_id": "toolu_000000000000000000000001",
+                "message": { "model": "claude-haiku-4-5-20251001", "stop_reason": "tool_use" } }),
+            json!({ "type": "assistant", "isSidechain": true,
+                "message": { "model": "claude-haiku-4-5-20251001", "stop_reason": "tool_use" } }),
+        ] {
+            if let Some(turn) = RunFacts::from_assistant(&line) {
+                facts.merge(turn);
+            }
+        }
+        assert_eq!(facts.model_id.as_deref(), Some("claude-sonnet-5"));
+        assert_eq!(facts.stop_reason.as_deref(), Some("end_turn"));
     }
 
     /// CLI output shaped by hand from real runs and reduced to the fields
@@ -461,6 +703,298 @@ mod tests {
             "usage": { "input_tokens": 1, "service_tier": "standard", "server_tool_use": {} }
         });
         assert!(unknown_fields(&event).is_empty());
+    }
+
+    /// A result whose `modelUsage` holds two models (M91.2c): the run's own
+    /// thread's and its subagent's, the first with every key 2.1.250's
+    /// schema declares.
+    fn two_models() -> Value {
+        json!({
+            "type": "result",
+            "usage": { "input_tokens": 14, "output_tokens": 150,
+                "cache_read_input_tokens": 6200, "cache_creation_input_tokens": 0 },
+            "modelUsage": {
+                "claude-sonnet-5": { "inputTokens": 14, "outputTokens": 150,
+                    "cacheReadInputTokens": 6200, "cacheCreationInputTokens": 0,
+                    "webSearchRequests": 0, "costUSD": 0.0123, "contextWindow": 200000,
+                    "maxOutputTokens": 32000, "canonicalModel": "claude-sonnet-5",
+                    "provider": "firstParty", "costBasis": "list" },
+                "claude-haiku-4-5-20251001": { "inputTokens": 2950, "outputTokens": 170,
+                    "cacheReadInputTokens": 0, "cacheCreationInputTokens": 1200,
+                    "webSearchRequests": 0, "costUSD": 0.0042, "contextWindow": 200000,
+                    "maxOutputTokens": 32000 }
+            }
+        })
+    }
+
+    #[test]
+    fn the_whole_tree_sums_every_model_the_run_called() {
+        let event = two_models();
+        assert_eq!(
+            whole_tree(&event),
+            Some(Usage {
+                input_tokens: 2_964,
+                output_tokens: 320,
+                cache_read: 6_200,
+                cache_write: 1_200,
+            }),
+            "the subagent's model counts beside the run's own"
+        );
+        assert_eq!(
+            parse(&event).map(|usage| usage.total()),
+            Some(14 + 150 + 6_200),
+            "`usage` is the run's own thread alone"
+        );
+        assert!(
+            unknown_fields(&event).is_empty(),
+            "{:?}",
+            unknown_fields(&event)
+        );
+    }
+
+    #[test]
+    fn a_model_usage_that_measures_nothing_is_none_never_zero() {
+        let entry = || {
+            json!({ "inputTokens": 1, "outputTokens": 2, "cacheReadInputTokens": 3,
+                "cacheCreationInputTokens": 4 })
+        };
+        let spoilt = |key: &str, value: Value| {
+            let mut spoilt = entry();
+            spoilt[key] = value;
+            json!({ "claude-sonnet-5": spoilt })
+        };
+        let mut short = entry();
+        short
+            .as_object_mut()
+            .unwrap()
+            .remove("cacheCreationInputTokens");
+        for (case, model_usage) in [
+            ("empty", json!({})),
+            ("not an object", json!([entry()])),
+            (
+                "an entry that is not an object",
+                json!({ "claude-sonnet-5": 7 }),
+            ),
+            ("a count missing", json!({ "claude-sonnet-5": short })),
+            ("a negative count", spoilt("inputTokens", json!(-1))),
+            ("a fractional count", spoilt("outputTokens", json!(1.5))),
+            (
+                "a count as text",
+                spoilt("cacheReadInputTokens", json!("3")),
+            ),
+            (
+                "a readable entry beside an unreadable one",
+                json!({ "claude-sonnet-5": entry(), "claude-haiku-4-5": { "inputTokens": 1 } }),
+            ),
+        ] {
+            let event = json!({ "type": "result", "modelUsage": model_usage });
+            assert_eq!(whole_tree(&event), None, "{case}");
+        }
+        assert_eq!(whole_tree(&json!({ "type": "result" })), None, "missing");
+        // A crash or startup error's result may carry zeroed counts for calls
+        // that were made: the tree never reads as free.
+        let zeros = json!({ "type": "result", "is_error": true, "modelUsage": {
+            "claude-sonnet-5": { "inputTokens": 0, "outputTokens": 0,
+                "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0 } } });
+        assert_eq!(whole_tree(&zeros), None, "zeroed");
+    }
+
+    #[test]
+    fn model_usage_counts_the_run_alone_only_before_resumes_restored_totals() {
+        // 2.1.277 started restoring a resumed or forked session's saved
+        // totals, so a later release's `modelUsage` on a thread's next turn
+        // holds every turn before it.
+        assert!(model_usage_is_the_runs(Some("2.1.250")));
+        assert!(model_usage_is_the_runs(Some("2.1.276")));
+        assert!(!model_usage_is_the_runs(Some("2.1.277")));
+        assert!(!model_usage_is_the_runs(Some("2.1.308")));
+        assert!(!model_usage_is_the_runs(Some("3.0.0")));
+        assert!(!model_usage_is_the_runs(Some("next")), "unreadable");
+        assert!(!model_usage_is_the_runs(None), "not named");
+    }
+
+    #[test]
+    fn a_model_entrys_known_keys_are_not_reported_and_a_new_one_is() {
+        let mut event = two_models();
+        event["modelUsage"]["claude-sonnet-5"]["quantumTokens"] = json!(1);
+        event["modelUsage"]["claude-haiku-4-5-20251001"]["quantumTokens"] = json!(2);
+        event["usage"]["zeta_tokens"] = json!(3);
+        assert_eq!(
+            unknown_fields(&event),
+            vec![
+                "modelUsage.quantumTokens".to_string(),
+                "zeta_tokens".to_string()
+            ],
+            "once, under the object that holds it"
+        );
+        // Each object is read in its own spelling.
+        let crossed = json!({ "type": "result", "usage": { "costUSD": 1 },
+            "modelUsage": { "claude-sonnet-5": { "service_tier": "standard" } } });
+        assert_eq!(
+            unknown_fields(&crossed),
+            vec!["costUSD".to_string(), "modelUsage.service_tier".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_subagents_progress_is_not_token_usage() {
+        // 2.1.250 (measured): a subagent's task lines carry a `usage` of
+        // their own, its running total, tool uses and time. Its tokens reach
+        // the books through the result's `modelUsage`, never through these.
+        for subtype in ["task_progress", "task_notification"] {
+            let line = json!({ "type": "system", "subtype": subtype,
+                "tool_use_id": "toolu_000000000000000000000001",
+                "usage": { "total_tokens": 9, "tool_uses": 2, "duration_ms": 900 } });
+            assert_eq!(parse(&line), None, "{subtype}");
+            assert!(unknown_fields(&line).is_empty(), "{subtype}");
+        }
+    }
+
+    #[test]
+    fn only_the_runs_own_call_to_the_subagent_tool_is_a_delegation() {
+        let call = |name: &str| {
+            json!({ "type": "assistant", "message": { "content": [
+                { "type": "text", "text": "Looking." },
+                { "type": "tool_use", "id": "toolu_000000000000000000000001", "name": name,
+                  "input": {} } ] } })
+        };
+        assert!(calls_subagent_tool(&call("Agent")));
+        assert!(
+            calls_subagent_tool(&call("Task")),
+            "the name an init lists it under"
+        );
+        assert!(!calls_subagent_tool(&call("Read")));
+        assert!(
+            !calls_subagent_tool(&call("mcp__cerebro__hand_to")),
+            "a hand-off is another run, with books of its own"
+        );
+        let mut nested = call("Agent");
+        nested["parent_tool_use_id"] = json!("toolu_000000000000000000000002");
+        assert!(
+            !calls_subagent_tool(&nested),
+            "a subagent's own call: the run's call that started it already counted"
+        );
+        let mut sidechain = call("Agent");
+        sidechain["isSidechain"] = json!(true);
+        assert!(!calls_subagent_tool(&sidechain));
+        let echoed = json!({ "type": "user", "message": { "content": [
+            { "type": "tool_use", "id": "toolu_000000000000000000000001", "name": "Agent" } ] } });
+        assert!(!calls_subagent_tool(&echoed), "only a turn calls a tool");
+    }
+
+    // --- M91.5: what a turn's context held -----------------------------------
+
+    /// A turn of the run's own thread whose request sent `input` new tokens,
+    /// wrote `write` to the cache and read `read` from it.
+    fn turn_sending(input: u64, write: u64, read: u64) -> Value {
+        json!({ "type": "assistant", "parent_tool_use_id": null, "message": {
+            "id": "msg_000000000000000000000001", "model": "claude-sonnet-5",
+            "usage": { "input_tokens": input, "cache_creation_input_tokens": write,
+                "cache_read_input_tokens": read, "output_tokens": 40 } } })
+    }
+
+    #[test]
+    fn a_turns_context_is_everything_its_request_sent() {
+        assert_eq!(context_used(&turn_sending(8, 6_300, 0)), Some(6_308));
+        assert_eq!(
+            context_used(&turn_sending(6, 0, 6_100)),
+            Some(6_106),
+            "what the cache served is in the context too"
+        );
+        // The committed turn: its output joins the context on the next
+        // request, not this one.
+        assert_eq!(context_used(&fixture(ASSISTANT_TURN)), Some(3 + 14_678));
+        assert_eq!(
+            context_used(&fixture(RESULT_SUCCESS)),
+            None,
+            "a result is not a turn"
+        );
+    }
+
+    #[test]
+    fn only_a_whole_reading_of_the_runs_own_turn_is_its_context() {
+        let mut forwarded = turn_sending(2_950, 1_200, 0);
+        forwarded["parent_tool_use_id"] = json!("toolu_000000000000000000000001");
+        assert_eq!(
+            context_used(&forwarded),
+            None,
+            "a subagent's context is its own"
+        );
+        let mut sidechain = turn_sending(2_950, 1_200, 0);
+        sidechain["isSidechain"] = json!(true);
+        assert_eq!(context_used(&sidechain), None);
+        let mut synthetic = turn_sending(1, 0, 0);
+        synthetic["message"]["model"] = json!("<synthetic>");
+        assert_eq!(
+            context_used(&synthetic),
+            None,
+            "no model read an API error's reply"
+        );
+        assert_eq!(
+            context_used(&turn_sending(0, 0, 0)),
+            None,
+            "every request sends something, so nothing is not a reading"
+        );
+        for key in CONTEXT_COUNTED {
+            let mut short = turn_sending(8, 6_300, 0);
+            short["message"]["usage"]
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert_eq!(context_used(&short), None, "{key} missing");
+            let mut spoilt = turn_sending(8, 6_300, 0);
+            spoilt["message"]["usage"][key] = json!(-1);
+            assert_eq!(context_used(&spoilt), None, "{key} negative");
+            spoilt["message"]["usage"][key] = json!("8");
+            assert_eq!(context_used(&spoilt), None, "{key} as text");
+        }
+        let mut bare = turn_sending(8, 6_300, 0);
+        bare["message"].as_object_mut().unwrap().remove("usage");
+        assert_eq!(context_used(&bare), None, "no usage at all");
+    }
+
+    #[test]
+    fn a_window_is_the_named_models_own_and_only_a_results() {
+        let event = two_models();
+        assert_eq!(context_window(&event, "claude-sonnet-5"), Some(200_000));
+        assert_eq!(
+            context_window(&event, "claude-opus-5"),
+            None,
+            "a model the result does not name"
+        );
+        let mut spoilt = two_models();
+        spoilt["modelUsage"]["claude-sonnet-5"]["contextWindow"] = json!("200000");
+        assert_eq!(
+            context_window(&spoilt, "claude-sonnet-5"),
+            None,
+            "text is not a window"
+        );
+        spoilt["modelUsage"]["claude-sonnet-5"]["contextWindow"] = json!(0);
+        assert_eq!(
+            context_window(&spoilt, "claude-sonnet-5"),
+            None,
+            "nor is nothing"
+        );
+        spoilt["modelUsage"]["claude-sonnet-5"]
+            .as_object_mut()
+            .unwrap()
+            .remove("contextWindow");
+        assert_eq!(context_window(&spoilt, "claude-sonnet-5"), None);
+        assert_eq!(
+            context_window(
+                &json!({ "type": "result", "modelUsage": {} }),
+                "claude-sonnet-5"
+            ),
+            None,
+            "the empty object the committed recordings carry"
+        );
+        let mut turn = two_models();
+        turn["type"] = json!("assistant");
+        assert_eq!(context_window(&turn, "claude-sonnet-5"), None);
+        // Read, so never reported as a key this build does not know.
+        assert!(!unknown_fields(&event)
+            .iter()
+            .any(|key| key.contains(CONTEXT_WINDOW)));
     }
 
     #[test]

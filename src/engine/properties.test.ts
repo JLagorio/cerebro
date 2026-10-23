@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   aggregateNumbers,
   coerceValueToKind,
+  plainText,
   computeRollup,
   formatTimestamp,
   findOptionByLabel,
@@ -300,6 +301,36 @@ describe('formatTimestamp', () => {
 });
 
 // M12.4b: value conversion when a field changes kind.
+describe('plainText', () => {
+  it('reads a map as its keys and values, and a list of them joined', () => {
+    expect(plainText({ by: 'claude-code', at: '2026-07-28' })).toBe(
+      'by claude-code · at 2026-07-28',
+    );
+    expect(plainText([{ by: 'me' }, { by: 'you' }])).toBe('by me, by you');
+    expect(plainText(['a', 2, true])).toBe('a, 2, true');
+    expect(plainText(null)).toBe('');
+  });
+});
+
+describe('coerceValueToKind on structure', () => {
+  // 2026-10-18: a `generated: {by, at}` stamp converted to text came back as
+  // the literal "[object Object]". A map has no reading in any kind.
+  it('answers a map, or a list of maps, as it is — never its String()', () => {
+    const stamp = { by: 'claude-code', at: '2026-07-28T16:42:00Z' };
+    for (const kind of ['text', 'select', 'multiselect', 'number', 'date'] as const) {
+      expect(coerceValueToKind(stamp, kind)).toBe(stamp);
+      const list = [stamp];
+      expect(coerceValueToKind(list, kind)).toBe(list);
+    }
+  });
+
+  it('still reads a date range, which is a map with a reading', () => {
+    expect(coerceValueToKind({ start: '2026-08-02', end: '2026-08-09' }, 'text')).toBe(
+      '2026-08-02, 2026-08-09',
+    );
+  });
+});
+
 describe('coerceValueToKind', () => {
   it('empty always clears', () => {
     expect(coerceValueToKind(null, 'number')).toBeNull();

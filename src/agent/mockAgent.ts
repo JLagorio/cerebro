@@ -4,6 +4,9 @@ import type {
   FailureNotice,
   PendingInteraction,
   PersonAnswer,
+  RunReach,
+  TodoStatus,
+  ToolResultData,
   UiAction,
 } from './types';
 import type { QuoteEdit } from '@/engine/quote';
@@ -13,13 +16,14 @@ import {
   hostAnswer,
   subjectIsCut,
   writeDeclined,
+  type Decision,
   type RunApproval,
 } from '@/lib/policy/toolApproval';
 import { answersFor, type QuestionAnswer } from '@/engine/questionForm';
 import { changedKeys } from '@/engine/writeDraft';
 import { TOOLS, isConfirmable, toolFacts } from '@/lib/policy/tools';
 import { slugify } from '@/lib/slug';
-import { mentionedTools } from '@/engine/toolGrant';
+import { grantedTools, mentionedTools } from '@/engine/toolGrant';
 import { parseSuggestionResult } from '@/engine/viewSuggestion';
 
 /**
@@ -39,13 +43,53 @@ import { parseSuggestionResult } from '@/engine/viewSuggestion';
  * for an atomic whiteboard change (M68.7b).
  * `create canvas <slug> in <folder>: <json ops>` uses onCreateCanvas;
  * the optional operations fill the new board in its single create (M68.7c).
+ * `research … with subagents`, `think it through`, `make a todo list`, `run
+ * the tests`, `fail with a stack trace` and `search the web` play what Rust's
+ * fold sends for subagents, reasoning, todos, shell and web results, with
+ * the CLI's times and a branch anchor (M91.4), and their result's count of
+ * how long the run worked (M92.2). A run handed its plan says what it
+ * reaches right after its init (M92.8), as Rust's init gate does.
  */
+
+/** One call a script makes, and what it returns when the script says (a
+ * write's report comes from its own step). */
+interface ScriptCall {
+  name: string;
+  input: string;
+  output?: string;
+  /** Its result is an error (M91.4), as a command that exits non-zero. */
+  failed?: true;
+  /** What its result's structure says (M91.4), sent after its ToolDone as
+   * Rust's fold sends it. */
+  result?: ToolResultData;
+  /** The reasoning the model streams before it makes the call (M91.4). */
+  thinking?: string;
+  /** How long it takes on the run's clock (M91.4), in ms. */
+  ms?: number;
+  /** The subagent an Agent call starts (M91.4): its steps run between the
+   * call's start and its report. */
+  subagent?: MockSubagent;
+}
+
+/** A subagent a script's Agent call starts (M91.4): a cerebro-researcher
+ * that thinks, reads with its own calls and reports. */
+interface MockSubagent {
+  type: string;
+  description: string;
+  thinking: string;
+  steps: { name: string; input: string; output: string; progress: string; ms: number }[];
+  report: string;
+}
 
 interface Script {
   thinking?: string;
-  /** Each call, and what it returns when the script says (a write's report
-   * comes from its own step). */
-  tools?: { name: string; input: string; output?: string }[];
+  /** Each call it makes. */
+  tools?: ScriptCall[];
+  /** The reasoning streamed before the reply (M91.4). */
+  answerThinking?: string;
+  /** Its events carry the CLI's times and its end the line uuid a branch
+   * starts from (M91.4), as Rust's do. */
+  stamped?: true;
   /**
    * A UI action the run drives, fired after its tools report done. The mock
    * has to actually DO what its reply claims — a script that says "I have
@@ -597,6 +641,319 @@ function reviewNotesScript(message: string): Script | null {
   };
 }
 
+// --- The M91 scripts (M91.4) -------------------------------------------------
+//
+// Each emits only what Rust's fold emits, in its order and with its fields:
+// the CLI's times on every line (`at`), a line uuid at the turn's end, a
+// subagent's steps under its Agent call, structured results after their
+// ToolDone. They read the demo vault's own pages.
+
+const RESEARCH = /\bresearch\b[\s\S]*\bwith subagents\b/i;
+const THINK_IT_THROUGH = /\bthink it through\b/i;
+const TODO_LIST = /\bmake a todo list\b/i;
+const RUN_THE_TESTS = /\brun the tests\b/i;
+const STACK_TRACE = /\bfail with a stack trace\b/i;
+const SEARCH_THE_WEB = /\bsearch the web\b/i;
+
+/** The risk the M91 scripts read, a demo-vault page. */
+const SCANNER_RISK = 'records/risks/risk-scanner-delivery.md';
+/** The project the research script's second researcher reads. */
+const PHOENIX = 'records/projects/phoenix-warehouse-rollout.md';
+
+/** What Claude Code tells the model after a TodoWrite. */
+const TODOS_WRITTEN =
+  'Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable';
+
+/** The todo script's list, each item at the status given, as TodoWrite's
+ * input and as its result's `newTodos`. */
+const TODO_ITEMS = [
+  ['List the open risks', 'Listing the open risks'],
+  ['Read the dated risks', 'Reading the dated risks'],
+  ['Name the risk to escalate', 'Naming the risk to escalate'],
+] as const;
+
+function todoCall(statuses: TodoStatus[]): ScriptCall {
+  const items = TODO_ITEMS.map(([content, activeForm], at) => ({
+    content,
+    status: statuses[at],
+    activeForm,
+  }));
+  return {
+    name: 'TodoWrite',
+    input: JSON.stringify({ todos: items }),
+    output: TODOS_WRITTEN,
+    result: {
+      type: 'todos',
+      todos: items.map(({ content, status, activeForm }) => ({
+        content,
+        status,
+        active_form: activeForm,
+      })),
+    },
+    ms: 60,
+  };
+}
+
+/** A vitest run of the vault's scripts with one failure, as vitest 3.2
+ * prints it: the files and the summary to stdout, the failure to stderr. */
+export const MOCK_TEST_STDOUT = ` RUN  v3.2.4 /vault
+
+ ✓ scripts/dates.test.mjs (6 tests) 4ms
+ ✓ scripts/links.test.mjs (9 tests) 7ms
+ ❯ scripts/risks.test.mjs (4 tests | 1 failed) 9ms
+   ✓ risks > reads every open risk 2ms
+   ✓ risks > sorts by due date 1ms
+   × risks > flags a risk with no mitigation 4ms
+     → expected [] to have a length of 1 but got +0
+   ✓ risks > ignores closed risks 1ms
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 18 passed (19)
+   Start at  09:12:40
+   Duration  412ms (transform 61ms, setup 0ms, collect 88ms, tests 20ms, environment 0ms, prepare 151ms)
+`;
+
+export const MOCK_TEST_STDERR = `
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/risks.test.mjs > risks > flags a risk with no mitigation
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ scripts/risks.test.mjs:27:21
+     25|   it('flags a risk with no mitigation', () => {
+     26|     const flagged = unmitigated(readRisks('records/risks'));
+     27|     expect(flagged).toHaveLength(1);
+       |                     ^
+     28|   });
+
+${'⎯'.repeat(24)}[1/1]⎯
+`;
+
+/** A render script that dies inside a vault page, as Node 22 prints it: the
+ * page's own frames are vault-relative, the script's are file URLs. */
+export const MOCK_STACK = `${SCANNER_RISK}:6
+Owner: {owner}
+        ^
+
+ReferenceError: owner is not defined
+    at _createMdxContent (${SCANNER_RISK}:6:9)
+    at MDXContent (${SCANNER_RISK}:14:8)
+    at renderNote (file:///vault/scripts/render-notes.mjs:21:11)
+    at async Promise.all (index 3)
+    at async main (file:///vault/scripts/render-notes.mjs:34:3)
+
+Node.js v22.12.0
+`;
+
+/**
+ * The M91 scripts (M91.4): research with subagents, reasoning, a todo list,
+ * a test run, a stack trace and a web search, each a phrase in the message.
+ * Null for any other message.
+ */
+function m91Script(message: string): Script | null {
+  if (RESEARCH.test(message)) {
+    const researcher = (description: string, prompt: string, subagent: MockSubagent) => ({
+      name: 'Agent',
+      input: JSON.stringify({ description, subagent_type: 'cerebro-researcher', prompt }),
+      ms: 120,
+      subagent,
+    });
+    return {
+      stamped: true,
+      tools: [
+        {
+          ...researcher(
+            'Read the open risks',
+            'Read the open risks under records/risks and say which one threatens the launch most.',
+            {
+              type: 'cerebro-researcher',
+              description: 'Read the open risks',
+              thinking: 'I should find the risks first, then read the one with a date.',
+              steps: [
+                {
+                  name: 'mcp__cerebro__search_notes',
+                  input: JSON.stringify({ query: 'risk' }),
+                  output: `Five open risks under records/risks, among them ${SCANNER_RISK}.`,
+                  progress: 'Searching for open risks',
+                  ms: 420,
+                },
+                {
+                  name: 'mcp__cerebro__get_note',
+                  input: JSON.stringify({ path: SCANNER_RISK }),
+                  output:
+                    '# Scanner delivery\n\nThe scanners ship late, and no mitigation is recorded.',
+                  progress: 'Reading risk-scanner-delivery.md',
+                  ms: 260,
+                },
+              ],
+              report:
+                'Scanner delivery threatens the launch most: it has a date and no recorded mitigation.',
+            },
+          ),
+          thinking:
+            'Two questions: which risk matters most, and what the rollout depends on. Each can go to a researcher.',
+        },
+        researcher(
+          'Read the rollout plan',
+          `Read ${PHOENIX} and say what its cutover depends on.`,
+          {
+            type: 'cerebro-researcher',
+            description: 'Read the rollout plan',
+            thinking: 'The project page should name what the cutover waits for.',
+            steps: [
+              {
+                name: 'mcp__cerebro__get_note',
+                input: JSON.stringify({ path: PHOENIX }),
+                output: '# Phoenix warehouse rollout\n\nCutover waits on the new scanners.',
+                progress: 'Reading phoenix-warehouse-rollout.md',
+                ms: 310,
+              },
+            ],
+            report: 'The rollout’s cutover waits on the new scanners arriving.',
+          },
+        ),
+      ],
+      answerThinking: 'Both researchers are back, and their answers meet at the scanners.',
+      text: 'Two researchers looked. **Scanner delivery** is the risk that threatens the launch most: it has a date and no recorded mitigation, and the rollout’s cutover waits on those scanners. [[risk-scanner-delivery]]',
+    };
+  }
+  if (THINK_IT_THROUGH.test(message)) {
+    return {
+      stamped: true,
+      tools: [
+        {
+          name: 'mcp__cerebro__get_note',
+          input: JSON.stringify({ path: SCANNER_RISK }),
+          output: '# Scanner delivery\n\nThe scanners ship late, and no mitigation is recorded.',
+          thinking:
+            'The person wants a judgement, not a summary. I should read the risk before I weigh it against the launch.',
+          ms: 240,
+        },
+      ],
+      answerThinking:
+        'It has a date, nothing mitigates it, and the launch depends on it. That makes it the one to escalate, ahead of the undated risks.',
+      text: 'Having thought it through: escalate [[risk-scanner-delivery]] first. It is the only open risk with a date, nothing in the vault mitigates it, and the launch depends on it.',
+    };
+  }
+  if (TODO_LIST.test(message)) {
+    return {
+      stamped: true,
+      tools: [
+        {
+          ...todoCall(['in_progress', 'pending', 'pending']),
+          thinking: 'Three steps. A list keeps them in view.',
+        },
+        {
+          name: 'mcp__cerebro__search_notes',
+          input: JSON.stringify({ query: 'risk' }),
+          output: 'Five open risks under records/risks.',
+          ms: 380,
+        },
+        todoCall(['completed', 'in_progress', 'pending']),
+        {
+          name: 'mcp__cerebro__get_note',
+          input: JSON.stringify({ path: SCANNER_RISK }),
+          output: '# Scanner delivery\n\nThe scanners ship late, and no mitigation is recorded.',
+          ms: 220,
+        },
+        todoCall(['completed', 'completed', 'in_progress']),
+        todoCall(['completed', 'completed', 'completed']),
+      ],
+      text: 'All three done: five risks are open, one of them dated, and [[risk-scanner-delivery]] is the one to escalate.',
+    };
+  }
+  if (RUN_THE_TESTS.test(message)) {
+    return {
+      stamped: true,
+      tools: [
+        {
+          name: 'Bash',
+          input: JSON.stringify({
+            command: 'pnpm vitest run scripts',
+            description: 'Run the vault scripts’ tests',
+          }),
+          output: `Exit code 1\n${MOCK_TEST_STDOUT}`,
+          failed: true,
+          result: {
+            type: 'shell',
+            stdout: MOCK_TEST_STDOUT,
+            stderr: MOCK_TEST_STDERR,
+            interrupted: false,
+            truncated: false,
+          },
+          thinking: 'The scripts have a vitest suite; running it is the quickest check.',
+          ms: 1900,
+        },
+      ],
+      text: 'The tests ran: 18 passed and 1 failed. `risks > flags a risk with no mitigation` expects one unmitigated risk and finds none.',
+    };
+  }
+  if (STACK_TRACE.test(message)) {
+    return {
+      stamped: true,
+      tools: [
+        {
+          name: 'Bash',
+          input: JSON.stringify({
+            command: 'node scripts/render-notes.mjs',
+            description: 'Render the notes',
+          }),
+          output: `Exit code 1\n${MOCK_STACK}`,
+          failed: true,
+          result: {
+            type: 'shell',
+            stdout: '',
+            stderr: MOCK_STACK,
+            interrupted: false,
+            truncated: false,
+          },
+          ms: 650,
+        },
+      ],
+      text: `The render failed: \`owner\` is not defined on line 6 of ${SCANNER_RISK}.`,
+    };
+  }
+  if (SEARCH_THE_WEB.test(message)) {
+    const query = 'warehouse scanner lead times';
+    const results = [
+      {
+        title: 'Scanner lead times - Example Logistics',
+        url: 'https://example.com/scanners/lead-times',
+      },
+      { title: 'Planning a warehouse cutover', url: 'https://example.org/guides/cutover' },
+    ];
+    const page = results[0].url;
+    return {
+      stamped: true,
+      tools: [
+        {
+          name: 'WebSearch',
+          input: JSON.stringify({ query }),
+          output: `Web search results for query: "${query}"\n\nLinks: ${JSON.stringify(results)}`,
+          result: { type: 'web_search', query, results },
+          thinking: 'Lead times are outside the vault; a search should find a current figure.',
+          ms: 2300,
+        },
+        {
+          name: 'WebFetch',
+          input: JSON.stringify({ url: page, prompt: 'What lead time does it give for scanners?' }),
+          output: 'Handheld scanners currently ship in 10 to 14 weeks.',
+          result: { type: 'web_fetch', url: page, code: 200, bytes: 48213, duration_ms: 1840 },
+          ms: 1900,
+        },
+      ],
+      text: `Scanners currently ship in 10 to 14 weeks ([Example Logistics](${page})), so a late order puts the cutover at risk. See also [Planning a warehouse cutover](${results[1].url}).`,
+    };
+  }
+  return null;
+}
+
 function scriptFor(message: string, systemPrompt?: string): Script {
   const later =
     /(?:^|\n)(?:@[\w-]+\s+)?follow up "([^"\n]*)" in (\d+) (minutes?|hours?|days?)$/i.exec(
@@ -806,6 +1163,9 @@ function scriptFor(message: string, systemPrompt?: string): Script {
       text: `I created "${title}" in ${folder}.`,
     };
   }
+  // M91.4: before the keyword branches, which would take "risks" or "inbox".
+  const m91 = m91Script(message);
+  if (m91 !== null) return m91;
   const prompt = message.toLowerCase();
 
   // Five reads in a row (M56.8): the panel's folded row has a browser path.
@@ -900,13 +1260,16 @@ export const MOCK_FAILURES: Readonly<
   },
 };
 
-/** Play a failure script: the init, the error (with its notice when Rust
- * types one), the turn's end and Done, as the fold reads a failed run. */
+/** Play a failure script: the init (and with it what the run reaches, when
+ * it has a plan, M92.8), the error (with its notice when Rust types one), the
+ * turn's end and Done, as the fold reads a failed run whose init was
+ * admitted. */
 function runFailure(
   failure: (typeof MOCK_FAILURES)[string],
   emit: (event: AgentStreamEvent) => void,
   sessionId: string,
   delayMs: number,
+  reach: RunReach | null,
 ): MockRun {
   let cancelled = false;
   const error: AgentStreamEvent = {
@@ -915,15 +1278,17 @@ function runFailure(
     ...(failure.code === null ? {} : { code: failure.code }),
     ...(failure.notice === null ? {} : { notice: failure.notice }),
   };
-  const steps: AgentStreamEvent[] = [
-    { kind: 'Init', session_id: sessionId },
-    error,
-    { kind: 'TurnEnded', stop_reason: 'stop_sequence' },
-    { kind: 'Done' },
+  const opening: AgentStreamEvent[] = [{ kind: 'Init', session_id: sessionId }];
+  if (reach !== null) opening.push({ kind: 'Reach', reach });
+  const steps: AgentStreamEvent[][] = [
+    opening,
+    [error],
+    [{ kind: 'TurnEnded', stop_reason: 'stop_sequence' }],
+    [{ kind: 'Done' }],
   ];
-  const timers = steps.map((event, at) =>
+  const timers = steps.map((events, at) =>
     setTimeout(() => {
-      if (!cancelled) emit(event);
+      if (!cancelled) for (const event of events) emit(event);
     }, at * delayMs),
   );
   return {
@@ -957,6 +1322,42 @@ const UNNAMED_SESSION = '00000000-0000-4000-8000-000000000000';
 async function writeGate(): Promise<void> {
   const gate = (globalThis as { __cerebroAgentWriteGate?: unknown }).__cerebroAgentWriteGate;
   if (gate instanceof Promise) await gate;
+}
+
+let agentIds = 0;
+
+/** A subagent's id as Claude Code mints one (M91.4): `a` and 16 hex digits. */
+function mockAgentId(): string {
+  agentIds += 1;
+  return `a${agentIds.toString(16).padStart(16, '0')}`;
+}
+
+/**
+ * What a mock run says it reaches (M92.8), as Rust's init gate says it once
+ * the run's first init is admitted: from the plan its calls decide through,
+ * each family's decisions once, in the manifest's order. The mock loads no
+ * connector, so it holds none, misses none and inherits none of the
+ * person's own. Its declared tools say whether it holds Cerebro's: absent,
+ * they narrow nothing.
+ */
+function mockReach(
+  approval: RunApproval,
+  allowedTools: readonly string[] | null | undefined,
+): RunReach {
+  const families: Record<string, Decision[]> = {};
+  for (const row of approval.decisions) {
+    const decided = (families[row.family] ??= []);
+    if (!decided.includes(row.decision)) decided.push(row.decision);
+  }
+  return {
+    connectors: [],
+    missing: [],
+    missing_more: 0,
+    inherits: false,
+    permission_mode: approval.permission_mode,
+    cerebro: allowedTools == null || grantedTools(allowedTools).size > 0,
+    families,
+  };
 }
 
 /** Split into small chunks so the UI genuinely streams rather than snapping. */
@@ -1042,6 +1443,7 @@ export function runMockAgent(
     model = null,
     asks,
     approval,
+    allowedTools,
     onDefer,
     resume,
   }: {
@@ -1101,6 +1503,9 @@ export function runMockAgent(
      * ask-first agent's page write (M57.4), which the plan reads by its
      * `askFirst` and run kind. Absent, every call runs. */
     approval?: RunApproval;
+    /** The run's declared tools (M92.8), for whether the reach it says
+     * holds Cerebro's own. Absent narrows nothing. */
+    allowedTools?: readonly string[] | null;
     /** Registers a held call with the book and gives its card, or null for
      * a deferral the book did not register. The caller resumes the turn
      * with `resume` below once the person answers. */
@@ -1110,9 +1515,11 @@ export function runMockAgent(
     resume?: { toolId: string; answer: PersonAnswer };
   } = {},
 ): MockRun {
+  // M92.8: only a run handed its plan can say what it reaches.
+  const reach = approval === undefined ? null : mockReach(approval, allowedTools);
   // Matched first, on the message as typed (M56.4).
   const failure = MOCK_FAILURES[message.trim()];
-  if (failure !== undefined) return runFailure(failure, emit, sessionId, delayMs);
+  if (failure !== undefined) return runFailure(failure, emit, sessionId, delayMs, reach);
   const script = scriptFor(message, systemPrompt);
   let cancelled = false;
   // Held on a call (M57.1): the turn stops at its Done, mid-script.
@@ -1123,6 +1530,131 @@ export function runMockAgent(
   let reply = script.text;
 
   type Step = () => void | Promise<void>;
+
+  // M91.4: a stamped script's events carry the CLI's line times, on the
+  // run's own clock: each step this many ms after the one before it. A
+  // pinned page clock stands still, and these durations still read the same.
+  const startedAt = Date.now();
+  let elapsed = 0;
+  const at = (ms: number): { at?: string } => {
+    if (script.stamped !== true) return {};
+    elapsed += ms;
+    return { at: new Date(startedAt + elapsed).toISOString() };
+  };
+  let messageCount = 0;
+  /** A fresh assistant message id, as the CLI gives each message one. */
+  const messageId = () => {
+    messageCount += 1;
+    return `msg_mock_${messageCount}`;
+  };
+  /** A reasoning block, as Rust folds one: its words streamed, then the
+   * block whole, which settles them (M91.4). */
+  const think = (text: string, id: string): Step[] => [
+    ...chunk(text).map(
+      (piece): Step =>
+        () =>
+          emit({ kind: 'ThinkingDelta', text: piece }),
+    ),
+    () => emit({ kind: 'Thinking', message_id: id, text, ...at(900) }),
+  ];
+  /** When each Agent call started on the run's clock: its subagent's time so
+   * far is measured from it. */
+  const began = new Map<string, number>();
+  const since = (id: string) => elapsed - (began.get(id) ?? elapsed);
+
+  /**
+   * A subagent's life between its Agent call's start and its report (M91.4),
+   * as Rust folds Claude Code's task notes and forwarded lines: it starts,
+   * thinks, takes each step under its call, reports in its own words, and
+   * ends. Never its tokens.
+   */
+  const subagentSteps = (id: string, sub: MockSubagent, agentId: string): Step[] => {
+    const thought = messageId();
+    const reported = messageId();
+    return [
+      () =>
+        emit({
+          kind: 'SubagentStarted',
+          tool_id: id,
+          agent_id: agentId,
+          subagent_type: sub.type,
+          description: sub.description,
+          background: false,
+          depth: 1,
+        }),
+      () =>
+        emit({ kind: 'Thinking', message_id: thought, text: sub.thinking, parent: id, ...at(800) }),
+      ...sub.steps.flatMap((step, k): Step[] => {
+        const stepId = `${id}-${k + 1}`;
+        return [
+          () =>
+            emit({
+              kind: 'SubagentProgress',
+              tool_id: id,
+              description: step.progress,
+              last_tool: step.name,
+              tool_uses: k + 1,
+              duration_ms: since(id),
+            }),
+          () =>
+            emit({
+              kind: 'ToolStart',
+              tool_name: step.name,
+              tool_id: stepId,
+              input: step.input,
+              parent: id,
+              ...at(120),
+            }),
+          () =>
+            emit({
+              kind: 'ToolDone',
+              tool_id: stepId,
+              output: step.output,
+              is_error: false,
+              parent: id,
+              ...at(step.ms),
+            }),
+        ];
+      }),
+      () => emit({ kind: 'Text', message_id: reported, text: sub.report, parent: id, ...at(600) }),
+      () =>
+        emit({
+          kind: 'SubagentDone',
+          tool_id: id,
+          status: 'completed',
+          tool_uses: sub.steps.length,
+          duration_ms: since(id),
+        }),
+    ];
+  };
+
+  /** A call that ran (M91.4): its result, then what its structure says, an
+   * Agent call's its subagent's report. */
+  const finish = (id: string, call: ScriptCall, agentId: string | null) => {
+    const failed = call.failed === true;
+    const output = call.output ?? call.subagent?.report;
+    emit({
+      kind: 'ToolDone',
+      tool_id: id,
+      ...(output === undefined ? {} : { output }),
+      ...(script.stamped === true ? { is_error: failed } : failed ? { is_error: true } : {}),
+      ...at(call.ms ?? 0),
+    });
+    const data: ToolResultData | undefined =
+      call.subagent !== undefined && agentId !== null
+        ? {
+            type: 'agent',
+            agent_id: agentId,
+            agent_type: call.subagent.type,
+            status: 'completed',
+            tool_uses: call.subagent.steps.length,
+            duration_ms: since(id),
+            model: mockModel(model),
+            summary: call.subagent.report,
+          }
+        : call.result;
+    if (data !== undefined) emit({ kind: 'ToolResult', tool_id: id, data });
+  };
 
   /** A write script's tool call: `write` it, then report as the server
    * does. A refusal rewrites the reply as `failed` words it. */
@@ -1362,11 +1894,15 @@ export function runMockAgent(
   };
 
   const acting: Step[] = [];
-  acting.push(() => emit({ kind: 'Init', session_id: sessionId }));
+  // M92.8: what the run reaches comes with its init, as Rust's gate says it.
+  acting.push(() => {
+    emit({ kind: 'Init', session_id: sessionId });
+    if (reach !== null) emit({ kind: 'Reach', reach });
+  });
   // The model answering, as the fold reports it once per turn (M56.3).
   acting.push(() => emit({ kind: 'ModelChanged', model: mockModel(model) }));
   if (script.thinking !== undefined && resume === undefined) {
-    acting.push(() => emit({ kind: 'ThinkingDelta', text: script.thinking as string }));
+    acting.push(...think(script.thinking, messageId()));
   }
   const tools = script.tools ?? [];
   // A resume starts after the held call, so its earlier calls are not run again.
@@ -1374,8 +1910,12 @@ export function runMockAgent(
     resume === undefined ? -1 : tools.findIndex((_, i) => `t-${i + 1}` === resume.toolId);
   // Each append_to_note call takes the next of the script's appends.
   let appendAt = 0;
-  tools.forEach(({ name, input, output }, i) => {
+  tools.forEach((call, i) => {
+    const { name, input } = call;
     const id = `t-${i + 1}`;
+    // M91.4: the subagent an Agent call starts, named as Claude Code names
+    // one, and its steps before the call's report.
+    const agentId = call.subagent === undefined ? null : mockAgentId();
     const appended = name === 'append_to_note' ? script.appends?.[appendAt++] : undefined;
     if (i < resumeAt) return;
     const edited = name === 'edit_note' ? script.edit : undefined;
@@ -1411,12 +1951,13 @@ export function runMockAgent(
                           ? () => create(id, created)
                           : commented !== undefined
                             ? () => comment(id, commented)
-                            : () =>
-                                emit(
-                                  output === undefined
-                                    ? { kind: 'ToolDone', tool_id: id }
-                                    : { kind: 'ToolDone', tool_id: id, output },
-                                );
+                            : () => finish(id, call, agentId);
+    const running: Step[] = [
+      ...(call.subagent !== undefined && agentId !== null
+        ? subagentSteps(id, call.subagent, agentId)
+        : []),
+      completion,
+    ];
     // M57.2: a CLI tool's call decides through the run's plan. Argv denies
     // what the plan disallows; the host answers the rest.
     const table = approval !== undefined && isCliTool(approval, name);
@@ -1482,45 +2023,53 @@ export function runMockAgent(
           ? (answer.updatedInput as unknown as CreateArgs)
           : null;
       acting.push(
-        approved !== null && created !== undefined
-          ? () =>
-              create(
-                id,
-                approved,
-                changedKeys(
-                  created as unknown as Record<string, unknown>,
-                  approved as unknown as Record<string, unknown>,
+        ...(approved !== null && created !== undefined
+          ? [
+              () =>
+                create(
+                  id,
+                  approved,
+                  changedKeys(
+                    created as unknown as Record<string, unknown>,
+                    approved as unknown as Record<string, unknown>,
+                  ),
                 ),
-              )
+            ]
           : answer.kind === 'allow'
-            ? completion
-            : () => {
-                const said = answer.message?.trim() ?? '';
-                if (asked !== null) {
-                  // Don't answer: the agent decides itself, and its reply says
-                  // what it went ahead with.
-                  const declined = APPROVAL_MESSAGES.question_declined;
-                  const refusal = said === '' ? declined : `${declined} They said: ${said}`;
+            ? running
+            : [
+                () => {
+                  const said = answer.message?.trim() ?? '';
+                  if (asked !== null) {
+                    // Don't answer: the agent decides itself, and its reply says
+                    // what it went ahead with.
+                    const declined = APPROVAL_MESSAGES.question_declined;
+                    const refusal = said === '' ? declined : `${declined} They said: ${said}`;
+                    emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+                    return;
+                  }
+                  // A write card's Deny (M57.4) is the table's ask on a page
+                  // writer; the debug seam's ask on one is M57.1's.
+                  const writeCard = confirmable && host?.kind === 'ask';
+                  const refusal = writeCard
+                    ? writeDeclined(said)
+                    : host?.kind === 'ask'
+                      ? `${APPROVAL_MESSAGES.person_denied}${said === '' ? '' : ` They said: ${said}`}`
+                      : declinedText(answer);
+                  reply = writeCard
+                    ? `I did not write it: ${refusal}`
+                    : `I did not run ${name}: you declined it.`;
                   emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
-                  return;
-                }
-                // A write card's Deny (M57.4) is the table's ask on a page
-                // writer; the debug seam's ask on one is M57.1's.
-                const writeCard = confirmable && host?.kind === 'ask';
-                const refusal = writeCard
-                  ? writeDeclined(said)
-                  : host?.kind === 'ask'
-                    ? `${APPROVAL_MESSAGES.person_denied}${said === '' ? '' : ` They said: ${said}`}`
-                    : declinedText(answer);
-                reply = writeCard
-                  ? `I did not write it: ${refusal}`
-                  : `I did not run ${name}: you declined it.`;
-                emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
-              },
+                },
+              ]),
       );
       return;
     }
-    acting.push(() => emit({ kind: 'ToolStart', tool_name: name, tool_id: id, input }));
+    if (call.thinking !== undefined) acting.push(...think(call.thinking, messageId()));
+    acting.push(() => {
+      emit({ kind: 'ToolStart', tool_name: name, tool_id: id, input, ...at(80) });
+      began.set(id, elapsed);
+    });
     // M57.5: a held script's first call waits here, mid-tool, for the release.
     if (script.held === true && i === 0) acting.push(() => heldRuns());
     // M57.4c: an unattended ask-first page write waits in Review, as Rust's
@@ -1603,7 +2152,7 @@ export function runMockAgent(
         emit({ kind: 'Done' });
       });
     }
-    acting.push(completion);
+    acting.push(...running);
   });
   if (script.uiAction !== undefined) {
     const action = script.uiAction;
@@ -1630,17 +2179,33 @@ export function runMockAgent(
     if (!(await play(acting))) return;
     // Chunked as it streams rather than when scripted: a refused write has
     // rewritten the reply by now.
+    // M91.4: a stamped script ends as Rust's fold ends a turn, its result
+    // before its end, which names the line a branch starts from; its result
+    // counts how long the run worked on the run's own clock (M92.2).
+    const result: Step = () =>
+      emit({
+        kind: 'Result',
+        text: reply,
+        session_id: sessionId,
+        ...(script.stamped === true ? { duration_ms: elapsed } : {}),
+      });
+    const ended: Step = () =>
+      emit({
+        kind: 'TurnEnded',
+        stop_reason: 'end_turn',
+        ...(script.stamped === true ? { last_uuid: crypto.randomUUID() } : {}),
+      });
     await play([
+      ...(script.answerThinking === undefined ? [] : think(script.answerThinking, 'msg_mock')),
       ...chunk(reply).map(
         (piece): Step =>
           () =>
             emit({ kind: 'TextDelta', text: piece }),
       ),
       // The whole message and the turn's end, as the fold reads them off the
-      // CLI's assistant line and result (M56.3), before the result itself.
-      () => emit({ kind: 'Text', message_id: 'msg_mock', text: reply }),
-      () => emit({ kind: 'TurnEnded', stop_reason: 'end_turn' }),
-      () => emit({ kind: 'Result', text: reply, session_id: sessionId }),
+      // CLI's assistant line and result (M56.3).
+      () => emit({ kind: 'Text', message_id: 'msg_mock', text: reply, ...at(500) }),
+      ...(script.stamped === true ? [result, ended] : [ended, result]),
       () => emit({ kind: 'Done' }),
     ]);
   })();

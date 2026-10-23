@@ -103,7 +103,7 @@ function CoverTile({
       data-testid="gallery-cover"
       data-cover={cover?.value ?? ''}
       data-fit={fit ? 'contain' : 'cover'}
-      style={{ height }}
+      style={{ aspectRatio: '16 / 9' }}
       className="relative flex flex-col items-center justify-center gap-1 overflow-hidden rounded-t-lg border-b border-n-100 bg-n-50"
     >
       {cover === null ? (
@@ -195,7 +195,7 @@ function GalleryCard({
       data-testid="gallery-card"
       data-path={entry.path}
       onClick={() => openPath(entry.path)}
-      className="flex w-full cursor-pointer flex-col overflow-hidden rounded-lg border border-n-200 bg-n-0 p-0 text-left shadow-[var(--shadow-xs)] hover:border-n-300 hover:shadow-[var(--shadow-sm)] focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+      className="cb-card-lift flex h-full w-full cursor-pointer flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0 p-0 text-left hover:border-n-300 hover:shadow-[var(--shadow-sm)] focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
     >
       {gallery?.cover !== undefined && (
         <CoverTile
@@ -206,12 +206,12 @@ function GalleryCard({
           fit={gallery.fit === true}
         />
       )}
-      <span className="flex min-w-0 flex-col gap-1.5 px-2.5 py-2">
-        <span className="truncate text-sm font-medium leading-[18px] text-n-900">
+      <span className="flex min-w-0 flex-1 flex-col gap-4 p-4">
+        <span className="line-clamp-2 text-[16px] leading-6 font-medium text-n-900 [overflow-wrap:anywhere]">
           {entry.title}
         </span>
         {chips.length > 0 && (
-          <span className="flex min-w-0 flex-col items-start gap-1">
+          <span className="mt-auto flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
             {chips.map((c) => (
               <FieldChip key={c.field} resolved={schema.resolveField(entry, c.field)} />
             ))}
@@ -239,8 +239,8 @@ function CardGrid({
   return (
     <div
       data-testid="gallery-grid"
-      className="grid items-start gap-2.5"
-      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${metrics.min}px, 1fr))` }}
+      className="grid items-stretch gap-4"
+      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${metrics.min}px), 1fr))` }}
     >
       {entries.map((e) => (
         <GalleryCard
@@ -331,16 +331,20 @@ export function GalleryView({
   // `presentation.cardSize`, the key the board already used. It was
   // `gallery.size` here, so one setting had two spellings and the settings
   // panel offered both of them to both card layouts (M16.29).
-  const size: CardSize = presentation.cardSize ?? 'medium';
-  const metrics = METRICS[size];
+  const size = presentation.cardSize;
+  const metrics = size === undefined ? { min: 260, cover: 146 } : METRICS[size];
   const bands = groupTree(entries, presentation.group, schema);
 
   return (
     <div
       data-testid="gallery-view"
-      data-card-size={size}
+      data-card-size={size ?? 'auto'}
       data-cover-field={presentation.gallery?.cover ?? ''}
-      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4"
+      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-0 p-4 @min-[720px]:px-6"
+      style={{
+        paddingBottom: 'max(16px, var(--assistant-scroll-clearance, 0px))',
+        scrollPaddingBottom: 'var(--assistant-scroll-clearance, 0px)',
+      }}
     >
       {entries.length === 0 ? (
         <EmptyState

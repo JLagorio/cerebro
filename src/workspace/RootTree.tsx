@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePageNavigationControls } from '@/app/PageNavigation';
+import { chevronClass, ROW_CONTROL } from '@/app/sidebarChrome';
 import { Icon } from '@/components/ui/Icon';
 import { gitBadgeText, syncNotice } from '@/engine/roots';
 import { selectActiveTab, useRootsStore } from '@/stores/rootsStore';
@@ -214,26 +215,33 @@ export function RootTree() {
                 }}
                 onKeyDown={onKeyDown(row, index)}
                 style={{ paddingLeft: `${row.depth * 12 + 6}px` }}
-                className={`flex w-full min-w-0 items-center gap-1 border-0 py-[3px] pr-2 text-left text-[13px] ${
-                  active ? 'bg-surface-selected text-cortex-700' : 'bg-transparent hover:bg-n-50'
+                // The open file wears the nav's selection, a neutral fill, as
+                // every other row the sidebar draws does; hover is the nav's
+                // n-100, since the old n-50 vanished on the navigation surface.
+                className={`motion-hover flex w-full min-w-0 items-center gap-1 border-0 py-[3px] pr-2 text-left text-[13px] ${
+                  active ? 'bg-n-200' : 'bg-transparent hover:bg-n-100'
                 } ${row.ignored ? 'opacity-50' : ''} ${row.isRoot ? 'font-semibold' : ''}`}
               >
                 {/* Directories keep a caret AS WELL as their glyph: the caret
                     says "this opens", the glyph says "this is a scripts
-                    folder". Collapsing them into one loses the affordance. */}
+                    folder". Collapsing them into one loses the affordance.
+                    The caret turns as the directory opens. */}
                 <span className="flex-none">
                   {row.isDir ? (
                     <Icon
-                      name={isOpen ? 'chevron-down' : 'chevron-right'}
+                      name="chevron-right"
                       size={12}
                       color="var(--n-400)"
+                      className={chevronClass(isOpen)}
                     />
                   ) : (
                     <span className="inline-block w-3" />
                   )}
                 </span>
                 <Icon name={look.icon} size={14} color={look.color ?? 'var(--n-500)'} />
-                <span className="min-w-0 truncate text-n-700">{row.label}</span>
+                <span className={`min-w-0 truncate ${active ? 'text-n-900' : 'text-n-700'}`}>
+                  {row.label}
+                </span>
                 {/* The last sync's answer is the control's own text, quiet
                     and never a toast: "auth failed" with the credential
                     hint in its title, "diverged", "nested". Clicking it
@@ -255,8 +263,8 @@ export function RootTree() {
                       // this control renders it from there.
                       void syncRoot(row.rootId);
                     }}
-                    className={`ml-auto flex-none rounded-sm px-1 text-2xs ${
-                      notice === null ? 'text-n-500 hover:bg-n-100' : 'text-n-300'
+                    className={`motion-hover ml-auto flex-none rounded-sm px-1 text-2xs ${
+                      notice === null ? `text-n-500 ${ROW_CONTROL}` : 'text-n-300'
                     }`}
                   >
                     {notice?.text ?? '\u21bb'}

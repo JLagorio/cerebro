@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 vi.mock('@/lib/ipc', { spy: true });
 
@@ -334,25 +336,17 @@ describe('undoStore (M60.7)', () => {
     expect(store.pushTrash('Moved “X” to Trash', VAULT, concept)).toBeNull();
     // Nothing on the knowledge surfaces or a proposal card reaches the stack
     // or labels a change undoable.
-    const sources = {
-      ...import.meta.glob('../knowledge/**/*.{ts,tsx}', {
-        query: '?raw',
-        import: 'default',
-        eager: true,
-      }),
-      ...import.meta.glob('../status/**/*.{ts,tsx}', {
-        query: '?raw',
-        import: 'default',
-        eager: true,
-      }),
-      ...import.meta.glob('../agent/ProposalCard.tsx', {
-        query: '?raw',
-        import: 'default',
-        eager: true,
-      }),
-    } as Record<string, string>;
-    expect(Object.keys(sources).length).toBeGreaterThan(3);
-    for (const [path, source] of Object.entries(sources)) {
+    // Filesystem reads preserve the audit without loading one-line ?raw
+    // transforms under the same coverage cache keys as executable modules.
+    const paths = ['knowledge', 'status'].flatMap((folder) =>
+      readdirSync(join(__dirname, '..', folder), { recursive: true, encoding: 'utf8' })
+        .filter((path) => /\.tsx?$/.test(path))
+        .map((path) => `../${folder}/${path.replaceAll('\\', '/')}`),
+    );
+    paths.push('../agent/ProposalCard.tsx');
+    expect(paths.length).toBeGreaterThan(3);
+    for (const path of paths) {
+      const source = readFileSync(join(__dirname, path), 'utf8');
       expect(source, path).not.toMatch(/undoStore|undoPlan|\bundo:\s/);
     }
   });

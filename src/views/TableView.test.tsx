@@ -102,6 +102,100 @@ it('counts a record in two value bands once in the table footer (M61.1)', () => 
   expect(screen.getByTestId('table-footer').textContent).toContain('1');
 });
 
+describe('table reading hierarchy', () => {
+  function readingGrid(onCreate = vi.fn().mockResolvedValue(true), hideEmpty?: boolean) {
+    const entries = fixtureVault();
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    const onPresentationChange = vi.fn();
+    render(
+      <TableView
+        entries={entries.filter((entry) => entry.type === 'Work item')}
+        allEntries={entries}
+        presentation={{ ...presentation, group: [{ field: 'status', dir: 'desc', hideEmpty }] }}
+        schema={schema}
+        fields={schema.types.get('Work item')!.fields}
+        sourceType="Work item"
+        scope="reading-hierarchy"
+        onCreate={onCreate}
+        onPresentationChange={onPresentationChange}
+      />,
+    );
+    return { onCreate, onPresentationChange };
+  }
+
+  it('folds only empty band scaffolding and restores configured order without a write', async () => {
+    const user = userEvent.setup();
+    const { onPresentationChange } = readingGrid();
+    const labels = () =>
+      screen.getAllByTestId('table-group-header').map((node) =>
+        within(node)
+          .getByRole('button', { name: /^(Collapse|Expand) / })
+          .getAttribute('aria-label'),
+      );
+    expect(labels()).toEqual(['Collapse Doing', 'Collapse Todo']);
+    expect(screen.getAllByTestId('table-row')).toHaveLength(2);
+    expect(screen.queryByTestId('quick-add')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Show empty groups (1)' }));
+    expect(labels()).toEqual(['Collapse Done', 'Collapse Doing', 'Collapse Todo']);
+    expect(screen.getAllByTestId('table-row')).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: 'Hide empty groups (1)' }));
+    expect(labels()).toEqual(['Collapse Doing', 'Collapse Todo']);
+    expect(onPresentationChange).not.toHaveBeenCalled();
+  });
+
+  it('honors an explicit hide-empty configuration without inventing a hidden-groups notice', () => {
+    readingGrid(undefined, true);
+    expect(screen.queryByTestId('table-empty-groups')).toBeNull();
+  });
+
+  it('opens a group draft directly, keeps a refused draft, and retries the same inherited value', async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    readingGrid(onCreate);
+    await user.click(screen.getByRole('button', { name: 'New record in Todo' }));
+    const input = screen.getByRole('textbox', { name: 'New record in Todo' });
+    expect(document.activeElement).toBe(input);
+    await user.type(input, 'Keep this task');
+    await user.keyboard('{Enter}');
+    expect(input).toHaveProperty('value', 'Keep this task');
+    await user.keyboard('{Enter}');
+    expect(onCreate).toHaveBeenNthCalledWith(2, 'Keep this task', {
+      groupBy: 'status',
+      groupValue: 'todo',
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('textbox', { name: 'New record in Todo' })).toBeNull(),
+    );
+    expect(document.activeElement).toBe(screen.getByTestId('table-view'));
+  });
+
+  it('omits redundant homogeneous type glyphs while keeping a named opener in every row', () => {
+    readingGrid();
+    for (const row of screen.getAllByTestId('table-row')) {
+      expect(row.querySelector('[data-icon="circle-check"]')).toBeNull();
+      expect(within(row).getByRole('button', { name: /^Open / })).toBeTruthy();
+    }
+  });
+
+  it('does not steal focus from another group draft when a delayed create completes', async () => {
+    const user = userEvent.setup();
+    let complete!: (ok: boolean) => void;
+    const onCreate = vi.fn(() => new Promise<boolean>((resolve) => (complete = resolve)));
+    readingGrid(onCreate);
+    await user.click(screen.getByRole('button', { name: 'New record in Todo' }));
+    await user.type(screen.getByRole('textbox', { name: 'New record in Todo' }), 'First draft');
+    await user.keyboard('{Enter}');
+    await user.click(screen.getByRole('button', { name: 'New record in Doing' }));
+    const next = screen.getByRole('textbox', { name: 'New record in Doing' });
+    await user.type(next, 'Second draft');
+    await act(async () => complete(true));
+    expect(screen.queryByRole('textbox', { name: 'New record in Todo' })).toBeNull();
+    expect(next).toHaveProperty('value', 'Second draft');
+    expect(document.activeElement).toBe(next);
+  });
+});
+
 /**
  * Keyboard reachability of the grid (M15).
  *
@@ -195,6 +289,38 @@ describe('TableView column resizing (M11)', () => {
     return { onColumnsChange, onPresentationChange };
   }
 
+  it('keeps saved widths while unsized columns yield only to their readable floor', () => {
+    const clientWidth = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600);
+    try {
+      const entries = fixtureVault();
+      const schema = buildSchema(entries);
+      const onPresentationChange = vi.fn();
+      const onColumnsChange = vi.fn();
+      render(
+        <TableView
+          entries={entries.filter((entry) => entry.type === 'Work item')}
+          presentation={{
+            ...presentation,
+            titleWidth: 260,
+            columns: [{ field: 'status', width: 222 }, { field: 'priority' }],
+          }}
+          schema={schema}
+          fields={schema.types.get('Work item')!.fields}
+          onColumnsChange={onColumnsChange}
+          onPresentationChange={onPresentationChange}
+        />,
+      );
+      const widths = (screen.getByRole('grid').firstElementChild as HTMLElement).style;
+      expect(widths.getPropertyValue('--cb-cw-title')).toBe('260px');
+      expect(widths.getPropertyValue('--cb-cw-0')).toBe('222px');
+      expect(widths.getPropertyValue('--cb-cw-1')).toBe('128px');
+      expect(onPresentationChange).not.toHaveBeenCalled();
+      expect(onColumnsChange).not.toHaveBeenCalled();
+    } finally {
+      clientWidth.mockRestore();
+    }
+  });
+
   // jsdom has no PointerEvent, and testing-library's `pointerDown` helper then
   // falls back to a bare Event, which silently drops clientX. Dispatching a
   // MouseEvent named `pointerdown` reaches the same listener with coordinates
@@ -238,9 +364,9 @@ describe('TableView column resizing (M11)', () => {
 
   it('resizes the name column, which nothing could resize before', () => {
     const { onPresentationChange } = grid();
-    drag(screen.getByLabelText('Resize Name column'), 280, 380);
+    drag(screen.getByLabelText('Resize Name column'), 320, 420);
     expect(onPresentationChange).toHaveBeenCalledTimes(1);
-    expect(onPresentationChange.mock.calls[0][0].titleWidth).toBe(380);
+    expect(onPresentationChange.mock.calls[0][0].titleWidth).toBe(420);
   });
 
   /**
@@ -643,6 +769,31 @@ describe('TableView row gutter (M16.16)', () => {
     expect(screen.getByTestId('bulk-bar').getAttribute('aria-label')).toBe('3 selected');
   });
 
+  it('memoized row handlers use the latest order when extending a selection', () => {
+    const items = ['One', 'Two', 'Three', 'Four'].map((title, index) =>
+      makeEntry({ path: `records/memo-${index}.md`, title, type: 'Work item' }),
+    );
+    const entries = [...fixtureVault(), ...items];
+    const schema = buildSchema(entries);
+    const view = (rows: Entry[]) => (
+      <TableView
+        entries={rows}
+        presentation={{ ...presentation, sort: [] }}
+        schema={schema}
+        fields={schema.types.get('Work item')!.fields}
+      />
+    );
+    const { rerender } = render(view(items));
+    rerender(view([...items].reverse()));
+    fireEvent.click(screen.getByLabelText('Select Four'));
+    fireEvent.click(screen.getByLabelText('Select Two'), { shiftKey: true });
+    expect(screen.getByTestId('bulk-bar').getAttribute('aria-label')).toBe('3 selected');
+    expect((screen.getByLabelText('Select Four') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('Select Three') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('Select Two') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('Select One') as HTMLInputElement).checked).toBe(false);
+  });
+
   it('copies one filename-stem link per selected row', async () => {
     const user = userEvent.setup();
     const { items } = grid();
@@ -796,7 +947,8 @@ describe('TableView row gutter (M16.16)', () => {
     const user = userEvent.setup();
     const onCreate = vi.fn().mockResolvedValue(true);
     grid({ onCreate });
-    await user.click(screen.getAllByTestId('row-insert')[0]);
+    await user.click(screen.getAllByTestId('row-menu')[0]);
+    await user.click(screen.getByTestId('row-insert'));
     const input = screen.getByLabelText('New record title');
     await user.type(input, 'Fresh work');
     await user.keyboard('{Enter}');
@@ -1111,7 +1263,7 @@ describe('TableView header settings (M16.18)', () => {
 
   // M19.4: the "+" used to open a menu whose only creation command was "New
   // property", which opened this panel — a click spent on an indirection,
-  // while the detail panel's own "+ Add property" had always gone straight to
+  // while the detail panel's own "Add property" had always gone straight to
   // the same surface.
   it('the "+" opens the property panel itself, not a menu that opens it', async () => {
     const user = userEvent.setup();
@@ -1145,7 +1297,7 @@ describe('TableView header settings (M16.18)', () => {
 
   it('defaults its rows to the default height', () => {
     grid();
-    expect(screen.getAllByTestId('table-row')[0].className).toContain('h-9');
+    expect(screen.getAllByTestId('table-row')[0].className).toContain('h-11');
   });
 
   it('renders the stored row height instead of ignoring it', () => {
@@ -1269,6 +1421,175 @@ describe('TableView name cell and cell hit target (M19.2, M19.3)', () => {
 
     expect(setTitle).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('Title')).toBeNull();
+  });
+
+  it('keeps a refused title draft, coalesces Enter and blur, and retries one write', async () => {
+    let finish: (ok: boolean) => void = () => {};
+    const setTitle = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockResolvedValue(true);
+    useVaultStore.setState({ setTitle });
+    const { items } = setup();
+    fireEvent.click(screen.getByRole('button', { name: items[0].title }));
+    const input = screen.getByLabelText('Title') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '  Keep this exact draft  ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.blur(input);
+    expect(setTitle).toHaveBeenCalledTimes(1);
+    await act(async () => finish(false));
+    expect(input.value).toBe('  Keep this exact draft  ');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(document.getElementById(input.getAttribute('aria-describedby')!)?.textContent).toContain(
+      'Your draft is kept',
+    );
+    fireEvent.blur(input);
+    expect(setTitle).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(screen.queryByLabelText('Title')).toBeNull());
+    expect(setTitle).toHaveBeenCalledTimes(2);
+    expect(setTitle).toHaveBeenLastCalledWith(items[0].path, 'Keep this exact draft');
+  });
+
+  it('a delayed title refusal does not steal focus from another control', async () => {
+    let finish!: (ok: boolean) => void;
+    useVaultStore.setState({
+      setTitle: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    });
+    const { items } = setup();
+    fireEvent.click(screen.getByRole('button', { name: items[0].title }));
+    const input = screen.getByLabelText('Title');
+    fireEvent.change(input, { target: { value: 'Keep this draft' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    const other = screen.getByTestId('select-all');
+    act(() => other.focus());
+    await act(async () => finish(false));
+    expect(document.activeElement).toBe(other);
+    expect((input as HTMLInputElement).value).toBe('Keep this draft');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('holds an active title through filtering and a replaced schema, then reconciles on cancel', () => {
+    const entries = fixtureVault();
+    const items = entries.filter((entry) => entry.type === 'Work item');
+    const schema = buildSchema(entries);
+    const fields = schema.types.get('Work item')!.fields;
+    const { rerender } = render(
+      <TableView
+        entries={items}
+        allEntries={entries}
+        presentation={presentation}
+        schema={schema}
+        fields={fields}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: items[0].title }));
+    const input = screen.getByLabelText('Title');
+    fireEvent.change(input, { target: { value: 'Recoverable draft' } });
+    rerender(
+      <TableView
+        entries={items.slice(1).reverse()}
+        allEntries={entries}
+        presentation={presentation}
+        schema={buildSchema(entries)}
+        fields={[...fields]}
+      />,
+    );
+    expect(screen.getByLabelText('Title')).toBe(input);
+    expect((input as HTMLInputElement).value).toBe('Recoverable draft');
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByLabelText(`Open ${items[0].title}`)).toBeNull();
+    expect(useUiStore.getState().toasts.at(-1)?.message).toContain('no longer in this view');
+  });
+
+  it('moving the cursor does not re-resolve unrelated records', () => {
+    const entries = fixtureVault();
+    const items = entries.filter((entry) => entry.type === 'Work item');
+    const schema = buildSchema(entries);
+    const resolve = vi.spyOn(schema, 'resolveField');
+    render(
+      <TableView
+        entries={items}
+        presentation={presentation}
+        schema={schema}
+        fields={schema.types.get('Work item')!.fields}
+      />,
+    );
+    const grid = screen.getByRole('grid');
+    fireEvent.focus(grid);
+    resolve.mockClear();
+    fireEvent.keyDown(grid, { key: 'ArrowDown' });
+    expect(screen.getAllByTestId('table-row')[1].getAttribute('data-focused')).toBe('true');
+    const touched = new Set(resolve.mock.calls.map(([entry]) => entry.path));
+    expect(touched.size).toBeGreaterThan(0);
+    expect([...touched].every((path) => path === items[0].path || path === items[1].path)).toBe(
+      true,
+    );
+  });
+
+  it('closing one duplicate membership editor does not release another draft', async () => {
+    const type = makeEntry({
+      path: 'types/item.md',
+      type: 'Type',
+      title: 'Item',
+      properties: {
+        fields: { tags: { kind: 'multiselect', options: [{ id: 'a' }, { id: 'b' }] } },
+      } as unknown as Entry['properties'],
+    });
+    const item = makeEntry({
+      path: 'items/shared.md',
+      type: 'Item',
+      title: 'Shared record',
+      properties: { tags: ['a', 'b'] },
+    });
+    const entries = [type, item];
+    const schema = buildSchema(entries);
+    const view: Presentation = { type: 'table', group: [{ field: 'tags' }], sort: [], columns: [] };
+    const setTitle = vi.fn().mockResolvedValue(false);
+    useVaultStore.setState({ entries, setTitle });
+    const props = {
+      presentation: view,
+      schema,
+      fields: schema.types.get('Item')!.fields,
+      allEntries: entries,
+    };
+    const { rerender } = render(<TableView {...props} entries={[item]} />);
+    fireEvent.click(screen.getAllByRole('button', { name: item.title })[0]);
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'First draft' } });
+    fireEvent.keyDown(screen.getByLabelText('Title'), { key: 'Enter' });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Title').getAttribute('aria-invalid')).toBe('true'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: item.title }));
+    const first = screen.getAllByLabelText('Title')[0];
+    fireEvent.keyDown(screen.getAllByLabelText('Title')[1], { key: 'Escape' });
+    rerender(<TableView {...props} entries={[]} />);
+    expect(screen.getByLabelText('Title')).toBe(first);
+    expect((first as HTMLInputElement).value).toBe('First draft');
+    fireEvent.keyDown(first, { key: 'Escape' });
+    expect(screen.queryByLabelText('Title')).toBeNull();
+    expect(screen.queryAllByTestId('table-row')).toHaveLength(0);
+  });
+
+  it('leaving an unchanged title closes quietly without a write', async () => {
+    const setTitle = vi.fn();
+    useVaultStore.setState({ setTitle });
+    const { items } = setup();
+    fireEvent.click(screen.getByRole('button', { name: items[0].title }));
+    await act(async () => fireEvent.blur(screen.getByLabelText('Title')));
+    expect(screen.queryByLabelText('Title')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(setTitle).not.toHaveBeenCalled();
   });
 
   it('the open affordance is a real focusable control, not a hidden glyph', () => {
@@ -1576,10 +1897,14 @@ describe('TableView nested rows of a foreign type (M20.1)', () => {
    * forward descent the child cannot express at all; until that exists,
    * offering nothing beats offering the wrong thing.
    */
-  it('offers no insert affordance on a nested row', () => {
+  it('offers no insert affordance on a nested row', async () => {
+    const user = userEvent.setup();
     const { parent, child } = okrGrid();
-    expect(parent.querySelector('[data-testid="row-insert"]')).not.toBeNull();
-    expect(child.querySelector('[data-testid="row-insert"]')).toBeNull();
+    await user.click(within(parent).getByTestId('row-menu'));
+    expect(screen.getByTestId('row-insert')).toBeTruthy();
+    await user.keyboard('{Escape}');
+    await user.click(within(child).getByTestId('row-menu'));
+    expect(screen.queryByTestId('row-insert')).toBeNull();
   });
 });
 

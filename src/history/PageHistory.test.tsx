@@ -23,13 +23,20 @@ import { commitRuns, getFileHistory } from '@/lib/gitIpc';
 import { pageAttribution } from '@/lib/ipc';
 import { failNext, resetFaults } from '@/lib/mockFaults';
 import { resetMockGit, seedGitHistory, type SeedCommit } from '@/lib/mockGit';
-import { __seedActivity, __seedConceptHistory, resetMockFs, saveNote } from '@/lib/mockIpc';
+import { demoFleetDetails, demoFleetRuns } from '@/lib/demoOperational';
+import {
+  __seedActivity,
+  __seedConceptHistory,
+  __seedFleet,
+  resetMockFs,
+  saveNote,
+} from '@/lib/mockIpc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { PAGE_HISTORY_KEEP, PAGE_HISTORY_WORDS, PageHistory } from './PageHistory';
 
 /**
- * A page's History tab (M64.2b), over the browser mock: the demo's rows,
+ * A page's History panel (M64.2b), over the browser mock: the demo's rows,
  * versions staged in the mock repository, and the seeded Knowledge lane.
  */
 
@@ -157,6 +164,23 @@ describe('PageHistory', () => {
         'Knowledge agent wrote it ·',
       );
     });
+  });
+
+  it('draws a run as a trace line that says how it ended before it (M91.14)', async () => {
+    __seedFleet(
+      demoFleetRuns().map((run) =>
+        run.run_id === 'run-ingest-2' ? { ...run, outcome: 'failed' } : run,
+      ),
+      demoFleetDetails(),
+    );
+    // With no ledger to stand in for them, the concept's runs are its rows.
+    __seedConceptHistory(CUTOVER, null);
+    render(<PageHistory path={CUTOVER} />);
+    const run = await within(await history()).findByTestId('history-run');
+    expect(run.textContent).toMatch(/^Failed: Knowledge agent wrote it ·/);
+    expect(run.querySelector('[data-slot="trace-line"]')?.getAttribute('data-status')).toBe(
+      'error',
+    );
   });
 
   it("lists a concept's ledger events in place of its file's writes", async () => {

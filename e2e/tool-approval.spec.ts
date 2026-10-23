@@ -204,8 +204,10 @@ test('tool approval: Web access gates WebFetch, and the switch survives a reload
   await chooseSettingsSection(page, 'Assistant');
   await expect(page.getByRole('switch', { name: 'Web access' })).toBeChecked();
 
-  // The panel was open before the reload, and it remembers that.
+  // The panel was open before the reload, and it remembers that: it rests on
+  // its round button, which opens the same conversation.
   await expect(page.getByTestId('ai-panel')).toBeVisible();
+  await page.getByTestId('ai-panel-fab').click();
   await send(page, 'fetch "https://example.com"');
   await expect(replies(page, 'I fetched https://example.com.')).toHaveCount(1, {
     timeout: 10_000,

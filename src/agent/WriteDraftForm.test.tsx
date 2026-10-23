@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DRAFT_COPY, WriteDraftForm } from '@/agent/WriteDraftForm';
 import { toolSchema } from '@/lib/policy/tools';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 
 /**
  * The editable draft (M57.4b): the form projected from create_note's schema,
@@ -31,7 +32,9 @@ describe('WriteDraftForm', () => {
     expect(field('folder').value).toBe('records/risks');
     expect(field('slug').value).toBe('vendor-delay');
     expect(field('body').value).toBe('# Vendor delay\n');
-    expect(screen.queryAllByRole('button')).toEqual([]);
+    // The one button is if_exists's select, a field: no act is the form's.
+    expect(screen.getAllByRole('button')).toEqual([field('if_exists')]);
+    expect(field('if_exists').getAttribute('aria-haspopup')).toBe('listbox');
     expect(screen.getByLabelText(/^slug/)).toBe(field('slug'));
   });
 
@@ -113,7 +116,11 @@ describe('WriteDraftForm', () => {
     };
     const onChange = form({ count: 2 }, schema);
     expect((field('done') as HTMLInputElement).type).toBe('checkbox');
-    expect(screen.getByTestId('write-draft-field-size').tagName).toBe('SELECT');
+    // The design system's select: a listbox button, never a native <select>.
+    const size = screen.getByTestId('write-draft-field-size');
+    expect(size.getAttribute('aria-haspopup')).toBe('listbox');
+    expect(screen.getByRole('button', { name: 'size' })).toBe(size);
+    expect(optionLabels(size)).toEqual(['—', 's', 'm']);
     fireEvent.click(field('done'));
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ input: { count: 2, done: true }, valid: true }),
@@ -122,12 +129,31 @@ describe('WriteDraftForm', () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ valid: false }));
     expect(field('count').getAttribute('aria-invalid')).toBe('true');
     fireEvent.change(field('count'), { target: { value: '3' } });
-    fireEvent.change(screen.getByTestId('write-draft-field-size'), { target: { value: 'm' } });
+    chooseOption(size, 'm');
     expect(onChange).toHaveBeenLastCalledWith({
       input: { count: 3, done: true, size: 'm' },
       valid: true,
       edited: true,
     });
+  });
+
+  it('a required choice has no none to pick, and a value off its list shows as asked', () => {
+    const schema = {
+      type: 'object',
+      properties: { size: { type: 'string', enum: ['s', 'm'] } },
+      required: ['size'],
+    };
+    form({}, schema);
+    const size = screen.getByTestId('write-draft-field-size');
+    // No value yet: the trigger says so, and the list holds only choices.
+    expect(size.textContent).toBe(DRAFT_COPY.none);
+    expect(optionLabels(size)).toEqual(['s', 'm']);
+    cleanup();
+    // Rust refuses it at the answer; the form shows it rather than hiding it.
+    form({ size: 'xl' }, schema);
+    const asked = screen.getByTestId('write-draft-field-size');
+    expect(asked.getAttribute('data-value')).toBe('xl');
+    expect(asked.textContent).toBe('xl');
   });
 
   it('shows the agent’s text as text, never markup', () => {

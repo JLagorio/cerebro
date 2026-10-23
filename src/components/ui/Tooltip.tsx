@@ -3,6 +3,9 @@ import { Keycaps } from './Keycaps';
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEscapeLayer } from '@/components/ui/Popover';
+import { useGhostOnUnmount } from './motion';
+import { tooltipsWarm, warmTooltips } from './tooltipWarmth';
+import { readPortalViewport, toPortalRect } from './portalGeometry';
 
 /**
  * A tooltip that shows up (M16.5).
@@ -96,7 +99,11 @@ export function Tooltip({
   const bubbleRef = useRef<HTMLDivElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const openRef = useRef(false);
+  openRef.current = open;
+  const [pos, setPos] = useState<{ left: number; top: number; side: 'top' | 'bottom' } | null>(
+    null,
+  );
 
   const cancel = useCallback(() => {
     if (timer.current !== null) clearTimeout(timer.current);
@@ -108,11 +115,13 @@ export function Tooltip({
   // the caller already passed. `currentTarget` is the element the handler is
   // bound to, which is exactly the anchor.
   const show = useCallback(
-    (e: { currentTarget: unknown }) => {
+    (e: { currentTarget: unknown; type?: string }) => {
       if (disabled || label === '') return;
       if (e.currentTarget instanceof HTMLElement) anchorRef.current = e.currentTarget;
       cancel();
-      timer.current = setTimeout(() => setOpen(true), delayMs);
+      // Warm only for the pointer (tooltipWarmth.ts): focus waits its delay.
+      const warm = e.type === 'pointerenter' && tooltipsWarm();
+      timer.current = setTimeout(() => setOpen(true), warm ? 0 : delayMs);
     },
     [cancel, delayMs, disabled, label],
   );
@@ -120,7 +129,11 @@ export function Tooltip({
   const hide = useCallback(
     (_e?: { currentTarget: unknown }) => {
       cancel();
+      if (openRef.current) warmTooltips();
       setOpen(false);
+      // Placed afresh next time, measured before it is drawn arriving (its
+      // entrance scales it), so it lands centred on its anchor.
+      setPos(null);
     },
     [cancel],
   );
@@ -141,20 +154,22 @@ export function Tooltip({
     const anchor = anchorRef.current;
     const bubble = bubbleRef.current;
     if (anchor === null || bubble === null) return;
-    const a = anchor.getBoundingClientRect();
-    const b = bubble.getBoundingClientRect();
+    const viewport = readPortalViewport();
+    const a = toPortalRect(anchor.getBoundingClientRect(), viewport.zoom);
+    const b = toPortalRect(bubble.getBoundingClientRect(), viewport.zoom);
     const above = a.top - GAP - b.height;
     const below = a.bottom + GAP;
     const wantAbove = side === 'top';
     const fitsAbove = above >= EDGE;
-    const fitsBelow = below + b.height <= window.innerHeight - EDGE;
+    const fitsBelow = below + b.height <= viewport.height - EDGE;
     const top = wantAbove ? (fitsAbove ? above : below) : fitsBelow ? below : above;
     setPos({
       left: Math.max(
         EDGE,
-        Math.min(a.left + a.width / 2 - b.width / 2, window.innerWidth - b.width - EDGE),
+        Math.min(a.left + a.width / 2 - b.width / 2, viewport.width - b.width - EDGE),
       ),
       top: Math.max(EDGE, top),
+      side: top === above ? 'top' : 'bottom',
     });
   }, [open, side]);
 
@@ -162,7 +177,7 @@ export function Tooltip({
 
   const child = children as React.ReactElement<Record<string, unknown>>;
   const childProps = child.props;
-  type Handler = (e: { currentTarget: unknown }) => void;
+  type Handler = (e: { currentTarget: unknown; type?: string }) => void;
   const chain =
     (own: Handler, theirs: unknown): Handler =>
     (e) => {
@@ -184,26 +199,48 @@ export function Tooltip({
         onBlur: chain(hide, childProps.onBlur),
         'aria-describedby': shown ? id : childProps['aria-describedby'],
       })}
-      {shown &&
-        createPortal(
-          <div
-            ref={bubbleRef}
-            id={id}
-            role="tooltip"
-            className="pointer-events-none fixed z-[1100] max-w-[260px] rounded-sm bg-n-900 px-2 py-1 text-xs leading-[1.4] text-n-0 shadow-[var(--shadow-lg)]"
-            style={
-              pos === null
-                ? { left: 0, top: 0, visibility: 'hidden' }
-                : { left: pos.left, top: pos.top }
-            }
-          >
-            <span className="inline-flex items-center gap-2">
-              {label}
-              {command !== undefined && <Keycaps command={command} className="text-n-200" />}
-            </span>
-          </div>,
-          document.body,
-        )}
+      {shown && (
+        <TooltipBubble id={id} label={label} command={command} pos={pos} bubbleRef={bubbleRef} />
+      )}
     </>
+  );
+}
+
+/**
+ * The bubble, its own component so it can leave a fading copy as it goes
+ * (components/ui/motion.ts) — the real one unmounts with its layer. Placed,
+ * it arrives from the anchor's side (`cb-tooltip`, index.css).
+ */
+function TooltipBubble({
+  id,
+  label,
+  command,
+  pos,
+  bubbleRef,
+}: {
+  id: string;
+  label: string;
+  command?: string;
+  pos: { left: number; top: number; side: 'top' | 'bottom' } | null;
+  bubbleRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  useGhostOnUnmount(bubbleRef, 'cb-tooltip-leave', { strip: ['cb-tooltip'] });
+  return createPortal(
+    <div
+      ref={bubbleRef}
+      id={id}
+      role="tooltip"
+      data-side={pos?.side}
+      className={`pointer-events-none fixed z-[1100] max-w-[260px] rounded-sm bg-n-900 px-2 py-1 text-xs leading-[1.4] text-n-0 shadow-[var(--shadow-lg)] ${pos === null ? '' : 'cb-tooltip'}`}
+      style={
+        pos === null ? { left: 0, top: 0, visibility: 'hidden' } : { left: pos.left, top: pos.top }
+      }
+    >
+      <span className="inline-flex items-center gap-2">
+        {label}
+        {command !== undefined && <Keycaps command={command} className="text-n-200" />}
+      </span>
+    </div>,
+    document.body,
   );
 }

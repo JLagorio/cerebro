@@ -4,7 +4,7 @@
 
 .cb-work-content {
   width: 100%;
-  max-width: 960px;
+  max-width: var(--surface-readable);
   margin-inline: auto;
   padding: var(--sp-4) 0 var(--sp-12);
 }
@@ -33,13 +33,14 @@
   align-items: center;
   gap: var(--sp-3);
   width: 100%;
-  min-height: 46px;
+  min-height: 48px;
   padding: var(--sp-2) var(--sp-3);
   border: 0;
   border-radius: var(--r-md);
   color: var(--n-800);
   background: transparent;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
   text-align: left;
 }
 
@@ -75,7 +76,7 @@
 .cb-library-controls,
 .cb-library-content {
   width: 100%;
-  max-width: 1120px;
+  max-width: var(--surface-broad);
   margin-inline: auto;
   padding-inline: var(--sp-8);
 }
@@ -91,16 +92,6 @@
   align-items: center;
   gap: var(--sp-3);
   padding-bottom: var(--sp-4);
-}
-
-.cb-library-controls .cb-seg {
-  border-radius: var(--r-full);
-  background: var(--surface-sunken);
-  padding: var(--sp-1);
-}
-
-.cb-library-controls .cb-seg button {
-  border-radius: var(--r-full);
 }
 
 .cb-library-content {
@@ -120,7 +111,7 @@
   flex-direction: column;
   border: 1px solid var(--n-200);
   border-radius: var(--r-xl);
-  background: var(--surface-board);
+  background: var(--surface-raised);
   transition:
     background-color var(--motion-hover),
     border-color var(--motion-hover);

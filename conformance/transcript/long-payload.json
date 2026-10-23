@@ -24,19 +24,22 @@
         {
           "kind": "Text",
           "message_id": "msg_000000000000000000000001",
-          "text": "Reading the notes and writing the concept."
+          "text": "Reading the notes and writing the concept.",
+          "at": "2026-07-28T12:00:05.000Z"
         },
         {
           "kind": "ToolStart",
           "tool_name": "mcp__cerebro__get_note",
           "tool_id": "toolu_000000000000000000000001",
-          "input": "{\"path\":\"records/churn-notes.md\"}"
+          "input": "{\"path\":\"records/churn-notes.md\"}",
+          "at": "2026-07-28T12:00:06.000Z"
         },
         {
           "kind": "ToolStart",
           "tool_name": "mcp__cerebro__write_concept",
           "tool_id": "toolu_000000000000000000000002",
-          "input": "{\"path\":\"knowledge/metrics/churn.md\",\"type\":\"Metric\",\"title\":\"Churn\",\"description\":\"How many paying accounts cancel each month.\",\"body\":\"# Churn\\n\\nMonthly churn is the share of paying accounts that cancel in a month. Monthly churn is the share of paying accounts that cancel in a month. Monthly chu…\"}"
+          "input": "{\"path\":\"knowledge/metrics/churn.md\",\"type\":\"Metric\",\"title\":\"Churn\",\"description\":\"How many paying accounts cancel each month.\",\"body\":\"# Churn\\n\\nMonthly churn is the share of paying accounts that cancel in a month. Monthly churn is the share of paying accounts that cancel in a month. Monthly chu…\"}",
+          "at": "2026-07-28T12:00:07.000Z"
         },
         {
           "kind": "ToolPayload",
@@ -50,7 +53,8 @@
           "kind": "ToolDone",
           "tool_id": "toolu_000000000000000000000001",
           "output": "1\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n2\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n3\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n4\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n5\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n6\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n7\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n8\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n9\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n10\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n11\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n12\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n13\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n14\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n15\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. …",
-          "is_error": false
+          "is_error": false,
+          "at": "2026-07-28T12:00:08.000Z"
         },
         {
           "kind": "ToolPayload",
@@ -64,7 +68,8 @@
           "kind": "ToolDone",
           "tool_id": "toolu_000000000000000000000002",
           "output": "Wrote knowledge/metrics/churn.md",
-          "is_error": false
+          "is_error": false,
+          "at": "2026-07-28T12:00:09.000Z"
         },
         {
           "kind": "TextDelta",
@@ -73,16 +78,19 @@
         {
           "kind": "Text",
           "message_id": "msg_000000000000000000000002",
-          "text": "Wrote the churn concept."
+          "text": "Wrote the churn concept.",
+          "at": "2026-07-28T12:00:10.000Z"
         },
         {
           "kind": "Result",
           "text": "Wrote the churn concept.",
-          "session_id": "00000000-0000-4000-8000-000000000008"
+          "session_id": "00000000-0000-4000-8000-000000000008",
+          "duration_ms": 2400
         },
         {
           "kind": "TurnEnded",
-          "stop_reason": "end_turn"
+          "stop_reason": "end_turn",
+          "last_uuid": "00000000-0000-4000-8000-000000000015"
         }
       ],
       "classes": {
@@ -105,7 +113,8 @@
     "events": [
       {
         "kind": "UserPrompt",
-        "text": "Read records/churn-notes.md and write it up as the churn concept."
+        "text": "Read records/churn-notes.md and write it up as the churn concept.",
+        "uuid": "00000000-0000-4000-8000-000000000008"
       },
       {
         "kind": "ModelChanged",
@@ -114,19 +123,22 @@
       {
         "kind": "Text",
         "message_id": "msg_000000000000000000000001",
-        "text": "Reading the notes and writing the concept."
+        "text": "Reading the notes and writing the concept.",
+        "at": "2026-07-28T12:00:05.000Z"
       },
       {
         "kind": "ToolStart",
         "tool_name": "mcp__cerebro__get_note",
         "tool_id": "toolu_000000000000000000000001",
-        "input": "{\"path\":\"records/churn-notes.md\"}"
+        "input": "{\"path\":\"records/churn-notes.md\"}",
+        "at": "2026-07-28T12:00:06.000Z"
       },
       {
         "kind": "ToolStart",
         "tool_name": "mcp__cerebro__write_concept",
         "tool_id": "toolu_000000000000000000000002",
-        "input": "{\"path\":\"knowledge/metrics/churn.md\",\"type\":\"Metric\",\"title\":\"Churn\",\"description\":\"How many paying accounts cancel each month.\",\"body\":\"# Churn\\n\\nMonthly churn is the share of paying accounts that cancel in a month. Monthly churn is the share of paying accounts that cancel in a month. Monthly chu…\"}"
+        "input": "{\"path\":\"knowledge/metrics/churn.md\",\"type\":\"Metric\",\"title\":\"Churn\",\"description\":\"How many paying accounts cancel each month.\",\"body\":\"# Churn\\n\\nMonthly churn is the share of paying accounts that cancel in a month. Monthly churn is the share of paying accounts that cancel in a month. Monthly chu…\"}",
+        "at": "2026-07-28T12:00:07.000Z"
       },
       {
         "kind": "ToolPayload",
@@ -140,7 +152,8 @@
         "kind": "ToolDone",
         "tool_id": "toolu_000000000000000000000001",
         "output": "1\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n2\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n3\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n4\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n5\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n6\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n7\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n8\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n9\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n10\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n11\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n12\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n13\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n14\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n15\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. …",
-        "is_error": false
+        "is_error": false,
+        "at": "2026-07-28T12:00:08.000Z"
       },
       {
         "kind": "ToolPayload",
@@ -154,15 +167,18 @@
         "kind": "ToolDone",
         "tool_id": "toolu_000000000000000000000002",
         "output": "Wrote knowledge/metrics/churn.md",
-        "is_error": false
+        "is_error": false,
+        "at": "2026-07-28T12:00:09.000Z"
       },
       {
         "kind": "Text",
         "message_id": "msg_000000000000000000000002",
-        "text": "Wrote the churn concept."
+        "text": "Wrote the churn concept.",
+        "at": "2026-07-28T12:00:10.000Z"
       },
       {
-        "kind": "TurnEnded"
+        "kind": "TurnEnded",
+        "last_uuid": "00000000-0000-4000-8000-000000000015"
       }
     ],
     "classes": {
@@ -228,7 +244,8 @@
           "text": "Wrote the churn concept."
         },
         {
-          "kind": "TurnEnded"
+          "kind": "TurnEnded",
+          "last_uuid": "00000000-0000-4000-8000-000000000015"
         }
       ]
     }

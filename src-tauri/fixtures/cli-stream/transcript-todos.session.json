@@ -1,0 +1,408 @@
+[
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "synthetic": "hand-shaped from Claude Code 2.1.250's measured shapes (M91.3a), not recorded: synthetic ids, and M91.R's live recording replaces it",
+    "timestamp": "2026-10-22T12:00:00.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "content": "Make a todo list for tidying the inbox, then work through it."
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-10-22T12:00:00.002Z",
+    "sessionId": "00000000-0000-4000-8000-000000009200"
+  },
+  {
+    "parentUuid": null,
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000009200003",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "Make a todo list for tidying the inbox, then work through it."
+    },
+    "permissionMode": "default",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000009200002",
+    "timestamp": "2026-10-22T12:00:00.005Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009200002",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009201",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "signature": "sig-9201"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009201",
+    "uuid": "00000000-0000-4000-8000-000009200101",
+    "timestamp": "2026-10-22T12:00:02.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009200101",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009201",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009201",
+          "name": "ToolSearch",
+          "input": {
+            "query": "select:TodoWrite",
+            "max_results": 1
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009201",
+    "uuid": "00000000-0000-4000-8000-000009200102",
+    "timestamp": "2026-10-22T12:00:02.200Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009200102",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009201",
+          "type": "tool_result",
+          "content": [
+            {
+              "type": "tool_reference",
+              "tool_name": "TodoWrite"
+            }
+          ]
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000009200103",
+    "timestamp": "2026-10-22T12:00:02.300Z",
+    "toolUseResult": {
+      "matches": ["TodoWrite"],
+      "query": "select:TodoWrite",
+      "total_deferred_tools": 16
+    },
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009200103",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009202",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "signature": "sig-9202"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009202",
+    "uuid": "00000000-0000-4000-8000-000009200104",
+    "timestamp": "2026-10-22T12:00:03.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009200104",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009202",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009202",
+          "name": "TodoWrite",
+          "input": {
+            "todos": [
+              {
+                "content": "List the inbox",
+                "status": "in_progress",
+                "activeForm": "Listing the inbox"
+              },
+              {
+                "content": "File each capture",
+                "status": "pending",
+                "activeForm": "Filing each capture"
+              }
+            ]
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009202",
+    "uuid": "00000000-0000-4000-8000-000009200105",
+    "timestamp": "2026-10-22T12:00:03.400Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009200105",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009202",
+          "type": "tool_result",
+          "content": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable"
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000009200106",
+    "timestamp": "2026-10-22T12:00:03.500Z",
+    "toolUseResult": {
+      "oldTodos": [],
+      "newTodos": [
+        {
+          "content": "List the inbox",
+          "status": "in_progress",
+          "activeForm": "Listing the inbox"
+        },
+        {
+          "content": "File each capture",
+          "status": "pending",
+          "activeForm": "Filing each capture"
+        }
+      ]
+    },
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009200106",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009203",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009203",
+          "name": "mcp__cerebro__list_inbox",
+          "input": {}
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009203",
+    "uuid": "00000000-0000-4000-8000-000009200107",
+    "timestamp": "2026-10-22T12:00:04.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009200107",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009203",
+          "type": "tool_result",
+          "content": "Two captures: inbox/call-vendor.md and inbox/book-venue.md."
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000009200108",
+    "timestamp": "2026-10-22T12:00:04.200Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009200108",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009204",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009204",
+          "name": "TodoWrite",
+          "input": {
+            "todos": [
+              {
+                "content": "List the inbox",
+                "status": "completed",
+                "activeForm": "Listing the inbox"
+              },
+              {
+                "content": "File each capture",
+                "status": "completed",
+                "activeForm": "Filing each capture"
+              }
+            ]
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009204",
+    "uuid": "00000000-0000-4000-8000-000009200109",
+    "timestamp": "2026-10-22T12:00:05.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009200109",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009204",
+          "type": "tool_result",
+          "content": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable"
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000009200110",
+    "timestamp": "2026-10-22T12:00:05.100Z",
+    "toolUseResult": {
+      "oldTodos": [
+        {
+          "content": "List the inbox",
+          "status": "in_progress",
+          "activeForm": "Listing the inbox"
+        },
+        {
+          "content": "File each capture",
+          "status": "pending",
+          "activeForm": "Filing each capture"
+        }
+      ],
+      "newTodos": [
+        {
+          "content": "List the inbox",
+          "status": "completed",
+          "activeForm": "Listing the inbox"
+        },
+        {
+          "content": "File each capture",
+          "status": "completed",
+          "activeForm": "Filing each capture"
+        }
+      ]
+    },
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009200110",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009205",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Both done: the inbox holds two captures, each filed."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009205",
+    "uuid": "00000000-0000-4000-8000-000009200111",
+    "timestamp": "2026-10-22T12:00:06.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009200",
+    "version": "2.1.250"
+  },
+  {
+    "type": "last-prompt",
+    "lastPrompt": "Make a todo list for tidying the inbox, then work through it.",
+    "leafUuid": "00000000-0000-4000-8000-000009200111",
+    "sessionId": "00000000-0000-4000-8000-000000009200"
+  }
+]

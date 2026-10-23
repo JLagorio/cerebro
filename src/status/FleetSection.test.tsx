@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeEntry } from '@/engine/testHelpers';
 import { localStamp } from '@/engine/whenText';
 import type { FleetRun, FleetRunDetail } from '@/lib/ipc';
+import { chooseOption } from '@/test/chooseOption';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { FleetSection } from './FleetSection';
@@ -240,9 +241,7 @@ describe('FleetSection', () => {
     render(<FleetSection />);
     await screen.findByTestId('fleet-row');
 
-    fireEvent.change(screen.getByTestId('fleet-filter-actor'), {
-      target: { value: 'process:weekly-digest' },
-    });
+    chooseOption(screen.getByTestId('fleet-filter-actor'), { value: 'process:weekly-digest' });
 
     await waitFor(() =>
       expect(fleetRuns).toHaveBeenLastCalledWith(
@@ -294,9 +293,22 @@ describe('FleetSection', () => {
         expect.objectContaining({ actor: 'process:weekly-digest' }),
       ),
     );
-    expect((screen.getByTestId('fleet-filter-actor') as HTMLSelectElement).value).toBe(
+    expect(screen.getByTestId('fleet-filter-actor').getAttribute('data-value')).toBe(
       'process:weekly-digest',
     );
+  });
+
+  it('an agent the roster picked before it ever ran still names itself on the chip', async () => {
+    // Its runs are what offer an actor, and it has none: without its own row
+    // the chip would read blank while the list is filtered by it.
+    useVaultStore.setState({ entries: [digestAgent] });
+    fleetRuns.mockResolvedValue([]);
+    render(<FleetSection focusActor="process:weekly-digest" />);
+
+    await screen.findByTestId('section-empty');
+    const chip = screen.getByTestId('fleet-filter-actor');
+    expect(chip.getAttribute('data-value')).toBe('process:weekly-digest');
+    expect(chip.textContent).toBe('Weekly digest');
   });
   // --- One cast, one set of names (M52.3) -------------------------------------
 
@@ -332,9 +344,10 @@ describe('FleetSection', () => {
     render(<FleetSection />);
     await screen.findByTestId('fleet-row');
 
-    const options = [
-      ...(screen.getByTestId('fleet-filter-actor') as HTMLSelectElement).options,
-    ].map((o) => [o.value, o.textContent]);
+    fireEvent.click(screen.getByTestId('fleet-filter-actor'));
+    const options = within(screen.getByRole('listbox'))
+      .getAllByRole('option')
+      .map((o) => [o.getAttribute('data-value'), o.textContent]);
     // Every construct is offered before it has run, so "has ingest run at
     // all?" is answered with a no rather than by a missing option.
     expect(options).toEqual([
@@ -386,6 +399,82 @@ describe('FleetSection', () => {
     expect(row.getAttribute('data-code')).toBe('write_outside_scope');
     expect(row.textContent).toContain('create_note · write outside scope — This run is scoped');
     expect(screen.getByTestId('run-detail-model').textContent).toBe('claude-opus-5');
+  });
+
+  // --- Runs as trace lines (M91.14) -----------------------------------------
+
+  it('stands a hop under the run that caused it, and a hop whose parent is not listed alone', async () => {
+    fleetRuns.mockResolvedValue([
+      run({ run_id: 'hop', actor: 'process:knowledge', parent_run_id: 'root' }),
+      run({ run_id: 'other' }),
+      run({ run_id: 'root' }),
+      run({ run_id: 'orphan', parent_run_id: 'filtered-out' }),
+    ]);
+    render(<FleetSection />);
+    const rows = await screen.findAllByTestId('fleet-row');
+    // Newest first, the hop under its run rather than where its start put it.
+    expect(rows.map((row) => row.getAttribute('data-run'))).toEqual([
+      'other',
+      'root',
+      'hop',
+      'orphan',
+    ]);
+    expect(rows[2].closest('[data-hops]')?.getAttribute('data-hops')).toBe('root');
+    for (const root of [rows[0], rows[1], rows[3]]) expect(root.closest('[data-hops]')).toBeNull();
+    // A hop still opens its own run.
+    fireEvent.click(rows[2]);
+    await waitFor(() => expect(fleetRunDetail).toHaveBeenCalledWith('hop'));
+  });
+
+  it("says each run's state in a word before its name, and lights a run still going", async () => {
+    fleetRuns.mockResolvedValue([
+      run({ run_id: 'live', outcome: 'running', ended_at: null }),
+      run({ run_id: 'quota', outcome: 'quota_failed' }),
+      run({ run_id: 'ok' }),
+    ]);
+    render(<FleetSection />);
+    const rows = await screen.findAllByTestId('fleet-row');
+    const line = (row: HTMLElement) => row.querySelector<HTMLElement>('[data-slot="trace-line"]')!;
+    expect(rows.map((row) => line(row).getAttribute('data-status'))).toEqual([
+      'running',
+      'error',
+      null,
+    ]);
+    // Read before the name: every line with a status says it.
+    expect(rows[0].textContent).toMatch(/^Running: /);
+    expect(rows[1].textContent).toMatch(/^Quota failed: /);
+    expect(rows[2].querySelector('.sr-only')).toBeNull();
+    expect(within(rows[1]).getByTestId('fleet-outcome').textContent).toBe('quota failed');
+    expect(within(rows[0]).getByTestId('fleet-actor').className).toContain('cb-ai-shimmer');
+    expect(within(rows[2]).getByTestId('fleet-actor').className).not.toContain('cb-ai-shimmer');
+  });
+
+  it('says how long a run took only when both its ends were recorded', async () => {
+    fleetRuns.mockResolvedValue([
+      run({
+        run_id: 'timed',
+        started_at: '2026-07-28T10:00:00Z',
+        ended_at: '2026-07-28T10:04:00Z',
+      }),
+      run({ run_id: 'live', outcome: 'running', ended_at: null }),
+      run({
+        run_id: 'skewed',
+        started_at: '2026-07-28T10:00:00Z',
+        ended_at: '2026-07-28T09:59:00Z',
+      }),
+      // Closed by the sweep days later: its end is the sweep's, not the run's.
+      run({
+        run_id: 'abandoned',
+        outcome: 'abandoned_usage_unknown',
+        started_at: '2026-07-28T10:00:00Z',
+        ended_at: '2026-07-31T08:00:00Z',
+      }),
+    ]);
+    render(<FleetSection />);
+    const rows = await screen.findAllByTestId('fleet-row');
+    expect(rows.map((row) => within(row).queryByTestId('fleet-took')?.textContent ?? null)).toEqual(
+      ['4m', null, null, null],
+    );
   });
 
   it("says when a run started and ended on the reader's clock, the ISO a hover away", async () => {

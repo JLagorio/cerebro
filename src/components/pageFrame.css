@@ -1,0 +1,209 @@
+/* A page's frame (DocPage, the Inbox): its toolbar across the top, the page
+   under it, and, when one is open, the side panel as a column the page's
+   whole height on its right, its hairline from the top edge to the bottom
+   (owner, 2026-10-19: "should take up the entire right side just like in
+   Notion and be collapsible").
+
+   The toolbar's end sits over the panel's head, led by the panel's Close:
+   the page's actions stay where they were, and the panel opens under them.
+   So the panel's column is never narrower than they are (`min-content`),
+   and the page folds the panel into a drawer before the reading column
+   would give past its floor (shellLayout `pageAsides`). Docked, the page
+   gives the panel its column; as a drawer, the page keeps the full width
+   and the panel hangs below the toolbar over its right side, so anything
+   the drawer opens draws over the toolbar too, and the toolbar keeps its
+   row for the crumbs. */
+.cb-page-frame {
+  --page-toolbar-h: 64px;
+  position: relative;
+  display: grid;
+  /* Clipped, not hidden: a drawer arriving from beyond the right edge must
+     not make the pane scrollable, or a field focused inside it as it
+     arrives would scroll the whole page sideways after it. */
+  overflow: clip;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: var(--page-toolbar-h) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.cb-page-frame[data-panel='docked'] {
+  grid-template-columns:
+    minmax(var(--frame-main-min, 0px), 1fr)
+    minmax(min-content, var(--frame-panel-w, 300px));
+}
+
+/* The toolbar's two ends sit on the frame's two columns, over a docked
+   panel's head but never under it. A layer of its own, low enough that what
+   a panel opens (a picker, a popover) still draws over it. */
+.cb-page-frame > .cb-document-toolbar {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-area: 1 / 1 / 2 / -1;
+  grid-template-columns: subgrid;
+  gap: 0;
+  min-height: 0;
+  padding: 0;
+}
+
+.cb-page-frame > .cb-document-toolbar > .cb-document-start {
+  padding: 0 12px 0 20px;
+}
+
+.cb-page-frame > .cb-document-toolbar > .cb-document-end {
+  padding: 0 20px 0 0;
+}
+
+/* Open: Close leads, at the panel's own edge, and the actions keep the
+   corner they had. */
+.cb-page-frame[data-panel] > .cb-document-toolbar > .cb-document-end {
+  justify-content: space-between;
+  padding-left: 8px;
+}
+
+.cb-page-frame-body {
+  position: relative;
+  display: flex;
+  grid-area: 2 / 1 / 3 / -1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cb-page-frame[data-panel='docked'] > .cb-page-frame-body {
+  grid-column: 1;
+}
+
+/* The panel's head is the toolbar's end; what it holds starts under it. */
+.cb-page-frame > .cb-inspector {
+  grid-area: 1 / 2 / 3 / 3;
+  min-width: var(--frame-panel-min, 200px);
+  padding-top: var(--page-toolbar-h);
+}
+
+/* Arriving, the panel comes in from the edge it lives on; leaving, it goes
+   back that way, quicker (owner, 2026-10-19: "add more animations"), and
+   the page takes its column back once it has gone: the frame holds the
+   docked columns for a panel on its way out (`Presence`,
+   components/ui/motion.ts). Docked, it travels a short way and fades in
+   beside the page; as a drawer, it comes the whole way in over it. It
+   arrives once, as it mounts (`data-arrive`): folding from docked to a
+   drawer, or a pane shown again, replays nothing. While it travels it takes
+   no press, so nothing inside it opens a menu measured against a panel
+   still moving. Reduced motion lands it where it belongs at once. */
+.cb-page-frame > .cb-inspector[data-arrive] {
+  animation: cb-side-in var(--motion-enter) backwards;
+  pointer-events: none;
+}
+
+.cb-page-frame > .cb-inspector[data-state='closed'] {
+  animation: cb-side-out var(--motion-exit) forwards;
+  pointer-events: none;
+}
+
+.cb-page-frame > .cb-inspector[data-overlay][data-arrive] {
+  animation-name: cb-drawer-in;
+}
+
+.cb-page-frame > .cb-inspector[data-overlay][data-state='closed'] {
+  animation-name: cb-drawer-out;
+}
+
+.cb-page-frame:not([data-panel]):has(> .cb-inspector[data-state='closed']:not([data-overlay])) {
+  grid-template-columns:
+    minmax(var(--frame-main-min, 0px), 1fr)
+    minmax(min-content, var(--frame-panel-w, 300px));
+}
+
+.cb-page-frame:not([data-panel]):has(> .cb-inspector[data-state='closed']:not([data-overlay]))
+  > .cb-page-frame-body {
+  grid-column: 1;
+}
+
+@keyframes cb-side-in {
+  from {
+    opacity: 0;
+    translate: 24px 0;
+  }
+}
+
+@keyframes cb-side-out {
+  to {
+    opacity: 0;
+    translate: 16px 0;
+  }
+}
+
+@keyframes cb-drawer-in {
+  from {
+    translate: 100% 0;
+  }
+}
+
+@keyframes cb-drawer-out {
+  to {
+    translate: 100% 0;
+  }
+}
+
+/* Close arrives with the panel it closes, and points the way it will go. */
+.cb-page-frame > .cb-document-toolbar .cb-panel-close {
+  animation: cb-fade-in var(--motion-enter) backwards;
+}
+
+.cb-page-frame > .cb-document-toolbar .cb-panel-close > svg {
+  transition: translate var(--motion-pop);
+}
+
+.cb-page-frame > .cb-document-toolbar .cb-panel-close:hover > svg {
+  translate: 2px 0;
+}
+
+/* A page arriving in the column fades in: DocPage's column on each new
+   page, the Inbox's reader on each new capture, each alternating the two
+   turns (`usePageTurn`) so the fade plays again over the same editor.
+   Opacity alone: a transform here would hold the editor's fixed menus while
+   it played. */
+.cb-page-frame-body [data-page-turn='a'] {
+  animation: cb-page-arrive-a var(--motion-enter) backwards;
+}
+
+.cb-page-frame-body [data-page-turn='b'] {
+  animation: cb-page-arrive-b var(--motion-enter) backwards;
+}
+
+@keyframes cb-page-arrive-a {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes cb-page-arrive-b {
+  from {
+    opacity: 0;
+  }
+}
+
+/* A drawer is drawn over the page, which keeps its full width beneath it
+   (M52), from under the toolbar to the bottom. */
+.cb-page-frame > .cb-inspector[data-overlay] {
+  position: absolute;
+  top: var(--page-toolbar-h);
+  right: 0;
+  bottom: 0;
+  grid-area: auto;
+  width: min(var(--frame-panel-w, 300px), 85%);
+  padding-top: 0;
+  z-index: 20;
+}
+
+@container (max-width: 600px) {
+  .cb-page-frame > .cb-document-toolbar > .cb-document-start {
+    padding-left: 12px;
+    padding-right: 8px;
+  }
+
+  .cb-page-frame > .cb-document-toolbar > .cb-document-end {
+    padding-right: 12px;
+  }
+}

@@ -103,6 +103,27 @@ describe('RunList', () => {
     });
   });
 
+  it('draws a run under way as a running trace line, starting until its child exists', () => {
+    useUiStore.setState({
+      runs: [run(), run({ id: 'r2', owner: 'job', label: 'Beta plan', run: null, place: null })],
+    });
+    render(<RunList />);
+    fireEvent.click(screen.getByTestId('status-agent'));
+    const [chat, job] = screen.getAllByTestId('run-row');
+    for (const row of [chat, job]) {
+      const line = row.querySelector<HTMLElement>('[data-slot="trace-line"]')!;
+      expect(line.getAttribute('data-status')).toBe('running');
+      expect(line.querySelector('[data-slot="trace-title"]')!.className).toContain('cb-ai-shimmer');
+      // The row's own button first, then Stop, named for the run it stops.
+      const [open, stop] = within(row).getAllByRole('button');
+      expect(open.contains(line)).toBe(true);
+      expect(stop.getAttribute('data-testid')).toBe('run-stop');
+    }
+    expect(chat.textContent).toMatch(/^Running: what is at risk right now\?/);
+    expect(job.textContent).toMatch(/^Starting: Beta plan$/);
+    expect(within(job).getByTestId('run-stop').getAttribute('aria-label')).toBe('Stop Beta plan');
+  });
+
   it('takes you to the note a background job is reading', () => {
     useUiStore.setState({
       runs: [run({ owner: 'job', label: 'Beta plan', place: null, path: 'notes/beta.md' })],
@@ -219,6 +240,27 @@ describe('the run log (M17.15)', () => {
     const row = screen.getByTestId('run-log-row');
     expect(row.textContent).toContain('this device only');
     expect(screen.queryByTestId('run-log-link')).toBeNull();
+  });
+
+  it('says how each logged run ended in its line, before its name', () => {
+    for (const [id, status] of [
+      ['r-stopped', 'stopped'],
+      ['r-failed', 'failed'],
+      ['r-ok', 'ok'],
+    ] as const) {
+      useRunLogStore
+        .getState()
+        .append(entry({ id, status, ...(status === 'failed' ? { error: 'Quota hit' } : {}) }));
+    }
+    render(<RunList />);
+    fireEvent.click(screen.getByTestId('status-agent'));
+    const [ok, failed, stopped] = screen.getAllByTestId('run-log-row');
+    const status = (row: HTMLElement) =>
+      row.querySelector('[data-slot="trace-line"]')!.getAttribute('data-status');
+    expect([ok, failed, stopped].map(status)).toEqual([null, 'error', 'pending']);
+    expect(ok.textContent).toBe('Release scout' + 'Wrote nothing · schedule · this device only');
+    expect(failed.textContent).toMatch(/^Failed: Release scoutQuota hit/);
+    expect(stopped.textContent).toMatch(/^Stopped: Release scoutStopped/);
   });
 
   it('says "wrote nothing" rather than leaving a blank', () => {

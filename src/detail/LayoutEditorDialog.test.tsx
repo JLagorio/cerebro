@@ -14,6 +14,7 @@ import { resetLayers } from '@/components/ui/layers';
 import { DISPLAY_DEFAULTS, type FieldDef, type TypeDef } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { makeEntry } from '@/test/factories';
 
 const DOC = 'types/work-item.md';
@@ -594,19 +595,14 @@ describe('the inert preview canvas + record picker (M45.2 Task 4)', () => {
 
   it('the picker lists the roster by title, template excluded, first as default', () => {
     recordSetup();
-    const picker = screen.getByTestId('layout-preview-picker') as HTMLSelectElement;
-    const labels = within(picker)
-      .getAllByRole('option')
-      .map((o) => o.textContent);
-    expect(labels).toEqual(['Alpha record', 'Beta record']);
-    expect(picker.value).toBe('items/alpha.md');
+    const picker = screen.getByTestId('layout-preview-picker');
+    expect(optionLabels(picker)).toEqual(['Alpha record', 'Beta record']);
+    expect(picker.getAttribute('data-value')).toBe('items/alpha.md');
   });
 
-  it('switching the preview record re-renders the values', async () => {
-    const user = userEvent.setup();
+  it('switching the preview record re-renders the values', () => {
     recordSetup();
-    const picker = screen.getByTestId('layout-preview-picker');
-    await user.selectOptions(picker, 'items/beta.md');
+    chooseOption(screen.getByTestId('layout-preview-picker'), { value: 'items/beta.md' });
     const preview = within(screen.getByTestId('layout-preview'));
     expect(preview.queryByText('todo')).toBeNull();
     expect(preview.getByTestId('heading-strip').textContent).toContain('doing');
@@ -698,10 +694,9 @@ describe('the inert preview canvas + record picker (M45.2 Task 4)', () => {
     expect(preview().queryByTestId('heading-strip')).toBeNull();
   });
 
-  it('a picked record deleted mid-session falls back to the first by title', async () => {
-    const user = userEvent.setup();
+  it('a picked record deleted mid-session falls back to the first by title', () => {
     recordSetup();
-    await user.selectOptions(screen.getByTestId('layout-preview-picker'), 'items/beta.md');
+    chooseOption(screen.getByTestId('layout-preview-picker'), { value: 'items/beta.md' });
     const strip = () => within(screen.getByTestId('layout-preview')).getByTestId('heading-strip');
     expect(strip().textContent).toContain('doing');
 
@@ -709,8 +704,8 @@ describe('the inert preview canvas + record picker (M45.2 Task 4)', () => {
     act(() => {
       useVaultStore.setState({ entries: [typeDoc(), RECORDS[1], TEMPLATE] });
     });
-    const picker = screen.getByTestId('layout-preview-picker') as HTMLSelectElement;
-    expect(picker.value).toBe('items/alpha.md');
+    const picker = screen.getByTestId('layout-preview-picker');
+    expect(picker.getAttribute('data-value')).toBe('items/alpha.md');
     expect(strip().textContent).toContain('todo');
   });
 
@@ -1168,13 +1163,11 @@ describe('the live tab strip (M45.5 Task 2)', () => {
     fireEvent.click(screen.getByTestId('new-record-tab'));
     fireEvent.click(screen.getByTestId('new-tab-kind-view'));
     // A source storing no relation at the host offers no toggle…
-    fireEvent.change(screen.getByTestId('view-tab-source'), {
-      target: { value: 'type:Work item' },
-    });
+    chooseOption(screen.getByTestId('view-tab-source'), { value: 'type:Work item' });
     expect(screen.queryByRole('switch', { name: 'Only related to this record' })).toBeNull();
     // …and one that does offers it default-ON. Both answers come from
     // `hostType`, which only the canvas can supply.
-    fireEvent.change(screen.getByTestId('view-tab-source'), { target: { value: 'type:Task' } });
+    chooseOption(screen.getByTestId('view-tab-source'), { value: 'type:Task' });
     const toggle = screen.getByRole('switch', {
       name: 'Only related to this record',
     }) as HTMLInputElement;

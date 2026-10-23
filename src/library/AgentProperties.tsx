@@ -1213,10 +1213,10 @@ function TriggerRow({
           width={116}
           value={trigger.event ?? 'any'}
           ariaLabel={`Trigger ${index + 1} event`}
-          onChange={(e) =>
+          onChange={(event) =>
             onChange({
-              event: e.target.value === 'any' ? undefined : (e.target.value as Trigger['event']),
-              ...(e.target.value === 'assigned' ? { field: undefined, to: undefined } : {}),
+              event: event === 'any' ? undefined : (event as Trigger['event']),
+              ...(event === 'assigned' ? { field: undefined, to: undefined } : {}),
             })
           }
           options={[
@@ -1239,7 +1239,7 @@ function TriggerRow({
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-n-600">
-        <span className="w-9">in</span>
+        <span className="w-11 flex-none whitespace-nowrap">in</span>
         <Picker
           testId={`trigger-folder-${index}`}
           ariaLabel="Folder to watch"
@@ -1257,17 +1257,19 @@ function TriggerRow({
       {assigned ? (
         <div className="mt-2 flex flex-col gap-1.5 text-xs text-n-600">
           <div className="flex items-center gap-1.5">
-            <span className="w-9">via</span>
+            <span className="w-11 flex-none whitespace-nowrap">via</span>
+            {/* Anything but a declared Agent relation is a field Done refuses,
+                so it reads as the placeholder, never as a row; with no such
+                relation there is nothing to pick. */}
             <Select
               size="sm"
               width={200}
               value={trigger.field ?? ''}
               ariaLabel={`Trigger ${index + 1} field`}
-              onChange={(event) => onChange({ field: event.target.value, to: undefined })}
-              options={[
-                { value: '', label: 'Pick a field' },
-                ...agentFields.map(({ field, label }) => ({ value: field, label })),
-              ]}
+              placeholder="Pick a field"
+              disabled={agentFields.length === 0}
+              onChange={(field) => onChange({ field, to: undefined })}
+              options={agentFields.map(({ field, label }) => ({ value: field, label }))}
             />
           </div>
           {agentFields.length === 0 && (
@@ -1280,17 +1282,17 @@ function TriggerRow({
         </div>
       ) : (
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-n-600">
-          <span className="w-9">and its</span>
+          <span className="w-11 flex-none whitespace-nowrap">and its</span>
           <Select
             size="sm"
             width={150}
             value={trigger.field ?? ''}
             ariaLabel={`Trigger ${index + 1} field`}
-            onChange={(e) => onChange({ field: e.target.value, to: undefined })}
-            options={[
-              { value: '', label: 'any field' },
-              ...fields.map((f) => ({ value: f, label: f })),
-            ]}
+            onChange={(field) => onChange({ field, to: undefined })}
+            options={withHeld(
+              [{ value: '', label: 'any field' }, ...fields.map((f) => ({ value: f, label: f }))],
+              trigger.field,
+            )}
           />
           <span>became</span>
           {values.length > 0 ? (
@@ -1299,11 +1301,11 @@ function TriggerRow({
               width={150}
               value={trigger.to ?? ''}
               ariaLabel={`Trigger ${index + 1} value`}
-              onChange={(e) => onChange({ to: e.target.value })}
-              options={[
-                { value: '', label: 'any value' },
-                ...values.map((v) => ({ value: v, label: v })),
-              ]}
+              onChange={(to) => onChange({ to })}
+              options={withHeld(
+                [{ value: '', label: 'any value' }, ...values.map((v) => ({ value: v, label: v }))],
+                trigger.to,
+              )}
             />
           ) : (
             <input
@@ -1347,6 +1349,19 @@ function TriggerRow({
       </p>
     </div>
   );
+}
+
+/**
+ * The options, plus the value the trigger already holds when the vault no
+ * longer offers it — a field no record carries now, a value none holds — so
+ * the clause reads what the file says instead of a blank, or another choice.
+ */
+function withHeld(
+  options: { value: string; label: string }[],
+  held: string | undefined,
+): { value: string; label: string }[] {
+  if (held === undefined || held === '' || options.some((o) => o.value === held)) return options;
+  return [...options, { value: held, label: held }];
 }
 
 /**

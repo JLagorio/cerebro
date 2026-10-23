@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, showDatabases, openDestination } from './boot';
+import { boot, showDatabases, openDestination, showPageFolders } from './boot';
 
 async function offEditor(page: Page) {
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -66,6 +66,7 @@ test('Back drops a trashed visit and Forward returns to the live page', async ({
   await openPage(page, 'Systems map');
   await openPage(page, 'History temporary A');
   await openPage(page, 'How we schedule');
+  await showPageFolders(page);
   const row = page
     .getByTestId('file-tree')
     .locator('[data-testid="tree-row"][data-path="history-temporary-a.md"]');

@@ -4,7 +4,7 @@ import { resolveOptionColor } from '@/lib/swatch';
 
 /**
  * The table's anatomy, spelled once (M52.5): header row, header cells, row,
- * gutter, cell, the name cell, its title and its Open pill, a select's value
+ * gutter, cell, the name cell, its title and its Open action, a select's value
  * and the group band. `TableView` renders from these, and so does the one
  * table that is not a view of a type — Knowledge's concept
  * list (`knowledge/ConceptTable.tsx`), which the owner asked to look exactly
@@ -15,21 +15,33 @@ import { resolveOptionColor } from '@/lib/swatch';
  * behaviour around them — the cursor, the drag, the frozen run, the editors —
  * stays `TableView`'s own.
  */
+export const TABLE_HEADER_HEIGHT = 36;
+export const TABLE_GROUP_HEIGHT = 32;
+export const TABLE_NESTED_GROUP_HEIGHT = 28;
+
+/** Top-level groups keep their emphasis; deeper bands use a quieter rhythm. */
+export function tableGroupTop(depth: number): number {
+  return (
+    TABLE_HEADER_HEIGHT +
+    (depth === 0 ? 0 : TABLE_GROUP_HEIGHT + (depth - 1) * TABLE_NESTED_GROUP_HEIGHT)
+  );
+}
+
 export const TABLE_ANATOMY = {
-  headerRow: 'group/head sticky top-0 z-20 flex h-8 border-b border-n-200 bg-n-25',
+  headerRow: 'group/head sticky top-0 z-20 flex h-9 border-b border-n-100 bg-n-0',
   /** The name column's header: a step heavier than the rest, and opaque. */
   titleHeader:
-    'group/header flex flex-none items-center gap-1.5 border-r border-n-100 bg-n-25 px-3 text-xs font-semibold text-n-600',
+    'group/header flex flex-none items-center gap-1.5 border-r border-transparent bg-n-0 px-3 text-metadata font-medium text-n-500 hover:border-n-200',
   header:
-    'group/header flex flex-none items-center gap-1.5 border-r border-n-100 px-2 text-xs font-medium text-n-600',
+    'group/header flex flex-none items-center gap-1.5 border-r border-transparent px-3 text-metadata font-medium text-n-500 hover:border-n-200',
   row: 'group cb-row flex border-b border-n-100',
-  /** The cursor row. The --cortex-50 fill alone is 1.13:1 on white, so a
-   * left rule carries it. */
-  rowSelected: 'bg-cortex-50 shadow-[inset_2px_0_0_var(--cortex-500)]',
+  /** A neutral selection fill keeps content primary; the accent rule and
+   * cell cursor remain the explicit keyboard/selection indicators. */
+  rowSelected: 'bg-n-50 shadow-[inset_2px_0_0_var(--cortex-500)]',
   rowHover: 'hover:bg-n-25',
-  cell: 'flex flex-none overflow-hidden border-r border-n-100 px-2',
+  cell: 'flex flex-none overflow-hidden border-r border-transparent px-3',
   /** A read-only value, and the clamp that keeps it to one line. */
-  value: 'text-sm text-n-600',
+  value: 'text-ui text-n-600',
   oneLine: 'truncate whitespace-nowrap',
   /** Wrap content (M12.4b): a cell's text breaks onto as many lines as it
    * needs, and the row (`ROW_MIN_HEIGHT`) grows to hold them. A word too
@@ -37,37 +49,35 @@ export const TABLE_ANATOMY = {
   wrap: 'whitespace-normal [overflow-wrap:anywhere]',
   /** A wrapped value's cell: its lines start at the top, padded off the
    * row's rules. */
-  wrapCell: 'items-start py-1.5',
-  titleCell: 'flex flex-none items-center gap-1.5 border-r border-n-100 pr-3',
+  wrapCell: 'items-start py-2.5',
+  titleCell: 'flex flex-none items-center gap-2 border-r border-transparent pr-3',
   title:
-    'min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm text-n-900 focus-visible:rounded-sm focus-visible:shadow-[var(--ring)] focus-visible:outline-none',
-  /** The row's Open pill (M19.3). `cb-row-open` keeps it laid out and fades
+    'min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-ui font-medium text-n-900 focus-visible:rounded-sm focus-visible:shadow-[var(--ring)] focus-visible:outline-none',
+  /** The row's Open action (M19.3). `cb-row-open` keeps it laid out and fades
    * it in on the row's hover and focus (`styles/table-chrome.css`). */
   openPill:
-    'cb-row-open flex-none rounded-sm border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs font-medium uppercase tracking-[0.04em] text-n-500 hover:bg-n-50 hover:text-n-800',
+    'cb-row-open flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-500 hover:bg-n-100 hover:text-n-800',
   /** A single select's value as a cell draws it (M52.5): a coloured dot and a
-   * 13px label, no pill — FieldEditor's select button, without the button.
-   * The padding is the button's, so a read-only value sits where an editable
-   * one does. */
+   * 14px label, no pill — FieldEditor's select button, without the button.
+   * Horizontal padding belongs to the parent cell in both presentations. */
   selectValue:
-    'inline-flex min-w-0 max-w-full items-center gap-1 px-2 py-[3px] text-left text-sm text-n-800',
+    'inline-flex min-w-0 max-w-full items-center gap-1 py-[3px] text-left text-ui text-n-800',
   selectDot: 'box-border h-[9px] w-[9px] flex-none rounded-full',
 } as const;
 
 /** The name cell's left padding, before any nesting indent. */
-export const TITLE_INSET = 12;
+export const TITLE_INSET = 10;
 
 /**
- * Width of a row's leading gutter (M16.16), wide enough for insert + checkbox
- * + grip. It is laid out on every row rather than inserted on hover: a
- * control that pushes the whole grid 46px sideways under the pointer is worse
- * than one that was always there and only faded in.
+ * Width of a row's leading gutter: checkbox and its action menu. Insert is
+ * in that menu, so it does not reserve another button on every row. The
+ * gutter stays laid out on hover/focus so data never moves under the pointer.
  *
  * A table with nothing to put there reserves it all the same (M52.5), so a
  * row's title starts where a view's does and switching between them does not
  * move the column you were reading.
  */
-export const GUTTER = 46;
+export const GUTTER = 40;
 
 /**
  * One select value, read-only: `selectValue`'s dot and label. `strong` sets
@@ -116,13 +126,13 @@ export function SelectValue({
  */
 export const ROW_HEIGHT: Record<RowHeight, string> = {
   compact: 'h-8',
-  default: 'h-9',
-  tall: 'h-12',
+  default: 'h-11',
+  tall: 'h-14',
 };
 export const ROW_MIN_HEIGHT: Record<RowHeight, string> = {
   compact: 'min-h-8',
-  default: 'min-h-9',
-  tall: 'min-h-12',
+  default: 'min-h-11',
+  tall: 'min-h-14',
 };
 
 /**
@@ -141,6 +151,8 @@ export function GroupBand({
   collapsed,
   onToggle,
   onOpen,
+  onCreate,
+  separated = false,
   inset,
   note,
   testId = 'table-group-header',
@@ -153,7 +165,11 @@ export function GroupBand({
   collapsed: boolean;
   onToggle: () => void;
   onOpen?: () => void;
-  /** Where the cluster starts: the gutter plus the depth indent. */
+  /** Group-local creation, without a permanent blank row after each group. */
+  onCreate?: () => void;
+  /** A new outer section gets breathing room without outlining every record. */
+  separated?: boolean;
+  /** Leading inset of the heading controls, aligned by the host's row anatomy. */
   inset: number;
   /** A quiet line after the count, for a band that heads a list of its own
    * rather than a group of a view's. */
@@ -182,10 +198,14 @@ export function GroupBand({
       // M20.5: sticky under the column header, offset by depth so a nested
       // band parks below its parent instead of on top of it — ListView has
       // done this since M10, and without it you scroll into a run of rows with
-      // nothing on screen saying which band you are in. `top-8` is the header
-      // row's own height.
-      className="sticky z-[15] flex h-8 w-full items-center border-b border-n-100 bg-n-25 text-left"
-      style={{ top: 32 + depth * 32 }}
+      // nothing on screen saying which band you are in. Both Knowledge and
+      // database tables derive this offset from the same header metric.
+      className="group/band sticky z-[15] flex w-full items-center bg-n-0 text-left"
+      style={{
+        top: tableGroupTop(depth),
+        height: depth === 0 ? TABLE_GROUP_HEIGHT : TABLE_NESTED_GROUP_HEIGHT,
+        marginTop: separated ? 12 : undefined,
+      }}
     >
       {/* The band spans the full scroll width, so the band itself cannot be
           sticky (a sticky box as wide as its container has no room to shift).
@@ -204,17 +224,19 @@ export function GroupBand({
         >
           <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
         </button>
-        <span
-          className="box-border h-[10px] w-[10px] flex-none rounded-full"
-          style={
-            color === null || color === ''
-              ? { border: '1.5px solid var(--n-400)' }
-              : {
-                  background: resolveOptionColor(color).solid,
-                  border: `1.5px solid ${resolveOptionColor(color).solid}`,
-                }
-          }
-        />
+        {(depth === 0 || (color !== null && color !== '')) && (
+          <span
+            className="box-border h-[10px] w-[10px] flex-none rounded-full"
+            style={
+              color === null || color === ''
+                ? { border: '1.5px solid var(--n-400)' }
+                : {
+                    background: resolveOptionColor(color).solid,
+                    border: `1.5px solid ${resolveOptionColor(color).solid}`,
+                  }
+            }
+          />
+        )}
         {onOpen === undefined ? (
           <span className={labelClass}>{label}</span>
         ) : (
@@ -226,7 +248,18 @@ export function GroupBand({
             {label}
           </button>
         )}
-        <span className={`[font-family:var(--font-mono)] text-2xs text-n-400${hold}`}>{count}</span>
+        <span className={`text-metadata tabular-nums text-n-500${hold}`}>{count}</span>
+        {onCreate !== undefined && (
+          <button
+            type="button"
+            aria-label={`New record in ${label}`}
+            title={`New record in ${label}`}
+            onClick={onCreate}
+            className="ml-1 flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-500 opacity-0 hover:bg-n-100 hover:text-n-800 focus-visible:opacity-100 group-hover/band:opacity-100 group-focus-within/band:opacity-100"
+          >
+            <Icon name="plus" size={14} />
+          </button>
+        )}
         {note !== undefined && <span className="min-w-0 truncate text-xs text-n-500">{note}</span>}
       </span>
     </div>

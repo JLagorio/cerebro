@@ -102,28 +102,44 @@ test('agent: Stop puts Up next on hold until Resume', async ({ page }) => {
   await expect(panel.getByTestId('up-next')).toBeHidden();
 });
 
-test('agent: two page asks during a turn both wait under Up next', async ({ page }) => {
+test('agent: two page asks during a turn each open a conversation, and the turn goes on', async ({
+  page,
+}) => {
   const panel = await openPanel(page);
   await holdATurn(page);
+  const users = panel.locator('[data-testid="chat-message"][data-role="user"]');
+  const switcher = panel.getByTestId('conversation-switcher');
 
   await openKnowledgeTab(page, 'all');
   await page
     .locator('[data-testid="concept-row"][data-path="knowledge/systems/pick-queue-drain.md"]')
     .click();
   await page.getByTestId('concept-review-bar').getByTestId('revise-concept').click();
-  const entries = panel.getByTestId('up-next-entry');
-  await expect(entries).toHaveCount(1);
+  const revise = 'Ask to revise · Pick queue drain time';
+  await expect(switcher).toHaveText(revise);
+  await expect(users).toHaveText([revise]);
 
   await openKnowledgeTab(page, 'all');
   await page
     .locator('[data-testid="concept-row"][data-path="knowledge/metrics/sync-error-rate.md"]')
     .click();
   await page.getByTestId('concept-review-bar').getByTestId('recheck-concept').click();
-  await expect(entries).toHaveCount(2);
-  await expect(entries.first()).toContainText('Pick queue drain time');
-  await expect(entries.nth(1)).toContainText('Sync error rate');
-  // A page ask is not typed text: it is never offered for editing.
-  await expect(panel.getByTestId('up-next-edit')).toHaveCount(0);
+  const recheck = 'Ask for a recheck · Sync error rate';
+  await expect(switcher).toHaveText(recheck);
+  await expect(users).toHaveText([recheck]);
+  // Neither ask waited behind the held turn.
+  await expect(panel.getByTestId('up-next-entry')).toHaveCount(0);
+
+  // The held turn went on in its own thread, and ends there, never stopped.
+  await switcher.click();
+  await page.getByTestId('conversation-row').filter({ hasText: 'wait for me' }).first().click();
+  await expect(users).toHaveText(['wait for me']);
+  await page.evaluate(() =>
+    (window as unknown as { __cerebroReleaseMockRuns: () => void }).__cerebroReleaseMockRuns(),
+  );
+  await expect(assistants(page).first()).toContainText('Done waiting.', { timeout: 10_000 });
+  await expect(assistants(page).first().getByTestId('turn-cancelled')).toHaveCount(0);
+  await expect(panel.getByTestId('up-next')).toBeHidden();
 });
 
 test('agent: Steer with a card open cancels it and runs the entry at once', async ({ page }) => {

@@ -1,12 +1,13 @@
 import { useMemo } from 'react';
 import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
-import { Button } from '@/components/ui/Button';
+import { askBaseAsk, sendAsk, type Ask } from '@/agent/elements/decisionsAsks';
+import { Suggestion, Suggestions } from '@/components/ai/Suggestion';
 import { Icon } from '@/components/ui/Icon';
 import { listConcepts, relatedConcepts } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { ReviewChip } from '@/knowledge/ReviewChip';
 import { useNavStore } from '@/stores/navStore';
-import { ASK_BASE_LABEL, askBasePrompt, askedAbout, AUGMENT_LABEL } from '@/lib/prompts';
+import { askedAbout, AUGMENT_LABEL } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -85,21 +86,21 @@ export function RelatedKnowledge({
   const shown = ordered.slice(0, limit);
   const rest = ordered.length - shown.length;
 
-  const ask = () => {
-    if (askPrompt === undefined) return;
-    askAgent(askPrompt, askSubject ?? null, askedAbout(askLabel, entry.title));
-  };
+  // The host's own question about the draft, under the label it gives.
+  const ask: Ask | null =
+    askPrompt === undefined
+      ? null
+      : {
+          label: askLabel,
+          prompt: askPrompt,
+          subject: askSubject ?? null,
+          bubble: askedAbout(askLabel, entry.title),
+        };
 
   // The record travels WITH the prompt (M17.6) — it becomes a context chip,
   // so the agent reads this record rather than whatever surface the user
   // happened to be standing on when they pressed the button.
-  const askBase = () => {
-    askAgent(
-      askBasePrompt(entry.path, entry.title),
-      entry.path,
-      askedAbout(ASK_BASE_LABEL, entry.title),
-    );
-  };
+  const askBase = askBaseAsk(entry);
   const embedded = variant === 'embedded';
 
   // An empty state that still offers the ask: "nothing yet" is exactly when
@@ -130,65 +131,127 @@ export function RelatedKnowledge({
           <p className="m-0 mt-2 text-sm leading-[18px] text-n-500">Nothing yet about this.</p>
         )
       ) : (
-        <ul className={`m-0 flex list-none flex-col gap-1 p-0 ${embedded ? '' : 'mt-2'}`}>
-          {shown.map((concept) => (
-            <li key={concept.entry.path}>
-              <button
-                type="button"
-                data-testid="related-concept"
-                data-path={concept.entry.path}
-                onClick={() => {
-                  // Same rule as the dossier (M14.2): following a concept
-                  // leaves the record, so the panel goes with it.
-                  closeDetail();
-                  navigate({ kind: 'doc', path: concept.entry.path });
-                }}
-                className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
-              >
-                <span className="min-w-0 flex-1">
-                  <span
-                    className={`block truncate text-sm font-medium ${
-                      concept.supersededBy !== null ? 'text-n-400 line-through' : 'text-n-800'
-                    }`}
+        // Embedded, the inspector's rows (owner, 2026-10-18): the text on the
+        // section's edge, the hover washing past it.
+        <ul
+          className={
+            embedded ? '-mx-2 flex flex-col gap-px' : 'm-0 mt-2 flex list-none flex-col gap-1 p-0'
+          }
+        >
+          {shown.map((concept) => {
+            const replaced = concept.supersededBy !== null;
+            // M52.3 — the Concepts list's rule: only the review states worth
+            // reading.
+            const reviewed = !replaced && concept.review !== 'unreviewed';
+            const open = () => {
+              // Same rule as the dossier (M14.2): following a concept
+              // leaves the record, so the panel goes with it.
+              closeDetail();
+              navigate({ kind: 'doc', path: concept.entry.path });
+            };
+            if (embedded) {
+              // One line in the inspector's voice (owner, 2026-10-18), like
+              // the dossier's rows beside it: the summary is the tooltip.
+              return (
+                <li key={concept.entry.path}>
+                  <button
+                    type="button"
+                    data-testid="related-concept"
+                    data-path={concept.entry.path}
+                    title={replaced ? undefined : (concept.description ?? undefined)}
+                    onClick={open}
+                    className="flex h-7 w-full min-w-0 items-center gap-2 rounded-md bg-transparent px-2 text-left hover:bg-n-50"
                   >
-                    {concept.title}
-                  </span>
-                  {/* Embedded, a row reads like the dossier's beside it. */}
-                  {concept.description !== null &&
-                    concept.supersededBy === null &&
-                    variant !== 'panel' && (
+                    <Icon name="lightbulb" size={14} color="var(--n-400)" />
+                    <span
+                      className={`min-w-0 flex-1 truncate text-ui ${
+                        replaced ? 'text-n-400 line-through' : 'text-n-800'
+                      }`}
+                    >
+                      {concept.title}
+                    </span>
+                    {/* A strikethrough alone is a legend nobody has (M15): the
+                        word is what makes it readable. */}
+                    {replaced ? (
+                      <span data-testid="related-replaced" className="flex-none text-xs text-n-400">
+                        Replaced
+                      </span>
+                    ) : (
+                      <>
+                        {reviewed && (
+                          <ReviewChip
+                            status={concept.review}
+                            by={concept.reviewedBy}
+                            size="glyph"
+                          />
+                        )}
+                        {concept.stale && (
+                          <span title="Due a recheck" className="flex flex-none">
+                            <Icon name="clock-alert" size={14} color="var(--warn-600)" />
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </button>
+                </li>
+              );
+            }
+            const review = reviewed && (
+              <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
+            );
+            return (
+              <li key={concept.entry.path}>
+                <button
+                  type="button"
+                  data-testid="related-concept"
+                  data-path={concept.entry.path}
+                  onClick={open}
+                  className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={`block truncate text-sm font-medium ${
+                        replaced ? 'text-n-400 line-through' : 'text-n-800'
+                      }`}
+                    >
+                      {concept.title}
+                    </span>
+                    {concept.description !== null && !replaced && variant !== 'panel' && (
                       <span className="block truncate text-xs text-n-500">
                         {concept.description}
                       </span>
                     )}
-                </span>
-                {/* A strikethrough alone is a legend nobody has (M15): deleted,
-                    deprecated, done and filtered-out all look like this. The
-                    word is what makes it readable. */}
-                {concept.supersededBy !== null ? (
-                  <span
-                    data-testid="related-replaced"
-                    className="flex-none rounded-sm bg-n-100 px-1 text-2xs text-n-500"
-                  >
-                    Replaced
                   </span>
-                ) : (
-                  <>
-                    {/* M52.3 — the Concepts list's rule: only the review
-                        states worth reading. */}
-                    {concept.review !== 'unreviewed' && (
-                      <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
-                    )}
-                    {concept.stale && <Icon name="clock-alert" size={11} color="var(--warn-600)" />}
-                  </>
-                )}
-              </button>
-            </li>
-          ))}
+                  {/* A strikethrough alone is a legend nobody has (M15): deleted,
+                      deprecated, done and filtered-out all look like this. The
+                      word is what makes it readable. */}
+                  {replaced ? (
+                    <span
+                      data-testid="related-replaced"
+                      className="flex-none rounded-sm bg-n-100 px-1 text-2xs text-n-500"
+                    >
+                      Replaced
+                    </span>
+                  ) : (
+                    <>
+                      {review}
+                      {concept.stale && (
+                        <Icon name="clock-alert" size={11} color="var(--warn-600)" />
+                      )}
+                    </>
+                  )}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 
-      {rest > 0 && <p className="m-0 mt-1.5 px-2 text-xs text-n-400">and {rest} more</p>}
+      {rest > 0 && (
+        <p className={`mt-1.5 text-xs text-n-400 ${embedded ? 'leading-4' : 'm-0 px-2'}`}>
+          and {rest} more
+        </p>
+      )}
 
       {/* Two questions, and they are genuinely different. Asking the base
           goes to the SUBJECT — knowledge_about answers by anchor, so it
@@ -196,18 +259,18 @@ export function RelatedKnowledge({
           record only reaches through its project or a link it never made. The
           optional second button goes to the DRAFT. Both are buttons, pressed
           by a person; neither counts up at anyone (M8.1). Embedded (M52.3),
-          the host's one action row carries them. */}
+          the host's asks carry them. */}
       {!embedded && (
-        <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          <Button variant="secondary" size="sm" icon="sparkles" onClick={askBase}>
-            {ASK_BASE_LABEL}
-          </Button>
-          {askPrompt !== undefined && (
-            <Button variant="secondary" size="sm" icon="sparkles" onClick={ask}>
-              {askLabel}
-            </Button>
+        <Suggestions aria-label="Ask Knowledge" className="mt-2.5">
+          <Suggestion suggestion={askBase.prompt} onClick={sendAsk(askBase, askAgent)}>
+            {askBase.label}
+          </Suggestion>
+          {ask !== null && (
+            <Suggestion suggestion={ask.prompt} onClick={sendAsk(ask, askAgent)}>
+              {ask.label}
+            </Suggestion>
           )}
-        </div>
+        </Suggestions>
       )}
     </section>
   );

@@ -92,6 +92,29 @@ describe('RootTree', () => {
     expect(screen.getByText('main.rs')).toBeTruthy();
   });
 
+  // One caret per directory, turned by the state the row announces rather
+  // than traded for another glyph; with icons off the directory keeps a
+  // folder glyph beside it, where a caret glyph used to make two carets.
+  it.each([true, false])('turns one caret per directory (file icons %s)', async (icons) => {
+    seedRoot({ path: '/repos/alpha', label: 'alpha' });
+    seedFile('/repos/alpha', 'docs/guide.md', '# Guide');
+    await useRootsStore.getState().loadRoots();
+    useUiStore.setState({ workspaceFileIcons: icons });
+
+    render(<RootTree />);
+    const root = screen.getByRole('treeitem', { name: /alpha/ });
+    expect(root.getAttribute('aria-expanded')).toBe('false');
+    expect(root.querySelectorAll('[data-icon^="chevron"]')).toHaveLength(1);
+    expect(root.querySelector('.cb-chevron--open')).toBeNull();
+    fireEvent.click(root);
+    await waitFor(() => expect(root.getAttribute('aria-expanded')).toBe('true'));
+    expect(root.querySelectorAll('[data-icon^="chevron"]')).toHaveLength(1);
+    expect(root.querySelector('[data-icon="chevron-right"].cb-chevron--open')).not.toBeNull();
+    const docs = await screen.findByRole('treeitem', { name: /docs/ });
+    expect(docs.querySelectorAll('[data-icon^="chevron"]')).toHaveLength(1);
+    await waitFor(() => expect(Object.keys(useRootsStore.getState().gitDirty)).toHaveLength(1));
+  });
+
   it('is a real tree: roles, levels, and one tabbable row', async () => {
     seedRoot({ path: '/repos/alpha', label: 'alpha' });
     seedFile('/repos/alpha', 'docs/guide.md', '# Guide');

@@ -5,7 +5,7 @@ import { deepEqual } from '@/lib/deepEqual';
 
 export const MAX_PANES = 4;
 export type PaneId = `p${number}`;
-export type EntryStateKey = 'view.search' | 'view.controls' | 'canvas.scroll';
+export type EntryStateKey = 'view.search' | 'view.controls' | 'canvas.scroll' | 'pages.browser';
 export interface NavSlot {
   selection: Selection;
   byAgent: boolean;
@@ -42,6 +42,7 @@ export interface PaneNavigation {
  * the folder-note carrier; an inferred root collection has no editor. */
 export const CLAIM_RULES = {
   home: 'none',
+  pages: 'none',
   inbox: 'single',
   mywork: 'none',
   changes: 'none',

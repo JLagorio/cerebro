@@ -15,9 +15,11 @@
 //! a failed Edit wrote nothing. The run that resumes a deferral never sees
 //! its ToolStart (2.1.250's resumed stream opens with the tool_result), so
 //! it starts [`holding`](CliWrites::holding) the held call, read from the
-//! session file by [`held_call`]. A Task subagent's writes stay unseen: the
-//! fold drops sidechain lines. Pure apart from that one read: nothing here
-//! touches git or the registry; the caller notes each path on the run's
+//! session file by [`held_call`]. A subagent works for its run (M91.3b): its
+//! calls fold with the Agent call that started it as their parent, by tool
+//! id like any other, so what it writes is noted on the run's claim and
+//! committed with the run (CV-34). Pure apart from that one read: nothing
+//! here touches git or the registry; the caller notes each path on the run's
 //! claim (`git::changeset::RunClaim::note_cli_write`).
 
 use std::collections::HashMap;
@@ -63,6 +65,8 @@ impl CliWrites {
                 tool_name: held.tool_name.clone(),
                 tool_id: held.tool_id.clone(),
                 input: Some(held.input.clone()),
+                parent: None,
+                at: None,
             });
         }
         self
@@ -77,6 +81,7 @@ impl CliWrites {
                 tool_name,
                 tool_id,
                 input,
+                ..
             } => {
                 let tool = crate::policy::tools::cli_tool(tool_name).filter(|tool| tool.writes)?;
                 let field = tool.subject.as_deref()?;
@@ -200,6 +205,8 @@ mod tests {
             tool_name: name.into(),
             tool_id: id.into(),
             input: Some(input.to_string()),
+            parent: None,
+            at: None,
         }
     }
 
@@ -208,6 +215,8 @@ mod tests {
             tool_id: id.into(),
             output: None,
             is_error,
+            parent: None,
+            at: None,
         }
     }
 
@@ -263,6 +272,7 @@ mod tests {
                 bytes: whole.len() as u64,
                 text: whole,
                 truncated: false,
+                parent: None,
             }),
             None
         );
@@ -285,6 +295,66 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    /// A subagent's writer calls (M91.3b) fold with their Agent call as
+    /// their parent and are noted like the run's own: a path its preview
+    /// kept, one only its whole input names, and never a failed call's.
+    #[test]
+    fn a_subagents_write_is_noted_like_the_runs_own() {
+        let vault = testutil::temp_vault("m91-cli-subagent");
+        let mut watch = CliWrites::new(&vault);
+        let parent = Some("toolu_agent".to_string());
+        let started = |name: &str, id: &str, input: Value| AgentEvent::ToolStart {
+            tool_name: name.into(),
+            tool_id: id.into(),
+            input: Some(input.to_string()),
+            parent: parent.clone(),
+            at: Some("2026-10-22T12:00:04.300Z".into()),
+        };
+        let finished = |id: &str, is_error: bool| AgentEvent::ToolDone {
+            tool_id: id.into(),
+            output: None,
+            is_error,
+            parent: parent.clone(),
+            at: None,
+        };
+        let edit =
+            serde_json::json!({ "file_path": vault.join("notes/sub.md"), "old_string": "x" });
+        assert_eq!(watch.observe(&started("Edit", "s-1", edit)), None);
+        assert_eq!(
+            watch.observe(&finished("s-1", false)),
+            Some("notes/sub.md".into())
+        );
+        let cut = format!("{}\u{2026}", "notes/a-long-name-".repeat(10));
+        assert_eq!(
+            watch.observe(&started(
+                "Write",
+                "s-2",
+                serde_json::json!({ "file_path": cut })
+            )),
+            None
+        );
+        let whole = serde_json::json!({ "file_path": "notes/long.md" }).to_string();
+        assert_eq!(
+            watch.observe(&AgentEvent::ToolPayload {
+                tool_id: "s-2".into(),
+                part: PayloadPart::Input,
+                bytes: whole.len() as u64,
+                text: whole,
+                truncated: false,
+                parent: parent.clone(),
+            }),
+            None
+        );
+        assert_eq!(
+            watch.observe(&finished("s-2", false)),
+            Some("notes/long.md".into())
+        );
+        let write = serde_json::json!({ "file_path": "notes/refused.md", "content": "x" });
+        assert_eq!(watch.observe(&started("Write", "s-3", write)), None);
+        assert_eq!(watch.observe(&finished("s-3", true)), None);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
     /// A failed call wrote nothing, and a call that never completes (one
     /// Cerebro's gate deferred) claims nothing in the run that deferred it.
     #[test]
@@ -299,6 +369,7 @@ mod tests {
             watch.observe(&AgentEvent::ToolDeferred {
                 tool_id: "t-2".into(),
                 tool_name: "Write".into(),
+                duration_ms: None,
             }),
             None
         );
@@ -378,6 +449,7 @@ mod tests {
                 text: read.to_string(),
                 bytes: 1,
                 truncated: false,
+                parent: None,
             }),
             None
         );

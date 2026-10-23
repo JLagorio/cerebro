@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { UpNext, type UpNextView } from './UpNext';
 import type { UpNextEntry } from './upNextQueue';
 
@@ -155,6 +155,18 @@ describe('UpNext (M57.5)', () => {
     expect(cancelEnd).toHaveBeenCalledOnce();
   });
 
+  it('leaves the Enter that ends an IME composition to the composition', () => {
+    const edit = vi.fn(() => true);
+    render(<UpNext upNext={view({ editing: 'a', edit })} />);
+    const editor = screen.getByTestId('up-next-editor');
+    fireEvent.change(editor, { target: { value: 'にほんご' } });
+    expect(fireEvent.keyDown(editor, { key: 'Enter', isComposing: true })).toBe(true);
+    expect(fireEvent.keyDown(editor, { key: 'Enter', keyCode: 229 })).toBe(true);
+    expect(edit).not.toHaveBeenCalled();
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(edit).toHaveBeenCalledWith('a', 'にほんご');
+  });
+
   it('removes an entry', () => {
     const remove = vi.fn();
     render(<UpNext upNext={view({ remove })} />);
@@ -175,5 +187,75 @@ describe('UpNext (M57.5)', () => {
     expect(screen.getByTestId('up-next-full').textContent).toBe(
       'Up next holds 10 messages. Remove one, or wait for this turn to finish.',
     );
+  });
+
+  // Motion (owner, 2026-10-19): what the conversation opened holding is
+  // simply there; the list comes in when it comes to hold something, and an
+  // entry joining it on its own.
+  it('brings in what comes to wait, and nothing it opened with', () => {
+    const marked = () =>
+      [screen.getByTestId('up-next'), ...screen.getAllByTestId('up-next-entry')].map((el) =>
+        el.hasAttribute('data-arrive'),
+      );
+    const opened = render(<UpNext upNext={view()} />);
+    expect(marked()).toEqual([false, false, false]);
+    opened.unmount();
+    const { rerender } = render(<UpNext upNext={view({ entries: [] })} />);
+    rerender(<UpNext upNext={view({ entries: [entry('a')] })} />);
+    expect(marked()).toEqual([true, false]);
+    rerender(<UpNext upNext={view({ entries: [entry('a'), entry('b')] })} />);
+    expect(marked()).toEqual([true, false, true]);
+  });
+
+  // M91.12a — the list is a Queue: a named region over its heading, items
+  // whose actions sit beside their line, and a starting row that says so in
+  // words before its message.
+  it('is a Queue: the region and heading Up next, and each entry an item with its actions beside it', () => {
+    render(<UpNext upNext={view({ held: true })} />);
+    const region = screen.getByRole('region', { name: 'Up next' });
+    expect(region).toBe(screen.getByTestId('up-next'));
+    expect(region.dataset.slot).toBe('queue');
+    const heading = screen.getByRole('heading', { level: 3, name: 'Up next' });
+    expect(heading.querySelector('[title]')?.getAttribute('title')).toBe(
+      'Up next holds up to 10 messages.',
+    );
+    // Resume is the section's action, beside its heading, and the hold is
+    // said in the section above the list.
+    const resume = screen.getByTestId('up-next-resume');
+    expect(resume.closest('[data-slot="queue-section-actions"]')).not.toBeNull();
+    expect(heading.contains(resume)).toBe(false);
+    const [first] = screen.getAllByTestId('up-next-entry');
+    expect(first.tagName).toBe('LI');
+    expect(first.dataset.slot).toBe('queue-item');
+    const remove = within(first).getByRole('button', { name: 'Remove from Up next' });
+    expect(remove.closest('[data-slot="queue-item-actions"]')?.parentElement).toBe(first);
+    expect(remove.closest('[data-slot="trace-line"]')).toBeNull();
+    // Its words are the line's own sentence, the whole of them on hover.
+    const text = within(first).getByTestId('up-next-text');
+    expect(text.textContent).toBe('message a');
+    expect(text.dataset.slot).toBe('trace-title');
+    expect(text.getAttribute('title')).toBe('message a');
+  });
+
+  it('says Starting… before the steered message, the working light standing for its actions', () => {
+    render(<UpNext upNext={view({ busy: true, steering: 'h' })} />);
+    const steered = screen.getAllByTestId('up-next-entry')[1];
+    const line = steered.querySelector('[data-slot="trace-line"]') as HTMLElement;
+    expect(line.querySelector('.sr-only')?.textContent).toBe('Starting…: ');
+    const light = steered.querySelector('.cb-working-text') as HTMLElement;
+    expect(light.textContent).toBe('Starting…');
+    expect(light.getAttribute('aria-hidden')).toBe('true');
+    expect(within(steered).queryAllByRole('button')).toEqual([]);
+  });
+
+  it('opens the editor in place of its line, offering nothing beside it', () => {
+    render(<UpNext upNext={view({ editing: 'a' })} />);
+    const [editing] = screen.getAllByTestId('up-next-entry');
+    const editor = within(editing).getByTestId('up-next-editor');
+    expect(editor.closest('[data-slot="queue-item-detail"]')).not.toBeNull();
+    // No words and no icon: the line is empty, and the editor stands for it.
+    expect(editing.querySelector('[data-slot="trace-line"]')?.childNodes).toHaveLength(0);
+    expect(within(editing).queryByTestId('up-next-text')).toBeNull();
+    expect(within(editing).queryAllByRole('button')).toEqual([]);
   });
 });

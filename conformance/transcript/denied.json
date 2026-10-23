@@ -1,0 +1,247 @@
+{
+  "case": "denied",
+  "cli_version": "2.1.250",
+  "streams": [
+    {
+      "file": "transcript-denied.stream.json",
+      "events": [
+        {
+          "kind": "Init",
+          "session_id": "00000000-0000-4000-8000-000000009400"
+        },
+        {
+          "kind": "ModelChanged",
+          "model": "claude-haiku-4-5-20251001"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "Bash",
+          "tool_id": "toolu_000000000000000000009401",
+          "input": "{\"command\":\"grep -rl vendor notes | wc -l; grep -rl vendor archive | wc -l\",\"description\":\"Count the notes that mention the vendor\"}",
+          "at": "2026-10-22T12:00:02.000Z"
+        },
+        {
+          "kind": "ToolDenied",
+          "tool_id": "toolu_000000000000000000009401",
+          "tool_name": "Bash",
+          "message": "This Bash command contains multiple operations. The following parts require approval: grep -rl vendor archive"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009401",
+          "output": "This Bash command contains multiple operations. The following parts require approval: grep -rl vendor archive",
+          "is_error": true,
+          "at": "2026-10-22T12:00:02.100Z"
+        },
+        {
+          "kind": "TextDelta",
+          "text": "The archive part needs approval, so "
+        },
+        {
+          "kind": "TextDelta",
+          "text": "I will count the notes folder alone."
+        },
+        {
+          "kind": "Text",
+          "message_id": "msg_000000000000000000009402",
+          "text": "The archive part needs approval, so I will count the notes folder alone.",
+          "at": "2026-10-22T12:00:03.000Z"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "Bash",
+          "tool_id": "toolu_000000000000000000009402",
+          "input": "{\"command\":\"grep -rl vendor notes | wc -l\",\"description\":\"Count the notes that mention the vendor\"}",
+          "at": "2026-10-22T12:00:03.300Z"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009402",
+          "output": "3",
+          "is_error": false,
+          "at": "2026-10-22T12:00:03.600Z"
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009402",
+          "data": {
+            "type": "shell",
+            "stdout": "3",
+            "stderr": "",
+            "interrupted": false,
+            "truncated": false
+          }
+        },
+        {
+          "kind": "TextDelta",
+          "text": "Three notes in notes"
+        },
+        {
+          "kind": "TextDelta",
+          "text": "/ mention the vendor."
+        },
+        {
+          "kind": "Text",
+          "message_id": "msg_000000000000000000009403",
+          "text": "Three notes in notes/ mention the vendor.",
+          "at": "2026-10-22T12:00:04.200Z"
+        },
+        {
+          "kind": "Result",
+          "text": "Three notes in notes/ mention the vendor.",
+          "session_id": "00000000-0000-4000-8000-000000009400",
+          "duration_ms": 9000
+        },
+        {
+          "kind": "TurnEnded",
+          "stop_reason": "end_turn",
+          "last_uuid": "00000000-0000-4000-8000-000009400106"
+        }
+      ],
+      "classes": {
+        "translated": 13,
+        "ignored": {
+          "a block closing, with nothing new in it": 4,
+          "a block opening; its content follows as deltas, or whole on the assistant line": 4,
+          "a progress word such as requesting; the panel shows its own": 3,
+          "a tool call's input in pieces; the assistant line carries it whole": 2,
+          "the turn's end, with nothing new in it": 3,
+          "the turn's model and opening usage; the assistant line and the result carry both": 3,
+          "the turn's stop reason and running usage; the assistant line and the result carry both": 3
+        },
+        "unclassified": {}
+      }
+    }
+  ],
+  "session": {
+    "file": "transcript-denied.session.json",
+    "events": [
+      {
+        "kind": "UserPrompt",
+        "text": "How many notes mention the vendor?",
+        "uuid": "00000000-0000-4000-8000-000009400002"
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "Bash",
+        "tool_id": "toolu_000000000000000000009401",
+        "input": "{\"command\":\"grep -rl vendor notes | wc -l; grep -rl vendor archive | wc -l\",\"description\":\"Count the notes that mention the vendor\"}",
+        "at": "2026-10-22T12:00:02.000Z"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000009401",
+        "output": "This Bash command contains multiple operations. The following parts require approval: grep -rl vendor archive",
+        "is_error": true,
+        "at": "2026-10-22T12:00:02.100Z"
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000009402",
+        "text": "The archive part needs approval, so I will count the notes folder alone.",
+        "at": "2026-10-22T12:00:03.000Z"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "Bash",
+        "tool_id": "toolu_000000000000000000009402",
+        "input": "{\"command\":\"grep -rl vendor notes | wc -l\",\"description\":\"Count the notes that mention the vendor\"}",
+        "at": "2026-10-22T12:00:03.300Z"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000009402",
+        "output": "3",
+        "is_error": false,
+        "at": "2026-10-22T12:00:03.600Z"
+      },
+      {
+        "kind": "ToolResult",
+        "tool_id": "toolu_000000000000000000009402",
+        "data": {
+          "type": "shell",
+          "stdout": "3",
+          "stderr": "",
+          "interrupted": false,
+          "truncated": false
+        }
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000009403",
+        "text": "Three notes in notes/ mention the vendor.",
+        "at": "2026-10-22T12:00:04.200Z"
+      },
+      {
+        "kind": "TurnEnded",
+        "last_uuid": "00000000-0000-4000-8000-000009400106"
+      }
+    ],
+    "classes": {
+      "translated": 7,
+      "ignored": {
+        "a prompt entering or leaving the CLI's queue; the prompt line follows": 2,
+        "the last prompt again, for the CLI's own resume picker": 1
+      },
+      "unclassified": {}
+    }
+  },
+  "content": [
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "ToolStart",
+          "tool_name": "Bash",
+          "tool_id": "toolu_000000000000000000009401",
+          "input": "{\"command\":\"grep -rl vendor notes | wc -l; grep -rl vendor archive | wc -l\",\"description\":\"Count the notes that mention the vendor\"}"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009401",
+          "output": "This Bash command contains multiple operations. The following parts require approval: grep -rl vendor archive",
+          "is_error": true
+        },
+        {
+          "kind": "Text",
+          "text": "The archive part needs approval, so I will count the notes folder alone."
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "Bash",
+          "tool_id": "toolu_000000000000000000009402",
+          "input": "{\"command\":\"grep -rl vendor notes | wc -l\",\"description\":\"Count the notes that mention the vendor\"}"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009402",
+          "output": "3",
+          "is_error": false
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009402",
+          "data": {
+            "type": "shell",
+            "stdout": "3",
+            "stderr": "",
+            "interrupted": false,
+            "truncated": false
+          }
+        },
+        {
+          "kind": "Text",
+          "text": "Three notes in notes/ mention the vendor."
+        },
+        {
+          "kind": "TurnEnded",
+          "last_uuid": "00000000-0000-4000-8000-000009400106"
+        }
+      ]
+    }
+  ]
+}

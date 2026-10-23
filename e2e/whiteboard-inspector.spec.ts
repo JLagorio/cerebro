@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { boot, readMockFile } from './boot';
+import { chooseOption } from './select';
 const PATH = 'boards/inspector.canvas';
 const SOURCE = JSON.stringify({
   nodes: [
@@ -96,6 +97,43 @@ test('preset and hex colours, align and distribute each save once and Undo resto
   });
   await undo(page, 8);
   expect(await read(page)).toEqual(JSON.parse(SOURCE));
+});
+test('shape and connection ends are listbox selects, and the board leaves their keys alone', async ({
+  page,
+}, info) => {
+  const point = await open(page),
+    a = point(60, 70);
+  await page.mouse.click(a.x, a.y);
+  const inspector = page.getByTestId('wb-inspector');
+  await expect(inspector.locator('select')).toHaveCount(0);
+  const shape = inspector.getByRole('button', { name: 'Shape', exact: true });
+  await expect(shape).toHaveAttribute('data-value', 'rectangle');
+  // A bare ArrowDown opens the list; the board's nudge never sees it.
+  await shape.focus();
+  await page.keyboard.press('ArrowDown');
+  const list = page.getByRole('listbox');
+  await expect(list.getByRole('option')).toHaveText(['Rectangle', 'Ellipse', 'Diamond']);
+  await page.screenshot({ path: info.outputPath('whiteboard-shape-select.png') });
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(list).toHaveCount(0);
+  await expect.poll(() => writes(page)).toBe(1);
+  let saved = await read(page);
+  expect(saved.cerebro.cards.a.shape).toBe('ellipse');
+  expect(saved.nodes[0]).toMatchObject({ x: 20, y: 40 });
+  // Backspace on the trigger is the select's too: the card stays.
+  await page.keyboard.press('Backspace');
+  await page.getByTestId('wb-input').focus();
+  await page.keyboard.press('ControlOrMeta+a');
+  // Mixed is a state the trigger names, not a row to pick.
+  await expect(shape).toHaveText('Mixed');
+  const end = inspector.getByRole('button', { name: 'End', exact: true });
+  await expect(end).toHaveAttribute('data-value', 'arrow');
+  await chooseOption(end, 'None');
+  await expect.poll(() => writes(page)).toBe(2);
+  saved = await read(page);
+  expect(saved.nodes).toHaveLength(3);
+  expect(saved.edges.map((edge: { toEnd?: string }) => edge.toEnd)).toEqual(['none', 'none']);
 });
 async function copyEvent(page: Page) {
   return page.getByTestId('wb-input').evaluate((el) => {

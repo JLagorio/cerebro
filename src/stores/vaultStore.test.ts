@@ -15,7 +15,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }));
 
 import { staleWords, type OpenReport } from '@/engine/batch';
 import { observeScan, type ScanBaseline } from '@/engine/events';
-import { onExternalWrite, registerFlush } from '@/editor/openPages';
+import { holdEditor, onExternalWrite, registerFlush, registerHold } from '@/editor/openPages';
 import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
 import * as mockBackend from '@/lib/mockIpc';
@@ -150,6 +150,43 @@ describe('vaultStore', () => {
     expect(toasts[0].message).toBe(
       "Couldn't save changes to projects/guided-onboarding-ga/items/fld-1.md",
     );
+  });
+
+  // 2026-10-18: a capture's `generated:` map reached the owner's disk as the
+  // text "[object Object]". Whatever writer sends that is destroying a map,
+  // so neither store door lands it.
+  it('refuses a patch that carries a stringified map, and writes nothing', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    useUiStore.setState({ toasts: [] });
+    vi.mocked(ipc.updateFrontmatter).mockClear();
+    const path = 'projects/guided-onboarding-ga/items/fld-1.md';
+    const landed = await useVaultStore
+      .getState()
+      .patchFrontmatter(path, { status: 'done', generated: '[object Object]' });
+    expect(landed).toBe(false);
+    expect(ipc.updateFrontmatter).not.toHaveBeenCalled();
+    expect(findEntry(path)?.properties.status).toBe('progress');
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toEqual([
+      "Couldn't save generated: its value came through garbled",
+    ]);
+  });
+
+  it('refuses a batch whose patch carries a stringified map', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    useUiStore.setState({ toasts: [] });
+    vi.mocked(ipc.applyBatch).mockClear();
+    const applied = await useVaultStore.getState().applyBatch([
+      {
+        op: 'patch',
+        path: 'projects/guided-onboarding-ga/items/fld-1.md',
+        set: { verified: ['[object Object]'] },
+      },
+    ]);
+    expect(applied).toBeNull();
+    expect(ipc.applyBatch).not.toHaveBeenCalled();
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toEqual([
+      "Couldn't save verified: its value came through garbled",
+    ]);
   });
 
   // Deviation test (Task 23, execution-log note 15a, reported): a stale
@@ -1290,5 +1327,87 @@ describe('human filing inherits in its one write (M63.4)', () => {
         .applyBatch([{ op: 'patch', path: other, set: { project: ['[[guided-onboarding-ga]]'] } }]),
     ).not.toBeNull();
     expect(findEntry(other)?.relationships.agent).toBeUndefined();
+  });
+});
+
+describe('renaming a page with an open editor', () => {
+  const path = 'projects/guided-onboarding-ga/items/fld-1.md';
+
+  it('settles the existing save before the rename and holds new saves through its rescan', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const events: string[] = [];
+    let release!: () => void;
+    const settled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stopOwner = holdEditor(path, 'test');
+    const stopFlush = registerFlush(async () => {
+      events.push('flush');
+      await settled;
+      events.push('flushed');
+    });
+    const stopWatch = onExternalWrite(path, {
+      pending: () => events.push('pending'),
+      settled: () => {
+        expect(findEntry(path)?.title).toBe('Coordinated rename');
+        events.push('reconciled');
+      },
+    });
+    vi.mocked(ipc.setNoteTitle).mockImplementationOnce(async (...args) => {
+      events.push('write');
+      return mockBackend.setNoteTitle(...args);
+    });
+    try {
+      const rename = useVaultStore.getState().setTitle(path, 'Coordinated rename');
+      expect(events).toEqual(['flush']);
+      expect(ipc.setNoteTitle).not.toHaveBeenCalled();
+      release();
+      expect(await rename).toBe(true);
+      expect(events).toEqual(['flush', 'flushed', 'pending', 'write', 'reconciled']);
+    } finally {
+      release();
+      stopWatch();
+      stopFlush();
+      stopOwner();
+    }
+  });
+
+  it('refuses a rename while the editor still holds an unresolved save', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const before = mockFsDisk().get(path);
+    const stopOwner = holdEditor(path, 'test');
+    const stopHold = registerHold(() => path);
+    try {
+      expect(await useVaultStore.getState().setTitle(path, 'Must stay a draft')).toBe(false);
+      expect(ipc.setNoteTitle).not.toHaveBeenCalled();
+      expect(mockFsDisk().get(path)).toBe(before);
+      expect(useUiStore.getState().toasts.at(-1)?.message).toBe(
+        'Save or resolve the open page before renaming it',
+      );
+    } finally {
+      stopHold();
+      stopOwner();
+    }
+  });
+
+  it('does not rename in another vault when the vault changes during the flush', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    let release!: () => void;
+    const stopped = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stopOwner = holdEditor(path, 'test');
+    const stopFlush = registerFlush(() => stopped);
+    try {
+      const rename = useVaultStore.getState().setTitle(path, 'Wrong vault');
+      useVaultStore.setState({ vaultPath: '/another-vault' });
+      release();
+      expect(await rename).toBe(false);
+      expect(ipc.setNoteTitle).not.toHaveBeenCalled();
+    } finally {
+      release();
+      stopFlush();
+      stopOwner();
+    }
   });
 });

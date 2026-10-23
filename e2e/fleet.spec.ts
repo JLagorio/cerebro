@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { boot, openAgents, seedBeforeBoot } from './boot';
+import { chooseOption } from './select';
 
 /**
  * The fleet section: who works here (M33b.3) and the run history behind them
@@ -140,8 +141,12 @@ test('fleet: filtering by actor narrows the list', async ({ page }) => {
 
   // The option READS as words and still filters by the stamp (M52.3).
   const filter = section.getByTestId('fleet-filter-actor');
-  await expect(filter.locator('option[value="agent:m26-ingest"]')).toHaveText('Background ingest');
-  await filter.selectOption('agent:m26-ingest');
+  await filter.click();
+  await expect(
+    page.getByRole('listbox').locator('[role="option"][data-value="agent:m26-ingest"]'),
+  ).toHaveText('Background ingest');
+  await chooseOption(filter, { value: 'agent:m26-ingest' });
+  await expect(filter).toHaveText('Background ingest');
   await expect(section.getByTestId('fleet-row')).toHaveCount(1);
   await expect(section.getByTestId('fleet-row')).toHaveAttribute('data-run', 'run-2');
 });

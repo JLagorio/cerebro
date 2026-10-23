@@ -127,14 +127,14 @@
       "why": "The Kelvin sign lowercases to k in Unicode and not in ASCII, so it names nothing."
     }
   ],
-  "cli_why": "The CLI's own tools a run holds or may ask for (M57.2), as the tool-approval table plans them (shared/policy/tool-approval.v1.json): `cli` is what its --allowedTools pre-approves and `asks` what an attended run's gate puts to the person. `web` is the web ceiling (M57.7), off where a case leaves it out: on pre-approves WebFetch and WebSearch, and a read limit leaves them alone. The narrowing is heard by the same name test as the cases above. Replayed by cli_grants_match_the_shared_cases in src-tauri/src/agent/mod.rs and by src/engine/toolGrant.test.ts, whose cliGrant decides whether a prompt may say the run can change files itself, and whether it may name the web tools.",
+  "cli_why": "The CLI's own tools a run holds or may ask for (M57.2), as the tool-approval table plans them (shared/policy/tool-approval.v1.json): `cli` is what its --allowedTools pre-approves and `asks` what an attended run's gate puts to the person. `web` is the web ceiling (M57.7), off where a case leaves it out: on pre-approves WebFetch and WebSearch, and a read limit leaves them alone. An attended run pre-approves its todo list too (M91.1); the subagent tool is left to the CLI, never pre-approved. The narrowing is heard by the same name test as the cases above. Replayed by cli_grants_match_the_shared_cases in src-tauri/src/agent/mod.rs and by src/engine/toolGrant.test.ts, whose cliGrant decides whether a prompt may say the run can change files itself, and whether it may name the web tools.",
   "cli_cases": [
     {
       "shell": "off",
       "kind": "attended",
       "read_scoped": false,
       "allowed_tools": null,
-      "cli": [],
+      "cli": ["TodoWrite"],
       "asks": ["AskUserQuestion"]
     },
     {
@@ -142,7 +142,7 @@
       "kind": "attended",
       "read_scoped": false,
       "allowed_tools": null,
-      "cli": [],
+      "cli": ["TodoWrite"],
       "asks": ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "AskUserQuestion"]
     },
     {
@@ -158,7 +158,17 @@
       "kind": "attended",
       "read_scoped": false,
       "allowed_tools": null,
-      "cli": ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Read", "Glob", "Grep"],
+      "cli": [
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "NotebookEdit",
+        "Bash",
+        "Read",
+        "Glob",
+        "Grep",
+        "TodoWrite"
+      ],
       "asks": ["AskUserQuestion"]
     },
     {
@@ -182,7 +192,7 @@
       "kind": "attended",
       "read_scoped": true,
       "allowed_tools": null,
-      "cli": [],
+      "cli": ["TodoWrite"],
       "asks": ["AskUserQuestion"]
     },
     {
@@ -199,7 +209,7 @@
       "kind": "attended",
       "read_scoped": false,
       "allowed_tools": null,
-      "cli": ["WebFetch", "WebSearch"],
+      "cli": ["WebFetch", "WebSearch", "TodoWrite"],
       "asks": ["AskUserQuestion"]
     },
     {
@@ -227,6 +237,14 @@
       "read_scoped": false,
       "allowed_tools": ["WebFetch", "WebSearch", "Bash"],
       "cli": ["Bash"],
+      "asks": []
+    },
+    {
+      "shell": "off",
+      "kind": "attended",
+      "read_scoped": false,
+      "allowed_tools": [" todowrite ", "Task", "get_note"],
+      "cli": ["TodoWrite"],
       "asks": []
     }
   ]

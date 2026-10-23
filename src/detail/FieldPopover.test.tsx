@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { ComponentProps } from 'react';
+import { useLayoutEffect, type ComponentProps } from 'react';
 import { FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
 import { hasLayers, pushLayer, resetLayers } from '@/components/ui/layers';
 
@@ -115,6 +115,61 @@ describe('FieldPopover keyboard', () => {
     // Otherwise no keystroke ever reaches the handler: focus sits on the
     // trigger, outside this subtree.
     expect(document.activeElement).toBe(list);
+  });
+
+  it('focuses search after measurement makes the surface visible, as native browsers require', () => {
+    const focus = HTMLElement.prototype.focus;
+    const nativeFocus = vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (
+      this: HTMLElement,
+      options,
+    ) {
+      // jsdom focuses hidden descendants; native browsers refuse that call.
+      if (getComputedStyle(this).visibility === 'hidden') return;
+      for (
+        let parent: HTMLElement | null = this.parentElement;
+        parent !== null;
+        parent = parent.parentElement
+      )
+        if (getComputedStyle(parent).visibility === 'hidden') return;
+      focus.call(this, options);
+    });
+    try {
+      open({ searchable: true });
+      expect(document.activeElement).toBe(screen.getByPlaceholderText('Search…'));
+    } finally {
+      nativeFocus.mockRestore();
+    }
+  });
+
+  it('does not take focus from another control before positioning finishes', () => {
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    function MovedFocus() {
+      useLayoutEffect(() => outside.focus(), []);
+      return <input aria-label="Picker search" />;
+    }
+    try {
+      render(
+        <FixedBelowAnchor autoFocusSelector="input">
+          <MovedFocus />
+        </FixedBelowAnchor>,
+      );
+      expect(document.activeElement).toBe(outside);
+    } finally {
+      outside.remove();
+    }
+  });
+
+  it('does not autofocus a picker in a hidden parked surface', () => {
+    const before = document.activeElement;
+    render(
+      <div hidden>
+        <FixedBelowAnchor autoFocusSelector="input">
+          <input aria-label="Parked search" />
+        </FixedBelowAnchor>
+      </div>,
+    );
+    expect(document.activeElement).toBe(before);
   });
 
   it('arrows down the list and Enter picks the highlighted option', () => {

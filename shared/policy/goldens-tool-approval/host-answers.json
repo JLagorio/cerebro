@@ -7,6 +7,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -29,6 +30,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -53,6 +55,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -79,6 +82,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -101,6 +105,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -123,6 +128,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -151,6 +157,7 @@
         "kind": "attended",
         "shell": "on",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -171,6 +178,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -190,6 +198,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -204,19 +213,20 @@
       }
     },
     {
-      "why": "A tool the manifest does not list is unlisted, which is cli: it passes.",
+      "why": "A tool the manifest does not list, another server's, is unlisted, which is cli: it passes. A built-in it does not list never gets this far: the init gate stops its run (M91.1).",
       "input": {
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
       },
       "granted": [],
-      "tool": "CronCreate",
+      "tool": "mcp__toy__echo",
       "tool_input": {
-        "cron": "* * * * *"
+        "text": "hi"
       },
       "answer": {
         "kind": "pass"
@@ -228,6 +238,7 @@
         "kind": "attended",
         "shell": "on",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -247,6 +258,7 @@
         "kind": "attended",
         "shell": "off",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -268,6 +280,7 @@
         "kind": "unattended",
         "shell": "ask",
         "web": "off",
+        "delegate": "off",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -288,6 +301,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -310,6 +324,7 @@
         "kind": "attended",
         "shell": "off",
         "web": "off",
+        "delegate": "on",
         "ask_first": true,
         "read_scoped": false,
         "narrowing": null
@@ -333,6 +348,7 @@
         "kind": "attended",
         "shell": "off",
         "web": "off",
+        "delegate": "on",
         "ask_first": true,
         "read_scoped": false,
         "narrowing": null
@@ -361,6 +377,7 @@
         "kind": "attended",
         "shell": "off",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -382,6 +399,7 @@
         "kind": "attended",
         "shell": "ask",
         "web": "off",
+        "delegate": "on",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null

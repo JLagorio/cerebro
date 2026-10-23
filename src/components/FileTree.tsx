@@ -8,6 +8,7 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { addSubPage, nestPage } from '@/app/pageActions';
+import { chevronClass, FOLD_IN, REVEAL } from '@/app/sidebarChrome';
 import { trashPath } from '@/app/trashActions';
 import { renameKeepingLinks } from '@/app/renameActions';
 import { canHaveSubPages, isFolderNote } from '@/engine/docPages';
@@ -623,7 +624,9 @@ export function FileTree({
     // keyboard user could never create a page in a folder, rename, move or
     // trash anything. Kept in flow and merely transparent, they stay
     // focusable and reveal themselves on focus.
-    <span className="ml-auto inline-flex flex-none items-center gap-0.5 opacity-0 focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100">
+    <span
+      className={`${REVEAL} ml-auto inline-flex flex-none items-center gap-0.5 opacity-0 focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100`}
+    >
       {node.kind !== 'file' && (
         <IconButton
           icon="file-plus"
@@ -672,9 +675,16 @@ export function FileTree({
         onDragLeave={() => setDropHint((p) => (p?.path === node.path ? null : p))}
         onDrop={onRowDrop(node)}
         className={[
-          'group flex min-w-0 items-center gap-1 rounded-md pr-1',
-          active ? 'bg-cortex-50' : 'hover:bg-n-100',
-          hint === 'into' ? 'bg-cortex-50 shadow-[inset_0_0_0_1.5px_var(--cortex-500)]' : '',
+          // `cb-tree-row` lets the row's own controls wash past its fill
+          // (shell.css); the wash itself keeps the nav's 20ms guard (M46.2).
+          'cb-tree-row motion-hover group flex min-w-0 items-center gap-1 rounded-md pr-1',
+          // The open page wears the nav's selection — a neutral fill and a
+          // medium label (sidebarChrome's rowClass) — not an accent of its own.
+          hint === 'into'
+            ? 'bg-cortex-50 shadow-[inset_0_0_0_1.5px_var(--cortex-500)]'
+            : active
+              ? 'bg-n-200'
+              : 'hover:bg-n-100',
           hint === 'before' ? 'shadow-[inset_0_2px_0_var(--cortex-500)]' : '',
           hint === 'after' ? 'shadow-[inset_0_-2px_0_var(--cortex-500)]' : '',
           dragPath === node.path ? 'opacity-50' : '',
@@ -694,7 +704,7 @@ export function FileTree({
       const active =
         (node.kind === 'file' && node.path === activePath) ||
         (node.kind === 'doc' && node.mainPath === activePath);
-      const labelClass = ['truncate', active ? 'font-medium text-cortex-600' : ''].join(' ');
+      const labelClass = ['truncate', active ? 'font-medium text-n-900' : ''].join(' ');
 
       return (
         <li key={node.path} className="list-none">
@@ -711,9 +721,10 @@ export function FileTree({
                 className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] text-left text-sm text-n-800"
               >
                 <Icon
-                  name={isOpen ? 'chevron-down' : 'chevron-right'}
+                  name="chevron-right"
                   size={13}
                   color="var(--n-400)"
+                  className={chevronClass(isOpen)}
                 />
                 <Icon name={isOpen ? 'folder-open' : 'folder'} size={14} color="var(--n-500)" />
                 <span className="truncate">{node.label}</span>
@@ -732,7 +743,7 @@ export function FileTree({
                   onClick={() => toggleFolder(node.path)}
                   className="inline-flex flex-none items-center border-0 bg-transparent py-[5px] pl-1 pr-0.5 text-n-400"
                 >
-                  <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={13} />
+                  <Icon name="chevron-right" size={13} className={chevronClass(isOpen)} />
                 </button>
                 <button
                   type="button"
@@ -744,10 +755,7 @@ export function FileTree({
                     entry={
                       node.mainPath === undefined ? null : (entryByPath.get(node.mainPath) ?? null)
                     }
-                    fallback={{
-                      name: 'file-stack',
-                      color: active ? 'var(--cortex-500)' : 'var(--n-500)',
-                    }}
+                    fallback={{ name: 'file-stack', color: 'var(--n-500)' }}
                   />
                   <span className={labelClass}>{node.label}</span>
                 </button>
@@ -772,7 +780,7 @@ export function FileTree({
                       entry={entry}
                       fallback={{
                         name: isWhiteboardPath(node.path) ? kindFor(node.path).icon : style.icon,
-                        color: active ? 'var(--cortex-500)' : (style.color ?? 'var(--n-500)'),
+                        color: style.color ?? 'var(--n-500)',
                       }}
                     />
                   );
@@ -780,16 +788,23 @@ export function FileTree({
                 <span className={labelClass}>{node.label}</span>
               </button>,
             )}
+          {/* What a folder or page holds drops in under it as it opens. */}
           {node.kind !== 'file' && isOpen && node.children.length > 0 && (
-            <ul className="m-0 p-0">{renderNodes(node.children, depth + 1)}</ul>
+            <ul className={`m-0 p-0 ${FOLD_IN}`}>{renderNodes(node.children, depth + 1)}</ul>
           )}
           {node.kind === 'folder' && isOpen && node.children.length === 0 && (
-            <p className="m-0 py-1 text-xs text-n-400" style={{ paddingLeft: depth * 14 + 40 }}>
+            <p
+              className={`m-0 py-1 text-xs text-n-400 ${FOLD_IN}`}
+              style={{ paddingLeft: depth * 14 + 40 }}
+            >
               Empty folder
             </p>
           )}
           {node.kind === 'doc' && isOpen && node.children.length === 0 && (
-            <p className="m-0 py-1 text-xs text-n-400" style={{ paddingLeft: depth * 14 + 40 }}>
+            <p
+              className={`m-0 py-1 text-xs text-n-400 ${FOLD_IN}`}
+              style={{ paddingLeft: depth * 14 + 40 }}
+            >
               No sub-pages
             </p>
           )}
@@ -808,7 +823,7 @@ export function FileTree({
           <button
             type="button"
             onClick={() => openDialog({ mode: 'new-page', dir: root })}
-            className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-500 hover:bg-n-100 hover:text-n-700"
+            className="motion-hover inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-500 hover:bg-n-100 hover:text-n-700"
           >
             <Icon name="file-plus" size={13} />
             New page
@@ -816,19 +831,24 @@ export function FileTree({
           <button
             type="button"
             onClick={() => openDialog({ mode: 'new-folder', dir: root })}
-            className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-500 hover:bg-n-100 hover:text-n-700"
+            className="motion-hover inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-500 hover:bg-n-100 hover:text-n-700"
           >
             <Icon name="folder-plus" size={13} />
             New folder
           </button>
         </div>
       )}
+      {/* The tree arrives with the fold that holds it (the sidebar's Folders).
+          The list moves, never this root: its dialogs and menus are drawn
+          fixed in here, and a moving ancestor would hold them inside the
+          sidebar's scroll for as long as it moved — which is exactly when
+          the header's New page opens one. */}
       {tree.length === 0 ? (
-        <p className="m-0 px-1.5 py-2 text-sm text-n-500">
+        <p className={`m-0 px-1.5 py-2 text-sm text-n-500 ${FOLD_IN}`}>
           No pages yet. Use New page to write the first one.
         </p>
       ) : (
-        <ul className="m-0 p-0">{renderNodes(tree, 0)}</ul>
+        <ul className={`m-0 p-0 ${FOLD_IN}`}>{renderNodes(tree, 0)}</ul>
       )}
       {menu !== null && (
         <ContextMenu

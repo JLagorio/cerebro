@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile, showPages } from './boot';
+import { boot, readMockFile, showPageFolders, showPagePanel } from './boot';
 
 const OLD = 'strategy/systems-map.md';
 const NEXT = 'strategy/systems-atlas.md';
@@ -26,7 +26,7 @@ async function seedLinks(page: Page) {
 }
 
 async function beginRename(page: Page) {
-  await showPages(page);
+  await showPageFolders(page);
   const tree = page.getByTestId('file-tree');
   const folder = tree.getByTestId('tree-folder').filter({ hasText: 'Strategy' });
   if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click();
@@ -104,9 +104,7 @@ test('a Pages rename updates links and Undo restores their exact bytes', async (
     .getByTestId('tree-file')
     .click();
   await expect(page.getByTestId('doc-title')).toHaveText('Systems atlas');
-  const showPanel = page.getByRole('button', { name: 'Show panel', exact: true });
-  if (await showPanel.isVisible()) await showPanel.click();
-  await page.getByTestId('doc-panel-tab-links').click();
+  await showPagePanel(page, 'Details');
   await expect(page.getByTestId('doc-links')).toContainText('Rename decision');
   await expect(page.getByTestId('doc-links')).toContainText('Rename work');
   await page.getByTestId('toast-host').getByRole('button', { name: 'Undo', exact: true }).click();
@@ -176,7 +174,7 @@ test('Move to folder keeps a cited stem without a rewrite prompt', async ({ page
     },
     [DECISION, DECISION_BYTES, WORK, WORK_BYTES],
   );
-  await showPages(page);
+  await showPageFolders(page);
   const tree = page.getByTestId('file-tree');
   await tree.getByTestId('tree-folder').filter({ hasText: 'Strategy' }).click();
   await tree
@@ -193,9 +191,7 @@ test('Move to folder keeps a cited stem without a rewrite prompt', async ({ page
   expect(await readMockFile(page, DECISION)).toBe(DECISION_BYTES);
   expect(await readMockFile(page, WORK)).toBe(WORK_BYTES);
   await expect(page.getByTestId('doc-title')).toHaveText('Systems map');
-  const showPanel = page.getByRole('button', { name: 'Show panel', exact: true });
-  if (await showPanel.isVisible()) await showPanel.click();
-  await page.getByTestId('doc-panel-tab-links').click();
+  await showPagePanel(page, 'Details');
   await expect(page.getByTestId('doc-links')).toContainText('Rename decision');
   await expect(page.getByTestId('doc-links')).toContainText('Rename work');
 });

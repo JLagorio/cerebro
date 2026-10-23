@@ -80,7 +80,7 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
       <div className="flex min-w-0 flex-1 items-center justify-center">
         <EmptyState
           icon="file-x"
-          title="This diagram no longer exists"
+          title="Diagram unavailable"
           description="It may have been renamed, moved to the Trash, or its file couldn't be read."
           action={
             <Button variant="secondary" onClick={() => navigate({ kind: 'home' })}>
@@ -101,12 +101,15 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
 
   return (
     <div ref={host} className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="diagram-page">
-      <div className="flex h-11 flex-none items-center gap-1.5 border-b border-n-200 px-3">
+      <div className="cb-diagram-toolbar">
         <Icon name="waypoints" size={14} color="var(--n-500)" />
-        <span className="truncate text-sm font-medium text-n-900" data-testid="diagram-title">
+        <span
+          className="min-w-0 truncate text-section-title font-semibold text-n-900"
+          data-testid="diagram-title"
+        >
           {title}
         </span>
-        <span className="flex-none text-xs uppercase tracking-[0.05em] text-n-500">
+        <span className="flex-none text-metadata text-(--text-meta)">
           {detectDiagramType(code ?? '')}
         </span>
         <span className="flex-1" />

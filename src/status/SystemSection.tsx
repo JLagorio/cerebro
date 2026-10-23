@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Select } from '@/components/ui/Select';
 import * as ipc from '@/lib/ipc';
 import type { PipelineOverview } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
@@ -229,14 +230,14 @@ export function SystemSection({ vaultPath }: { vaultPath: string | null }) {
             ? 'Background work runs one job at a time.'
             : `Background work runs up to ${overview.ambient_concurrency} jobs at a time, so it can spend that much of your subscription at once.`}
         </label>
-        <select
+        <Select
           id="ambient-concurrency"
-          data-testid="ambient-concurrency"
-          className="rounded-xs border border-n-200 px-2 py-1 text-sm"
-          value={overview.ambient_concurrency}
+          testId="ambient-concurrency"
+          size="sm"
+          value={String(overview.ambient_concurrency)}
           disabled={busy}
-          onChange={(e) => {
-            const ceiling = Number(e.target.value);
+          onChange={(next) => {
+            const ceiling = Number(next);
             void act(
               () => ipc.setAmbientConcurrency(ceiling),
               ceiling === 1
@@ -244,13 +245,10 @@ export function SystemSection({ vaultPath }: { vaultPath: string | null }) {
                 : `Background work may now run ${ceiling} jobs at once`,
             );
           }}
-        >
-          {Array.from({ length: overview.ambient_concurrency_max }, (_, i) => i + 1).map((n) => (
-            <option key={n} value={n}>
-              {n === 1 ? '1 at a time' : `${n} at a time`}
-            </option>
-          ))}
-        </select>
+          options={Array.from({ length: overview.ambient_concurrency_max }, (_, i) => i + 1).map(
+            (n) => ({ value: String(n), label: n === 1 ? '1 at a time' : `${n} at a time` }),
+          )}
+        />
       </div>
 
       {overview.banners.map((banner) => (

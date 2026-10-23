@@ -20,20 +20,263 @@
   --bn-colors-tooltip-background: var(--n-800);
   --bn-colors-hovered-text: var(--n-900);
   --bn-colors-hovered-background: var(--n-50);
-  --bn-colors-selected-text: var(--n-0);
-  --bn-colors-selected-background: var(--cortex-500);
+  --bn-colors-selected-text: var(--text-primary);
+  --bn-colors-selected-background: var(--n-100);
   --bn-colors-disabled-text: var(--n-400);
   --bn-colors-disabled-background: var(--n-50);
   --bn-colors-side-menu: var(--n-400);
-  --bn-colors-border: var(--n-200);
+  --bn-colors-border: var(--border-subtle);
   --bn-colors-shadow: var(--n-200);
   --bn-font-family: var(--font-ui);
-  --bn-border-radius-medium: 8px;
+  --bn-border-radius-medium: 12px;
 }
 
 .cerebro-editor .bn-editor {
   font-size: 14px;
   line-height: 1.6;
+}
+
+/* The title is the actual H1, visually projected above view-only page chrome.
+   Ordering never rewrites the document, including a nonleading first H1. */
+.cb-page-editor .bn-editor > .bn-block-group {
+  display: flex;
+  flex-direction: column;
+}
+.cb-page-editor .bn-editor > .bn-block-group > .cb-page-title-block {
+  order: -2;
+}
+.cb-page-editor .bn-editor > .bn-block-group > .cb-page-editor-chrome,
+.cb-page-editor .cb-page-title-block > .bn-block > .cb-page-editor-chrome {
+  margin-block: 12px 28px;
+  font-size: var(--fs-ui, 14px);
+  line-height: var(--lh-ui, 20px);
+  cursor: default;
+}
+.cb-page-editor .bn-editor > .bn-block-group > .cb-page-editor-chrome {
+  order: -1;
+}
+.cb-page-editor-chrome:empty,
+.cb-page-editor-chrome:has(> [data-testid='page-body-start']:only-child) {
+  margin-block: 0 16px !important;
+}
+.cb-page-body-hidden {
+  display: none;
+}
+.cb-page-title-body-hidden > .bn-block > .bn-block-group {
+  display: none;
+}
+.cb-held-selection {
+  background: var(--cortex-100);
+  box-shadow: inset 0 -1px var(--cortex-400);
+}
+.cb-peek-icon {
+  padding-left: 26px;
+}
+.cb-page-chrome-parking:not(:empty) {
+  padding-inline: 54px;
+}
+.cerebro-editor-compact .cb-page-chrome-parking:not(:empty) {
+  padding-inline: 28px 8px;
+}
+.cerebro-editor
+  .cb-page-title-block
+  > .bn-block
+  > .bn-block-content[data-content-type='heading']
+  h1,
+.cb-page-title-fallback {
+  font-size: var(--fs-page-title, 32px) !important;
+  line-height: var(--lh-page-title, 40px) !important;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.cerebro-editor-compact
+  .cb-page-title-block
+  > .bn-block
+  > .bn-block-content[data-content-type='heading']
+  h1,
+.cerebro-editor-compact .cb-page-title-fallback {
+  font-size: var(--fs-workspace-title, 24px) !important;
+  line-height: var(--lh-workspace-title, 32px) !important;
+}
+.cb-page-title-fallback {
+  display: block;
+  width: 100%;
+  resize: none;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  padding: 0;
+  margin-bottom: 16px;
+  color: var(--n-900);
+  background: transparent;
+}
+.cb-page-title-fallback:focus-visible {
+  outline: 2px solid var(--cortex-500);
+  outline-offset: 3px;
+}
+
+/* Heading properties read as one quiet byline. The original field controls
+   remain the edit targets, including their inline draft and error states. */
+.cb-heading-properties {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 20px;
+  margin-bottom: 12px;
+}
+.cb-heading-property {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.cb-heading-property-label {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  max-width: 160px;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-heading-property-value {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 260px;
+  color: var(--text-secondary);
+}
+.cb-heading-property-value > a,
+.cb-heading-property-value > span > a {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-decoration-color: var(--n-300);
+  text-underline-offset: 3px;
+}
+.cb-heading-property-value a:hover {
+  color: var(--text-link);
+}
+.cb-heading-details {
+  flex: none;
+  margin-left: auto;
+}
+
+.cb-record-page-properties {
+  margin-bottom: 12px;
+}
+.cb-record-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  min-height: 34px;
+}
+.cb-record-summary-field,
+.cb-record-properties-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 30px;
+  border: 0;
+  border-radius: 5px;
+  padding: 3px 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  text-align: left;
+}
+.cb-record-summary-field:first-child {
+  margin-left: -5px;
+}
+.cb-record-summary-field:hover,
+.cb-record-properties-toggle:hover:not(:disabled) {
+  background: var(--surface-sunken);
+}
+.cb-record-summary-label,
+.cb-record-summary-field > svg {
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+}
+.cb-record-summary-value {
+  overflow: hidden;
+  max-width: 180px;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-record-properties-toggle {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+}
+.cb-record-properties-toggle:disabled {
+  opacity: 0.5;
+}
+.cb-record-properties-toggle > span {
+  font-variant-numeric: tabular-nums;
+}
+.cb-record-property-manager {
+  margin-top: 12px;
+  padding-block: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.cb-record-property-manager > .cb-record-properties {
+  margin-bottom: 0;
+}
+.cb-record-property-manager .cb-record-property-rows {
+  gap: 0;
+}
+.cb-page-knowledge-links {
+  margin-bottom: 8px;
+}
+.cb-record-page-tabs {
+  margin-block: 12px;
+}
+.cb-record-page-tabs .cb-record-tab-bar {
+  border-color: var(--border-subtle);
+}
+.cb-record-page-tabs [role='tab'] {
+  padding: 8px 10px;
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+.cb-record-page-tabs [role='tab'][aria-selected='true'] {
+  border-bottom-color: var(--text-primary);
+  font-weight: 500;
+}
+.cb-page-editor
+  .bn-block-content:is(
+    [data-content-type='paragraph'],
+    [data-content-type='bulletListItem'],
+    [data-content-type='numberedListItem'],
+    [data-content-type='checkListItem'],
+    [data-content-type='quote'],
+    [data-content-type='callout']
+  ) {
+  font-size: var(--fs-prose, 16px);
+  line-height: var(--lh-prose, 28px);
+  padding-block: 4px 8px;
+}
+.cb-page-editor .bn-block-content[data-content-type='heading'] h1 {
+  font-size: var(--fs-2xl);
+  line-height: 1.4;
+}
+.cb-page-editor
+  .bn-block-content:is(
+    [data-content-type='bulletListItem'],
+    [data-content-type='numberedListItem'],
+    [data-content-type='checkListItem']
+  ) {
+  padding-block: 2px 4px;
+}
+.cb-page-editor .cb-page-editor-chrome .bn-editor > .bn-block-group {
+  display: block;
 }
 
 .cerebro-editor .bn-inline-content code,
@@ -50,45 +293,100 @@
   background: transparent;
 }
 
-/* Ordinary document titles share the page reading scale. Compact embeds and
-   record section editors keep their intentionally smaller heading hierarchy. */
-.cb-document-content
-  .cerebro-editor:not(.cerebro-editor-compact):not(.cerebro-editor-sections)
-  .bn-block-content[data-content-type='heading']
-  h1 {
-  font-size: var(--fs-3xl);
-  font-weight: 600;
-  line-height: 1.35;
-  letter-spacing: -0.025em;
+/* The code block's language picker (codeBlock.tsx, CV-63): the design
+   system's Select in the block's top corner, inked for the dark canvas in
+   either theme. It stays out of the code's way until the block is hovered,
+   or the picker holds focus or has its list open. */
+.cerebro-editor .cb-code-language {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  transition: opacity var(--motion-hover);
 }
+.cerebro-editor .bn-block-content[data-content-type='codeBlock']:hover > .cb-code-language,
+.cerebro-editor .cb-code-language:focus-within,
+.cerebro-editor .cb-code-language:has([aria-expanded='true']) {
+  opacity: 1;
+}
+.cerebro-editor .cb-code-language .cb-select-trigger {
+  height: 24px;
+  color: color-mix(in srgb, var(--text-inverse) 60%, transparent);
+}
+.cerebro-editor .cb-code-language .cb-select-trigger:not(:disabled):hover,
+.cerebro-editor .cb-code-language .cb-select-trigger[aria-expanded='true'] {
+  color: var(--text-inverse);
+  background: color-mix(in srgb, var(--text-inverse) 12%, transparent);
+}
+.cerebro-editor .cb-code-language .cb-select-chevron,
+.cerebro-editor .cb-code-language .cb-select-placeholder {
+  color: inherit;
+}
+/* Read-only: the language as a label, with nothing to open. */
+.cerebro-editor .cb-code-language .cb-select-trigger:disabled {
+  color: color-mix(in srgb, var(--text-inverse) 45%, transparent);
+  cursor: default;
+}
+.cerebro-editor .cb-code-language .cb-select-trigger:disabled .cb-select-chevron {
+  display: none;
+}
+
 .cb-document-content
   .cerebro-editor:not(.cerebro-editor-compact):not(.cerebro-editor-sections)
   .bn-block-content[data-content-type='heading']
   h2 {
-  font-size: var(--fs-2xl);
-  line-height: 1.4;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 
-/* Table polish (M2.x docs polish): quiet grid, header band, roomy cells —
-   closer to Notion/ClickUp tables than the mantine defaults. */
+/* The ordinary markdown table belongs to the writing surface. Database and
+   spreadsheet blocks retain their own grid geometry and interaction layers. */
 .cerebro-editor .bn-block-content[data-content-type='table'] table {
   border-collapse: collapse;
   width: 100%;
 }
 .cerebro-editor .bn-block-content[data-content-type='table'] th,
 .cerebro-editor .bn-block-content[data-content-type='table'] td {
-  border: 1px solid var(--n-200);
-  padding: 6px 10px;
-  font-size: 13.5px;
-  line-height: 1.5;
+  border: 1px solid var(--border-subtle);
+  padding: 9px 12px;
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
 }
 .cerebro-editor .bn-block-content[data-content-type='table'] th {
-  background: var(--n-25);
-  font-weight: 600;
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-weight: 500;
   text-align: left;
 }
 .cerebro-editor .bn-block-content[data-content-type='table'] tr:hover td {
   background: var(--n-25);
+}
+
+/* BlockNote portals carry bn-mantine outside the editor's DOM subtree. These
+   are its public control classes; focus and selection behavior stay native. */
+.bn-mantine .bn-toolbar,
+.bn-mantine .bn-menu-dropdown,
+.bn-mantine .bn-suggestion-menu {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--n-900) 9%, transparent);
+  padding: 5px;
+}
+.bn-mantine .bn-toolbar {
+  border-radius: 14px;
+}
+.bn-mantine .bn-menu-item,
+.bn-mantine .bn-suggestion-menu-item {
+  border-radius: 7px;
+}
+.bn-mantine .bn-suggestion-menu-label {
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  font-weight: 500;
 }
 
 /* BlockNote's global .ProseMirror table rules force 100% fixed tables and
@@ -719,4 +1017,169 @@
     animation: none;
     opacity: 0.55;
   }
+}
+
+/* Rich blocks use one rhythm and focus treatment; their own inner controls
+   keep ownership of selection, scrolling and any more specific status. */
+.cb-page-editor
+  .bn-block-content:is(
+    [data-content-type='codeBlock'],
+    [data-content-type='table'],
+    [data-content-type='image'],
+    [data-content-type='video'],
+    [data-content-type='audio'],
+    [data-content-type='file'],
+    [data-content-type='mermaid'],
+    [data-content-type='database'],
+    [data-content-type='sheet'],
+    [data-content-type='whiteboard'],
+    [data-content-type='pageCard'],
+    [data-content-type='ai']
+  ) {
+  min-width: 0;
+  margin-block: 12px;
+  border-radius: var(--r-lg);
+}
+.cb-page-editor
+  .bn-block-content:is(
+    [data-content-type='mermaid'],
+    [data-content-type='database'],
+    [data-content-type='sheet'],
+    [data-content-type='whiteboard'],
+    [data-content-type='pageCard'],
+    [data-content-type='ai']
+  ):focus-within {
+  outline: 1px solid var(--border-focus);
+  outline-offset: 3px;
+}
+.cb-page-editor .bn-block-content[data-content-type='callout'] .bn-inline-content {
+  font-size: var(--fs-prose);
+  line-height: var(--lh-prose);
+}
+.cb-page-editor .bn-file-caption {
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.cb-page-editor .bn-block-content[data-content-type='codeBlock'] pre {
+  border-radius: var(--r-lg);
+  padding: 16px;
+  font-size: var(--fs-ui);
+  line-height: 24px;
+}
+.cb-page-editor .bn-block-content[data-content-type='table'] td:focus-within {
+  box-shadow: inset 0 0 0 1px var(--border-focus);
+}
+
+/* The AI block's question and its run button (M91.14): a Prompt Input's
+   anatomy at the block's own size, on the block's synapse card — no pill, a
+   small field, and a run button that is a word, not a round arrow. Named with
+   the element's class beside the block's, so the order the two stylesheets
+   load in never decides which wins. */
+.cb-ai-block .cb-ai-prompt-input {
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: auto;
+}
+.cb-ai-block .cb-ai-prompt-input-body {
+  flex: 1 1 auto;
+}
+.cb-ai-block .cb-ai-prompt-input-textarea {
+  min-height: 0;
+  max-height: none;
+  padding: 1px 6px;
+  border: 1px solid var(--synapse-200);
+  border-radius: var(--r-xs);
+  background: var(--n-0);
+  color: var(--n-800);
+  font-size: var(--fs-xs);
+  line-height: 18px;
+}
+.cb-ai-block .cb-ai-prompt-input-submit {
+  width: auto;
+  height: auto;
+  padding: 2px 4px;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--synapse-700);
+  font-family: inherit;
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-2xs);
+  white-space: nowrap;
+}
+.cb-ai-block .cb-ai-prompt-input-submit:hover:not(:disabled),
+.cb-ai-block .cb-ai-prompt-input-submit:active:not(:disabled) {
+  background: var(--synapse-100);
+  scale: 1;
+}
+.cb-ai-block .cb-ai-prompt-input-submit:disabled {
+  opacity: 0.4;
+}
+/* Working, the word keeps full ink: the light passing through it is the
+   state, not a disabled button's fade. */
+.cb-ai-block[aria-busy] .cb-ai-prompt-input-submit:disabled {
+  opacity: 1;
+}
+
+/* Ask AI on a selection (M91.14): its instruction a Prompt Input with the AI
+   glyph and the send arrow inside one field; its working line under the AI
+   light; the writing actions as Suggestion rows; and the decision a
+   Confirmation drawn flat, since the popover is already its card. */
+.cb-ask-ai-field.cb-ai-prompt-input {
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-height: 0;
+  padding: 3px 3px 3px 8px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+}
+.cb-ask-ai-field.cb-ai-prompt-input:focus-within {
+  border-color: var(--cortex-400);
+}
+.cb-ask-ai-field .cb-ai-prompt-input-body {
+  flex: 1 1 auto;
+}
+.cb-ask-ai-field .cb-ai-prompt-input-textarea {
+  min-height: 20px;
+  max-height: 120px;
+  font-size: var(--fs-sm);
+  line-height: 20px;
+}
+.cb-ask-ai-field .cb-ai-prompt-input-submit {
+  width: 26px;
+  height: 26px;
+}
+.cb-ask-ai-working {
+  margin: 8px 0 0;
+  padding: 0 8px;
+  color: var(--text-ai);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cb-ask-ai-presets.cb-ai-suggestions {
+  gap: 2px;
+}
+.cb-ask-ai-presets .cb-ai-suggestion {
+  padding: 6px 8px;
+  color: var(--n-700);
+}
+.cb-ask-ai-presets .cb-ai-suggestion:hover {
+  background: var(--n-50);
+}
+.cb-ask-ai-presets .cb-ai-suggestion-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.cb-ask-ai-decision.cb-ai-confirmation.cb-ai-item {
+  padding: 0;
+  border: 0;
+  background: transparent;
 }

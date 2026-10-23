@@ -1120,10 +1120,11 @@ impl McpState {
 // ---------------------------------------------------------------------------
 
 /// How many requests the endpoint answers at once: two per run at the run
-/// cap, so every run at the cap can have a call in flight and a read beside
-/// it before a request waits for a worker. The CLI runs the calls the catalog
-/// marks read-only in parallel. One thread used to answer every run, so one
-/// slow call held up all of them, and one panic ended the server.
+/// cap, one of which `SeamReserve` keeps for the ask seam (M91.2b), so
+/// ordinary calls share the other 2N-1 and a call past them waits for one to
+/// free. The CLI runs the calls the catalog marks read-only in parallel. One
+/// thread used to answer every run, so one slow call held up all of them, and
+/// one panic ended the server.
 const LOOPBACK_WORKERS: usize = 2 * crate::agent::MAX_CONCURRENT_RUNS;
 
 /// The largest request body the endpoint reads. A tool call carries a note at
@@ -1260,11 +1261,13 @@ fn routed(
 /// check (`loopback_refusal`), the size cap (`max_body`), then `dispatch` with
 /// the request's bearer and body. An address refusal is answered before the
 /// body is read or the bearer looked at, and a size refusal before the
-/// bearer. `dispatch` runs inside `catch_unwind`, so a call that panics
-/// answers -32603 and its worker takes the next request, and a panic anywhere
-/// else in answering, tiny_http's own included, costs that one request: the
-/// pool keeps its size. `serve_pool` owns worker shutdown for both listeners;
-/// M54.5's init check makes a failed run listener visible to its run.
+/// bearer. A call to the ask seam is dispatched at once; every other waits
+/// for one of the slots `SeamReserve` leaves it (M91.2b). `dispatch` runs
+/// inside `catch_unwind`, so a call that panics answers -32603 and its worker
+/// takes the next request, and a panic anywhere else in answering,
+/// tiny_http's own included, costs that one request: the pool keeps its
+/// size. `serve_pool` owns worker shutdown for both listeners; M54.5's init
+/// check makes a failed run listener visible to its run.
 fn serve_loopback<F>(
     server: Arc<tiny_http::Server>,
     port: u16,
@@ -1275,14 +1278,104 @@ fn serve_loopback<F>(
 where
     F: Fn(Option<&str>, &str) -> Reply + Send + Sync + 'static,
 {
+    let reserve = Arc::new(SeamReserve::new(workers));
     serve_pool(
         server,
         "cerebro-mcp",
         workers,
         Arc::new(move |request| {
-            answer_request(request, port, max_body, &*dispatch);
+            let Some(admitted) = admit_request(request, port, max_body) else {
+                return;
+            };
+            if calls_the_ask_seam(&admitted.1) {
+                answer_body(admitted, &*dispatch);
+            } else {
+                reserve.run(admitted, |job| answer_body(job, &*dispatch));
+            }
         }),
     )
+}
+
+/// A request the address and size checks admitted, and its body.
+type AdmittedCall = (tiny_http::Request, String);
+
+/// The loopback's worker kept for the ask seam (M91.2b). A run's PreToolUse
+/// hook (`ask_gate`) and its permission prompt (`ask_host`) are book lookups
+/// Claude Code waits on for `interaction::HOOK_TIMEOUT_SECS`, and refuses
+/// the call past that, while a run's subagents can keep every worker busy
+/// with reads. So all but one worker at most answer anything else at once
+/// (one, in a pool of one). A request that finds those slots taken waits
+/// here, in arrival order, for the next worker an ordinary call frees, and
+/// the worker that found them taken goes back to the endpoint's queue, where
+/// the seam's calls wait for it.
+struct SeamReserve {
+    slots: usize,
+    state: Mutex<Reserved>,
+}
+
+/// The ordinary calls being answered, and the ones waiting for a slot.
+#[derive(Default)]
+struct Reserved {
+    busy: usize,
+    waiting: std::collections::VecDeque<AdmittedCall>,
+}
+
+impl SeamReserve {
+    fn new(workers: usize) -> Self {
+        Self {
+            slots: workers.saturating_sub(1).max(1),
+            state: Mutex::default(),
+        }
+    }
+
+    /// Answer `job` with `answer` in an ordinary slot, then every job that
+    /// waited for one while it ran; or, with every slot taken, leave it to
+    /// wait. A panic in `answer` costs its own request and frees nothing it
+    /// should not: the slot is given back or handed on either way.
+    fn run(&self, job: AdmittedCall, answer: impl Fn(AdmittedCall)) {
+        {
+            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            if state.busy >= self.slots {
+                state.waiting.push_back(job);
+                return;
+            }
+            state.busy += 1;
+        }
+        let mut next = Some(job);
+        while let Some(job) = next {
+            let _ = catch_unwind(AssertUnwindSafe(|| answer(job)));
+            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            next = state.waiting.pop_front();
+            if next.is_none() {
+                state.busy -= 1;
+            }
+        }
+    }
+}
+
+/// Is `body` a call to the ask seam's own two tools (M91.2b), `ask_gate` and
+/// `ask_host`? Read for its method and tool name alone; a body that says
+/// neither, or does not parse, is an ordinary call, which dispatch answers
+/// or refuses as before.
+fn calls_the_ask_seam(body: &str) -> bool {
+    use crate::agent::interaction::{GATE_TOOL, HOST_TOOL};
+    #[derive(serde::Deserialize)]
+    struct Call {
+        method: Option<String>,
+        params: Option<Params>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Params {
+        name: Option<String>,
+    }
+    let Ok(call) = serde_json::from_str::<Call>(body) else {
+        return false;
+    };
+    call.method.as_deref() == Some("tools/call")
+        && call
+            .params
+            .and_then(|params| params.name)
+            .is_some_and(|name| name == GATE_TOOL || name == HOST_TOOL)
 }
 
 /// Both loopback transports isolate a failed request and keep their worker
@@ -1323,11 +1416,14 @@ pub(crate) enum Body {
     Unreadable,
 }
 
-/// Answer one request, in the order `serve_loopback` gives.
-fn answer_request<F>(mut request: tiny_http::Request, port: u16, max_body: usize, dispatch: &F)
-where
-    F: Fn(Option<&str>, &str) -> Reply,
-{
+/// Admit one request, in the order `serve_loopback` gives: the address
+/// check, then the size cap. A refused request is answered here, and None
+/// returned; an admitted one comes back with its body, for `answer_body`.
+fn admit_request(
+    mut request: tiny_http::Request,
+    port: u16,
+    max_body: usize,
+) -> Option<AdmittedCall> {
     let host = header_value(&request, "Host");
     let origin = header_value(&request, "Origin");
     if let Some((status, reason)) = loopback_refusal(host.as_deref(), origin.as_deref(), port) {
@@ -1338,10 +1434,10 @@ where
         };
         log_first_refusal(reason, presented.as_deref().unwrap_or_default());
         respond_json(request, status, &rpc_error(Value::Null, -32600, reason));
-        return;
+        return None;
     }
-    let body = match read_body(&mut request, max_body) {
-        Body::Text(body) => body,
+    match read_body(&mut request, max_body) {
+        Body::Text(body) => Some((request, body)),
         Body::TooLarge => {
             let declared = request
                 .body_length()
@@ -1354,14 +1450,21 @@ where
                 413,
                 &rpc_error(Value::Null, -32600, OVERSIZED_BODY),
             );
-            return;
+            None
         }
         Body::Unreadable => {
             let error = rpc_error(Value::Null, -32700, UNREADABLE_BODY);
             respond_json(request, 400, &error);
-            return;
+            None
         }
-    };
+    }
+}
+
+/// Answer one admitted request: `dispatch` with its bearer and body.
+fn answer_body<F>((request, body): AdmittedCall, dispatch: &F)
+where
+    F: Fn(Option<&str>, &str) -> Reply,
+{
     let reply = catch_unwind(AssertUnwindSafe(|| dispatch(bearer_of(&request), &body)));
     match reply {
         Ok(Reply::Accepted) => {
@@ -1517,8 +1620,14 @@ pub(crate) fn answer_value(app: &AppHandle, grant: &RunGrant, request: &Value) -
     let method = request.get("method").and_then(Value::as_str).unwrap_or("");
 
     let result = match method {
-        // What this bearer may call, never the whole catalog (M54.4).
-        "tools/list" => Ok(json!({ "tools": listed_tools(grant, proposals_enabled(app)) })),
+        // What this bearer may call, never the whole catalog (M54.4), and the
+        // prompt tool on a run whose argv names it (M57.3).
+        "tools/list" => {
+            use tauri::Manager;
+            let agents = app.try_state::<crate::agent::AgentState>();
+            let book = agents.as_ref().map(|a| a.interactions());
+            Ok(json!({ "tools": tools_list(grant, proposals_enabled(app), book) }))
+        }
         "tools/call" => {
             let params = request.get("params").cloned().unwrap_or(Value::Null);
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
@@ -1596,12 +1705,14 @@ fn answer_gate(
 /// The prompt tool's answer (M57.3), when `name` is `ask_host`: Claude
 /// Code's `--permission-prompt-tool` on a seated run, asked when a call
 /// reaches its permission prompt. Like the gate, a hook endpoint answered
-/// before `call_tool`, so it is never listed, counted, held to a grant axis,
+/// before `call_tool`, so it is never counted, held to a grant axis,
 /// announced or recorded, and it answers as one text block, never
-/// `error_result`. It allows only a call the bearer's seat holds a person's
-/// answer for (`Interactions::host_prompt`) and denies the rest; with no book
-/// nobody can have answered, so it denies. It can read a person's answer,
-/// never record one.
+/// `error_result`. It is listed only to the run whose argv names it
+/// (`tools_list`), and that argv hides it from the model. It allows only a
+/// call the bearer's seat holds a person's answer for
+/// (`Interactions::host_prompt`) and denies the rest; with no book nobody
+/// can have answered, so it denies. It can read a person's answer, never
+/// record one.
 fn answer_host(
     name: &str,
     args: &Map<String, Value>,
@@ -2549,9 +2660,10 @@ pub fn tool_catalog(proposals_enabled: bool) -> Vec<Value> {
     tools
 }
 
-/// What one bearer's `tools/list` holds (M54.4): the catalog, in its order,
-/// less every tool its grant would refuse at dispatch, so a narrowed run is
-/// shown only what it can call.
+/// What one bearer may call, as its `tools/list` holds it (M54.4), before
+/// `tools_list` adds the prompt tool: the catalog, in its order, less every
+/// tool its grant would refuse at dispatch, so a narrowed run is shown only
+/// what it can call.
 ///
 /// The three held tools go only to the run that can use them:
 /// `report_window_outcome` while it holds an open ingest window, and
@@ -2583,6 +2695,48 @@ pub(crate) fn listed_tools(grant: &RunGrant, proposals_enabled: bool) -> Vec<Val
             }
         })
         .collect()
+}
+
+/// What one bearer's `tools/list` answers: `listed_tools`, then the prompt
+/// tool (M57.3) for a run whose argv names it as Claude Code's
+/// `--permission-prompt-tool`. Live on 2.1.250, a run whose prompt tool its
+/// server does not list fails every tool call, so the run's seat records
+/// that it was handed one (`Interactions::hand_prompt_tool`) and only that
+/// run is shown it; its `--disallowedTools` keeps it from the model. It is
+/// added here and never in `listed_tools`, so nothing that counts or
+/// announces a run's tools meets it. A client token's session is never
+/// seated, and its calls never reach the prompt tool.
+fn tools_list(
+    grant: &RunGrant,
+    proposals_enabled: bool,
+    book: Option<&crate::agent::interaction::Interactions>,
+) -> Vec<Value> {
+    let mut tools = listed_tools(grant, proposals_enabled);
+    let client = grant
+        .actor
+        .starts_with(crate::client_access::CLIENT_ACTOR_PREFIX);
+    if !client && book.is_some_and(|book| book.lists_prompt_tool(&grant.run_id)) {
+        tools.push(host_tool_entry());
+    }
+    tools
+}
+
+/// The prompt tool's `tools/list` entry (M57.3). No manifest row, so no
+/// annotations and no `anthropic/alwaysLoad`; its schema admits what Claude
+/// Code sends (`GateCall::from_prompt_args`).
+fn host_tool_entry() -> Value {
+    json!({
+        "name": crate::agent::interaction::HOST_TOOL,
+        "description": "Cerebro's permission endpoint for Claude Code, which asks it when a call reaches its permission prompt. The model never calls it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tool_name": { "type": "string" },
+                "input": { "type": "object" },
+                "tool_use_id": { "type": "string" }
+            }
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -5982,6 +6136,7 @@ fn handoff_request(
             record.title, record.path, callee_actor, body
         )),
         session_id: None,
+        fork: None,
         model,
         // Fail closed, all three: the shell and the web need their Settings
         // ceilings (M57.7) and connectors need the per-machine approvals, and
@@ -5990,6 +6145,7 @@ fn handoff_request(
         // person starts themselves.
         shell: Some(crate::agent::ShellCeiling::Off),
         web: Some(false),
+        delegate: None,
         connectors: Some(false),
         connector_names: Some(vec![]),
         attended: Some(false),
@@ -8311,8 +8467,13 @@ mod tests {
                 case["renderer"].as_str().expect("renderer"),
                 "{case}"
             );
-            let fold = crate::policy::tools::fold(tool)
-                .map(|fold| json!({ "one": fold.one, "many": fold.many }));
+            let fold = crate::policy::tools::fold(tool).map(|fold| {
+                let mut words = json!({ "one": fold.one, "many": fold.many });
+                if let Some(running) = &fold.running {
+                    words["running"] = json!({ "one": running.one, "many": running.many });
+                }
+                words
+            });
             assert_eq!(
                 fold.as_ref().unwrap_or(&Value::Null),
                 &case["fold"],
@@ -14716,6 +14877,115 @@ mod tests {
         }
     }
 
+    /// What the calls `the_ask_seam_keeps_a_worker_however_busy_the_others_are`
+    /// parks share.
+    #[derive(Default)]
+    struct Parked {
+        in_flight: usize,
+        peak: usize,
+        released: bool,
+    }
+
+    // M91.2b: a run's subagents can keep every ordinary worker busy, and the
+    // ask seam still finds one. With a call parked in every slot the pool
+    // leaves ordinary calls, and one more waiting behind them, `ask_gate` is
+    // answered at once, well inside the hook's timeout; once freed, every
+    // parked call is answered, and none ever took the seam's worker.
+    #[test]
+    fn the_ask_seam_keeps_a_worker_however_busy_the_others_are() {
+        use crate::agent::interaction::{GATE_TOOL, HOOK_TIMEOUT_SECS, HOST_TOOL};
+        let workers = LOOPBACK_WORKERS;
+        let slots = workers - 1;
+        let parked = Arc::new((Mutex::new(Parked::default()), Condvar::new()));
+        let held = Arc::clone(&parked);
+        let pool = Pool::start(workers, MAX_BODY_BYTES, move |_bearer, body| {
+            let request: Value = serde_json::from_str(body).unwrap_or_default();
+            let id = request["id"].clone();
+            if request["params"]["name"] != "search_notes" {
+                return Reply::Json(rpc_result(id, json!({ "answered": true })));
+            }
+            let (lock, changed) = &*held;
+            let mut state = lock.lock().unwrap();
+            state.in_flight += 1;
+            state.peak = state.peak.max(state.in_flight);
+            changed.notify_all();
+            let (mut state, _) = changed
+                .wait_timeout_while(state, Duration::from_secs(20), |state| !state.released)
+                .unwrap();
+            state.in_flight -= 1;
+            Reply::Json(rpc_result(id, json!({ "parked": true })))
+        });
+        let call = |id: usize, name: &str| {
+            json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                "params": { "name": name, "arguments": {} } })
+            .to_string()
+        };
+        // One more ordinary call than there are slots for it.
+        let clients: Vec<_> = (0..workers)
+            .map(|id| {
+                let (port, host, body) = (pool.port, pool.host(), call(id, "search_notes"));
+                std::thread::spawn(move || post(port, &[("Host", host.as_str())], &body))
+            })
+            .collect();
+        {
+            let (lock, changed) = &*parked;
+            let (state, waited) = changed
+                .wait_timeout_while(lock.lock().unwrap(), Duration::from_secs(10), |state| {
+                    state.in_flight < slots
+                })
+                .unwrap();
+            assert!(
+                !waited.timed_out(),
+                "only {} of {slots} slots filled",
+                state.in_flight
+            );
+        }
+        let began = Instant::now();
+        let (status, answer) = post(
+            pool.port,
+            &[("Host", pool.host().as_str())],
+            &call(workers, GATE_TOOL),
+        );
+        let took = began.elapsed();
+        assert_eq!(status, 200, "{answer}");
+        assert_eq!(answer["result"]["answered"], true, "{answer}");
+        assert!(
+            took < Duration::from_secs(HOOK_TIMEOUT_SECS),
+            "the gate waited {took:?}"
+        );
+        {
+            let (lock, changed) = &*parked;
+            let mut state = lock.lock().unwrap();
+            assert_eq!(
+                state.in_flight, slots,
+                "the parked calls still held their slots"
+            );
+            state.released = true;
+            changed.notify_all();
+        }
+        for client in clients {
+            let (status, answer) = client.join().expect("a client");
+            assert_eq!(status, 200, "{answer}");
+            assert_eq!(answer["result"]["parked"], true, "{answer}");
+        }
+        assert_eq!(parked.0.lock().unwrap().peak, slots);
+        pool.stop();
+        // A pool of one keeps no worker back, or it would answer nothing.
+        assert_eq!(SeamReserve::new(1).slots, 1);
+        assert_eq!(SeamReserve::new(LOOPBACK_WORKERS).slots, slots);
+        // Only the seam's own two tools are its calls.
+        assert!(calls_the_ask_seam(&call(1, GATE_TOOL)));
+        assert!(calls_the_ask_seam(&call(1, HOST_TOOL)));
+        for ordinary in [
+            call(1, "search_notes"),
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }).to_string(),
+            json!({ "method": "initialize", "params": { "name": GATE_TOOL } }).to_string(),
+            "not json".to_string(),
+        ] {
+            assert!(!calls_the_ask_seam(&ordinary), "{ordinary}");
+        }
+    }
+
     /// Run `call` on a thread of its own, and hear its outcome on the
     /// returned channel, so a test can tell a call that waits from one that
     /// answers.
@@ -17660,7 +17930,7 @@ mod tests {
     // --- The comment tools (M70.3) -------------------------------------------
 
     /// A person's thread on `page`, about `quote` (or the whole page when
-    /// it is empty), as the Comments tab starts one.
+    /// it is empty), as the Comments panel starts one.
     fn comment_as_owner(vault: &Path, page: &str, quote: &str, body: &str) -> String {
         let anchor = (!quote.is_empty()).then(|| vault::comments::AnchorInput {
             quote: quote.to_string(),
@@ -18104,8 +18374,13 @@ mod tests {
         .unwrap()
     }
 
+    // Live on 2.1.250, a run whose `--permission-prompt-tool` its server
+    // does not list fails every tool call, so the run whose seat was handed
+    // the prompt tool, and only that run, finds it in tools/list. It is never
+    // a catalog tool, a manifest row or one of `listed_tools`, which feed the
+    // grant, counts and announcements.
     #[test]
-    fn the_prompt_tool_is_never_listed_or_named() {
+    fn the_prompt_tool_is_listed_only_to_the_run_handed_it() {
         let host = crate::agent::interaction::HOST_TOOL;
         let grants = [
             bearer(None, None, None),
@@ -18114,15 +18389,44 @@ mod tests {
             bearer(None, Some(vec![]), Some(vec![])),
         ];
         for grant in &grants {
+            let book = seated_book(grant);
             for proposals in [false, true] {
+                let without = listed_tools(grant, proposals);
                 assert!(
-                    !listed_names(grant, proposals)
-                        .iter()
-                        .any(|name| name == host),
+                    !names_of(&without).iter().any(|name| name == host),
                     "proposals={proposals}"
                 );
+                // No book, or a seat its argv never named it to.
+                assert_eq!(tools_list(grant, proposals, None), without);
+                assert_eq!(tools_list(grant, proposals, Some(&book)), without);
             }
+            book.hand_prompt_tool(&grant.run_id);
+            for proposals in [false, true] {
+                let without = listed_tools(grant, proposals);
+                let with = tools_list(grant, proposals, Some(&book));
+                assert_eq!(with[..with.len() - 1], without[..], "listed_tools first");
+                assert_eq!(with.last(), Some(&host_tool_entry()));
+                assert_eq!(names_of(&with).iter().filter(|n| *n == host).count(), 1);
+                // Another run's bearer on the same book is shown nothing.
+                let stranger = bearer(None, None, None);
+                assert!(!names_of(&tools_list(&stranger, proposals, Some(&book)))
+                    .iter()
+                    .any(|name| name == host));
+            }
+            book.close_seat(&grant.run_id);
+            assert_eq!(
+                tools_list(grant, true, Some(&book)),
+                listed_tools(grant, true)
+            );
         }
+        // A client token's session is never shown it, whatever a book says.
+        let mut client = bearer(None, None, None);
+        client.actor = format!("{}terminal", crate::client_access::CLIENT_ACTOR_PREFIX);
+        let book = seated_book(&client);
+        book.hand_prompt_tool(&client.run_id);
+        assert!(!names_of(&tools_list(&client, true, Some(&book)))
+            .iter()
+            .any(|name| name == host));
         for proposals in [false, true] {
             assert!(!names_of(&tool_catalog(proposals))
                 .iter()
@@ -18131,6 +18435,48 @@ mod tests {
         assert!(crate::policy::tools::row(host).is_none());
         let manifest = include_str!("../../shared/policy/tools.v1.json");
         assert!(!manifest.contains(host));
+    }
+
+    // The entry admits what Claude Code sends the prompt tool, and carries
+    // none of a manifest row's keys: no annotations and no `alwaysLoad`.
+    #[test]
+    fn the_prompt_tools_entry_admits_what_claude_code_sends() {
+        use crate::agent::interaction::{GateCall, HOST_TOOL};
+        let entry = host_tool_entry();
+        assert_eq!(entry["name"], HOST_TOOL);
+        assert!(!entry["description"].as_str().unwrap().is_empty());
+        let mut keys: Vec<&String> = entry.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["description", "inputSchema", "name"]);
+        let schema = &entry["inputSchema"];
+        assert_eq!(schema["type"], "object");
+        assert!(
+            schema.get("required").is_none(),
+            "a missing field reads empty"
+        );
+        let mut properties: Vec<&String> =
+            schema["properties"].as_object().unwrap().keys().collect();
+        properties.sort();
+        assert_eq!(properties, ["input", "tool_name", "tool_use_id"]);
+        let sent = host_args("toolu_1", "Read", json!({ "file_path": "a.md" }));
+        for (key, value) in &sent {
+            let kind = &schema["properties"][key]["type"];
+            assert_eq!(
+                kind,
+                if value.is_object() {
+                    "object"
+                } else {
+                    "string"
+                },
+                "{key}"
+            );
+        }
+        let call = GateCall::from_prompt_args(&sent);
+        assert_eq!(
+            (call.tool_name.as_str(), call.tool_use_id.as_str()),
+            ("Read", "toolu_1")
+        );
+        assert!(!entry.to_string().contains("alwaysLoad"));
     }
 
     #[test]

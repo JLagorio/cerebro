@@ -1,7 +1,13 @@
 import { isTemplate } from '@/lib/templates';
 import { isDateText } from './dateGrammar';
 import { isKnowledgePath } from './okf';
-import { coerceValueToKind, inferTarget, isSystemProperty, validateValue } from './properties';
+import {
+  coerceValueToKind,
+  inferTarget,
+  isStructure,
+  isSystemProperty,
+  validateValue,
+} from './properties';
 import type { Entry, FieldKind, Schema } from './types';
 
 /**
@@ -18,10 +24,11 @@ import type { Entry, FieldKind, Schema } from './types';
  * field kind per frontmatter key from the values actually stored, and
  * computes the exact writes that would make every record fit — a Type doc
  * declaration per cluster, and a value conversion (or clearance) per record
- * that disagrees. Nothing here writes; the wizard shows the plan and
- * `applyAdoption` (app layer) executes exactly what was approved. Running it
- * on an already-adopted vault proposes nothing — the Repair Vault rule:
- * idempotent, count what changed.
+ * that disagrees. Maps and lists of maps (provenance stamps) are structure,
+ * not drift: they are neither declared nor converted. Nothing here writes;
+ * the wizard shows the plan and `applyAdoption` (app layer) executes exactly
+ * what was approved. Running it on an already-adopted vault proposes nothing
+ * — the Repair Vault rule: idempotent, count what changed.
  */
 
 export interface FieldProposal {
@@ -127,6 +134,10 @@ export function analyzeVault(entries: Entry[], schema: Schema): TypeProposal[] {
       const seen = new Set<string>();
       for (const [key, value] of Object.entries(record.properties)) {
         if (isSystemProperty(key) || key === 'type' || key === 'key') continue;
+        // Structure is not drift: a stamp map no kind holds is left as it is,
+        // never declared as text and rewritten (2026-10-18, the owner's
+        // `generated:` map became the text "[object Object]").
+        if (isStructure(value)) continue;
         const slot = keys.get(key) ?? { scalar: [], rel: [], carriers: 0 };
         slot.scalar.push(value);
         if (!seen.has(key)) {
@@ -168,6 +179,8 @@ export function analyzeVault(entries: Entry[], schema: Schema): TypeProposal[] {
             ? record.relationships[key]
             : record.properties[key];
         if (stored === undefined || stored === null || stored === '') continue;
+        // A record whose value under a declared key is structure keeps it.
+        if (isStructure(stored)) continue;
         if (validateValue(probe, stored) === null) {
           finalValues.push(stored);
           continue;

@@ -317,9 +317,9 @@ export function PropertyEditor({
                 size="sm"
                 value={def.remind ?? 'none'}
                 options={REMIND_OPTIONS.map(({ id, label }) => ({ value: id, label }))}
-                onChange={(event) =>
+                onChange={(remind) =>
                   void setFieldConfig(sourceType, def.name, {
-                    remind: event.target.value === 'none' ? null : event.target.value,
+                    remind: remind === 'none' ? null : remind,
                   })
                 }
               />

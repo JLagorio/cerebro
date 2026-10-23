@@ -1,0 +1,693 @@
+
+> cerebro@0.1.0 e2e /Users/joseflagorio/Development/cerebro
+> playwright test --list
+
+Listing tests:
+  [chromium] › add-existing.spec.ts:34:1 › Add existing moves two records together and Undo restores exact bytes
+  [chromium] › add-existing.spec.ts:72:1 › a changed staged record stays selected and named while the ready record is added
+  [chromium] › agent-ask.spec.ts:34:1 › agent: a held call waits on a card; Allow once runs it and the next one asks again
+  [chromium] › agent-ask.spec.ts:67:1 › agent: Deny with a message leaves the note alone and the row says why
+  [chromium] › agent-ask.spec.ts:87:1 › agent: Stop with a card open cancels it, the row reads cancelled, and the next send works
+  [chromium] › agent-assignment.spec.ts:4:1 › a Work item links an existing Agent and opens its page
+  [chromium] › agent-assignment.spec.ts:43:1 › the property catalog declares Agent only as a one-way Relation
+  [chromium] › agent-assignment.spec.ts:57:1 › an assigned trigger drains three bulk-linked pages and a re-add wakes again
+  [chromium] › agent-canvas.spec.ts:31:1 › agent edits an open Obsidian board once and retains unknown data
+  [chromium] › agent-canvas.spec.ts:102:3 › dangling refuses without changing bytes or recording a row
+  [chromium] › agent-canvas.spec.ts:102:3 › 26 operations refuses without changing bytes or recording a row
+  [chromium] › agent-canvas.spec.ts:112:1 › agent creates filled boards once, chooses a free name, and the change card opens it
+  [chromium] › agent-comments.spec.ts:56:1 › a comment on a quoted passage lands in the sidecar, and the page keeps its bytes
+  [chromium] › agent-comments.spec.ts:72:1 › an ambiguous quote is refused with both appearances, and nothing is posted
+  [chromium] › agent-comments.spec.ts:89:1 › a reply and a resolve address the thread by the id the comment named
+  [chromium] › agent-detach.spec.ts:74:1 › agent: closing the panel mid-turn and reopening it re-attaches without duplicate rows
+  [chromium] › agent-detach.spec.ts:91:1 › agent: a thread switch mid-turn keeps the turn running
+  [chromium] › agent-detach.spec.ts:107:1 › agent: the composer draft survives closing the panel, per thread
+  [chromium] › agent-detach.spec.ts:131:1 › agent: the run list opens the thread a detached run belongs to
+  [chromium] › agent-detach.spec.ts:152:1 › agent: a card left open across a close still waits, and Allow ends the turn in one reply
+  [chromium] › agent-edit.spec.ts:87:1 › an edit lands in place: the editor stays, the caret stays, and ⌘Z undoes only it
+  [chromium] › agent-edit.spec.ts:130:1 › typing elsewhere inside the debounce merges with the edit, with no choice
+  [chromium] › agent-edit.spec.ts:146:1 › typing in the paragraph the agent edits asks, and Keep yours writes yours
+  [chromium] › agent-failures.spec.ts:23:1 › agent failures: not signed in opens Settings at Claude Code's row
+  [chromium] › agent-failures.spec.ts:39:1 › agent failures: a usage limit names when it resets
+  [chromium] › agent-failures.spec.ts:56:1 › agent failures: a failure Rust cannot type keeps the red box and its words
+  [chromium] › agent-questions.spec.ts:49:1 › agent questions: the card returns the chosen labels, and the reply goes on in the same bubble
+  [chromium] › agent-questions.spec.ts:75:1 › agent questions: Other sends the typed text
+  [chromium] › agent-questions.spec.ts:90:1 › agent questions: Send answers waits until every question has one
+  [chromium] › agent-questions.spec.ts:109:1 › agent questions: Don’t answer declines, and the reply says it went ahead
+  [chromium] › agent-questions.spec.ts:124:1 › agent questions: Stop with a question open removes the card, and the next send works
+  [chromium] › agent-questions.spec.ts:139:1 › agent questions: a set no card can show is refused, and the agent hears why
+  [chromium] › agent-rows.spec.ts:10:1 › agent: five note reads fold into one row
+  [chromium] › agent-schedule.spec.ts:20:1 › a phrase and monthly list persist, next time is soonest, and an invalid phrase cancels cleanly
+  [chromium] › agent-schedule.spec.ts:56:1 › Resume and an earlier schedule edit leave the waiting count unchanged with Learn off
+  [chromium] › agent-set-fields.spec.ts:43:1 › an option label is stored as its id, and the page shows its label
+  [chromium] › agent-set-fields.spec.ts:54:1 › a link to a record of another database is refused naming the one expected
+  [chromium] › agent-set-fields.spec.ts:73:1 › a computed field is refused, and nothing changes
+  [chromium] › agent-sheets.spec.ts:31:1 › an agent sheet edit updates the open grid, saves formulas, and records one write
+  [chromium] › agent-sheets.spec.ts:60:1 › 26 sheet operations are refused without changing the page or recording a write
+  [chromium] › agent-suggest-view.spec.ts:43:1 › the live board is inert, Add saves a tab, Open selects it, and Undo restores bytes
+  [chromium] › agent-suggest-view.spec.ts:71:1 › a number chart counts the same seven matching rows
+  [chromium] › agent-suggest-view.spec.ts:83:1 › an unknown field remains a failed step with its closest name
+  [chromium] › agent-suggest-view.spec.ts:95:1 › Place appends a live database block and one Undo restores both files
+  [chromium] › agent-transcript.spec.ts:53:1 › agent transcript: a thread whose messages are gone rebuilds from its session
+  [chromium] › agent-transcript.spec.ts:78:1 › agent transcript: an expired thread says Claude Code cleared it and offers a new one
+  [chromium] › agent-transcript.spec.ts:107:1 › agent transcript: a first turn stores a UUID session and the vault on its thread
+  [chromium] › agent-up-next.spec.ts:40:1 › agent: text sent mid-turn waits under Up next, and Steer runs it next
+  [chromium] › agent-up-next.spec.ts:59:1 › agent: Up next entries can be edited and removed before they run
+  [chromium] › agent-up-next.spec.ts:86:1 › agent: Stop puts Up next on hold until Resume
+  [chromium] › agent-up-next.spec.ts:105:1 › agent: two page asks during a turn both wait under Up next
+  [chromium] › agent-up-next.spec.ts:129:1 › agent: Steer with a card open cancels it and runs the entry at once
+  [chromium] › agent-wakes.spec.ts:56:1 › agent wakes: a change wakes its agent once, the next waits under the cooldown, and Pause cancels it
+  [chromium] › agent-writes.spec.ts:74:1 › an agent append during a turn shows on the open page and survives the next save
+  [chromium] › agent-writes.spec.ts:125:1 › an agent edit replaces only the quoted text on the open page, and an ambiguous quote changes nothing
+  [chromium] › agent.spec.ts:21:1 › agent: the panel streams a reply and shows what it did
+  [chromium] › agent.spec.ts:49:1 › agent: walking away keeps the thread, and moves the context with you
+  [chromium] › agent.spec.ts:84:1 › agent: context is shown as chips you can take away
+  [chromium] › agent.spec.ts:145:1 › agent: a turn can be addressed by name, and the thread stays put
+  [chromium] › agent.spec.ts:198:1 › agent: shell access is one persisted ceiling in Settings, not a per-chat mode
+  [chromium] › agent.spec.ts:227:1 › agent: a suggested filing is shown for approval, never applied
+  [chromium] › agent.spec.ts:275:1 › agent: organizing AI-written work records who signed off
+  [chromium] › agent.spec.ts:297:1 › library: three shelves, no workspace nav, and nothing posing as a type
+  [chromium] › agent.spec.ts:346:1 › agent page: an agent is built from pickers, not from remembered strings
+  [chromium] › agent.spec.ts:414:1 › agent page: the duty bar and the Runs tab carry its history (M33.6)
+  [chromium] › agent.spec.ts:458:1 › agent page: an agent with no runs says so, rather than showing a table of zeros
+  [chromium] › agent.spec.ts:471:1 › agent page: editing its schedule property updates the record
+  [chromium] › agent.spec.ts:495:1 › editor: selecting prose shows AI controls, and a rewrite is a decision
+  [chromium] › agent.spec.ts:537:1 › editor: the same AI controls appear on a record, not only in Docs
+  [chromium] › agents.spec.ts:48:1 › agents: the front door — roster, the agent’s page on its Runs, chain trace
+  [chromium] › agents.spec.ts:82:1 › agents: a run, its agent and what it wrote tell one story
+  [chromium] › agents.spec.ts:148:1 › agents: the lobby names what is waiting to wake an agent, and its Runs tab its own
+  [chromium] › agents.spec.ts:187:1 › agents: a wake list that cannot be read says so, never that nothing waits
+  [chromium] › ai-block.spec.ts:50:1 › an AI block asked from the / menu is written as its carrier and opens again as itself
+  [chromium] › ai-block.spec.ts:134:1 › Enter at the end of an answer starts a paragraph after the block, and Recompute keeps it
+  [chromium] › ask-first-writes.spec.ts:53:1 › ask-first: a page write waits on a card and lands only on Allow
+  [chromium] › ask-first-writes.spec.ts:73:1 › ask-first: Deny with a reason writes nothing and the reply says why
+  [chromium] › ask-first-writes.spec.ts:91:1 › ask-first: with it off, the same create writes with no card
+  [chromium] › ask-first-writes.spec.ts:98:1 › ask-first: the person edits the title before Allow, and the file holds their version
+  [chromium] › ask-first-writes.spec.ts:123:1 › ask-first: Stop with a write card open cancels it and writes nothing
+  [chromium] › ask-first-writes.spec.ts:157:1 › ask-first: an unattended write waits in Review once, and Allow writes the edited page
+  [chromium] › ask-first-writes.spec.ts:176:1 › ask-first: Reject waits for a reason, and Send removes the card with nothing written
+  [chromium] › attachments.spec.ts:46:1 › gallery and page images load, image chips open a lightbox and other attachments open as pages
+  [chromium] › attribution.spec.ts:45:1 › a page's Info says who last changed it: you, outside Cerebro, the Assistant
+  [chromium] › attribution.spec.ts:87:1 › run detail names the pages a run wrote, or says it was not recorded
+  [chromium] › base-itself.spec.ts:112:1 › base itself: every lane is on the tab, and an empty one says so in its own words
+  [chromium] › base-itself.spec.ts:126:1 › base itself: the protected lanes say they are protected, and the tunable ones do not
+  [chromium] › base-itself.spec.ts:141:1 › base itself: a lane item carries its reason and what the base is standing on
+  [chromium] › base-itself.spec.ts:182:1 › base itself: a feed that refused says so, and takes no other tab with it
+  [chromium] › base-itself.spec.ts:217:1 › base itself: what the backend could not see is named, not dropped
+  [chromium] › base-itself.spec.ts:232:1 › base itself: what changed is read aloud, and a quiet window says one sentence
+  [chromium] › base-itself.spec.ts:280:1 › base itself: waiting-on-you holds the cards themselves, not a door to them
+  [chromium] › base-itself.spec.ts:336:1 › base itself: three tabs, the Status sections inside them, the machinery folded (M51)
+  [chromium] › base-itself.spec.ts:363:1 › base itself: the gate board is the shared artifact, and never-evaluated is said out loud
+  [chromium] › base-itself.spec.ts:392:1 › base itself: a fired gate is loud, and even then licenses only a dated plan
+  [chromium] › base-itself.spec.ts:419:1 › base itself: evaluate answers honestly in the browser, where no runtime database exists
+  [chromium] › base-itself.spec.ts:431:1 › base itself: declaring an R7 scope walks the real guards and round-trips
+  [chromium] › batch-writes.spec.ts:47:1 › renaming a property rewrites the Type doc and every record under one batch
+  [chromium] › batch-writes.spec.ts:93:1 › deleting two checked rows moves both to the Trash, byte for byte, with one toast
+  [chromium] › block-drag.spec.ts:85:1 › a block dragged up lands where the line says, and the file agrees
+  [chromium] › block-drag.spec.ts:108:1 › a block can be dragged INTO a column
+  [chromium] › block-drag.spec.ts:130:1 › dropping a block back where it started changes nothing
+  [chromium] › block-drag.spec.ts:149:1 › a click on the grip still opens the block menu
+  [chromium] › board-multi-value.spec.ts:5:1 › moving one decider membership keeps the other decider and both rendered cards
+  [chromium] › bulk-set.spec.ts:4:1 › bulk Set and Delete leave changed rows selected and preserve their newer bytes
+  [chromium] › calendar-hours.spec.ts:84:1 › calendar hours: Week draws blocks, the all-day row, the now line and opens at 07:00
+  [chromium] › calendar-hours.spec.ts:141:1 › calendar hours: Day draws one column, and Month keeps a midnight end on its day
+  [chromium] › calendar-hours.spec.ts:160:1 › calendar hours: moves, resizes, selects a slot, cancels and edits an embedded calendar
+  [chromium] › calendar-repeat.spec.ts:71:1 › Repeat reads in words, edits a preset, keeps unknown raw text and clears the key
+  [chromium] › calendar-repeat.spec.ts:115:1 › calendar occurrences are read-only, This event is one undoable split and All events opens the series
+  [chromium] › canvas-page.spec.ts:25:1 › Quick Open opens a board as a page without changing any bytes or recording a write
+  [chromium] › canvas-page.spec.ts:55:1 › invalid JSON and a future version stay unavailable and unchanged
+  [chromium] › canvas-page.spec.ts:77:1 › an empty board is measured and empty rather than unavailable
+  [chromium] › chat-canvas.spec.ts:17:1 › conversation canvas gives the greeting and composer a centered reading column
+  [chromium] › chat-canvas.spec.ts:65:1 › docking a live conversation keeps its draft, turn, and transcript exactly once
+  [chromium] › chat-canvas.spec.ts:105:3 › empty chat stays usable in a short light window, including context completion
+  [chromium] › chat-canvas.spec.ts:105:3 › empty chat stays usable in a short dark window, including context completion
+  [chromium] › chat-canvas.spec.ts:145:1 › conversation navigation reuses existing threads and a narrow composer keeps every action reachable
+  [chromium] › chat-canvas.spec.ts:192:1 › a full queue and multiline draft keep the transcript and Stop reachable in a short window
+  [chromium] › chat-canvas.spec.ts:223:1 › an open approval survives docking and expanding and writes only after Allow
+  [chromium] › client-access.spec.ts:10:1 › a token is shown once, with safe snippets, and revoke asks first
+  [chromium] › client-access.spec.ts:42:1 › writing tokens require named folders and use whole-vault reads by default
+  [chromium] › client-access.spec.ts:66:1 › twenty tokens is the global cap
+  [chromium] › client-access.spec.ts:73:1 › the listener reports its address and refuses invalid ports in words
+  [chromium] › client-access.spec.ts:94:1 › Other apps renders every state-lab preset
+  [chromium] › collections.spec.ts:48:1 › collections: a container is a page that holds docs and databases
+  [chromium] › collections.spec.ts:90:1 › collections: nothing sits outside a Collection — there is no Lists bucket
+  [chromium] › collections.spec.ts:112:1 › collections: a nested table renders the retired hierarchy view’s job
+  [chromium] › collections.spec.ts:131:1 › collections: creating one writes a folder marker and opens its empty page
+  [chromium] › collections.spec.ts:153:1 › views: every kind is offered, and the date views place records on an axis
+  [chromium] › collections.spec.ts:224:1 › views: a table nests when its grouping chain descends a relation
+  [chromium] › collections.spec.ts:261:1 › views: a database keeps several views as tabs, each with its own layout
+  [chromium] › collections.spec.ts:308:1 › calendar: a day + on a range field writes a range (M53.16)
+  [chromium] › collections.spec.ts:339:1 › calendar: the embedded calendar on the Delivery page creates on a day too (M53.16)
+  [chromium] › columns.spec.ts:66:1 › a :::columns page lays its columns out side by side
+  [chromium] › columns.spec.ts:77:1 › a declared width is a RATIO, so width=2 is twice its neighbour
+  [chromium] › columns.spec.ts:86:1 › the page still reads as markdown, and saving it changes nothing
+  [chromium] › columns.spec.ts:102:1 › typing /columns builds a layout and writes it to the file
+  [chromium] › columns.spec.ts:135:1 › a column layout is not offered inside a column
+  [chromium] › columns.spec.ts:150:1 › turn into moves the block you are standing in, and does not leave a copy
+  [chromium] › columns.spec.ts:190:1 › dragging the gutter re-proportions the pair and writes the new ratios
+  [chromium] › columns.spec.ts:228:1 › the gutter resizes from the keyboard too
+  [chromium] › columns.spec.ts:242:1 › there are N-1 gutters for N columns
+  [chromium] › columns.spec.ts:271:1 › the demo vault has a page that uses columns, and it survives being opened
+  [chromium] › comment-anchors.spec.ts:87:1 › a comment anchor is drawn outside the page, survives a reopen and edits, and detaches when its quote goes
+  [chromium] › comments.spec.ts:135:1 › a comment on a sentence shows a thread, lives in the sidecar, and leaves the page alone
+  [chromium] › comments.spec.ts:163:1 › deleting the quoted sentence moves its thread to Discussion, quote and all
+  [chromium] › comments.spec.ts:184:1 › a thread is replied to, resolved, reopened and deleted, and the sidecar keeps the stamps
+  [chromium] › comments.spec.ts:248:1 › a conflicted sidecar is unavailable, and a comment on it is refused without a write
+  [chromium] › comments.spec.ts:274:1 › a click on a highlight opens Comments on its thread
+  [chromium] › computed-values.spec.ts:36:1 › a Last edited time filter returns the rows edited in the last week
+  [chromium] › connectors.spec.ts:31:1 › connectors: one that needs sign-in shows the command that fixes it (M54.11)
+  [chromium] › connectors.spec.ts:65:1 › connectors: one no run has used reads not observed yet
+  [chromium] › connectors.spec.ts:76:1 › connectors: a status read that fails says so, never not observed yet
+  [chromium] › connectors.spec.ts:89:1 › connectors: Add Linear signs in under its name with its scopes, and Remove says the sign-in stays (M69.1)
+  [chromium] › correspondence.spec.ts:16:1 › records match cached mail only through uniquely declared addresses
+  [chromium] › create-launcher.spec.ts:4:1 › the launcher explains its groups, creates a database with starter statuses, and remembers it
+  [chromium] › create-launcher.spec.ts:37:1 › creation chords work with collapsed navigation and stay text inside a page
+  [chromium] › create-launcher.spec.ts:66:1 › New Whiteboard and its chord create deduped files and open them as pages
+  [chromium] › create-link.spec.ts:37:1 › [[ then Create makes the page at the vault root, links it, and the link opens it
+  [chromium] › create-link.spec.ts:62:1 › @ creates only where a word starts, and a lone [ never does
+  [chromium] › create-link.spec.ts:92:1 › a sentence after @ closes the menu, so Enter starts a line and makes nothing
+  [chromium] › csv-export.spec.ts:24:1 › exports each tab’s saved rows and columns, including a closed filtered tab
+  [chromium] › csv-import.spec.ts:10:1 › imports quoted CSV into a database in one batch and removes it with one Undo
+  [chromium] › csv-import.spec.ts:74:1 › a long row shows its record number and writes nothing
+  [chromium] › data-display-polish.spec.ts:50:1 › six-column Gantt budgets a readable axis, resizes by keyboard and scrolls columns independently
+  [chromium] › data-display-polish.spec.ts:83:1 › default gallery cards and lists reflow in a 360px content host without writing defaults
+  [chromium] › data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus
+  [chromium] › data-display-polish.spec.ts:185:3 › table chrome and a refused scalar remain legible in light
+  [chromium] › data-display-polish.spec.ts:185:3 › table chrome and a refused scalar remain legible in dark
+  [chromium] › data-display-polish.spec.ts:266:1 › database destruction has entity scope and remains outside view settings
+  [chromium] › data-display-polish.spec.ts:282:1 › Knowledge group bands stick below the same 36px data header
+  [chromium] › data-display-polish.spec.ts:295:1 › alternate displays show meaningful data in both themes without writing on open
+  [chromium] › data-display-polish.spec.ts:328:1 › fixed rows preserve sticky hit targets, offscreen navigation, find and wrapped content
+  [chromium] › database-rename.spec.ts:16:1 › database rename keeps records, relations, tabs and embeds connected; one Undo restores all 50 files
+  [chromium] › date-bands.spec.ts:16:1 › date bands create on days, preserve date moves, and refuse ambiguous periods
+  [chromium] › deadlines.spec.ts:4:1 › declared deadlines place open work before databases and the switch removes that capability
+  [chromium] › deep-link.spec.ts:4:1 › a cold link wins over last place and opens exactly once
+  [chromium] › deep-link.spec.ts:23:1 › a missing page says so and creates nothing
+  [chromium] › deep-link.spec.ts:33:1 › another registered vault asks before opening and Stay here drops it
+  [chromium] › deep-link.spec.ts:52:1 › a live go opens History and refused payloads show their reason without writes
+  [chromium] › destinations.spec.ts:5:1 › the window title names the place, and ⌘K speaks the nav’s words
+  [chromium] › diagrams.spec.ts:7:1 › mermaid renders in docs, and the lightbox zooms
+  [chromium] › diagrams.spec.ts:90:1 › authoring: template, live preview, error banner, commit
+  [chromium] › diagrams.spec.ts:184:1 › structural editing round-trips to the file
+  [chromium] › diagrams.spec.ts:262:1 › a .mmd file opens as a diagram page and edits round-trip raw
+  [chromium] › diagrams.spec.ts:319:1 › the diagram page is a pan/zoom canvas with a floating code overlay
+  [chromium] › diagrams.spec.ts:402:1 › a doc block opens full screen, and a rename flows back into the block
+  [chromium] › diagrams.spec.ts:478:1 › shapes, colors, and edge animation round-trip as surgical mermaid
+  [chromium] › diagrams.spec.ts:626:1 › stage F: group, icon, and record link, end to end
+  [chromium] › diagrams.spec.ts:771:1 › manual layout: a drag writes positions, they survive a reopen, auto returns
+  [chromium] › diagrams.spec.ts:962:1 › M29.51: the editor chrome survives a zoom, and a rename keeps the diagram
+  [chromium] › diagrams.spec.ts:1125:1 › M29.53: a popover tracks its node through a wheel zoom
+  [chromium] › diagrams.spec.ts:1182:1 › M29.53: closing the full-screen dialog hands focus back to its trigger
+  [chromium] › diagrams.spec.ts:1217:1 › M29.53: an exported svg carries the font it names
+  [chromium] › diagrams.spec.ts:1233:1 › M29.53: a link badge closes the dialog deliberately, then navigates
+  [chromium] › diagrams.spec.ts:1273:1 › M29.53: at 39% the node toolbar leaves the next node clickable
+  [chromium] › draft-reply.spec.ts:8:1 › draft reply offers its inputs, shows external calls and leaves the vault unchanged
+  [chromium] › draft-reply.spec.ts:56:1 › the shipped placeholder stays out of the draft and a missing thread asks first
+  [chromium] › editor-carriers.spec.ts:98:1 › a page holding every carrier opens editable and writes each one back unchanged
+  [chromium] › editor-carriers.spec.ts:171:1 › / inserts each block, writes it as its carrier, and opens it again as itself
+  [chromium] › editor-carriers.spec.ts:237:1 › a list-item image keeps its relative url through a save
+  [chromium] › editor-writing-polish.spec.ts:109:3 › writing controls form one durable session in light
+  [chromium] › editor-writing-polish.spec.ts:109:3 › writing controls form one durable session in dark
+  [chromium] › editor-writing-polish.spec.ts:227:1 › selection tools stay reachable at narrow width and 200 percent scale
+  [chromium] › field-rename.spec.ts:82:1 › renaming Assignee rewrites every stored reference in one batch, and one Undo puts every file back
+  [chromium] › file-viewers.spec.ts:82:1 › images fit their frame, never upscale, and show actual size on request
+  [chromium] › file-viewers.spec.ts:108:1 › native audio controls start paused with metadata loaded
+  [chromium] › file-viewers.spec.ts:119:1 › CSV and TSV are plain read-only tables with a source view
+  [chromium] › file-viewers.spec.ts:133:1 › unknown files explain their limits, executable files omit Open, and markdown images resolve
+  [chromium] › find-replace.spec.ts:79:1 › ⌘F finds every hit, reaches into a closed toggle, and Replace all is one undo
+  [chromium] › fleet.spec.ts:111:1 › fleet: runs come back newest first, attributed to whoever ran them
+  [chromium] › fleet.spec.ts:129:1 › fleet: a run whose usage was never reported says unknown, not zero
+  [chromium] › fleet.spec.ts:137:1 › fleet: filtering by actor narrows the list
+  [chromium] › fleet.spec.ts:149:1 › fleet: a run opens, and an unrecorded cost says so rather than showing a zero
+  [chromium] › fleet.spec.ts:167:1 › fleet: a run that left nothing undecided offers no door to the review section
+  [chromium] › fleet.spec.ts:180:1 › fleet: recorded components render, and an estimate is marked as one
+  [chromium] › fleet.spec.ts:222:1 › fleet: an unreadable run history says so
+  [chromium] › fleet.spec.ts:236:1 › fleet: a genuinely quiet fleet says nothing has run
+  [chromium] › fleet.spec.ts:250:1 › fleet: the surface lists agents, and says which of them is off duty
+  [chromium] › fleet.spec.ts:266:1 › fleet: an agent says what it has queued waiting on you
+  [chromium] › fleet.spec.ts:275:1 › fleet: work that no agent record owns is named, not given a face
+  [chromium] › fleet.spec.ts:288:1 › fleet: clicking an agent opens it, with only its runs
+  [chromium] › fleet.spec.ts:322:1 › fleet: an agent can be stopped without deleting it
+  [chromium] › fleet.spec.ts:350:1 › fleet: the background pause is not the same control as one row pause
+  [chromium] › fleet.spec.ts:372:1 › fleet: a run row says when it happened
+  [chromium] › fleet.spec.ts:385:1 › fleet: a run says why it started and how late
+  [chromium] › fleet.spec.ts:406:1 › fleet: a run from before causes says why not recorded
+  [chromium] › fleet.spec.ts:413:1 › fleet: release-scout's scheduled run says why, on the fleet and on its Runs tab
+  [chromium] › fleet.spec.ts:440:1 › fleet: a long why never squeezes who or when to nothing, at 1100 wide
+  [chromium] › fleet.spec.ts:464:1 › fleet: release-scout's Runs tab keeps its start time beside the why, at 1100 wide
+  [chromium] › fleet.spec.ts:478:1 › fleet: release-scout's run explains itself
+  [chromium] › fleet.spec.ts:504:1 › fleet: an expired transcript says cleared by Claude Code
+  [chromium] › fleet.spec.ts:523:1 › fleet: a run with no session says transcript not recorded
+  [chromium] › followups.spec.ts:23:1 › a due follow-up runs once as its own agent
+  [chromium] › followups.spec.ts:46:1 › Learn off leaves it waiting, enabling Learn runs it once
+  [chromium] › followups.spec.ts:67:1 › the lobby cancels pending rows and an addressed booking appears on its agent page
+  [chromium] › formula.spec.ts:14:1 › formulas compute on read, follow renames, protect inputs and count skipped values
+  [chromium] › history-state.spec.ts:22:1 › Back restores the database search and scroll for that visit
+  [chromium] › history-state.spec.ts:41:1 › reload restores the current page and its saved Back history
+  [chromium] › history-state.spec.ts:51:1 › reload restores the place but never the record peek
+  [chromium] › history-state.spec.ts:63:1 › Back drops a trashed visit and Forward returns to the live page
+  [chromium] › history-state.spec.ts:83:1 › a last page missing after reload is silently forgotten
+  [chromium] › history.spec.ts:31:1 › five saves to one page fold into one session
+  [chromium] › history.spec.ts:54:1 › a day Cerebro was closed, or before it recorded, reads not recorded, never 0
+  [chromium] › history.spec.ts:78:1 › a failed activity read says so, and the checkpoints still render
+  [chromium] › history.spec.ts:107:1 › a run names why it ran and the page it wrote
+  [chromium] › home-document-polish.spec.ts:5:3 › Home gives actual work a clear first view in light
+  [chromium] › home-document-polish.spec.ts:57:3 › ordinary document prose has a reading rhythm without changing its bytes in light
+  [chromium] › home-document-polish.spec.ts:5:3 › Home gives actual work a clear first view in dark
+  [chromium] › home-document-polish.spec.ts:57:3 › ordinary document prose has a reading rhythm without changing its bytes in dark
+  [chromium] › home-keys.spec.ts:4:1 › j enters Home, e marks a run done, and Undo returns the exact row
+  [chromium] › home.spec.ts:5:1 › Home opens a centered conversation and preserves its draft when docked
+  [chromium] › home.spec.ts:64:1 › Home groups proposals by when they arrived, leads with deadlines and opens their page
+  [chromium] › home.spec.ts:130:1 › a failed waiting lane leaves other lanes standing and offers no decision
+  [chromium] › home.spec.ts:144:1 › empty proposal and disabled capture lanes leave no boxes behind
+  [chromium] › home.spec.ts:154:1 › a page saved five times shows once in recent edits and opens its current page
+  [chromium] › home.spec.ts:182:1 › finished runs name the first-look window, Done hides only the seen revision and Undo restores it
+  [chromium] › home.spec.ts:232:1 › after each actor has a mark, newer runs say since you looked
+  [chromium] › home.spec.ts:260:1 › Knowledge Done has Undo, while a missed reminder names its closed window
+  [chromium] › hover-preview.spec.ts:24:1 › a page link previews its page on hover, and Escape closes only the card
+  [chromium] › ics-import.spec.ts:37:1 › calendar drop previews times and people, imports once, and re-imports unchanged
+  [chromium] › import-stamps.spec.ts:16:1 › an imported page names its source and agent writes preserve its stamps
+  [chromium] › inbox-documents.spec.ts:26:1 › an Office drop keeps its original, files an editable capture and deduplicates a repeat
+  [chromium] › inbox-documents.spec.ts:89:1 › a PDF with no text layer keeps its original and explains the outcome
+  [chromium] › inbox-documents.spec.ts:100:1 › a real text PDF files one editable section per page
+  [chromium] › inbox-redesign.spec.ts:4:1 › Inbox lends its queue to the context, keeps a wide reader, and folds Organize without replacing the editor
+  [chromium] › inbox-redesign.spec.ts:40:1 › narrow Inbox exposes its capture drawer, closes on selection, and keeps j/k on the owning pane
+  [chromium] › inbox-redesign.spec.ts:89:1 › only the active Inbox pane supplies the queue and receives its navigation keys
+  [chromium] › inbox.spec.ts:4:1 › inbox: queue untyped captures, organize one, and watch it leave
+  [chromium] › inbox.spec.ts:55:1 › inbox: quick capture writes an untyped note into the queue
+  [chromium] › keyboard.spec.ts:44:1 › ⌘K from a focused mermaid source box opens the palette
+  [chromium] › keyboard.spec.ts:59:1 › a mermaid block's ⌘Z, with focus left on body, undoes the block and not the last batch
+  [chromium] › keyboard.spec.ts:97:1 › ⌘J toggles the assistant while typing in a page
+  [chromium] › keyboard.spec.ts:110:1 › ⌘[ in a page body stays put, and from outside its text goes back
+  [chromium] › keyboard.spec.ts:124:1 › Inbox ⌘E files the open capture, and never while typing in its body
+  [chromium] › keyboard.spec.ts:151:1 › g chords navigate, wait before hinting, swallow a hinted miss, and pass Escape
+  [chromium] › keyboard.spec.ts:181:1 › g h typed into a page stays text, and Save and Find use the keymap
+  [chromium] › keyboard.spec.ts:199:1 › c p creates an ordinary page, and g comma opens the complete shortcut catalog
+  [chromium] › kind-change.spec.ts:44:1 › a lossy change converts into a new property and leaves the old one byte for byte
+  [chromium] › kind-change.spec.ts:100:1 › a lossless change that alters no value writes only the Type doc
+  [chromium] › knowledge.spec.ts:27:1 › knowledge: browse the bundle, read provenance, and verify a concept
+  [chromium] › knowledge.spec.ts:100:1 › knowledge: the queue is walkable from inside it (M51.2)
+  [chromium] › knowledge.spec.ts:119:1 › knowledge: the queue ends at its last concept, and Done returns to Review
+  [chromium] › knowledge.spec.ts:137:1 › knowledge: verifying through the whole queue ends the walk at Review
+  [chromium] › knowledge.spec.ts:160:1 › knowledge: a page's strip opens what waits for review, and the queue takes over (M52.3)
+  [chromium] › knowledge.spec.ts:180:1 › knowledge: a verified concept revised later shows the predating notice (M23.4)
+  [chromium] › knowledge.spec.ts:213:1 › knowledge: the bundle navigates by its own axes, not by Home's
+  [chromium] › knowledge.spec.ts:280:1 › knowledge: Concepts is a table filed by folder, and Start review opens the queue
+  [chromium] › knowledge.spec.ts:405:1 › knowledge: a wrapped title keeps its Open pill off its words
+  [chromium] › knowledge.spec.ts:453:1 › knowledge: a folder's view counts the folder and walks only it
+  [chromium] › knowledge.spec.ts:475:1 › knowledge: the Knowledge section carries no review badge
+  [chromium] › knowledge.spec.ts:490:1 › knowledge: the bundle stays out of the surfaces you author
+  [chromium] › knowledge.spec.ts:613:1 › knowledge: the three axes render per facet, and review is not one of them
+  [chromium] › knowledge.spec.ts:656:1 › knowledge: a vault with no ledger shows no axes rather than empty ones
+  [chromium] › layout-editor.spec.ts:33:1 › layout editor: strip to vault bytes, inert preview, and the eye folds the page
+  [chromium] › layout-editor.spec.ts:213:1 › layout editor: the strip renames a tab, the + mints a section, both land in the bytes
+  [chromium] › layout-editor.spec.ts:349:1 › layout editor: the peek shows the strip, and a section stands above every tab
+  [chromium] › list-keys.spec.ts:5:1 › My work keys peek in place, type in the body, and close one thing per Escape
+  [chromium] › list-keys.spec.ts:63:1 › Inbox j advances the capture and Enter opens its page
+  [chromium] › list-keys.spec.ts:75:1 › Concepts j then Enter opens the first concept page
+  [chromium] › mail-digests.spec.ts:14:1 › Settings reports the closed gate and cached threads, and a digest opens as a page
+  [chromium] › mail-digests.spec.ts:50:1 › requested text is readable as text and adds no task to Home or My work
+  [chromium] › mail-digests.spec.ts:77:1 › retention moves a digest and its text to Trash and one Undo restores both
+  [chromium] › notion-import.spec.ts:31:1 › a captured Notion page imports once and its callout, columns and toggle reopen unlossy
+  [chromium] › notion-import.spec.ts:61:1 › a database fetch is refused in the transcript and writes no page
+  [chromium] › one-workspace.spec.ts:24:1 › one workspace: a page says what Knowledge holds about it, and a concept is a page
+  [chromium] › one-workspace.spec.ts:54:1 › one workspace: the assistant follows the page — its knowledge and its questions
+  [chromium] › one-workspace.spec.ts:80:1 › one workspace: the assistant counts the Knowledge that stands, as the page does
+  [chromium] › one-workspace.spec.ts:103:1 › one workspace: asking about a concept says what was asked, about which page, once
+  [chromium] › one-workspace.spec.ts:124:1 › one workspace: a run names the concepts it changed, each one a page
+  [chromium] › open-with.spec.ts:30:1 › Open with copies the page as typed a moment ago, and its path
+  [chromium] › open-with.spec.ts:56:1 › Open with disables the desktop doors in the browser
+  [chromium] › os-drop.spec.ts:13:1 › OS paths show hover, capture text, name skipped folders, and refuse unsupported targets
+  [chromium] › os-drop.spec.ts:45:1 › a Files property copies dropped bytes into attachments and keeps the relative reference
+  [chromium] › page-access.spec.ts:35:1 › a page inside release-scout’s scope lists it as able to change it, and why
+  [chromium] › page-access.spec.ts:51:1 › a page outside every scope says no agent can change it
+  [chromium] › page-access.spec.ts:66:1 › an agent’s own page: only its own notes, and a grant to every other agent
+  [chromium] › page-access.spec.ts:86:1 › a cached source says both agents can rewrite it, past their scopes
+  [chromium] › page-activity.spec.ts:77:3 › a page's History (M64.2b) › typing puts You edited it above the versions, which still open the lens
+  [chromium] › page-activity.spec.ts:99:3 › a page's History (M64.2b) › Warehouse cutover's History lists what the ledger recorded
+  [chromium] › page-activity.spec.ts:114:3 › a page's History (M64.2b) › a failed read says Edits could not be read while the versions render
+  [chromium] › page-activity.spec.ts:126:3 › a page's History (M64.2b) › an edit made outside Cerebro puts the outside line at the top
+  [chromium] › page-attachments.spec.ts:38:1 › paste reuses bytes, renders the image, undoes one batch, and survives reopen and later edits
+  [chromium] › page-attachments.spec.ts:91:1 › OS and HTML5 drops name skips once and copy a PDF into a durable file block
+  [chromium] › page-attachments.spec.ts:133:1 › /image Upload states the cap and copies the selected file
+  [chromium] › page-attachments.spec.ts:152:1 › a locked page refuses an OS attachment before any copy
+  [chromium] › page-cards.spec.ts:68:1 › a /page card shows its page live, a pasted link becomes one, and Open lands
+  [chromium] › page-cards.spec.ts:124:1 › a card naming no page shows so, and keeps its pointer through a save
+  [chromium] › page-cards.spec.ts:153:1 › a card picked among pages sharing a stem shows and opens the one picked
+  [chromium] › page-history.spec.ts:75:3 › page history (M58.4) › names an agent only on the commit its run recorded
+  [chromium] › page-history.spec.ts:85:3 › page history (M58.4) › reads a version as prose, shows the page it was, and restores it
+  [chromium] › page-history.spec.ts:117:3 › page history (M58.4) › reads Assistant on the commit a panel turn's run made
+  [chromium] › page-icons.spec.ts:36:1 › a page icon shows everywhere the page is named, and its bytes round-trip
+  [chromium] › page-title-polish.spec.ts:12:3 › the leading H1 is one native title with unchanged source order
+  [chromium] › page-title-polish.spec.ts:12:3 › the nonleading H1 is one native title with unchanged source order
+  [chromium] › page-title-polish.spec.ts:76:1 › a filename title writes no H1 until the person adopts it
+  [chromium] › page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic image block
+  [chromium] › page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic database block
+  [chromium] › page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic sheet block
+  [chromium] › page-title-polish.spec.ts:165:1 › an unchanged filename title is adopted only by an explicit Enter
+  [chromium] › page-title-polish.spec.ts:185:1 › adopting a filename title on a related tab keeps its body hidden
+  [chromium] › page-title-polish.spec.ts:212:1 › wrapped title arrows travel inside the heading before crossing into prose
+  [chromium] › page-title-polish.spec.ts:241:1 › a title with nested children retains child order and copies document content only
+  [chromium] › palette-commands.spec.ts:9:1 › Tab cycles categories and the theme chooser previews, cancels, then commits
+  [chromium] › palette-commands.spec.ts:38:1 › Open favorite opens its page, and an unmatched query waits for an explicit Ask
+  [chromium] › palette-commands.spec.ts:61:1 › the command snapshot offers filing on Inbox and not on Home
+  [chromium] › pane-layout.spec.ts:15:1 › reload restores two panes and the first focus, without the peek
+  [chromium] › pane-layout.spec.ts:42:1 › a missing stored pane is dropped before a page can render
+  [chromium] › pane-layout.spec.ts:63:1 › a rename moves the open pane, favorite, Recent and saved layout together
+  [chromium] › panel-agent.spec.ts:11:1 › panel agent: binding Release scout names it in the header, and unbinding removes it
+  [chromium] › panes.spec.ts:33:1 › modified link, file reuse, focused Back and closing the last pane
+  [chromium] › panes.spec.ts:59:1 › Shift+Enter opens beside from Quick open and a list cursor
+  [chromium] › panes.spec.ts:73:1 › a full narrow row beside the assistant opens in place and says why
+  [chromium] › panes.spec.ts:89:1 › narrowing parks the older pane at zero width and its tab restores it
+  [chromium] › panes.spec.ts:119:1 › closing immediately after typing preserves the new words and link bytes
+  [chromium] › pdf-viewer.spec.ts:39:1 › a forty-page PDF renders nearby pages and supports outline, find, page input and zoom
+  [chromium] › pdf-viewer.spec.ts:87:1 › a scanned PDF explains its missing text layer and disables search and browser print
+  [chromium] › pdf-viewer.spec.ts:99:1 › the upstream legacy engine restores missing early-WebKit APIs and still renders
+  [chromium] › people-and-companies.spec.ts:13:1 › the optional pack adds declarations in one batch, shows company mail and undoes exact bytes
+  [chromium] › pipeline-surface.spec.ts:100:1 › background: the meter says today across every vault
+  [chromium] › pipeline-surface.spec.ts:112:1 › background: three faces of failure stay three banners
+  [chromium] › pipeline-surface.spec.ts:132:1 › background: an unaccounted day says so rather than showing a confident zero
+  [chromium] › pipeline-surface.spec.ts:147:1 › background: the pause is one control for one subscription
+  [chromium] › pipeline-surface.spec.ts:157:1 › background: a lane can be turned off for this vault without touching the others
+  [chromium] › pipeline-surface.spec.ts:169:1 › background: held work asks its question instead of being guessed at
+  [chromium] › pipeline.spec.ts:41:1 › ingest: a dropped transcript becomes an untyped working doc in the Inbox
+  [chromium] › pipeline.spec.ts:71:1 › ingest: dropping the same transcript again names its filed copy and writes nothing
+  [chromium] › pipeline.spec.ts:93:1 › meeting: a transcript files as a record with its matched speakers, only on Apply
+  [chromium] › pipeline.spec.ts:133:1 › distil: the ingested transcript and its cached ticket are cited by a concept
+  [chromium] › pipeline.spec.ts:150:1 › commit: any note says what the base took from it, not just Inbox captures
+  [chromium] › pipeline.spec.ts:194:1 › augment: knowledge surfaces beside the PRD, and only when asked
+  [chromium] › pipeline.spec.ts:228:1 › augment: Home volunteers at most a few unconfirmed things, and forgets what you dismiss
+  [chromium] › pipeline.spec.ts:266:1 › grow: filing a capture hands it to the base without anyone asking
+  [chromium] › pipeline.spec.ts:329:1 › retire: a replaced concept says so, and stops asking to be verified
+  [chromium] › pipeline.spec.ts:370:1 › dossier: a project record says what the base believes, doubts, and no longer believes
+  [chromium] › polish-integration.spec.ts:55:1 › a property picker stays usable at 200% zoom
+  [chromium] › polish-integration.spec.ts:90:1 › table → peek → page preserves an invalid field draft, then commits one corrected value
+  [chromium] › polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 125% text
+  [chromium] › polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 150% text
+  [chromium] › polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 200% text
+  [chromium] › polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 125% text
+  [chromium] › polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 150% text
+  [chromium] › polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 200% text
+  [chromium] › pr-chip.spec.ts:37:1 › an unread pull request stays checks unknown on both peek and page
+  [chromium] › pr-chip.spec.ts:47:1 › both check shapes read ready and the chip stays within its page
+  [chromium] › pr-chip.spec.ts:60:1 › a merged PR offers one undoable Done status patch
+  [chromium] › pr-chip.spec.ts:70:1 › the five PR strip presets keep missing, unknown and unavailable distinct
+  [chromium] › project-agents.spec.ts:15:1 › project agents apply only to work newly filed through a human action
+  [chromium] › project-pages.spec.ts:20:1 › a project page lists and creates its work, with related Docs and progress
+  [chromium] › project-runs.spec.ts:41:1 › a project places recorded subjects and hops, leaving unrelated and legacy runs out
+  [chromium] › project-runs.spec.ts:81:1 › an unreadable fleet says unavailable on the project
+  [chromium] › promote-checklist.spec.ts:35:1 › the checklist grip promotes a record with deadline and owner, then saves a page link
+  [chromium] › promote-checklist.spec.ts:75:1 › selection promotion reports created, empty and linked lines, with the task-like parent
+  [chromium] › proposals.spec.ts:50:1 › proposals: a card opens its concept, which shows it and decides it
+  [chromium] › proposals.spec.ts:85:1 › proposals: a card whose concept moved says so on that concept
+  [chromium] › proposals.spec.ts:101:1 › proposals: a queue row says when its concept has a card waiting
+  [chromium] › proposals.spec.ts:144:1 › proposals: the pager lands on a concept with its card showing
+  [chromium] › proposals.spec.ts:174:1 › proposals: a link card shows on both of its concepts
+  [chromium] › quick-open-content.spec.ts:26:1 › a body-only word lists its pages under In pages, the word marked
+  [chromium] › quick-open-content.spec.ts:37:1 › a two-character query asks for no page text
+  [chromium] › quick-open-content.spec.ts:45:1 › a failed page-text search says so, never "No matches"
+  [chromium] › quick-open-content.spec.ts:55:1 › "All N matches" expands In pages in place
+  [chromium] › quick-open-content.spec.ts:68:1 › rows that arrive late never move the highlight
+  [chromium] › quick-open-content.spec.ts:82:1 › Enter on a page row opens that page
+  [chromium] › quick-open-recent.spec.ts:35:1 › an empty ⌘K lists Recent, newest first, and Settings can clear it
+  [chromium] › quick-open-recent.spec.ts:68:1 › opening the second of two equal matches makes it lead next time
+  [chromium] › quick-open-recent.spec.ts:84:1 › two words apart find the project by name
+  [chromium] › quick-open-recent.spec.ts:94:1 › moving the pointer deliberately can select Ask before Enter
+  [chromium] › quit.spec.ts:34:1 › quit saves a line typed inside the save debounce
+  [chromium] › quit.spec.ts:56:1 › quit commits an untitled heading typed without Enter or blur
+  [chromium] › recipes.spec.ts:4:1 › the Library adds editable recipes and a skill mentioning Inbox never proposes filing
+  [chromium] › recipes.spec.ts:36:1 › the empty-vault kit includes all three recipes
+  [chromium] › recipes.spec.ts:49:1 › a failed scan and a refused add preserve the offer’s honest state
+  [chromium] › reconciliation.spec.ts:29:1 › M49.6: the banner names each diverged file, and Keep-all says what it could not keep
+  [chromium] › reconciliation.spec.ts:48:1 › M49.6: Restore asks first, then closes the divergence
+  [chromium] › reconciliation.spec.ts:58:1 › M49.6: a status read that fails is said, never shown as nothing wrong
+  [chromium] › reconciliation.spec.ts:65:1 › M49.2: a vault another Cerebro is recording says so
+  [chromium] › record-composer.spec.ts:27:1 › heading fields and similar records precede a keyboard create that opens its page
+  [chromium] › record-composer.spec.ts:62:1 › Create more makes two records, retaining fields and title focus
+  [chromium] › record-composer.spec.ts:84:1 › an unavailable similar search says so and never blocks creation
+  [chromium] › relative-filters.spec.ts:22:1 › relative due filters show the named days and save tokens as plain strings
+  [chromium] › reminder-fields.spec.ts:4:1 › a date property reminds its unfinished records and stores the type setting
+  [chromium] › reminder-fields.spec.ts:33:1 › a timed date chip labels its own reminder time and explains in-app delivery
+  [chromium] › reminders.spec.ts:35:1 › reminders missed while closed are claimed once alongside a due reminder
+  [chromium] › reminders.spec.ts:75:1 › a wiped webview keeps a durable claim quiet while an unclaimed chip fires
+  [chromium] › reminders.spec.ts:114:1 › browser permission is unknown, with no request on opening Settings
+  [chromium] › reminders.spec.ts:130:1 › two due reminders saved through the editor give one native banner
+  [chromium] › reminders.spec.ts:160:1 › two due chips with no recorded writer toast without posting
+  [chromium] › remote-images.spec.ts:15:1 › a mounted README makes no image request until Load and refuses HTTP
+  [chromium] › remote-images.spec.ts:63:1 › editor saves and copies stay inert, Load works, and Mermaid never requests images
+  [chromium] › remote-images.spec.ts:114:1 › diagram directives and encoded HTML labels cannot load a resource
+  [chromium] › rename-links.spec.ts:47:1 › a Pages rename updates links and Undo restores their exact bytes
+  [chromium] › rename-links.spec.ts:128:1 › Escape cancels the link prompt without changing any file
+  [chromium] › rename-links.spec.ts:142:1 › a citer changed during confirmation refuses the entire rename
+  [chromium] › rename-links.spec.ts:163:1 › an uncited page renames without the link prompt
+  [chromium] › rename-links.spec.ts:171:1 › Move to folder keeps a cited stem without a rewrite prompt
+  [chromium] › rename-links.spec.ts:203:1 › a whiteboard citer is named and its bytes stay untouched after Rename anyway
+  [chromium] › review-notes.spec.ts:65:1 › two notes on two files reach the agent as one numbered prompt
+  [chromium] › review-notes.spec.ts:119:1 › busy, Send waits in Up next; removing the entry returns the notes
+  [chromium] › review.spec.ts:70:1 › review: a queued card says what it is, how dangerous it is, and why it waits
+  [chromium] › review.spec.ts:99:1 › review: a card whose world moved says so before anyone clicks
+  [chromium] › review.spec.ts:118:1 › review: a CRITICAL card is marked for diff review
+  [chromium] › review.spec.ts:125:1 › review: rejecting needs a reason, and approving clears the card
+  [chromium] › review.spec.ts:137:1 › review: revert is offered only where the server offered one
+  [chromium] › routines-ask.spec.ts:15:1 › a no checks once, skips with its question and reason, and starts no full run
+  [chromium] › run-now.spec.ts:21:1 › Run now works with Learn off, and both pause doors refuse it without another row
+  [chromium] › run-options.spec.ts:23:1 › run options: the pick rides the turn, the footer names the model, and it survives a reload
+  [chromium] › run-options.spec.ts:54:1 › run options: Release scout's page writes model and effort one key per Done
+  [chromium] › save-guard.spec.ts:4:1 › a stale Home tick refreshes and the next click checks the relocated task
+  [chromium] › save-guard.spec.ts:39:1 › Library keeps an outside edit and offers to load its new version
+  [chromium] › section-links.spec.ts:61:1 › a section chip keeps its fragment on disk and lands on the heading
+  [chromium] › section-links.spec.ts:86:1 › a heading inside a closed toggle is opened and reached
+  [chromium] › section-links.spec.ts:101:1 › [[#Heading]] jumps within the page without leaving it
+  [chromium] › settings-redesign.spec.ts:4:1 › Settings lends its section navigation to the shell and keeps a readable detail column
+  [chromium] › settings-redesign.spec.ts:48:1 › Settings keeps unsaved local drafts across sections and the theme survives a reload
+  [chromium] › settings-redesign.spec.ts:76:1 › compact Settings opens its section drawer and returns focus to a usable detail
+  [chromium] › sheet-export.spec.ts:19:1 › Excel export includes both live fences and a pending cell draft
+  [chromium] › sheet-export.spec.ts:49:1 › CSV downloads calculated values, blanks and guarded text with BOM and CRLF
+  [chromium] › sheet-import.spec.ts:26:1 › a real workbook preview names what stays behind and imports ten sheet blocks with one Undo
+  [chromium] › sheet-import.spec.ts:61:1 › CSV keeps its BOM-decoded text, quoted CRLF and blank row as one four-row sheet
+  [chromium] › sheet-import.spec.ts:79:1 › a refused workbook and malformed CSV leave the vault unchanged and explain why
+  [chromium] › sheets-grid.spec.ts:32:1 › completion inserts a function and point-selection keeps its draft and argument hint
+  [chromium] › sheets-grid.spec.ts:57:1 › fill handle continues a series in one undo step and command-D translates formulas
+  [chromium] › sheets-grid.spec.ts:80:1 › Ask about selection opens the assistant with its page and range label
+  [chromium] › sheets-grid.spec.ts:95:1 › formulas compute and a 3×3 paste is exactly one page undo step
+  [chromium] › sheets-grid.spec.ts:111:1 › two quick commits undo as two steps and redo follows the page
+  [chromium] › sheets-grid.spec.ts:125:1 › insert and delete rewrite every sheet once and undo restores both byte for byte
+  [chromium] › sheets-grid.spec.ts:143:1 › grid keys and clipboard stay inside the block, and Escape returns to the page
+  [chromium] › sheets-grid.spec.ts:166:1 › /sheet makes stable named fences and an open draft flushes when leaving
+  [chromium] › sheets-grid.spec.ts:193:1 › New Sheet creates a root page whose first grid accepts typing
+  [chromium] › sheets-grid.spec.ts:207:1 › an editable sheet still moves by the page block grip
+  [chromium] › sheets.spec.ts:8:1 › Studio computes linked sheet fences and retains unavailable source without changing bytes
+  [chromium] › sheets.spec.ts:30:1 › page sheets retain their exact fences through typing and an unmount flush, with a bounded wide grid
+  [chromium] › shell-layout.spec.ts:170:3 › shell layout (M52) › the peek shrinks to the room beside the assistant, and the assistant keeps its width
+  [chromium] › shell-layout.spec.ts:194:3 › shell layout (M52) › the owner's window: widening the peek fills the room and leaves the assistant whole
+  [chromium] › shell-layout.spec.ts:214:3 › shell layout (M52) › a drag stores only a width it drew, and one that cannot widen stores nothing
+  [chromium] › shell-layout.spec.ts:253:3 › shell layout (M52) › the sidebar header keeps its controls at the sidebar floor
+  [chromium] › shell-layout.spec.ts:268:3 › shell layout (M52) › a concept's Details panel stays readable beside the assistant
+  [chromium] › shell-layout.spec.ts:290:3 › shell layout (M52) › with no room beside the column the side panel folds, and opens as a drawer
+  [chromium] › shell-layout.spec.ts:323:3 › shell layout (M52) › a window drag never clips the assistant, not even for a frame
+  [chromium] › shell-layout.spec.ts:347:3 › shell layout (M52) › a jump across the rail and park widths draws no frame of the old plan
+  [chromium] › shell-layout.spec.ts:369:3 › shell layout (M52) › below 1274 the sidebar steps down to its rail, and the assistant stays
+  [chromium] › shell-layout.spec.ts:424:3 › shell layout (M52) › below the rail width the assistant parks without costing the sidebar
+  [chromium] › shell-layout.spec.ts:450:3 › shell layout (M52) › the sidebar's drag stops at the width it can draw
+  [chromium] › shell-layout.spec.ts:474:3 › shell layout (M52) › a drag that cannot widen the sidebar keeps the width it had
+  [chromium] › shell-layout.spec.ts:498:3 › shell layout (M52) › a relation keeps its chevron on the first chip's line at the peek's floor
+  [chromium] › shell-layout.spec.ts:525:3 › shell layout (M52) › a drawer closes on Escape and on the column it covers, never writing the flag
+  [chromium] › shell-layout.spec.ts:564:3 › shell layout (M52) › Escape in the composer's [[ menu closes the menu, not the drawer
+  [chromium] › shell-layout.spec.ts:590:3 › shell layout (M52) › a page with sub-pages folds its Pages panel before the side panel
+  [chromium] › shell-layout.spec.ts:629:3 › shell layout (M52) › Escape in a field in a drawer leaves the field, keeps what was typed, and the drawer
+  [chromium] › shell-layout.spec.ts:664:5 › shell layout (M52) › at 900px the parked assistant's tab stays on screen
+  [chromium] › shell-layout.spec.ts:664:5 › shell layout (M52) › at 915px the parked assistant's tab stays on screen
+  [chromium] › shell-layout.spec.ts:664:5 › shell layout (M52) › at 931px the parked assistant's tab stays on screen
+  [chromium] › shell-layout.spec.ts:700:3 › shell layout (M52) › the peek's header keeps to one line at its floor
+  [chromium] › shell-layout.spec.ts:737:3 › shell layout (M52) › a person or select field keeps its chevron on the first line at the peek's floor
+  [chromium] › shell-layout.spec.ts:812:3 › shell layout (M52) › a type view marks only its own row current
+  [chromium] › smoke.spec.ts:4:1 › smoke: boot demo vault, list, board drag writes disk, rename, quick open
+  [chromium] › smoke.spec.ts:114:1 › smoke v2: view tabs persist edits, page created in folder, BlockNote round trip
+  [chromium] › starter.spec.ts:9:1 › an empty vault accepts the kit once and opens its Getting started page
+  [chromium] › starter.spec.ts:38:1 › No thanks writes only a marker and stays declined
+  [chromium] › starter.spec.ts:50:1 › the demo never offers the starter kit
+  [chromium] › starter.spec.ts:58:1 › marker failure and install refusal remain readable and retryable
+  [chromium] › state-lab.spec.ts:26:1 › every preset renders the state it names
+  [chromium] › state-lab.spec.ts:49:1 › mounts the real roster at a link, with the clock pinned to the vault day
+  [chromium] › state-lab.spec.ts:58:1 › a failed read recovers on the next remount
+  [chromium] › state-lab.spec.ts:76:1 › the URL keeps the preset across a reload
+  [chromium] › studio.spec.ts:10:1 › studio: create a prototype, preview it live, hand the build to the assistant
+  [chromium] › sub-pages.spec.ts:65:1 › Add sub-page grows a page by rename, lists the child everywhere, and a drop nests
+  [chromium] › suggest-view-file-times.spec.ts:4:1 › a suggested calendar places file times and cannot write them through arrow keys
+  [chromium] › surface-states.spec.ts:5:3 › operational surfaces keep five honest states readable in light
+  [chromium] › surface-states.spec.ts:5:3 › operational surfaces keep five honest states readable in dark
+  [chromium] › surface-system.spec.ts:24:3 › shared controls retain contrast, size and focus in light
+  [chromium] › surface-system.spec.ts:128:3 › My work wraps long names and keeps an invalid deadline honest in light
+  [chromium] › surface-system.spec.ts:24:3 › shared controls retain contrast, size and focus in dark
+  [chromium] › surface-system.spec.ts:128:3 › My work wraps long names and keeps an invalid deadline honest in dark
+  [chromium] › thread-agent.spec.ts:65:1 › "@release-scout wait for me" posts a placeholder, then the answer in its place
+  [chromium] › thread-agent.spec.ts:96:1 › a deleted placeholder drops the answer
+  [chromium] › thread-agent.spec.ts:125:1 › "@release-scout check this" ends answered in the same thread
+  [chromium] › thread-agent.spec.ts:138:1 › an agent's reply naming @release-scout, and a plain human reply, start no turn
+  [chromium] › tool-approval.spec.ts:46:1 › tool approval: under Ask a command waits on a card; Allow once runs it, and the next asks again
+  [chromium] › tool-approval.spec.ts:68:1 › tool approval: This conversation runs the same command again with no card
+  [chromium] › tool-approval.spec.ts:85:1 › tool approval: Deny returns the person-denied message
+  [chromium] › tool-approval.spec.ts:101:1 › tool approval: a scheduled shell agent under Ask runs without the shell, and its run says so
+  [chromium] › tool-approval.spec.ts:155:1 › tool approval: Settings counts the person’s own rules and hook events
+  [chromium] › tool-approval.spec.ts:183:1 › tool approval: Web access gates WebFetch, and the switch survives a reload (M57.7)
+  [chromium] › trash.spec.ts:81:1 › a deleted page waits in the vault Trash and Settings restores it byte for byte
+  [chromium] › turn-changeset.spec.ts:38:1 › a turn commits exactly the two notes it wrote, and View diff opens its commit
+  [chromium] › turn-changeset.spec.ts:106:1 › an ordinary append cannot change a mail digest or create a commit
+  [chromium] › turn-changeset.spec.ts:136:1 › a restored mail-only turn names the file kept out of git
+  [chromium] › undo.spec.ts:57:1 › renaming assignee, then Undo, puts the Type doc and every Work item back byte for byte
+  [chromium] › undo.spec.ts:94:1 › a deleted record comes back byte for byte from the toast’s Undo
+  [chromium] › undo.spec.ts:117:1 › Undo keeps a key changed outside Cerebro since, and says so
+  [chromium] › undo.spec.ts:162:1 › ⌘Z undoes from the table, leaves a page body alone, and ⇧⌘Z redoes
+  [chromium] › unfiled-correspondents.spec.ts:7:1 › on demand creates pages, links a company, dismisses locally and restores
+  [chromium] › unfiled-correspondents.spec.ts:63:1 › all five lane states remain distinct in the state lab
+  [chromium] › view-check.spec.ts:28:1 › renamed fields stay valid; hand-edited broken filters are named and marked everywhere
+  [chromium] › view-tabs.spec.ts:33:1 › view tab: scoped to the host record, and honest when the source dies
+  [chromium] › visual-pages.spec.ts:5:3 › document canvas keeps readable space across desktop widths in light
+  [chromium] › visual-pages.spec.ts:5:3 › document canvas keeps readable space across desktop widths in dark
+  [chromium] › visual-pages.spec.ts:48:3 › a rich document keeps long content within its reading frame in light
+  [chromium] › visual-pages.spec.ts:48:3 › a rich document keeps long content within its reading frame in dark
+  [chromium] › visual-pages.spec.ts:92:1 › Studio lends its page picker to the sidebar and keeps its preview through drawer changes
+  [chromium] › visual-pages.spec.ts:127:3 › workspace page hierarchy stays readable in light
+  [chromium] › visual-pages.spec.ts:127:3 › workspace page hierarchy stays readable in dark
+  [chromium] › visual-pages.spec.ts:190:1 › Library keeps a bounded shelf and usable controls from wide to compact windows
+  [chromium] › whiteboard-block.spec.ts:38:1 › a page board is read-only, passes the wheel to the page, opens and saves its exact fence
+  [chromium] › whiteboard-block.spec.ts:83:1 › /Whiteboard takes a picked file and New whiteboard creates beside the page
+  [chromium] › whiteboard-cards.spec.ts:161:1 › live faces, nested guards and record Open keep the board mounted and write nothing
+  [chromium] › whiteboard-cards.spec.ts:190:1 › missing-card movement preserves its pointer and Add card is one undo step
+  [chromium] › whiteboard-cards.spec.ts:223:1 › renaming a cited page leaves the exact old whiteboard pointer visibly missing
+  [chromium] › whiteboard-connectors.spec.ts:67:1 › ports, lines and a new end card save one step each; deleting that card takes its connection
+  [chromium] › whiteboard-connectors.spec.ts:110:1 › a seeded side-less endpoint reconnects and its label edits without losing unknown keys
+  [chromium] › whiteboard-convert.spec.ts:19:1 › converts a manual Mermaid board with a loss report and leaves its source unchanged
+  [chromium] › whiteboard-editor.spec.ts:85:1 › a drag is one saved edit with unknown keys kept; Undo and Redo restore exact scenes
+  [chromium] › whiteboard-editor.spec.ts:116:1 › Shift resize keeps ratio; marquee selects only cards; a group drag carries both members
+  [chromium] › whiteboard-editor.spec.ts:151:1 › Delete removes a card and its connection together; cancelled drag and view gestures never save
+  [chromium] › whiteboard-inspector.spec.ts:64:1 › preset and hex colours, align and distribute each save once and Undo restores the prior scene
+  [chromium] › whiteboard-inspector.spec.ts:125:1 › clipboard keeps only copied connections, cut, Duplicate and Alt-drag are each one undo step
+  [chromium] › whiteboard-readonly.spec.ts:19:1 › Studio previews a board fence and a canvas file; Open reaches its page without writing
+  [chromium] › whiteboard-readonly.spec.ts:51:1 › a knowledge board offers no editing input and a real drag leaves its bytes untouched
+  [chromium] › whiteboard-readonly.spec.ts:95:1 › a missing embed retains its pointer and a changed file refreshes the read-only preview
+  [chromium] › whiteboard-render.spec.ts:124:1 › draws every item, pans and zooms without a write, and remembers the camera
+  [chromium] › whiteboard-render.spec.ts:178:1 › exports every card with literal paints as SVG and PNG
+  [chromium] › whiteboard-render.spec.ts:226:1 › standalone bounds contain outward curves and long connection labels
+  [chromium] › whiteboard-tools.spec.ts:53:1 › shape, verbatim markdown, pencil and eraser are four edits and four Undos restore the seed
+  [chromium] › whiteboard-tools.spec.ts:96:1 › typing tool letters stays in the text editor, and leaving the board saves the current draft
+  [chromium] › whiteboard.spec.ts:67:1 › whiteboard: a legacy Mermaid tab stays editable, takes a record, and opens it
+  [chromium] › whiteboard.spec.ts:178:1 › whiteboard: reopening the tab finds the same canvas, not a second file
+  [chromium] › whiteboard.spec.ts:217:1 › whiteboard: the record picker marks the row Enter will take
+  [chromium] › whiteboard.spec.ts:247:1 › whiteboard: a chip adds only what the node does not say, and drags it
+  [chromium] › whiteboard.spec.ts:298:1 › whiteboard: a new tab writes JSON Canvas and adds a record with one undo step
+  [chromium] › workspace-redesign.spec.ts:13:1 › the rail opens contextual shelves while retaining every workspace destination
+  [chromium] › workspace-redesign.spec.ts:53:1 › collapse and narrow drawers keep the rail, readable canvas, and stored sidebar width
+  [chromium] › workspace-redesign.spec.ts:91:3 › the quiet shell keeps its controls and operational status usable in light
+  [chromium] › workspace-redesign.spec.ts:91:3 › the quiet shell keeps its controls and operational status usable in dark
+  [chromium] › workspace-surfaces.spec.ts:40:1 › Work lends one Explorer to the shell and keeps the open file through compact keyboard navigation
+  [chromium] › workspace-surfaces.spec.ts:88:3 › file preview controls stay reachable and retain their behavior in light
+  [chromium] › workspace-surfaces.spec.ts:126:3 › History and whiteboard keep a clear heading and usable canvas in light
+  [chromium] › workspace-surfaces.spec.ts:88:3 › file preview controls stay reachable and retain their behavior in dark
+  [chromium] › workspace-surfaces.spec.ts:126:3 › History and whiteboard keep a clear heading and usable canvas in dark
+  [chromium] › workspace.spec.ts:51:3 › workspace › browses a mounted repo and reads a doc
+  [chromium] › workspace.spec.ts:77:3 › workspace › a relative link navigates in-app
+  [chromium] › workspace.spec.ts:98:3 › workspace › a code file opens read-only in the code viewer
+  [chromium] › workspace.spec.ts:120:3 › workspace › opening files stacks tabs, and closing one falls back left
+  [chromium] › workspace.spec.ts:159:3 › workspace › the editor splits into two panes and each keeps its own file
+  [chromium] › workspace.spec.ts:194:3 › workspace › Cmd+\ splits, and closing a pane’s last tab removes the pane
+  [chromium] › workspace.spec.ts:220:3 › workspace › a code file shows numbered lines and a breadcrumb
+  [chromium] › workspace.spec.ts:243:3 › workspace › the explorer is a keyboard-operable tree
+  [chromium] › workspace.spec.ts:270:3 › workspace › file icons can be turned off from the explorer settings
+  [chromium] › workspace.spec.ts:286:3 › workspace › the mount dialog opens and closes without mounting anything
+  [chromium] › workspace.spec.ts:306:3 › workspace › an empty workspace says how to fill it
+  [chromium] › workspace.spec.ts:319:3 › workspace git › a repo root badges its branch and counts, a plain folder stays silent
+  [chromium] › workspace.spec.ts:339:3 › workspace git › a non-repo root refuses without a toast, and the tree stays usable
+  [chromium] › workspace.spec.ts:362:3 › workspace git sync › a root that is only behind fast-forwards and the badge clears
+  [chromium] › workspace.spec.ts:382:3 › workspace git sync › a diverged root is not pulled and its counts stand
+  [chromium] › workspace.spec.ts:407:3 › workspace git sync › a root whose credentials fail says so on the row, with the hint
+  [chromium] › workspace.spec.ts:431:3 › workspace git sync › a root nested in a larger repository shows a quiet nested state
+  [webkit] › chat-canvas.spec.ts:17:1 › conversation canvas gives the greeting and composer a centered reading column
+  [webkit] › chat-canvas.spec.ts:65:1 › docking a live conversation keeps its draft, turn, and transcript exactly once
+  [webkit] › chat-canvas.spec.ts:105:3 › empty chat stays usable in a short light window, including context completion
+  [webkit] › chat-canvas.spec.ts:105:3 › empty chat stays usable in a short dark window, including context completion
+  [webkit] › chat-canvas.spec.ts:145:1 › conversation navigation reuses existing threads and a narrow composer keeps every action reachable
+  [webkit] › chat-canvas.spec.ts:192:1 › a full queue and multiline draft keep the transcript and Stop reachable in a short window
+  [webkit] › chat-canvas.spec.ts:223:1 › an open approval survives docking and expanding and writes only after Allow
+  [webkit] › data-display-polish.spec.ts:50:1 › six-column Gantt budgets a readable axis, resizes by keyboard and scrolls columns independently
+  [webkit] › data-display-polish.spec.ts:83:1 › default gallery cards and lists reflow in a 360px content host without writing defaults
+  [webkit] › data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus
+  [webkit] › data-display-polish.spec.ts:185:3 › table chrome and a refused scalar remain legible in light
+  [webkit] › data-display-polish.spec.ts:185:3 › table chrome and a refused scalar remain legible in dark
+  [webkit] › data-display-polish.spec.ts:266:1 › database destruction has entity scope and remains outside view settings
+  [webkit] › data-display-polish.spec.ts:282:1 › Knowledge group bands stick below the same 36px data header
+  [webkit] › data-display-polish.spec.ts:295:1 › alternate displays show meaningful data in both themes without writing on open
+  [webkit] › data-display-polish.spec.ts:328:1 › fixed rows preserve sticky hit targets, offscreen navigation, find and wrapped content
+  [webkit] › editor-carriers.spec.ts:98:1 › a page holding every carrier opens editable and writes each one back unchanged
+  [webkit] › editor-carriers.spec.ts:171:1 › / inserts each block, writes it as its carrier, and opens it again as itself
+  [webkit] › editor-carriers.spec.ts:237:1 › a list-item image keeps its relative url through a save
+  [webkit] › editor-writing-polish.spec.ts:109:3 › writing controls form one durable session in light
+  [webkit] › editor-writing-polish.spec.ts:109:3 › writing controls form one durable session in dark
+  [webkit] › editor-writing-polish.spec.ts:227:1 › selection tools stay reachable at narrow width and 200 percent scale
+  [webkit] › home-document-polish.spec.ts:5:3 › Home gives actual work a clear first view in light
+  [webkit] › home-document-polish.spec.ts:57:3 › ordinary document prose has a reading rhythm without changing its bytes in light
+  [webkit] › home-document-polish.spec.ts:5:3 › Home gives actual work a clear first view in dark
+  [webkit] › home-document-polish.spec.ts:57:3 › ordinary document prose has a reading rhythm without changing its bytes in dark
+  [webkit] › hover-preview.spec.ts:24:1 › a page link previews its page on hover, and Escape closes only the card
+  [webkit] › inbox-documents.spec.ts:26:1 › an Office drop keeps its original, files an editable capture and deduplicates a repeat
+  [webkit] › inbox-documents.spec.ts:89:1 › a PDF with no text layer keeps its original and explains the outcome
+  [webkit] › inbox-documents.spec.ts:100:1 › a real text PDF files one editable section per page
+  [webkit] › inbox-redesign.spec.ts:4:1 › Inbox lends its queue to the context, keeps a wide reader, and folds Organize without replacing the editor
+  [webkit] › inbox-redesign.spec.ts:40:1 › narrow Inbox exposes its capture drawer, closes on selection, and keeps j/k on the owning pane
+  [webkit] › inbox-redesign.spec.ts:89:1 › only the active Inbox pane supplies the queue and receives its navigation keys
+  [webkit] › page-attachments.spec.ts:38:1 › paste reuses bytes, renders the image, undoes one batch, and survives reopen and later edits
+  [webkit] › page-attachments.spec.ts:91:1 › OS and HTML5 drops name skips once and copy a PDF into a durable file block
+  [webkit] › page-attachments.spec.ts:133:1 › /image Upload states the cap and copies the selected file
+  [webkit] › page-attachments.spec.ts:152:1 › a locked page refuses an OS attachment before any copy
+  [webkit] › page-title-polish.spec.ts:12:3 › the leading H1 is one native title with unchanged source order
+  [webkit] › page-title-polish.spec.ts:12:3 › the nonleading H1 is one native title with unchanged source order
+  [webkit] › page-title-polish.spec.ts:76:1 › a filename title writes no H1 until the person adopts it
+  [webkit] › page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic image block
+  [webkit] › page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic database block
+  [webkit] › page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic sheet block
+  [webkit] › page-title-polish.spec.ts:165:1 › an unchanged filename title is adopted only by an explicit Enter
+  [webkit] › page-title-polish.spec.ts:185:1 › adopting a filename title on a related tab keeps its body hidden
+  [webkit] › page-title-polish.spec.ts:212:1 › wrapped title arrows travel inside the heading before crossing into prose
+  [webkit] › page-title-polish.spec.ts:241:1 › a title with nested children retains child order and copies document content only
+  [webkit] › pdf-viewer.spec.ts:39:1 › a forty-page PDF renders nearby pages and supports outline, find, page input and zoom
+  [webkit] › pdf-viewer.spec.ts:87:1 › a scanned PDF explains its missing text layer and disables search and browser print
+  [webkit] › pdf-viewer.spec.ts:99:1 › the upstream legacy engine restores missing early-WebKit APIs and still renders
+  [webkit] › polish-integration.spec.ts:55:1 › a property picker stays usable at 200% zoom
+  [webkit] › polish-integration.spec.ts:90:1 › table → peek → page preserves an invalid field draft, then commits one corrected value
+  [webkit] › polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 125% text
+  [webkit] › polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 150% text
+  [webkit] › polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 200% text
+  [webkit] › polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 125% text
+  [webkit] › polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 150% text
+  [webkit] › polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 200% text
+  [webkit] › remote-images.spec.ts:15:1 › a mounted README makes no image request until Load and refuses HTTP
+  [webkit] › remote-images.spec.ts:63:1 › editor saves and copies stay inert, Load works, and Mermaid never requests images
+  [webkit] › remote-images.spec.ts:114:1 › diagram directives and encoded HTML labels cannot load a resource
+  [webkit] › settings-redesign.spec.ts:4:1 › Settings lends its section navigation to the shell and keeps a readable detail column
+  [webkit] › settings-redesign.spec.ts:48:1 › Settings keeps unsaved local drafts across sections and the theme survives a reload
+  [webkit] › settings-redesign.spec.ts:76:1 › compact Settings opens its section drawer and returns focus to a usable detail
+  [webkit] › sheets.spec.ts:8:1 › Studio computes linked sheet fences and retains unavailable source without changing bytes
+  [webkit] › sheets.spec.ts:30:1 › page sheets retain their exact fences through typing and an unmount flush, with a bounded wide grid
+  [webkit] › surface-states.spec.ts:5:3 › operational surfaces keep five honest states readable in light
+  [webkit] › surface-states.spec.ts:5:3 › operational surfaces keep five honest states readable in dark
+  [webkit] › surface-system.spec.ts:24:3 › shared controls retain contrast, size and focus in light
+  [webkit] › surface-system.spec.ts:128:3 › My work wraps long names and keeps an invalid deadline honest in light
+  [webkit] › surface-system.spec.ts:24:3 › shared controls retain contrast, size and focus in dark
+  [webkit] › surface-system.spec.ts:128:3 › My work wraps long names and keeps an invalid deadline honest in dark
+  [webkit] › visual-pages.spec.ts:5:3 › document canvas keeps readable space across desktop widths in light
+  [webkit] › visual-pages.spec.ts:5:3 › document canvas keeps readable space across desktop widths in dark
+  [webkit] › visual-pages.spec.ts:48:3 › a rich document keeps long content within its reading frame in light
+  [webkit] › visual-pages.spec.ts:48:3 › a rich document keeps long content within its reading frame in dark
+  [webkit] › visual-pages.spec.ts:92:1 › Studio lends its page picker to the sidebar and keeps its preview through drawer changes
+  [webkit] › visual-pages.spec.ts:127:3 › workspace page hierarchy stays readable in light
+  [webkit] › visual-pages.spec.ts:127:3 › workspace page hierarchy stays readable in dark
+  [webkit] › visual-pages.spec.ts:190:1 › Library keeps a bounded shelf and usable controls from wide to compact windows
+  [webkit] › workspace-redesign.spec.ts:13:1 › the rail opens contextual shelves while retaining every workspace destination
+  [webkit] › workspace-redesign.spec.ts:53:1 › collapse and narrow drawers keep the rail, readable canvas, and stored sidebar width
+  [webkit] › workspace-redesign.spec.ts:91:3 › the quiet shell keeps its controls and operational status usable in light
+  [webkit] › workspace-redesign.spec.ts:91:3 › the quiet shell keeps its controls and operational status usable in dark
+  [webkit] › workspace-surfaces.spec.ts:40:1 › Work lends one Explorer to the shell and keeps the open file through compact keyboard navigation
+  [webkit] › workspace-surfaces.spec.ts:88:3 › file preview controls stay reachable and retain their behavior in light
+  [webkit] › workspace-surfaces.spec.ts:126:3 › History and whiteboard keep a clear heading and usable canvas in light
+  [webkit] › workspace-surfaces.spec.ts:88:3 › file preview controls stay reachable and retain their behavior in dark
+  [webkit] › workspace-surfaces.spec.ts:126:3 › History and whiteboard keep a clear heading and usable canvas in dark
+Total: 687 tests in 158 files

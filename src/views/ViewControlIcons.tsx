@@ -14,15 +14,10 @@ import { countRules, GROUPABLE_KINDS, META_SORTS, ORDERABLE_KINDS } from '@/view
 import { axesFor } from '@/views/viewKinds';
 
 /**
- * The view-control icon cluster (M12.8): Notion's toolbar-in-the-tab-row.
- *
- * Filter, sort and group used to live in a permanent strip of pills below the
- * tabs — always present, mostly idle. Now each is an icon at the tab row's
- * right edge. An icon whose axis is EMPTY opens a quick field picker, so the
- * first rule is one click and one choice; an icon whose axis has rules toggles
- * the chip bar below, where the full builders live. The icon tints when its
- * axis is active, so a hidden bar never hides the fact that a view is
- * filtered.
+ * Reading controls in the view's tab row. Full database hosts put layout,
+ * filters, sorting and grouping behind their existing View options panel;
+ * active filtering remains explicit beside it with a direct clear action.
+ * Hosts without that panel retain the standalone quick-axis controls.
  */
 export function ViewControlIcons({
   presentation,
@@ -64,6 +59,7 @@ export function ViewControlIcons({
 }) {
   const filterCount = countRules(filters);
   const axes = axesFor(presentation.type);
+  const consolidated = onSettingsOpenChange !== undefined && settingsPanel !== undefined;
 
   const option = (f: ColumnDef) => ({
     value: f.name,
@@ -75,10 +71,11 @@ export function ViewControlIcons({
 
   return (
     <>
-      {onFiltersChange !== undefined && (
+      {!consolidated && onFiltersChange !== undefined && (
         <QuickAxisIcon
           icon="list-filter"
           label="Filter"
+          count={filterCount}
           active={filterCount > 0}
           placeholder="Filter by…"
           options={[{ value: 'title', label: 'Name', icon: 'type' }, ...fields.map(option)]}
@@ -95,26 +92,30 @@ export function ViewControlIcons({
           }}
         />
       )}
-      <QuickAxisIcon
-        icon="arrow-up-down"
-        label="Sort"
-        active={presentation.sort.length > 0}
-        placeholder="Sort by…"
-        options={[
-          ...META_SORTS.map((m) => ({ value: m.value, label: m.label, icon: 'type' })),
-          ...fields.filter((f) => ORDERABLE_KINDS.has(f.kind)).map(option),
-        ]}
-        barOpen={barOpen}
-        onToggleBar={toggleBar}
-        onPick={(field) => {
-          onChange(sortBy(presentation, field, 'asc'));
-          onBarOpenChange(true);
-        }}
-      />
-      {axes.group && (
+      {!consolidated && (
+        <QuickAxisIcon
+          icon="arrow-up-down"
+          label="Sort"
+          count={presentation.sort.length}
+          active={presentation.sort.length > 0}
+          placeholder="Sort by…"
+          options={[
+            ...META_SORTS.map((m) => ({ value: m.value, label: m.label, icon: 'type' })),
+            ...fields.filter((f) => ORDERABLE_KINDS.has(f.kind)).map(option),
+          ]}
+          barOpen={barOpen}
+          onToggleBar={toggleBar}
+          onPick={(field) => {
+            onChange(sortBy(presentation, field, 'asc'));
+            onBarOpenChange(true);
+          }}
+        />
+      )}
+      {!consolidated && axes.group && (
         <QuickAxisIcon
           icon="rows-3"
           label="Group"
+          count={presentation.group.length}
           active={presentation.group.length > 0}
           placeholder="Group by…"
           options={fields.filter((f) => GROUPABLE_KINDS.has(f.kind)).map(option)}
@@ -126,23 +127,60 @@ export function ViewControlIcons({
           }}
         />
       )}
+      {consolidated && (filterCount > 0 || barOpen) && (
+        <span className="inline-flex h-8 items-center rounded-full bg-n-100 text-metadata text-n-800">
+          <button
+            type="button"
+            data-testid="view-control-filter"
+            aria-label="Filter"
+            aria-expanded={barOpen}
+            aria-description={`${filterCount} active filter rules`}
+            onClick={toggleBar}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full border-0 bg-transparent px-3 hover:bg-n-200"
+          >
+            <Icon name="list-filter" size={14} />
+            Filter{filterCount > 0 ? ` · ${filterCount}` : ''}
+          </button>
+          {filterCount > 0 && onFiltersChange !== undefined && (
+            <button
+              type="button"
+              aria-label="Clear filters"
+              onClick={() => {
+                onFiltersChange(null);
+                onBarOpenChange(false);
+              }}
+              className="mr-1 flex h-6 w-6 items-center justify-center rounded-full border-0 bg-transparent hover:bg-n-200"
+            >
+              <Icon name="x" size={12} />
+            </button>
+          )}
+        </span>
+      )}
       {onSearchChange !== undefined && <SearchBox query={search ?? ''} onChange={onSearchChange} />}
       {onSettingsOpenChange !== undefined && (
         <span className="relative inline-flex">
           <button
             type="button"
             data-testid="view-control-settings"
-            aria-label="View settings"
+            aria-label={consolidated ? 'View options' : 'View settings'}
+            title="Layout, properties, filters, sorting and grouping"
+            aria-description={
+              consolidated
+                ? `${filterCount} filters, ${presentation.sort.length} sorts, ${presentation.group.length} group levels`
+                : undefined
+            }
             aria-expanded={settingsOpen}
             onClick={() => onSettingsOpenChange(!settingsOpen)}
             className={[
-              'flex h-7 w-7 items-center justify-center rounded-md border-0',
+              'flex h-8 items-center justify-center gap-1.5 rounded-full border-0 text-metadata',
+              consolidated ? 'px-3' : 'w-8',
               settingsOpen
                 ? 'bg-n-100 text-n-800'
                 : 'bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800',
             ].join(' ')}
           >
             <Icon name="sliders-horizontal" size={14} />
+            {consolidated && <span>View options</span>}
           </button>
           {settingsOpen && settingsPanel !== undefined && (
             <>
@@ -165,7 +203,13 @@ export function ViewControlIcons({
       )}
       {onNew !== undefined && (
         <span className="ml-1" data-testid="view-control-new">
-          <Button variant="primary" size="sm" icon="plus" onClick={() => void onNew()}>
+          <Button
+            variant="primary"
+            size="md"
+            icon="plus"
+            style={{ borderRadius: 999 }}
+            onClick={() => void onNew()}
+          >
             New
           </Button>
         </span>
@@ -177,13 +221,11 @@ export function ViewControlIcons({
 /**
  * Search within the view (M16.26).
  *
- * Collapsed to a glyph until pressed, the way Notion's is: a permanent input
- * in a row of 28px icons is the widest thing in the row and earns that width
- * on the minority of visits where anyone types in it. It stays open while it
- * holds a query, because a control that hides a narrowed result set is how a
- * view ends up looking broken.
+ * A named search pill opens the input without making the toolbar feel like
+ * a form. It stays open while it holds a query so a narrowed result set
+ * always names the search responsible for it.
  */
-function SearchBox({ query, onChange }: { query: string; onChange: (q: string) => void }) {
+export function SearchBox({ query, onChange }: { query: string; onChange: (q: string) => void }) {
   const [open, setOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
@@ -199,16 +241,17 @@ function SearchBox({ query, onChange }: { query: string; onChange: (q: string) =
           data-testid="view-control-search"
           aria-label="Search this view"
           onClick={() => setOpen(true)}
-          className="flex h-7 w-7 items-center justify-center rounded-md border-0 bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800"
+          className="flex h-8 items-center justify-center gap-2 rounded-full border border-n-200 bg-n-0 px-3 text-metadata text-n-500 hover:bg-n-50 hover:text-n-800"
         >
           <Icon name="search" size={14} />
+          <span>Search</span>
         </button>
       </Tooltip>
     );
   }
 
   return (
-    <span className="inline-flex h-7 items-center gap-1 rounded-md border border-n-300 bg-n-0 pl-1.5 pr-0.5">
+    <span className="inline-flex h-8 items-center gap-2 rounded-full border border-n-300 bg-n-0 pl-3 pr-1">
       <Icon name="search" size={12} color="var(--n-400)" />
       <input
         ref={input}
@@ -228,7 +271,7 @@ function SearchBox({ query, onChange }: { query: string; onChange: (q: string) =
           onChange('');
           setOpen(false);
         }}
-        className="h-6 w-[124px] border-0 bg-transparent text-sm text-n-800 outline-none placeholder:text-n-400"
+        className="h-6 w-[124px] border-0 bg-transparent text-ui text-n-800 outline-none placeholder:text-n-400"
       />
       {query !== '' && (
         <IconButton
@@ -253,6 +296,7 @@ function QuickAxisIcon({
   icon,
   label,
   active,
+  count,
   placeholder,
   options,
   barOpen,
@@ -262,6 +306,7 @@ function QuickAxisIcon({
   icon: string;
   label: string;
   active: boolean;
+  count: number;
   placeholder: string;
   options: { value: string; label: string; icon: string }[];
   /** Whether the chip bar below the tabs is showing. */
@@ -298,19 +343,21 @@ function QuickAxisIcon({
         type="button"
         data-testid={`view-control-${label.toLowerCase()}`}
         aria-label={label}
+        aria-description={active ? `${count} active ${label.toLowerCase()} rules` : undefined}
         aria-expanded={open}
         // An OPEN bar always closes from these icons. It used to toggle only
         // while its axis was ACTIVE, so clearing the last rule stranded the bar
         // permanently open with nothing left that could close it.
         onClick={() => (open ? close() : barOpen || active ? onToggleBar() : openMenu())}
         className={[
-          'flex h-7 w-7 items-center justify-center rounded-md border-0 bg-transparent',
+          'flex h-8 min-w-8 items-center justify-center gap-1 rounded-full border-0 px-2',
           active
-            ? 'text-cortex-600 hover:bg-cortex-50'
-            : 'text-n-500 hover:bg-n-50 hover:text-n-800',
+            ? 'bg-n-100 text-n-800 hover:bg-n-200'
+            : 'bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800',
         ].join(' ')}
       >
         <Icon name={icon} size={14} />
+        {active && <span className="text-[12px] tabular-nums">{count}</span>}
       </button>
       {open && (
         <>
@@ -348,7 +395,7 @@ function QuickAxisIcon({
                     onPick(shown[at].value);
                   }
                 }}
-                className="mb-1 h-7 w-full rounded-md border border-n-200 px-2 text-sm text-n-800 outline-none focus:border-cortex-500 focus:shadow-[0_0_0_3px_var(--cortex-100)]"
+                className="mb-1 h-7 w-full rounded-md border border-n-200 px-2 text-ui text-n-800 outline-none focus:border-cortex-500 focus:shadow-[0_0_0_3px_var(--cortex-100)]"
               />
               <div className="max-h-[264px] overflow-y-auto">
                 {shown.map((o, i) => (
@@ -364,7 +411,7 @@ function QuickAxisIcon({
                     // The highlight wears the hover background, so pointer and
                     // keyboard say "this is the one Enter takes" the same way.
                     className={[
-                      'flex w-full items-center gap-2 rounded-sm border-0 px-2 py-1.5 text-left text-sm text-n-700 hover:bg-n-50',
+                      'flex w-full items-center gap-2 rounded-sm border-0 px-2 py-1.5 text-left text-ui text-n-700 hover:bg-n-50',
                       i === at ? 'bg-n-50' : 'bg-transparent',
                     ].join(' ')}
                   >

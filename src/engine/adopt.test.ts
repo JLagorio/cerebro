@@ -114,6 +114,36 @@ describe('analyzeVault', () => {
     expect(analyzeVault(entries, buildSchema(entries))).toEqual([]);
   });
 
+  // 2026-10-18: the owner's adoption declared `generated: text` on Risk and
+  // converted a capture's `generated: {by, at}` stamp to the text
+  // "[object Object]", destroying it. Stamps are structure, not drift.
+  it('leaves stamp maps and lists of them alone: never declared, never converted', () => {
+    const riskType = makeEntry({
+      path: 'types/risk.md',
+      filename: 'risk.md',
+      folder: 'types',
+      title: 'Risk',
+      type: 'Type',
+      properties: {
+        fields: { severity: { kind: 'select', options: ['high', 'low'] }, stamp: { kind: 'text' } },
+      } as unknown as ReturnType<typeof makeEntry>['properties'],
+    });
+    const stamp = { by: 'claude-code', at: '2026-07-28T16:42:00Z' };
+    const entries = [
+      riskType,
+      risk(1, {
+        severity: 'high',
+        generated: stamp,
+        verified: [{ by: 'human:me', at: '2026-07-29T09:00:00Z' }],
+        // Declared text, holding a map: kept, not rewritten to fit.
+        stamp,
+      } as never),
+      risk(2, { severity: 'low', generated: stamp } as never),
+    ];
+    const proposals = analyzeVault(entries, buildSchema(entries));
+    expect(proposals).toEqual([]);
+  });
+
   it('flags ill-fitting values on an already-declared field', () => {
     const riskType = makeEntry({
       path: 'types/risk.md',

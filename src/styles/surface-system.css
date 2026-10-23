@@ -1,0 +1,133 @@
+/* Shared compositions adopted by workspace surfaces. These are opt-in roles,
+   not descendant overrides of controls or utility font sizes. */
+.cb-nav-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: var(--nav-row-h);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-md);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  text-align: left;
+}
+
+.cb-nav-row:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+/* Page-level databases share the paper inset; embedded views retain the
+   document's own measure. Keep padding outside the scroll/frozen grid. */
+.cb-data-page {
+  padding-inline: clamp(16px, 3cqw, 48px);
+  background: var(--surface-app);
+}
+
+.cb-data-page > .cb-page-header {
+  padding: var(--sp-10) 0 var(--sp-6);
+}
+
+.cb-data-page > .cb-view-tabs {
+  padding-inline: 0;
+  margin-bottom: var(--sp-4);
+}
+
+.cb-data-page > .cb-page-header .cb-page-heading {
+  font-size: 28px;
+  line-height: 36px;
+}
+
+.cb-surface-content {
+  width: 100%;
+  max-width: var(--surface-broad);
+  margin-inline: auto;
+  padding: var(--sp-4) var(--surface-inset) var(--sp-12);
+}
+
+.cb-section-heading {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-primary);
+  font-size: var(--fs-section-title);
+  font-weight: var(--w-semibold);
+  line-height: var(--lh-section-title);
+}
+
+.cb-state-message {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+
+.cb-state-message--compact {
+  padding: var(--sp-3) 0;
+  border: 0;
+  background: transparent;
+}
+
+.cb-state-message-icon {
+  flex: none;
+  margin-top: 2px;
+}
+
+.cb-state-message-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cb-state-message-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: var(--w-medium);
+}
+
+.cb-state-message-description {
+  margin-top: var(--sp-1);
+}
+
+.cb-state-message-action {
+  margin-top: var(--sp-3);
+}
+
+.cb-state-message[data-state='unavailable'] {
+  border-color: var(--danger-200);
+}
+
+.cb-state-message[data-state='unavailable'] .cb-state-message-icon {
+  color: var(--danger-700);
+}
+
+.cb-agents-content {
+  padding-top: var(--sp-6);
+}
+
+.cb-agent-roster-row {
+  align-items: center;
+  min-height: 72px;
+  border-bottom: 1px solid var(--n-100);
+  padding-block: var(--sp-1);
+}
+
+.cb-agents-content .cb-section-heading:not(:first-child) {
+  margin-top: var(--sp-8);
+}
+
+.cb-diagram-toolbar {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 52px;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}

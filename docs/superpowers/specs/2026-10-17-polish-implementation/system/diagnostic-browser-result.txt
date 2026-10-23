@@ -1,0 +1,1298 @@
+
+> cerebro@0.1.0 e2e /Users/joseflagorio/Development/cerebro
+> playwright test --workers=3 --output=/private/tmp/cerebro-m90/full-e2e-final
+
+
+Running 687 tests using 3 workers
+
+(node:66774) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:66773) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:66775) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓    1 [chromium] › e2e/agent-ask.spec.ts:34:1 › agent: a held call waits on a card; Allow once runs it and the next one asks again (5.1s)
+  ✓    2 [chromium] › e2e/agent-assignment.spec.ts:4:1 › a Work item links an existing Agent and opens its page (6.4s)
+  ✓    3 [chromium] › e2e/add-existing.spec.ts:34:1 › Add existing moves two records together and Undo restores exact bytes (6.7s)
+  ✓    4 [chromium] › e2e/agent-ask.spec.ts:67:1 › agent: Deny with a message leaves the note alone and the row says why (3.5s)
+  ✓    5 [chromium] › e2e/agent-assignment.spec.ts:43:1 › the property catalog declares Agent only as a one-way Relation (3.4s)
+  ✓    6 [chromium] › e2e/add-existing.spec.ts:72:1 › a changed staged record stays selected and named while the ready record is added (4.2s)
+  ✓    7 [chromium] › e2e/agent-ask.spec.ts:87:1 › agent: Stop with a card open cancels it, the row reads cancelled, and the next send works (3.0s)
+  ✓   10 [chromium] › e2e/agent-comments.spec.ts:56:1 › a comment on a quoted passage lands in the sidecar, and the page keeps its bytes (3.4s)
+  ✓    9 [chromium] › e2e/agent-canvas.spec.ts:31:1 › agent edits an open Obsidian board once and retains unknown data (4.6s)
+  ✓   12 [chromium] › e2e/agent-canvas.spec.ts:102:3 › dangling refuses without changing bytes or recording a row (2.1s)
+  ✓   11 [chromium] › e2e/agent-comments.spec.ts:72:1 › an ambiguous quote is refused with both appearances, and nothing is posted (3.0s)
+  ✓   13 [chromium] › e2e/agent-canvas.spec.ts:102:3 › 26 operations refuses without changing bytes or recording a row (2.2s)
+  ✓   14 [chromium] › e2e/agent-comments.spec.ts:89:1 › a reply and a resolve address the thread by the id the comment named (3.6s)
+  ✓   15 [chromium] › e2e/agent-canvas.spec.ts:112:1 › agent creates filled boards once, chooses a free name, and the change card opens it (2.6s)
+  ✓   16 [chromium] › e2e/agent-detach.spec.ts:74:1 › agent: closing the panel mid-turn and reopening it re-attaches without duplicate rows (2.1s)
+  ✓   18 [chromium] › e2e/agent-detach.spec.ts:91:1 › agent: a thread switch mid-turn keeps the turn running (2.0s)
+  ✓   17 [chromium] › e2e/agent-edit.spec.ts:87:1 › an edit lands in place: the editor stays, the caret stays, and ⌘Z undoes only it (3.4s)
+  ✓   19 [chromium] › e2e/agent-detach.spec.ts:107:1 › agent: the composer draft survives closing the panel, per thread (2.5s)
+  ✓   20 [chromium] › e2e/agent-edit.spec.ts:130:1 › typing elsewhere inside the debounce merges with the edit, with no choice (2.7s)
+  ✓   21 [chromium] › e2e/agent-detach.spec.ts:131:1 › agent: the run list opens the thread a detached run belongs to (2.4s)
+  ✓   22 [chromium] › e2e/agent-edit.spec.ts:146:1 › typing in the paragraph the agent edits asks, and Keep yours writes yours (3.7s)
+  ✓   23 [chromium] › e2e/agent-detach.spec.ts:152:1 › agent: a card left open across a close still waits, and Allow ends the turn in one reply (1.9s)
+  ✓   24 [chromium] › e2e/agent-failures.spec.ts:23:1 › agent failures: not signed in opens Settings at Claude Code's row (1.6s)
+  ✓   25 [chromium] › e2e/agent-questions.spec.ts:49:1 › agent questions: the card returns the chosen labels, and the reply goes on in the same bubble (2.3s)
+  ✓    8 [chromium] › e2e/agent-assignment.spec.ts:57:1 › an assigned trigger drains three bulk-linked pages and a re-add wakes again (25.7s)
+  ✓   26 [chromium] › e2e/agent-failures.spec.ts:39:1 › agent failures: a usage limit names when it resets (2.2s)
+  ✓   27 [chromium] › e2e/agent-questions.spec.ts:75:1 › agent questions: Other sends the typed text (2.3s)
+  ✓   28 [chromium] › e2e/agent-rows.spec.ts:10:1 › agent: five note reads fold into one row (2.3s)
+  ✓   29 [chromium] › e2e/agent-failures.spec.ts:56:1 › agent failures: a failure Rust cannot type keeps the red box and its words (1.8s)
+  ✓   30 [chromium] › e2e/agent-questions.spec.ts:90:1 › agent questions: Send answers waits until every question has one (1.7s)
+  ✓   31 [chromium] › e2e/agent-schedule.spec.ts:20:1 › a phrase and monthly list persist, next time is soonest, and an invalid phrase cancels cleanly (2.9s)
+  ✓   32 [chromium] › e2e/agent-set-fields.spec.ts:43:1 › an option label is stored as its id, and the page shows its label (3.1s)
+  ✓   33 [chromium] › e2e/agent-questions.spec.ts:109:1 › agent questions: Don’t answer declines, and the reply says it went ahead (2.2s)
+  ✓   36 [chromium] › e2e/agent-questions.spec.ts:124:1 › agent questions: Stop with a question open removes the card, and the next send works (2.6s)
+  ✓   34 [chromium] › e2e/agent-schedule.spec.ts:56:1 › Resume and an earlier schedule edit leave the waiting count unchanged with Learn off (3.5s)
+  ✓   35 [chromium] › e2e/agent-set-fields.spec.ts:54:1 › a link to a record of another database is refused naming the one expected (3.3s)
+  ✓   37 [chromium] › e2e/agent-questions.spec.ts:139:1 › agent questions: a set no card can show is refused, and the agent hears why (1.8s)
+  ✓   38 [chromium] › e2e/agent-sheets.spec.ts:31:1 › an agent sheet edit updates the open grid, saves formulas, and records one write (3.2s)
+  ✓   39 [chromium] › e2e/agent-set-fields.spec.ts:73:1 › a computed field is refused, and nothing changes (3.6s)
+  ✓   40 [chromium] › e2e/agent-suggest-view.spec.ts:43:1 › the live board is inert, Add saves a tab, Open selects it, and Undo restores bytes (2.8s)
+  ✓   42 [chromium] › e2e/agent-transcript.spec.ts:53:1 › agent transcript: a thread whose messages are gone rebuilds from its session (2.4s)
+  ✓   41 [chromium] › e2e/agent-sheets.spec.ts:60:1 › 26 sheet operations are refused without changing the page or recording a write (3.3s)
+  ✓   43 [chromium] › e2e/agent-suggest-view.spec.ts:71:1 › a number chart counts the same seven matching rows (2.6s)
+  ✓   44 [chromium] › e2e/agent-transcript.spec.ts:78:1 › agent transcript: an expired thread says Claude Code cleared it and offers a new one (2.0s)
+  ✓   45 [chromium] › e2e/agent-up-next.spec.ts:40:1 › agent: text sent mid-turn waits under Up next, and Steer runs it next (2.4s)
+  ✓   46 [chromium] › e2e/agent-suggest-view.spec.ts:83:1 › an unknown field remains a failed step with its closest name (2.4s)
+  ✓   47 [chromium] › e2e/agent-transcript.spec.ts:107:1 › agent transcript: a first turn stores a UUID session and the vault on its thread (1.9s)
+  ✓   48 [chromium] › e2e/agent-up-next.spec.ts:59:1 › agent: Up next entries can be edited and removed before they run (2.2s)
+  ✓   49 [chromium] › e2e/agent-suggest-view.spec.ts:95:1 › Place appends a live database block and one Undo restores both files (2.8s)
+  ✓   51 [chromium] › e2e/agent-up-next.spec.ts:86:1 › agent: Stop puts Up next on hold until Resume (1.9s)
+  ✓   53 [chromium] › e2e/agent-up-next.spec.ts:105:1 › agent: two page asks during a turn both wait under Up next (2.0s)
+  ✓   54 [chromium] › e2e/agent-up-next.spec.ts:129:1 › agent: Steer with a card open cancels it and runs the entry at once (1.6s)
+  ✓   52 [chromium] › e2e/agent-writes.spec.ts:74:1 › an agent append during a turn shows on the open page and survives the next save (4.6s)
+  ✓   50 [chromium] › e2e/agent-wakes.spec.ts:56:1 › agent wakes: a change wakes its agent once, the next waits under the cooldown, and Pause cancels it (7.9s)
+  ✓   55 [chromium] › e2e/agent.spec.ts:21:1 › agent: the panel streams a reply and shows what it did (1.7s)
+  ✓   56 [chromium] › e2e/agent-writes.spec.ts:125:1 › an agent edit replaces only the quoted text on the open page, and an ambiguous quote changes nothing (2.9s)
+  ✓   57 [chromium] › e2e/agents.spec.ts:48:1 › agents: the front door — roster, the agent’s page on its Runs, chain trace (1.8s)
+  ✓   58 [chromium] › e2e/agent.spec.ts:49:1 › agent: walking away keeps the thread, and moves the context with you (2.0s)
+  ✓   60 [chromium] › e2e/agents.spec.ts:82:1 › agents: a run, its agent and what it wrote tell one story (3.1s)
+  ✓   61 [chromium] › e2e/agent.spec.ts:84:1 › agent: context is shown as chips you can take away (3.0s)
+  ✓   62 [chromium] › e2e/agents.spec.ts:148:1 › agents: the lobby names what is waiting to wake an agent, and its Runs tab its own (1.7s)
+  ✓   63 [chromium] › e2e/agent.spec.ts:145:1 › agent: a turn can be addressed by name, and the thread stays put (2.5s)
+  ✓   64 [chromium] › e2e/agents.spec.ts:187:1 › agents: a wake list that cannot be read says so, never that nothing waits (1.3s)
+  ✓   59 [chromium] › e2e/ai-block.spec.ts:50:1 › an AI block asked from the / menu is written as its carrier and opens again as itself (7.1s)
+  ✓   66 [chromium] › e2e/ask-first-writes.spec.ts:53:1 › ask-first: a page write waits on a card and lands only on Allow (3.0s)
+  ✓   65 [chromium] › e2e/agent.spec.ts:198:1 › agent: shell access is one persisted ceiling in Settings, not a per-chat mode (3.1s)
+  ✓   68 [chromium] › e2e/ask-first-writes.spec.ts:73:1 › ask-first: Deny with a reason writes nothing and the reply says why (2.7s)
+  ✓   67 [chromium] › e2e/ai-block.spec.ts:134:1 › Enter at the end of an answer starts a paragraph after the block, and Recompute keeps it (5.4s)
+  ✓   70 [chromium] › e2e/ask-first-writes.spec.ts:91:1 › ask-first: with it off, the same create writes with no card (2.0s)
+  ✓   71 [chromium] › e2e/attachments.spec.ts:46:1 › gallery and page images load, image chips open a lightbox and other attachments open as pages (3.0s)
+  ✘   69 [chromium] › e2e/agent.spec.ts:227:1 › agent: a suggested filing is shown for approval, never applied (6.9s)
+  ✓   72 [chromium] › e2e/ask-first-writes.spec.ts:98:1 › ask-first: the person edits the title before Allow, and the file holds their version (2.4s)
+(node:67610) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   74 [chromium] › e2e/ask-first-writes.spec.ts:123:1 › ask-first: Stop with a write card open cancels it and writes nothing (2.1s)
+  ✓   73 [chromium] › e2e/attribution.spec.ts:45:1 › a page's Info says who last changed it: you, outside Cerebro, the Assistant (3.8s)
+  ✓   75 [chromium] › e2e/agent.spec.ts:271:1 › agent: organizing AI-written work records who signed off (2.0s)
+  ✓   77 [chromium] › e2e/attribution.spec.ts:87:1 › run detail names the pages a run wrote, or says it was not recorded (2.3s)
+  ✓   78 [chromium] › e2e/agent.spec.ts:293:1 › library: three shelves, no workspace nav, and nothing posing as a type (2.3s)
+  ✓   76 [chromium] › e2e/ask-first-writes.spec.ts:157:1 › ask-first: an unattended write waits in Review once, and Allow writes the edited page (3.4s)
+  ✓   79 [chromium] › e2e/base-itself.spec.ts:112:1 › base itself: every lane is on the tab, and an empty one says so in its own words (2.2s)
+  ✓   81 [chromium] › e2e/ask-first-writes.spec.ts:176:1 › ask-first: Reject waits for a reason, and Send removes the card with nothing written (3.2s)
+  ✓   80 [chromium] › e2e/agent.spec.ts:342:1 › agent page: an agent is built from pickers, not from remembered strings (3.6s)
+  ✓   82 [chromium] › e2e/base-itself.spec.ts:126:1 › base itself: the protected lanes say they are protected, and the tunable ones do not (1.7s)
+  ✓   84 [chromium] › e2e/agent.spec.ts:410:1 › agent page: the duty bar and the Runs tab carry its history (M33.6) (2.5s)
+  ✓   85 [chromium] › e2e/base-itself.spec.ts:141:1 › base itself: a lane item carries its reason and what the base is standing on (2.5s)
+  ✓   83 [chromium] › e2e/batch-writes.spec.ts:47:1 › renaming a property rewrites the Type doc and every record under one batch (3.1s)
+  ✓   86 [chromium] › e2e/agent.spec.ts:454:1 › agent page: an agent with no runs says so, rather than showing a table of zeros (2.3s)
+  ✓   87 [chromium] › e2e/base-itself.spec.ts:182:1 › base itself: a feed that refused says so, and takes no other tab with it (2.9s)
+  ✓   88 [chromium] › e2e/batch-writes.spec.ts:93:1 › deleting two checked rows moves both to the Trash, byte for byte, with one toast (3.7s)
+  ✓   89 [chromium] › e2e/agent.spec.ts:467:1 › agent page: editing its schedule property updates the record (2.1s)
+  ✓   90 [chromium] › e2e/base-itself.spec.ts:217:1 › base itself: what the backend could not see is named, not dropped (1.7s)
+  ✓   91 [chromium] › e2e/block-drag.spec.ts:85:1 › a block dragged up lands where the line says, and the file agrees (3.6s)
+  ✓   92 [chromium] › e2e/agent.spec.ts:491:1 › editor: selecting prose shows AI controls, and a rewrite is a decision (3.3s)
+  ✓   93 [chromium] › e2e/base-itself.spec.ts:232:1 › base itself: what changed is read aloud, and a quiet window says one sentence (3.2s)
+  ✓   94 [chromium] › e2e/block-drag.spec.ts:108:1 › a block can be dragged INTO a column (3.7s)
+  ✓   96 [chromium] › e2e/base-itself.spec.ts:280:1 › base itself: waiting-on-you holds the cards themselves, not a door to them (3.6s)
+  ✓   98 [chromium] › e2e/base-itself.spec.ts:336:1 › base itself: three tabs, the Status sections inside them, the machinery folded (M51) (1.8s)
+  ✓   97 [chromium] › e2e/block-drag.spec.ts:130:1 › dropping a block back where it started changes nothing (3.1s)
+  ✓   99 [chromium] › e2e/base-itself.spec.ts:363:1 › base itself: the gate board is the shared artifact, and never-evaluated is said out loud (1.5s)
+  ✓  100 [chromium] › e2e/block-drag.spec.ts:149:1 › a click on the grip still opens the block menu (2.2s)
+  ✓  101 [chromium] › e2e/base-itself.spec.ts:392:1 › base itself: a fired gate is loud, and even then licenses only a dated plan (1.9s)
+  ✓  103 [chromium] › e2e/base-itself.spec.ts:419:1 › base itself: evaluate answers honestly in the browser, where no runtime database exists (2.1s)
+  ✓  102 [chromium] › e2e/board-multi-value.spec.ts:5:1 › moving one decider membership keeps the other decider and both rendered cards (2.4s)
+  ✓  104 [chromium] › e2e/base-itself.spec.ts:431:1 › base itself: declaring an R7 scope walks the real guards and round-trips (1.9s)
+  ✓  105 [chromium] › e2e/bulk-set.spec.ts:4:1 › bulk Set and Delete leave changed rows selected and preserve their newer bytes (3.6s)
+  ✓  106 [chromium] › e2e/calendar-hours.spec.ts:84:1 › calendar hours: Week draws blocks, the all-day row, the now line and opens at 07:00 (2.0s)
+  ✓  108 [chromium] › e2e/calendar-hours.spec.ts:141:1 › calendar hours: Day draws one column, and Month keeps a midnight end on its day (2.3s)
+  ✓  107 [chromium] › e2e/calendar-repeat.spec.ts:71:1 › Repeat reads in words, edits a preset, keeps unknown raw text and clears the key (3.7s)
+  ✓  109 [chromium] › e2e/calendar-hours.spec.ts:160:1 › calendar hours: moves, resizes, selects a slot, cancels and edits an embedded calendar (3.5s)
+  ✓  110 [chromium] › e2e/calendar-repeat.spec.ts:115:1 › calendar occurrences are read-only, This event is one undoable split and All events opens the series (2.5s)
+  ✓  112 [chromium] › e2e/chat-canvas.spec.ts:17:1 › conversation canvas gives the greeting and composer a centered reading column (1.6s)
+  ✓  113 [chromium] › e2e/chat-canvas.spec.ts:65:1 › docking a live conversation keeps its draft, turn, and transcript exactly once (1.7s)
+  ✓  111 [chromium] › e2e/canvas-page.spec.ts:25:1 › Quick Open opens a board as a page without changing any bytes or recording a write (4.1s)
+  ✓  114 [chromium] › e2e/chat-canvas.spec.ts:105:3 › empty chat stays usable in a short light window, including context completion (2.5s)
+  ✓  115 [chromium] › e2e/canvas-page.spec.ts:55:1 › invalid JSON and a future version stay unavailable and unchanged (3.8s)
+  ✓  116 [chromium] › e2e/chat-canvas.spec.ts:105:3 › empty chat stays usable in a short dark window, including context completion (2.3s)
+  ✘   95 [chromium] › e2e/agent.spec.ts:533:1 › editor: the same AI controls appear on a record, not only in Docs (30.2s)
+  ✓  117 [chromium] › e2e/canvas-page.spec.ts:77:1 › an empty board is measured and empty rather than unavailable (1.7s)
+(node:68341) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  118 [chromium] › e2e/chat-canvas.spec.ts:145:1 › conversation navigation reuses existing threads and a narrow composer keeps every action reachable (2.5s)
+  ✓  119 [chromium] › e2e/collections.spec.ts:48:1 › collections: a container is a page that holds docs and databases (2.3s)
+  ✓  121 [chromium] › e2e/chat-canvas.spec.ts:192:1 › a full queue and multiline draft keep the transcript and Stop reachable in a short window (2.1s)
+  ✓  120 [chromium] › e2e/client-access.spec.ts:10:1 › a token is shown once, with safe snippets, and revoke asks first (3.1s)
+  ✓  122 [chromium] › e2e/collections.spec.ts:90:1 › collections: nothing sits outside a Collection — there is no Lists bucket (1.7s)
+  ✓  123 [chromium] › e2e/chat-canvas.spec.ts:223:1 › an open approval survives docking and expanding and writes only after Allow (2.9s)
+  ✓  125 [chromium] › e2e/collections.spec.ts:112:1 › collections: a nested table renders the retired hierarchy view’s job (3.0s)
+  ✓  124 [chromium] › e2e/client-access.spec.ts:42:1 › writing tokens require named folders and use whole-vault reads by default (3.4s)
+  ✓  126 [chromium] › e2e/columns.spec.ts:66:1 › a :::columns page lays its columns out side by side (2.8s)
+  ✓  128 [chromium] › e2e/client-access.spec.ts:66:1 › twenty tokens is the global cap (2.6s)
+  ✓  127 [chromium] › e2e/collections.spec.ts:131:1 › collections: creating one writes a folder marker and opens its empty page (2.7s)
+  ✓  129 [chromium] › e2e/columns.spec.ts:77:1 › a declared width is a RATIO, so width=2 is twice its neighbour (2.1s)
+  ✓  130 [chromium] › e2e/client-access.spec.ts:73:1 › the listener reports its address and refuses invalid ports in words (2.3s)
+  ✓  131 [chromium] › e2e/collections.spec.ts:153:1 › views: every kind is offered, and the date views place records on an axis (4.6s)
+  ✓  132 [chromium] › e2e/columns.spec.ts:86:1 › the page still reads as markdown, and saving it changes nothing (3.3s)
+  ✓  133 [chromium] › e2e/client-access.spec.ts:94:1 › Other apps renders every state-lab preset (3.6s)
+  ✓  134 [chromium] › e2e/collections.spec.ts:224:1 › views: a table nests when its grouping chain descends a relation (2.6s)
+  ✓  135 [chromium] › e2e/columns.spec.ts:102:1 › typing /columns builds a layout and writes it to the file (3.8s)
+  ✓  137 [chromium] › e2e/collections.spec.ts:261:1 › views: a database keeps several views as tabs, each with its own layout (2.7s)
+  ✓  138 [chromium] › e2e/columns.spec.ts:135:1 › a column layout is not offered inside a column (2.2s)
+  ✓  139 [chromium] › e2e/collections.spec.ts:308:1 › calendar: a day + on a range field writes a range (M53.16) (2.6s)
+  ✓  136 [chromium] › e2e/comment-anchors.spec.ts:87:1 › a comment anchor is drawn outside the page, survives a reopen and edits, and detaches when its quote goes (7.0s)
+  ✓  140 [chromium] › e2e/columns.spec.ts:150:1 › turn into moves the block you are standing in, and does not leave a copy (3.4s)
+  ✓  141 [chromium] › e2e/collections.spec.ts:339:1 › calendar: the embedded calendar on the Delivery page creates on a day too (M53.16) (3.0s)
+  ✓  142 [chromium] › e2e/comments.spec.ts:135:1 › a comment on a sentence shows a thread, lives in the sidecar, and leaves the page alone (4.6s)
+  ✓  143 [chromium] › e2e/columns.spec.ts:190:1 › dragging the gutter re-proportions the pair and writes the new ratios (3.1s)
+  ✓  146 [chromium] › e2e/columns.spec.ts:228:1 › the gutter resizes from the keyboard too (2.5s)
+  ✓  144 [chromium] › e2e/computed-values.spec.ts:36:1 › a Last edited time filter returns the rows edited in the last week (4.7s)
+  ✓  145 [chromium] › e2e/comments.spec.ts:163:1 › deleting the quoted sentence moves its thread to Discussion, quote and all (4.3s)
+  ✓  148 [chromium] › e2e/connectors.spec.ts:31:1 › connectors: one that needs sign-in shows the command that fixes it (M54.11) (1.8s)
+  ✓  147 [chromium] › e2e/columns.spec.ts:242:1 › there are N-1 gutters for N columns (2.4s)
+  ✓  150 [chromium] › e2e/connectors.spec.ts:65:1 › connectors: one no run has used reads not observed yet (2.4s)
+  ✓  149 [chromium] › e2e/comments.spec.ts:184:1 › a thread is replied to, resolved, reopened and deleted, and the sidecar keeps the stamps (3.6s)
+  ✓  151 [chromium] › e2e/columns.spec.ts:271:1 › the demo vault has a page that uses columns, and it survives being opened (3.8s)
+  ✓  152 [chromium] › e2e/connectors.spec.ts:76:1 › connectors: a status read that fails says so, never not observed yet (1.8s)
+  ✓  153 [chromium] › e2e/comments.spec.ts:248:1 › a conflicted sidecar is unavailable, and a comment on it is refused without a write (3.3s)
+  ✓  155 [chromium] › e2e/connectors.spec.ts:89:1 › connectors: Add Linear signs in under its name with its scopes, and Remove says the sign-in stays (M69.1) (2.9s)
+  ✓  157 [chromium] › e2e/create-launcher.spec.ts:4:1 › the launcher explains its groups, creates a database with starter statuses, and remembers it (2.4s)
+  ✓  154 [chromium] › e2e/correspondence.spec.ts:16:1 › records match cached mail only through uniquely declared addresses (5.8s)
+  ✓  156 [chromium] › e2e/comments.spec.ts:274:1 › a click on a highlight opens Comments on its thread (3.6s)
+  ✓  158 [chromium] › e2e/create-launcher.spec.ts:37:1 › creation chords work with collapsed navigation and stay text inside a page (2.9s)
+  ✓  160 [chromium] › e2e/csv-export.spec.ts:24:1 › exports each tab’s saved rows and columns, including a closed filtered tab (2.9s)
+  ✓  159 [chromium] › e2e/create-link.spec.ts:37:1 › [[ then Create makes the page at the vault root, links it, and the link opens it (4.0s)
+  ✓  161 [chromium] › e2e/create-launcher.spec.ts:66:1 › New Whiteboard and its chord create deduped files and open them as pages (2.6s)
+  ✓  162 [chromium] › e2e/csv-import.spec.ts:10:1 › imports quoted CSV into a database in one batch and removes it with one Undo (2.5s)
+  ✓  164 [chromium] › e2e/data-display-polish.spec.ts:50:1 › six-column Gantt budgets a readable axis, resizes by keyboard and scrolls columns independently (2.4s)
+  ✓  165 [chromium] › e2e/csv-import.spec.ts:74:1 › a long row shows its record number and writes nothing (1.9s)
+  ✓  163 [chromium] › e2e/create-link.spec.ts:62:1 › @ creates only where a word starts, and a lone [ never does (4.1s)
+  ✓  166 [chromium] › e2e/data-display-polish.spec.ts:83:1 › default gallery cards and lists reflow in a 360px content host without writing defaults (3.3s)
+  ✓  168 [chromium] › e2e/create-link.spec.ts:92:1 › a sentence after @ closes the menu, so Enter starts a line and makes nothing (4.2s)
+  ✓  167 [chromium] › e2e/database-rename.spec.ts:16:1 › database rename keeps records, relations, tabs and embeds connected; one Undo restores all 50 files (5.3s)
+  ✓  170 [chromium] › e2e/date-bands.spec.ts:16:1 › date bands create on days, preserve date moves, and refuse ambiguous periods (2.8s)
+  ✓  171 [chromium] › e2e/deadlines.spec.ts:4:1 › declared deadlines place open work before databases and the switch removes that capability (3.5s)
+  ✓  172 [chromium] › e2e/deep-link.spec.ts:4:1 › a cold link wins over last place and opens exactly once (2.2s)
+  ✘  169 [chromium] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus (7.4s)
+  ✓  173 [chromium] › e2e/destinations.spec.ts:5:1 › the window title names the place, and ⌘K speaks the nav’s words (1.8s)
+  ✓  174 [chromium] › e2e/deep-link.spec.ts:23:1 › a missing page says so and creates nothing (1.5s)
+(node:69058) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  176 [chromium] › e2e/deep-link.spec.ts:33:1 › another registered vault asks before opening and Stay here drops it (1.9s)
+  ✓  175 [chromium] › e2e/diagrams.spec.ts:7:1 › mermaid renders in docs, and the lightbox zooms (3.1s)
+  ✓  178 [chromium] › e2e/deep-link.spec.ts:52:1 › a live go opens History and refused payloads show their reason without writes (1.6s)
+  ✓  177 [chromium] › e2e/data-display-polish.spec.ts:172:3 › table chrome and a refused scalar remain legible in light (3.1s)
+  ✓  180 [chromium] › e2e/draft-reply.spec.ts:8:1 › draft reply offers its inputs, shows external calls and leaves the vault unchanged (2.3s)
+  ✓  179 [chromium] › e2e/diagrams.spec.ts:90:1 › authoring: template, live preview, error banner, commit (3.9s)
+  ✓  181 [chromium] › e2e/data-display-polish.spec.ts:172:3 › table chrome and a refused scalar remain legible in dark (3.2s)
+  ✓  182 [chromium] › e2e/draft-reply.spec.ts:56:1 › the shipped placeholder stays out of the draft and a missing thread asks first (3.0s)
+  ✓  184 [chromium] › e2e/data-display-polish.spec.ts:253:1 › database destruction has entity scope and remains outside view settings (3.1s)
+  ✓  183 [chromium] › e2e/diagrams.spec.ts:184:1 › structural editing round-trips to the file (4.0s)
+  ✓  186 [chromium] › e2e/data-display-polish.spec.ts:269:1 › Knowledge group bands stick below the same 36px data header (1.6s)
+  ✓  187 [chromium] › e2e/diagrams.spec.ts:262:1 › a .mmd file opens as a diagram page and edits round-trip raw (3.0s)
+  ✓  185 [chromium] › e2e/editor-carriers.spec.ts:98:1 › a page holding every carrier opens editable and writes each one back unchanged (5.8s)
+  ✓  188 [chromium] › e2e/data-display-polish.spec.ts:282:1 › alternate displays show meaningful data in both themes without writing on open (3.2s)
+  ✓  189 [chromium] › e2e/diagrams.spec.ts:319:1 › the diagram page is a pan/zoom canvas with a floating code overlay (4.4s)
+  ✓  191 [chromium] › e2e/data-display-polish.spec.ts:315:1 › fixed rows preserve sticky hit targets, offscreen navigation, find and wrapped content (5.7s)
+  ✓  192 [chromium] › e2e/diagrams.spec.ts:402:1 › a doc block opens full screen, and a rename flows back into the block (4.6s)
+  ✓  190 [chromium] › e2e/editor-carriers.spec.ts:171:1 › / inserts each block, writes it as its carrier, and opens it again as itself (8.2s)
+  ✓  193 [chromium] › e2e/field-rename.spec.ts:82:1 › renaming Assignee rewrites every stored reference in one batch, and one Undo puts every file back (2.7s)
+  ✓  196 [chromium] › e2e/file-viewers.spec.ts:82:1 › images fit their frame, never upscale, and show actual size on request (2.3s)
+  ✓  195 [chromium] › e2e/editor-carriers.spec.ts:237:1 › a list-item image keeps its relative url through a save (3.4s)
+  ✓  194 [chromium] › e2e/diagrams.spec.ts:478:1 › shapes, colors, and edge animation round-trip as surgical mermaid (4.8s)
+  ✓  197 [chromium] › e2e/file-viewers.spec.ts:108:1 › native audio controls start paused with metadata loaded (1.8s)
+  ✓  200 [chromium] › e2e/file-viewers.spec.ts:119:1 › CSV and TSV are plain read-only tables with a source view (2.3s)
+  ✓  198 [chromium] › e2e/find-replace.spec.ts:79:1 › ⌘F finds every hit, reaches into a closed toggle, and Replace all is one undo (4.4s)
+  ✓  201 [chromium] › e2e/file-viewers.spec.ts:133:1 › unknown files explain their limits, executable files omit Open, and markdown images resolve (1.7s)
+  ✓  202 [chromium] › e2e/fleet.spec.ts:111:1 › fleet: runs come back newest first, attributed to whoever ran them (1.5s)
+  ✓  199 [chromium] › e2e/diagrams.spec.ts:626:1 › stage F: group, icon, and record link, end to end (5.6s)
+  ✓  204 [chromium] › e2e/fleet.spec.ts:129:1 › fleet: a run whose usage was never reported says unknown, not zero (1.5s)
+  ✓  206 [chromium] › e2e/fleet.spec.ts:137:1 › fleet: filtering by actor narrows the list (1.4s)
+  ✓  207 [chromium] › e2e/fleet.spec.ts:149:1 › fleet: a run opens, and an unrecorded cost says so rather than showing a zero (1.6s)
+  ✓  203 [chromium] › e2e/followups.spec.ts:23:1 › a due follow-up runs once as its own agent (5.7s)
+  ✓  208 [chromium] › e2e/fleet.spec.ts:167:1 › fleet: a run that left nothing undecided offers no door to the review section (1.8s)
+  ✓  210 [chromium] › e2e/fleet.spec.ts:180:1 › fleet: recorded components render, and an estimate is marked as one (1.6s)
+  ✓  205 [chromium] › e2e/diagrams.spec.ts:771:1 › manual layout: a drag writes positions, they survive a reopen, auto returns (7.9s)
+  ✓  211 [chromium] › e2e/fleet.spec.ts:222:1 › fleet: an unreadable run history says so (1.4s)
+  ✓  213 [chromium] › e2e/fleet.spec.ts:236:1 › fleet: a genuinely quiet fleet says nothing has run (1.6s)
+  ✓  212 [chromium] › e2e/diagrams.spec.ts:962:1 › M29.51: the editor chrome survives a zoom, and a rename keeps the diagram (2.7s)
+  ✓  209 [chromium] › e2e/followups.spec.ts:46:1 › Learn off leaves it waiting, enabling Learn runs it once (6.7s)
+  ✓  214 [chromium] › e2e/fleet.spec.ts:250:1 › fleet: the surface lists agents, and says which of them is off duty (1.6s)
+V1 node moved {"x":-285.31805419921875,"y":-231.38329315185547} | palette moved {"x":-285.328125,"y":-183.69668579101562} | open: true | gap to its anchor: 4 -> 13
+  ✓  215 [chromium] › e2e/diagrams.spec.ts:1125:1 › M29.53: a popover tracks its node through a wheel zoom (3.0s)
+  ✓  217 [chromium] › e2e/fleet.spec.ts:266:1 › fleet: an agent says what it has queued waiting on you (2.0s)
+  ✓  216 [chromium] › e2e/followups.spec.ts:67:1 › the lobby cancels pending rows and an addressed booking appears on its agent page (3.8s)
+  ✓  219 [chromium] › e2e/fleet.spec.ts:275:1 › fleet: work that no agent record owns is named, not given a face (1.8s)
+V3 activeElement: BUTTON:Open full screen | is the trigger: true
+V3 after Escape, is the trigger: true
+  ✓  218 [chromium] › e2e/diagrams.spec.ts:1182:1 › M29.53: closing the full-screen dialog hands focus back to its trigger (3.0s)
+  ✓  221 [chromium] › e2e/fleet.spec.ts:288:1 › fleet: clicking an agent opens it, with only its runs (2.0s)
+  ✓  223 [chromium] › e2e/fleet.spec.ts:322:1 › fleet: an agent can be stopped without deleting it (1.9s)
+  ✓  220 [chromium] › e2e/formula.spec.ts:14:1 › formulas compute on read, follow renames, protect inputs and count skipped values (5.6s)
+V4 svg 274162 chars | @font-face: 1 | data URI head: AAEAAAAUAQAABABAR0RFRkL+NTMAAImsAABE7EdQ
+  ✓  222 [chromium] › e2e/diagrams.spec.ts:1217:1 › M29.53: an exported svg carries the font it names (3.8s)
+  ✓  224 [chromium] › e2e/fleet.spec.ts:350:1 › fleet: the background pause is not the same control as one row pause (1.4s)
+  ✓  227 [chromium] › e2e/fleet.spec.ts:372:1 › fleet: a run row says when it happened (2.0s)
+  ✓  225 [chromium] › e2e/history-state.spec.ts:22:1 › Back restores the database search and scroll for that visit (2.8s)
+  ✓  228 [chromium] › e2e/fleet.spec.ts:385:1 › fleet: a run says why it started and how late (1.8s)
+M29.53 badge — dialog: 0 | scrims: 0 | title: Phoenix cutover standup
+  ✓  226 [chromium] › e2e/diagrams.spec.ts:1233:1 › M29.53: a link badge closes the dialog deliberately, then navigates (5.3s)
+  ✓  230 [chromium] › e2e/fleet.spec.ts:406:1 › fleet: a run from before causes says why not recorded (1.8s)
+  ✓  229 [chromium] › e2e/history-state.spec.ts:41:1 › reload restores the current page and its saved Back history (4.0s)
+M29.53 toolbar/zoom 39% | elementFromPoint at node 2 centre: structural-host
+  ✓  232 [chromium] › e2e/fleet.spec.ts:413:1 › fleet: release-scout's scheduled run says why, on the fleet and on its Runs tab (2.4s)
+  ✓  231 [chromium] › e2e/diagrams.spec.ts:1273:1 › M29.53: at 39% the node toolbar leaves the next node clickable (3.2s)
+  ✓  233 [chromium] › e2e/history-state.spec.ts:51:1 › reload restores the place but never the record peek (3.7s)
+  ✓  234 [chromium] › e2e/fleet.spec.ts:440:1 › fleet: a long why never squeezes who or when to nothing, at 1100 wide (2.0s)
+  ✓  237 [chromium] › e2e/fleet.spec.ts:464:1 › fleet: release-scout's Runs tab keeps its start time beside the why, at 1100 wide (2.3s)
+  ✓  236 [chromium] › e2e/history-state.spec.ts:63:1 › Back drops a trashed visit and Forward returns to the live page (4.3s)
+  ✓  238 [chromium] › e2e/fleet.spec.ts:478:1 › fleet: release-scout's run explains itself (1.8s)
+  ✓  235 [chromium] › e2e/history.spec.ts:31:1 › five saves to one page fold into one session (7.3s)
+  ✓  240 [chromium] › e2e/fleet.spec.ts:504:1 › fleet: an expired transcript says cleared by Claude Code (1.9s)
+  ✓  241 [chromium] › e2e/history.spec.ts:54:1 › a day Cerebro was closed, or before it recorded, reads not recorded, never 0 (1.8s)
+  ✓  239 [chromium] › e2e/history-state.spec.ts:83:1 › a last page missing after reload is silently forgotten (3.6s)
+  ✓  242 [chromium] › e2e/fleet.spec.ts:523:1 › fleet: a run with no session says transcript not recorded (2.0s)
+  ✓  243 [chromium] › e2e/history.spec.ts:78:1 › a failed activity read says so, and the checkpoints still render (2.0s)
+  ✓  244 [chromium] › e2e/home-document-polish.spec.ts:5:3 › Home gives actual work a clear first view in light (3.1s)
+  ✓  245 [chromium] › e2e/home-keys.spec.ts:4:1 › j enters Home, e marks a run done, and Undo returns the exact row (3.2s)
+  ✓  246 [chromium] › e2e/history.spec.ts:107:1 › a run names why it ran and the page it wrote (2.6s)
+  ✓  248 [chromium] › e2e/home.spec.ts:5:1 › Home opens a centered conversation and preserves its draft when docked (2.4s)
+  ✓  250 [chromium] › e2e/home.spec.ts:64:1 › Home groups proposals by when they arrived, leads with deadlines and opens their page (2.1s)
+  ✓  247 [chromium] › e2e/home-document-polish.spec.ts:57:3 › ordinary document prose has a reading rhythm without changing its bytes in light (5.1s)
+  ✓  251 [chromium] › e2e/home.spec.ts:130:1 › a failed waiting lane leaves other lanes standing and offers no decision (2.0s)
+  ✓  249 [chromium] › e2e/hover-preview.spec.ts:24:1 › a page link previews its page on hover, and Escape closes only the card (6.3s)
+  ✓  252 [chromium] › e2e/home-document-polish.spec.ts:5:3 › Home gives actual work a clear first view in dark (2.6s)
+  ✓  253 [chromium] › e2e/home.spec.ts:144:1 › empty proposal and disabled capture lanes leave no boxes behind (1.8s)
+  ✓  255 [chromium] › e2e/home-document-polish.spec.ts:57:3 › ordinary document prose has a reading rhythm without changing its bytes in dark (4.7s)
+  ✘  254 [chromium] › e2e/ics-import.spec.ts:37:1 › calendar drop previews times and people, imports once, and re-imports unchanged (7.0s)
+(node:70159) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  257 [chromium] › e2e/import-stamps.spec.ts:16:1 › an imported page names its source and agent writes preserve its stamps (2.9s)
+  ✓  256 [chromium] › e2e/home.spec.ts:154:1 › a page saved five times shows once in recent edits and opens its current page (6.9s)
+  ✓  258 [chromium] › e2e/inbox-documents.spec.ts:26:1 › an Office drop keeps its original, files an editable capture and deduplicates a repeat (2.5s)
+  ✓  260 [chromium] › e2e/home.spec.ts:182:1 › finished runs name the first-look window, Done hides only the seen revision and Undo restores it (2.8s)
+  ✓  259 [chromium] › e2e/inbox-redesign.spec.ts:4:1 › Inbox lends its queue to the context, keeps a wide reader, and folds Organize without replacing the editor (3.7s)
+  ✓  262 [chromium] › e2e/home.spec.ts:232:1 › after each actor has a mark, newer runs say since you looked (2.2s)
+  ✓  261 [chromium] › e2e/inbox-documents.spec.ts:89:1 › a PDF with no text layer keeps its original and explains the outcome (3.6s)
+  ✓  263 [chromium] › e2e/inbox-redesign.spec.ts:40:1 › narrow Inbox exposes its capture drawer, closes on selection, and keeps j/k on the owning pane (3.8s)
+  ✓  264 [chromium] › e2e/home.spec.ts:260:1 › Knowledge Done has Undo, while a missed reminder names its closed window (2.9s)
+  ✓  265 [chromium] › e2e/inbox-documents.spec.ts:100:1 › a real text PDF files one editable section per page (3.4s)
+  ✓  266 [chromium] › e2e/inbox-redesign.spec.ts:89:1 › only the active Inbox pane supplies the queue and receives its navigation keys (2.3s)
+  ✓  267 [chromium] › e2e/inbox.spec.ts:4:1 › inbox: queue untyped captures, organize one, and watch it leave (3.1s)
+  ✓  268 [chromium] › e2e/keyboard.spec.ts:44:1 › ⌘K from a focused mermaid source box opens the palette (4.0s)
+  ✓  270 [chromium] › e2e/inbox.spec.ts:55:1 › inbox: quick capture writes an untyped note into the queue (2.2s)
+  ✓  272 [chromium] › e2e/knowledge.spec.ts:27:1 › knowledge: browse the bundle, read provenance, and verify a concept (2.5s)
+  ✓  273 [chromium] › e2e/knowledge.spec.ts:100:1 › knowledge: the queue is walkable from inside it (M51.2) (1.7s)
+  ✓  271 [chromium] › e2e/keyboard.spec.ts:59:1 › a mermaid block's ⌘Z, with focus left on body, undoes the block and not the last batch (5.4s)
+  ✓  274 [chromium] › e2e/knowledge.spec.ts:119:1 › knowledge: the queue ends at its last concept, and Done returns to Review (1.6s)
+  ✓  275 [chromium] › e2e/keyboard.spec.ts:97:1 › ⌘J toggles the assistant while typing in a page (2.4s)
+  ✓  276 [chromium] › e2e/knowledge.spec.ts:137:1 › knowledge: verifying through the whole queue ends the walk at Review (2.7s)
+  ✓  277 [chromium] › e2e/keyboard.spec.ts:110:1 › ⌘[ in a page body stays put, and from outside its text goes back (2.4s)
+  ✓  278 [chromium] › e2e/knowledge.spec.ts:160:1 › knowledge: a page's strip opens what waits for review, and the queue takes over (M52.3) (2.5s)
+  ✓  279 [chromium] › e2e/keyboard.spec.ts:124:1 › Inbox ⌘E files the open capture, and never while typing in its body (2.9s)
+  ✓  280 [chromium] › e2e/knowledge.spec.ts:180:1 › knowledge: a verified concept revised later shows the predating notice (M23.4) (2.6s)
+  ✓  281 [chromium] › e2e/keyboard.spec.ts:151:1 › g chords navigate, wait before hinting, swallow a hinted miss, and pass Escape (2.1s)
+  ✓  282 [chromium] › e2e/knowledge.spec.ts:213:1 › knowledge: the bundle navigates by its own axes, not by Home's (2.0s)
+  ✓  283 [chromium] › e2e/keyboard.spec.ts:181:1 › g h typed into a page stays text, and Save and Find use the keymap (2.2s)
+  ✓  284 [chromium] › e2e/knowledge.spec.ts:280:1 › knowledge: Concepts is a table filed by folder, and Start review opens the queue (2.1s)
+  ✓  285 [chromium] › e2e/keyboard.spec.ts:199:1 › c p creates an ordinary page, and g comma opens the complete shortcut catalog (2.1s)
+  ✓  286 [chromium] › e2e/knowledge.spec.ts:405:1 › knowledge: a wrapped title keeps its Open pill off its words (1.8s)
+  ✓  288 [chromium] › e2e/knowledge.spec.ts:453:1 › knowledge: a folder's view counts the folder and walks only it (1.9s)
+  ✓  289 [chromium] › e2e/knowledge.spec.ts:475:1 › knowledge: the Knowledge section carries no review badge (1.5s)
+  ✓  287 [chromium] › e2e/layout-editor.spec.ts:33:1 › layout editor: strip to vault bytes, inert preview, and the eye folds the page (5.0s)
+  ✓  290 [chromium] › e2e/knowledge.spec.ts:490:1 › knowledge: the bundle stays out of the surfaces you author (1.7s)
+  ✘  269 [chromium] › e2e/kind-change.spec.ts:44:1 › a lossy change converts into a new property and leaves the old one byte for byte (30.1s)
+  ✓  292 [chromium] › e2e/knowledge.spec.ts:613:1 › knowledge: the three axes render per facet, and review is not one of them (2.1s)
+  ✓  291 [chromium] › e2e/layout-editor.spec.ts:213:1 › layout editor: the strip renames a tab, the + mints a section, both land in the bytes (3.1s)
+(node:70730) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  293 [chromium] › e2e/knowledge.spec.ts:656:1 › knowledge: a vault with no ledger shows no axes rather than empty ones (2.4s)
+  ✓  295 [chromium] › e2e/kind-change.spec.ts:96:1 › a lossless change that alters no value writes only the Type doc (3.4s)
+  ✓  294 [chromium] › e2e/layout-editor.spec.ts:349:1 › layout editor: the peek shows the strip, and a section stands above every tab (4.2s)
+  ✓  296 [chromium] › e2e/list-keys.spec.ts:5:1 › My work keys peek in place, type in the body, and close one thing per Escape (2.9s)
+  ✓  299 [chromium] › e2e/list-keys.spec.ts:63:1 › Inbox j advances the capture and Enter opens its page (2.3s)
+  ✓  297 [chromium] › e2e/mail-digests.spec.ts:14:1 › Settings reports the closed gate and cached threads, and a digest opens as a page (3.6s)
+  ✓  298 [chromium] › e2e/notion-import.spec.ts:31:1 › a captured Notion page imports once and its callout, columns and toggle reopen unlossy (3.9s)
+  ✓  300 [chromium] › e2e/list-keys.spec.ts:75:1 › Concepts j then Enter opens the first concept page (2.4s)
+  ✓  302 [chromium] › e2e/notion-import.spec.ts:61:1 › a database fetch is refused in the transcript and writes no page (2.8s)
+  ✓  301 [chromium] › e2e/mail-digests.spec.ts:50:1 › requested text is readable as text and adds no task to Home or My work (3.4s)
+  ✓  303 [chromium] › e2e/one-workspace.spec.ts:24:1 › one workspace: a page says what Knowledge holds about it, and a concept is a page (2.5s)
+  ✓  305 [chromium] › e2e/mail-digests.spec.ts:77:1 › retention moves a digest and its text to Trash and one Undo restores both (2.3s)
+  ✓  304 [chromium] › e2e/open-with.spec.ts:30:1 › Open with copies the page as typed a moment ago, and its path (3.0s)
+  ✓  306 [chromium] › e2e/one-workspace.spec.ts:54:1 › one workspace: the assistant follows the page — its knowledge and its questions (2.7s)
+  ✓  308 [chromium] › e2e/open-with.spec.ts:56:1 › Open with disables the desktop doors in the browser (2.3s)
+  ✓  309 [chromium] › e2e/one-workspace.spec.ts:80:1 › one workspace: the assistant counts the Knowledge that stands, as the page does (2.3s)
+  ✓  310 [chromium] › e2e/page-access.spec.ts:35:1 › a page inside release-scout’s scope lists it as able to change it, and why (2.4s)
+  ✓  311 [chromium] › e2e/one-workspace.spec.ts:103:1 › one workspace: asking about a concept says what was asked, about which page, once (1.7s)
+  ✓  313 [chromium] › e2e/one-workspace.spec.ts:124:1 › one workspace: a run names the concepts it changed, each one a page (1.8s)
+  ✓  312 [chromium] › e2e/page-access.spec.ts:51:1 › a page outside every scope says no agent can change it (2.3s)
+  ✓  315 [chromium] › e2e/page-access.spec.ts:66:1 › an agent’s own page: only its own notes, and a grant to every other agent (2.4s)
+  ✓  314 [chromium] › e2e/page-activity.spec.ts:77:3 › a page's History (M64.2b) › typing puts You edited it above the versions, which still open the lens (3.0s)
+  ✓  317 [chromium] › e2e/page-activity.spec.ts:99:3 › a page's History (M64.2b) › Warehouse cutover's History lists what the ledger recorded (1.8s)
+  ✓  316 [chromium] › e2e/page-access.spec.ts:86:1 › a cached source says both agents can rewrite it, past their scopes (2.5s)
+  ✓  318 [chromium] › e2e/page-activity.spec.ts:114:3 › a page's History (M64.2b) › a failed read says Edits could not be read while the versions render (2.1s)
+  ✓  319 [chromium] › e2e/page-attachments.spec.ts:38:1 › paste reuses bytes, renders the image, undoes one batch, and survives reopen and later edits (4.5s)
+  ✓  320 [chromium] › e2e/page-activity.spec.ts:126:3 › a page's History (M64.2b) › an edit made outside Cerebro puts the outside line at the top (2.8s)
+  ✓  321 [chromium] › e2e/page-attachments.spec.ts:91:1 › OS and HTML5 drops name skips once and copy a PDF into a durable file block (3.3s)
+  ✓  323 [chromium] › e2e/page-attachments.spec.ts:133:1 › /image Upload states the cap and copies the selected file (3.1s)
+  ✓  322 [chromium] › e2e/page-cards.spec.ts:68:1 › a /page card shows its page live, a pasted link becomes one, and Open lands (6.5s)
+  ✓  324 [chromium] › e2e/page-attachments.spec.ts:152:1 › a locked page refuses an OS attachment before any copy (2.2s)
+  ✓  325 [chromium] › e2e/page-cards.spec.ts:124:1 › a card naming no page shows so, and keeps its pointer through a save (3.2s)
+  ✓  326 [chromium] › e2e/page-history.spec.ts:75:3 › page history (M58.4) › names an agent only on the commit its run recorded (1.4s)
+  ✓  328 [chromium] › e2e/page-history.spec.ts:85:3 › page history (M58.4) › reads a version as prose, shows the page it was, and restores it (2.5s)
+  ✘  307 [chromium] › e2e/os-drop.spec.ts:13:1 › OS paths show hover, capture text, name skipped folders, and refuse unsupported targets (30.1s)
+(node:71386) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  329 [chromium] › e2e/page-history.spec.ts:117:3 › page history (M58.4) › reads Assistant on the commit a panel turn's run made (2.2s)
+  ✓  330 [chromium] › e2e/os-drop.spec.ts:45:1 › a Files property copies dropped bytes into attachments and keeps the relative reference (3.0s)
+  ✓  332 [chromium] › e2e/page-title-polish.spec.ts:12:3 › the leading H1 is one native title with unchanged source order (3.2s)
+  ✓  331 [chromium] › e2e/page-icons.spec.ts:36:1 › a page icon shows everywhere the page is named, and its bytes round-trip (5.5s)
+  ✓  334 [chromium] › e2e/palette-commands.spec.ts:9:1 › Tab cycles categories and the theme chooser previews, cancels, then commits (1.9s)
+  ✓  333 [chromium] › e2e/page-title-polish.spec.ts:12:3 › the nonleading H1 is one native title with unchanged source order (3.3s)
+  ✘  327 [chromium] › e2e/page-cards.spec.ts:153:1 › a card picked among pages sharing a stem shows and opens the one picked (13.7s)
+  ✓  335 [chromium] › e2e/palette-commands.spec.ts:38:1 › Open favorite opens its page, and an unmatched query waits for an explicit Ask (1.9s)
+(node:71536) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  336 [chromium] › e2e/page-title-polish.spec.ts:76:1 › a filename title writes no H1 until the person adopts it (3.2s)
+  ✓  337 [chromium] › e2e/palette-commands.spec.ts:61:1 › the command snapshot offers filing on Inbox and not on Home (3.1s)
+  ✓  338 [chromium] › e2e/pane-layout.spec.ts:15:1 › reload restores two panes and the first focus, without the peek (5.1s)
+  ✓  339 [chromium] › e2e/page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic image block (3.7s)
+  ✓  341 [chromium] › e2e/pane-layout.spec.ts:42:1 › a missing stored pane is dropped before a page can render (1.5s)
+  ✓  343 [chromium] › e2e/pane-layout.spec.ts:63:1 › a rename moves the open pane, favorite, Recent and saved layout together (2.9s)
+  ✓  342 [chromium] › e2e/page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic database block (4.2s)
+  ✘  340 [chromium] › e2e/panel-agent.spec.ts:11:1 › panel agent: binding Release scout names it in the header, and unbinding removes it (7.1s)
+(node:71673) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  344 [chromium] › e2e/panes.spec.ts:33:1 › modified link, file reuse, focused Back and closing the last pane (3.5s)
+  ✓  345 [chromium] › e2e/page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic sheet block (3.8s)
+  ✓  346 [chromium] › e2e/pdf-viewer.spec.ts:39:1 › a forty-page PDF renders nearby pages and supports outline, find, page input and zoom (4.4s)
+  ✓  347 [chromium] › e2e/panes.spec.ts:59:1 › Shift+Enter opens beside from Quick open and a list cursor (2.8s)
+  ✓  348 [chromium] › e2e/page-title-polish.spec.ts:165:1 › an unchanged filename title is adopted only by an explicit Enter (3.6s)
+  ✓  350 [chromium] › e2e/panes.spec.ts:73:1 › a full narrow row beside the assistant opens in place and says why (2.7s)
+  ✓  349 [chromium] › e2e/pdf-viewer.spec.ts:87:1 › a scanned PDF explains its missing text layer and disables search and browser print (3.4s)
+  ✓  351 [chromium] › e2e/page-title-polish.spec.ts:185:1 › adopting a filename title on a related tab keeps its body hidden (3.5s)
+  ✓  352 [chromium] › e2e/panes.spec.ts:89:1 › narrowing parks the older pane at zero width and its tab restores it (2.8s)
+  ✓  353 [chromium] › e2e/pdf-viewer.spec.ts:99:1 › the upstream legacy engine restores missing early-WebKit APIs and still renders (2.8s)
+  ✓  354 [chromium] › e2e/page-title-polish.spec.ts:212:1 › wrapped title arrows travel inside the heading before crossing into prose (2.4s)
+  ✓  355 [chromium] › e2e/panes.spec.ts:119:1 › closing immediately after typing preserves the new words and link bytes (2.9s)
+  ✓  357 [chromium] › e2e/page-title-polish.spec.ts:241:1 › a title with nested children retains child order and copies document content only (2.8s)
+  ✓  358 [chromium] › e2e/pipeline-surface.spec.ts:100:1 › background: the meter says today across every vault (1.7s)
+  ✓  359 [chromium] › e2e/pipeline.spec.ts:41:1 › ingest: a dropped transcript becomes an untyped working doc in the Inbox (1.8s)
+  ✓  360 [chromium] › e2e/pipeline-surface.spec.ts:112:1 › background: three faces of failure stay three banners (1.8s)
+  ✘  356 [chromium] › e2e/people-and-companies.spec.ts:6:1 › the optional pack adds declarations in one batch, shows company mail and undoes exact bytes (7.0s)
+(node:71927) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  361 [chromium] › e2e/pipeline.spec.ts:71:1 › ingest: dropping the same transcript again names its filed copy and writes nothing (1.8s)
+  ✓  362 [chromium] › e2e/pipeline-surface.spec.ts:132:1 › background: an unaccounted day says so rather than showing a confident zero (3.4s)
+  ✓  363 [chromium] › e2e/polish-integration.spec.ts:55:1 › a property picker stays usable at 200% zoom (3.0s)
+  ✓  365 [chromium] › e2e/pipeline-surface.spec.ts:147:1 › background: the pause is one control for one subscription (2.3s)
+  ✓  367 [chromium] › e2e/pipeline-surface.spec.ts:157:1 › background: a lane can be turned off for this vault without touching the others (1.8s)
+  ✓  366 [chromium] › e2e/polish-integration.spec.ts:90:1 › table → peek → page preserves an invalid field draft, then commits one corrected value (3.3s)
+  ✓  368 [chromium] › e2e/pipeline-surface.spec.ts:169:1 › background: held work asks its question instead of being guessed at (1.7s)
+  ✓  369 [chromium] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 125% text (2.3s)
+  ✓  370 [chromium] › e2e/pr-chip.spec.ts:37:1 › an unread pull request stays checks unknown on both peek and page (2.1s)
+  ✓  371 [chromium] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 150% text (2.7s)
+  ✘  364 [chromium] › e2e/pipeline.spec.ts:93:1 › meeting: a transcript files as a record with its matched speakers, only on Apply (11.9s)
+  ✓  372 [chromium] › e2e/pr-chip.spec.ts:47:1 › both check shapes read ready and the chip stays within its page (2.4s)
+(node:72167) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  373 [chromium] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 200% text (2.7s)
+  ✓  374 [chromium] › e2e/pr-chip.spec.ts:60:1 › a merged PR offers one undoable Done status patch (2.5s)
+  ✓  375 [chromium] › e2e/pipeline.spec.ts:129:1 › distil: the ingested transcript and its cached ticket are cited by a concept (2.1s)
+  ✓  376 [chromium] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 125% text (2.8s)
+  ✓  378 [chromium] › e2e/pipeline.spec.ts:146:1 › commit: any note says what the base took from it, not just Inbox captures (3.1s)
+  ✓  377 [chromium] › e2e/pr-chip.spec.ts:70:1 › the five PR strip presets keep missing, unknown and unavailable distinct (4.1s)
+  ✓  379 [chromium] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 150% text (2.5s)
+  ✓  380 [chromium] › e2e/pipeline.spec.ts:190:1 › augment: knowledge surfaces beside the PRD, and only when asked (2.8s)
+  ✓  382 [chromium] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 200% text (3.1s)
+  ✓  381 [chromium] › e2e/project-agents.spec.ts:15:1 › project agents apply only to work newly filed through a human action (5.2s)
+  ✓  383 [chromium] › e2e/pipeline.spec.ts:224:1 › augment: Home volunteers at most a few unconfirmed things, and forgets what you dismiss (2.9s)
+  ✓  385 [chromium] › e2e/project-runs.spec.ts:41:1 › a project places recorded subjects and hops, leaving unrelated and legacy runs out (3.1s)
+  ✓  384 [chromium] › e2e/project-pages.spec.ts:20:1 › a project page lists and creates its work, with related Docs and progress (4.9s)
+  ✓  387 [chromium] › e2e/project-runs.spec.ts:81:1 › an unreadable fleet says unavailable on the project (2.3s)
+  ✓  388 [chromium] › e2e/promote-checklist.spec.ts:35:1 › the checklist grip promotes a record with deadline and owner, then saves a page link (3.3s)
+  ✓  389 [chromium] › e2e/proposals.spec.ts:50:1 › proposals: a card opens its concept, which shows it and decides it (1.8s)
+  ✓  391 [chromium] › e2e/proposals.spec.ts:85:1 › proposals: a card whose concept moved says so on that concept (1.8s)
+  ✓  392 [chromium] › e2e/proposals.spec.ts:101:1 › proposals: a queue row says when its concept has a card waiting (1.7s)
+  ✓  390 [chromium] › e2e/promote-checklist.spec.ts:75:1 › selection promotion reports created, empty and linked lines, with the task-like parent (4.1s)
+  ✓  393 [chromium] › e2e/proposals.spec.ts:144:1 › proposals: the pager lands on a concept with its card showing (2.0s)
+  ✓  394 [chromium] › e2e/quick-open-content.spec.ts:26:1 › a body-only word lists its pages under In pages, the word marked (2.1s)
+  ✓  395 [chromium] › e2e/proposals.spec.ts:174:1 › proposals: a link card shows on both of its concepts (2.2s)
+  ✓  396 [chromium] › e2e/quick-open-content.spec.ts:37:1 › a two-character query asks for no page text (2.1s)
+  ✓  398 [chromium] › e2e/quick-open-content.spec.ts:45:1 › a failed page-text search says so, never "No matches" (2.1s)
+  ✓  397 [chromium] › e2e/quick-open-recent.spec.ts:35:1 › an empty ⌘K lists Recent, newest first, and Settings can clear it (2.7s)
+  ✓  399 [chromium] › e2e/quick-open-content.spec.ts:55:1 › "All N matches" expands In pages in place (2.3s)
+  ✓  400 [chromium] › e2e/quick-open-recent.spec.ts:68:1 › opening the second of two equal matches makes it lead next time (2.2s)
+  ✓  402 [chromium] › e2e/quick-open-recent.spec.ts:84:1 › two words apart find the project by name (1.8s)
+  ✓  401 [chromium] › e2e/quick-open-content.spec.ts:68:1 › rows that arrive late never move the highlight (2.2s)
+  ✓  403 [chromium] › e2e/quick-open-recent.spec.ts:94:1 › moving the pointer deliberately can select Ask before Enter (2.0s)
+  ✓  404 [chromium] › e2e/quick-open-content.spec.ts:82:1 › Enter on a page row opens that page (2.2s)
+  ✓  405 [chromium] › e2e/quit.spec.ts:34:1 › quit saves a line typed inside the save debounce (2.3s)
+  ✓  406 [chromium] › e2e/recipes.spec.ts:4:1 › the Library adds editable recipes and a skill mentioning Inbox never proposes filing (2.8s)
+  ✓  407 [chromium] › e2e/quit.spec.ts:56:1 › quit commits an untitled heading typed without Enter or blur (2.1s)
+  ✓  408 [chromium] › e2e/recipes.spec.ts:36:1 › the empty-vault kit includes all three recipes (1.4s)
+  ✓  409 [chromium] › e2e/reconciliation.spec.ts:29:1 › M49.6: the banner names each diverged file, and Keep-all says what it could not keep (1.7s)
+  ✓  410 [chromium] › e2e/recipes.spec.ts:49:1 › a failed scan and a refused add preserve the offer’s honest state (1.7s)
+  ✘  386 [chromium] › e2e/pipeline.spec.ts:262:1 › grow: filing a capture hands it to the base without anyone asking (30.1s)
+(node:72788) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  411 [chromium] › e2e/reconciliation.spec.ts:48:1 › M49.6: Restore asks first, then closes the divergence (1.7s)
+  ✓  412 [chromium] › e2e/record-composer.spec.ts:27:1 › heading fields and similar records precede a keyboard create that opens its page (2.9s)
+  ✓  414 [chromium] › e2e/reconciliation.spec.ts:58:1 › M49.6: a status read that fails is said, never shown as nothing wrong (2.6s)
+  ✓  413 [chromium] › e2e/pipeline.spec.ts:321:1 › retire: a replaced concept says so, and stops asking to be verified (3.5s)
+  ✓  416 [chromium] › e2e/reconciliation.spec.ts:65:1 › M49.2: a vault another Cerebro is recording says so (1.6s)
+  ✓  415 [chromium] › e2e/record-composer.spec.ts:62:1 › Create more makes two records, retaining fields and title focus (3.0s)
+  ✓  417 [chromium] › e2e/pipeline.spec.ts:362:1 › dossier: a project record says what the base believes, doubts, and no longer believes (2.6s)
+  ✓  419 [chromium] › e2e/record-composer.spec.ts:84:1 › an unavailable similar search says so and never blocks creation (3.0s)
+  ✓  418 [chromium] › e2e/relative-filters.spec.ts:22:1 › relative due filters show the named days and save tokens as plain strings (5.0s)
+  ✓  420 [chromium] › e2e/reminder-fields.spec.ts:4:1 › a date property reminds its unfinished records and stores the type setting (4.1s)
+  ✓  421 [chromium] › e2e/reminders.spec.ts:35:1 › reminders missed while closed are claimed once alongside a due reminder (4.1s)
+  ✓  422 [chromium] › e2e/remote-images.spec.ts:15:1 › a mounted README makes no image request until Load and refuses HTTP (2.5s)
+  ✓  423 [chromium] › e2e/reminder-fields.spec.ts:33:1 › a timed date chip labels its own reminder time and explains in-app delivery (2.7s)
+  ✓  424 [chromium] › e2e/reminders.spec.ts:75:1 › a wiped webview keeps a durable claim quiet while an unclaimed chip fires (2.0s)
+  ✓  427 [chromium] › e2e/reminders.spec.ts:114:1 › browser permission is unknown, with no request on opening Settings (2.1s)
+  ✓  425 [chromium] › e2e/remote-images.spec.ts:63:1 › editor saves and copies stay inert, Load works, and Mermaid never requests images (4.0s)
+  ✓  426 [chromium] › e2e/rename-links.spec.ts:47:1 › a Pages rename updates links and Undo restores their exact bytes (3.7s)
+  ✓  428 [chromium] › e2e/reminders.spec.ts:130:1 › two due reminders saved through the editor give one native banner (3.5s)
+  ✓  430 [chromium] › e2e/rename-links.spec.ts:128:1 › Escape cancels the link prompt without changing any file (2.9s)
+  ✓  429 [chromium] › e2e/remote-images.spec.ts:114:1 › diagram directives and encoded HTML labels cannot load a resource (3.7s)
+  ✓  431 [chromium] › e2e/reminders.spec.ts:160:1 › two due chips with no recorded writer toast without posting (1.5s)
+  ✓  432 [chromium] › e2e/rename-links.spec.ts:142:1 › a citer changed during confirmation refuses the entire rename (3.1s)
+  ✓  434 [chromium] › e2e/review.spec.ts:70:1 › review: a queued card says what it is, how dangerous it is, and why it waits (2.2s)
+  ✓  436 [chromium] › e2e/review.spec.ts:99:1 › review: a card whose world moved says so before anyone clicks (2.5s)
+  ✓  435 [chromium] › e2e/rename-links.spec.ts:163:1 › an uncited page renames without the link prompt (2.9s)
+  ✓  433 [chromium] › e2e/review-notes.spec.ts:65:1 › two notes on two files reach the agent as one numbered prompt (5.9s)
+  ✓  437 [chromium] › e2e/review.spec.ts:118:1 › review: a CRITICAL card is marked for diff review (2.0s)
+  ✓  438 [chromium] › e2e/rename-links.spec.ts:171:1 › Move to folder keeps a cited stem without a rewrite prompt (3.2s)
+  ✓  440 [chromium] › e2e/review.spec.ts:125:1 › review: rejecting needs a reason, and approving clears the card (1.7s)
+  ✓  439 [chromium] › e2e/review-notes.spec.ts:119:1 › busy, Send waits in Up next; removing the entry returns the notes (3.7s)
+  ✓  442 [chromium] › e2e/review.spec.ts:137:1 › review: revert is offered only where the server offered one (2.3s)
+  ✓  441 [chromium] › e2e/rename-links.spec.ts:203:1 › a whiteboard citer is named and its bytes stay untouched after Rename anyway (3.1s)
+  ✓  444 [chromium] › e2e/run-now.spec.ts:21:1 › Run now works with Learn off, and both pause doors refuse it without another row (4.2s)
+  ✓  445 [chromium] › e2e/run-options.spec.ts:23:1 › run options: the pick rides the turn, the footer names the model, and it survives a reload (4.2s)
+  ✓  446 [chromium] › e2e/save-guard.spec.ts:4:1 › a stale Home tick refreshes and the next click checks the relocated task (1.8s)
+  ✓  443 [chromium] › e2e/routines-ask.spec.ts:15:1 › a no checks once, skips with its question and reason, and starts no full run (8.6s)
+  ✓  447 [chromium] › e2e/run-options.spec.ts:54:1 › run options: Release scout's page writes model and effort one key per Done (2.7s)
+  ✓  448 [chromium] › e2e/save-guard.spec.ts:39:1 › Library keeps an outside edit and offers to load its new version (2.0s)
+  ✓  450 [chromium] › e2e/settings-redesign.spec.ts:4:1 › Settings lends its section navigation to the shell and keeps a readable detail column (2.2s)
+  ✓  451 [chromium] › e2e/sheet-export.spec.ts:19:1 › Excel export includes both live fences and a pending cell draft (2.9s)
+  ✓  449 [chromium] › e2e/section-links.spec.ts:61:1 › a section chip keeps its fragment on disk and lands on the heading (5.4s)
+  ✓  452 [chromium] › e2e/settings-redesign.spec.ts:48:1 › Settings keeps unsaved local drafts across sections and the theme survives a reload (2.8s)
+  ✓  453 [chromium] › e2e/sheet-export.spec.ts:49:1 › CSV downloads calculated values, blanks and guarded text with BOM and CRLF (2.8s)
+  ✓  455 [chromium] › e2e/settings-redesign.spec.ts:76:1 › compact Settings opens its section drawer and returns focus to a usable detail (2.5s)
+  ✓  454 [chromium] › e2e/section-links.spec.ts:86:1 › a heading inside a closed toggle is opened and reached (3.3s)
+  ✓  456 [chromium] › e2e/sheet-import.spec.ts:26:1 › a real workbook preview names what stays behind and imports ten sheet blocks with one Undo (3.7s)
+  ✓  457 [chromium] › e2e/sheets-grid.spec.ts:32:1 › completion inserts a function and point-selection keeps its draft and argument hint (3.7s)
+  ✓  458 [chromium] › e2e/section-links.spec.ts:101:1 › [[#Heading]] jumps within the page without leaving it (4.0s)
+  ✓  459 [chromium] › e2e/sheet-import.spec.ts:61:1 › CSV keeps its BOM-decoded text, quoted CRLF and blank row as one four-row sheet (3.1s)
+  ✓  461 [chromium] › e2e/sheets.spec.ts:8:1 › Studio computes linked sheet fences and retains unavailable source without changing bytes (1.9s)
+  ✓  462 [chromium] › e2e/sheet-import.spec.ts:79:1 › a refused workbook and malformed CSV leave the vault unchanged and explain why (1.9s)
+  ✓  460 [chromium] › e2e/sheets-grid.spec.ts:57:1 › fill handle continues a series in one undo step and command-D translates formulas (3.9s)
+  ✓  464 [chromium] › e2e/shell-layout.spec.ts:170:3 › shell layout (M52) › the peek shrinks to the room beside the assistant, and the assistant keeps its width (2.5s)
+  ✓  463 [chromium] › e2e/sheets.spec.ts:30:1 › page sheets retain their exact fences through typing and an unmount flush, with a bounded wide grid (4.6s)
+  ✓  465 [chromium] › e2e/sheets-grid.spec.ts:80:1 › Ask about selection opens the assistant with its page and range label (3.3s)
+  ✓  466 [chromium] › e2e/shell-layout.spec.ts:194:3 › shell layout (M52) › the owner's window: widening the peek fills the room and leaves the assistant whole (2.3s)
+  ✓  469 [chromium] › e2e/shell-layout.spec.ts:214:3 › shell layout (M52) › a drag stores only a width it drew, and one that cannot widen stores nothing (2.8s)
+  ✓  468 [chromium] › e2e/sheets-grid.spec.ts:95:1 › formulas compute and a 3×3 paste is exactly one page undo step (5.8s)
+  ✓  467 [chromium] › e2e/smoke.spec.ts:4:1 › smoke: boot demo vault, list, board drag writes disk, rename, quick open (6.0s)
+  ✓  470 [chromium] › e2e/shell-layout.spec.ts:253:3 › shell layout (M52) › the sidebar header keeps its controls at the sidebar floor (1.9s)
+  ✓  473 [chromium] › e2e/shell-layout.spec.ts:268:3 › shell layout (M52) › a concept's Details panel stays readable beside the assistant (3.1s)
+  ✓  474 [chromium] › e2e/shell-layout.spec.ts:290:3 › shell layout (M52) › with no room beside the column the side panel folds, and opens as a drawer (2.3s)
+  ✓  471 [chromium] › e2e/sheets-grid.spec.ts:111:1 › two quick commits undo as two steps and redo follows the page (6.0s)
+  ✓  472 [chromium] › e2e/smoke.spec.ts:114:1 › smoke v2: view tabs persist edits, page created in folder, BlockNote round trip (6.0s)
+  ✓  477 [chromium] › e2e/starter.spec.ts:9:1 › an empty vault accepts the kit once and opens its Getting started page (2.7s)
+  ✓  475 [chromium] › e2e/shell-layout.spec.ts:323:3 › shell layout (M52) › a window drag never clips the assistant, not even for a frame (4.7s)
+  ✓  478 [chromium] › e2e/starter.spec.ts:38:1 › No thanks writes only a marker and stays declined (1.4s)
+  ✓  480 [chromium] › e2e/starter.spec.ts:50:1 › the demo never offers the starter kit (1.6s)
+  ✓  476 [chromium] › e2e/sheets-grid.spec.ts:125:1 › insert and delete rewrite every sheet once and undo restores both byte for byte (6.8s)
+  ✓  479 [chromium] › e2e/shell-layout.spec.ts:347:3 › shell layout (M52) › a jump across the rail and park widths draws no frame of the old plan (3.0s)
+  ✓  481 [chromium] › e2e/starter.spec.ts:58:1 › marker failure and install refusal remain readable and retryable (1.6s)
+  ✓  482 [chromium] › e2e/sheets-grid.spec.ts:143:1 › grid keys and clipboard stay inside the block, and Escape returns to the page (3.0s)
+  ✓  483 [chromium] › e2e/shell-layout.spec.ts:369:3 › shell layout (M52) › below 1274 the sidebar steps down to its rail, and the assistant stays (3.5s)
+  ✓  486 [chromium] › e2e/shell-layout.spec.ts:424:3 › shell layout (M52) › below the rail width the assistant parks without costing the sidebar (2.5s)
+  ✓  485 [chromium] › e2e/sheets-grid.spec.ts:166:1 › /sheet makes stable named fences and an open draft flushes when leaving (3.8s)
+  ✓  487 [chromium] › e2e/shell-layout.spec.ts:450:3 › shell layout (M52) › the sidebar's drag stops at the width it can draw (2.8s)
+  ✓  488 [chromium] › e2e/sheets-grid.spec.ts:193:1 › New Sheet creates a root page whose first grid accepts typing (4.2s)
+  ✓  489 [chromium] › e2e/shell-layout.spec.ts:474:3 › shell layout (M52) › a drag that cannot widen the sidebar keeps the width it had (2.5s)
+  ✓  491 [chromium] › e2e/shell-layout.spec.ts:498:3 › shell layout (M52) › a relation keeps its chevron on the first chip's line at the peek's floor (2.2s)
+  ✓  490 [chromium] › e2e/sheets-grid.spec.ts:207:1 › an editable sheet still moves by the page block grip (3.7s)
+  ✓  492 [chromium] › e2e/shell-layout.spec.ts:525:3 › shell layout (M52) › a drawer closes on Escape and on the column it covers, never writing the flag (2.7s)
+  ✓  493 [chromium] › e2e/studio.spec.ts:10:1 › studio: create a prototype, preview it live, hand the build to the assistant (2.6s)
+  ✓  494 [chromium] › e2e/shell-layout.spec.ts:564:3 › shell layout (M52) › Escape in the composer's [[ menu closes the menu, not the drawer (2.7s)
+  ✓  495 [chromium] › e2e/sub-pages.spec.ts:65:1 › Add sub-page grows a page by rename, lists the child everywhere, and a drop nests (5.4s)
+  ✓  496 [chromium] › e2e/shell-layout.spec.ts:590:3 › shell layout (M52) › a page with sub-pages folds its Pages panel before the side panel (3.8s)
+  ✓  497 [chromium] › e2e/suggest-view-file-times.spec.ts:4:1 › a suggested calendar places file times and cannot write them through arrow keys (2.1s)
+  ✓  498 [chromium] › e2e/shell-layout.spec.ts:629:3 › shell layout (M52) › Escape in a field in a drawer leaves the field, keeps what was typed, and the drawer (2.3s)
+  ✓  500 [chromium] › e2e/shell-layout.spec.ts:664:5 › shell layout (M52) › at 900px the parked assistant's tab stays on screen (3.1s)
+  ✓  501 [chromium] › e2e/shell-layout.spec.ts:664:5 › shell layout (M52) › at 915px the parked assistant's tab stays on screen (2.4s)
+  ✓  502 [chromium] › e2e/shell-layout.spec.ts:664:5 › shell layout (M52) › at 931px the parked assistant's tab stays on screen (2.5s)
+  ✓  503 [chromium] › e2e/shell-layout.spec.ts:700:3 › shell layout (M52) › the peek's header keeps to one line at its floor (3.3s)
+  ✓  504 [chromium] › e2e/shell-layout.spec.ts:737:3 › shell layout (M52) › a person or select field keeps its chevron on the first line at the peek's floor (3.3s)
+  ✓  499 [chromium] › e2e/surface-states.spec.ts:5:3 › operational surfaces keep five honest states readable in light (17.1s)
+  ✓  505 [chromium] › e2e/shell-layout.spec.ts:812:3 › shell layout (M52) › a type view marks only its own row current (1.9s)
+  ✓  507 [chromium] › e2e/surface-system.spec.ts:24:3 › shared controls retain contrast, size and focus in light (4.1s)
+  ✓  508 [chromium] › e2e/surface-system.spec.ts:128:3 › My work wraps long names and keeps an invalid deadline honest in light (2.0s)
+  ✓  509 [chromium] › e2e/surface-system.spec.ts:24:3 › shared controls retain contrast, size and focus in dark (3.8s)
+  ✓  510 [chromium] › e2e/surface-system.spec.ts:128:3 › My work wraps long names and keeps an invalid deadline honest in dark (2.8s)
+  ✓  506 [chromium] › e2e/surface-states.spec.ts:5:3 › operational surfaces keep five honest states readable in dark (16.7s)
+  ✓  511 [chromium] › e2e/thread-agent.spec.ts:65:1 › "@release-scout wait for me" posts a placeholder, then the answer in its place (3.7s)
+  ✓  512 [chromium] › e2e/tool-approval.spec.ts:46:1 › tool approval: under Ask a command waits on a card; Allow once runs it, and the next asks again (2.4s)
+  ✓  514 [chromium] › e2e/tool-approval.spec.ts:68:1 › tool approval: This conversation runs the same command again with no card (2.4s)
+  ✓  513 [chromium] › e2e/thread-agent.spec.ts:96:1 › a deleted placeholder drops the answer (4.7s)
+  ✓  515 [chromium] › e2e/tool-approval.spec.ts:85:1 › tool approval: Deny returns the person-denied message (2.2s)
+  ✓  516 [chromium] › e2e/thread-agent.spec.ts:125:1 › "@release-scout check this" ends answered in the same thread (4.1s)
+  ✓  518 [chromium] › e2e/thread-agent.spec.ts:138:1 › an agent's reply naming @release-scout, and a plain human reply, start no turn (3.1s)
+  ✓  517 [chromium] › e2e/tool-approval.spec.ts:101:1 › tool approval: a scheduled shell agent under Ask runs without the shell, and its run says so (5.6s)
+  ✓  520 [chromium] › e2e/tool-approval.spec.ts:155:1 › tool approval: Settings counts the person’s own rules and hook events (1.6s)
+  ✓  521 [chromium] › e2e/tool-approval.spec.ts:183:1 › tool approval: Web access gates WebFetch, and the switch survives a reload (M57.7) (3.1s)
+  ✓  519 [chromium] › e2e/trash.spec.ts:81:1 › a deleted page waits in the vault Trash and Settings restores it byte for byte (5.3s)
+  ✓  522 [chromium] › e2e/turn-changeset.spec.ts:38:1 › a turn commits exactly the two notes it wrote, and View diff opens its commit (2.9s)
+  ✓  523 [chromium] › e2e/undo.spec.ts:57:1 › renaming assignee, then Undo, puts the Type doc and every Work item back byte for byte (3.2s)
+  ✓  524 [chromium] › e2e/turn-changeset.spec.ts:106:1 › an ordinary append cannot change a mail digest or create a commit (1.9s)
+  ✓  525 [chromium] › e2e/undo.spec.ts:94:1 › a deleted record comes back byte for byte from the toast’s Undo (2.6s)
+  ✓  526 [chromium] › e2e/turn-changeset.spec.ts:136:1 › a restored mail-only turn names the file kept out of git (1.5s)
+  ✘  528 [chromium] › e2e/unfiled-correspondents.spec.ts:7:1 › on demand creates pages, links a company, dismisses locally and restores (2.2s)
+  ✓  527 [chromium] › e2e/undo.spec.ts:117:1 › Undo keeps a key changed outside Cerebro since, and says so (3.0s)
+(node:75197) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  530 [chromium] › e2e/unfiled-correspondents.spec.ts:57:1 › all five lane states remain distinct in the state lab (2.5s)
+  ✓  529 [chromium] › e2e/undo.spec.ts:162:1 › ⌘Z undoes from the table, leaves a page body alone, and ⇧⌘Z redoes (3.6s)
+  ✓  532 [chromium] › e2e/view-tabs.spec.ts:33:1 › view tab: scoped to the host record, and honest when the source dies (2.8s)
+  ✓  484 [chromium] › e2e/state-lab.spec.ts:26:1 › every preset renders the state it names (1.5m)
+  ✓  531 [chromium] › e2e/view-check.spec.ts:28:1 › renamed fields stay valid; hand-edited broken filters are named and marked everywhere (4.5s)
+  ✓  534 [chromium] › e2e/state-lab.spec.ts:49:1 › mounts the real roster at a link, with the clock pinned to the vault day (632ms)
+  ✓  533 [chromium] › e2e/visual-pages.spec.ts:5:3 › document canvas keeps readable space across desktop widths in light (2.5s)
+  ✓  536 [chromium] › e2e/state-lab.spec.ts:58:1 › a failed read recovers on the next remount (1.2s)
+  ✓  538 [chromium] › e2e/state-lab.spec.ts:76:1 › the URL keeps the preset across a reload (1.5s)
+  ✓  535 [chromium] › e2e/whiteboard-block.spec.ts:38:1 › a page board is read-only, passes the wheel to the page, opens and saves its exact fence (3.4s)
+  ✓  537 [chromium] › e2e/visual-pages.spec.ts:5:3 › document canvas keeps readable space across desktop widths in dark (3.1s)
+  ✓  541 [chromium] › e2e/visual-pages.spec.ts:48:3 › a rich document keeps long content within its reading frame in light (2.1s)
+  ✓  540 [chromium] › e2e/whiteboard-block.spec.ts:83:1 › /Whiteboard takes a picked file and New whiteboard creates beside the page (4.4s)
+  ✓  542 [chromium] › e2e/visual-pages.spec.ts:48:3 › a rich document keeps long content within its reading frame in dark (2.1s)
+  ✘  539 [chromium] › e2e/whiteboard-cards.spec.ts:161:1 › live faces, nested guards and record Open keep the board mounted and write nothing (6.6s)
+(node:75386) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  544 [chromium] › e2e/visual-pages.spec.ts:92:1 › Studio lends its page picker to the sidebar and keeps its preview through drawer changes (1.7s)
+  ✓  546 [chromium] › e2e/visual-pages.spec.ts:127:3 › workspace page hierarchy stays readable in light (2.3s)
+  ✓  547 [chromium] › e2e/visual-pages.spec.ts:127:3 › workspace page hierarchy stays readable in dark (2.0s)
+  ✘  548 [chromium] › e2e/visual-pages.spec.ts:190:1 › Library keeps a bounded shelf and usable controls from wide to compact windows (1.3s)
+(node:75642) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  545 [chromium] › e2e/whiteboard-cards.spec.ts:190:1 › missing-card movement preserves its pointer and Add card is one undo step (6.6s)
+  ✓  543 [chromium] › e2e/whiteboard-connectors.spec.ts:67:1 › ports, lines and a new end card save one step each; deleting that card takes its connection (8.8s)
+(node:75661) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  549 [chromium] › e2e/whiteboard-convert.spec.ts:19:1 › converts a manual Mermaid board with a loss report and leaves its source unchanged (2.5s)
+  ✓  552 [chromium] › e2e/whiteboard-editor.spec.ts:85:1 › a drag is one saved edit with unknown keys kept; Undo and Redo restore exact scenes (4.7s)
+  ✘  551 [chromium] › e2e/whiteboard-cards.spec.ts:223:1 › renaming a cited page leaves the exact old whiteboard pointer visibly missing (7.1s)
+  ✓  550 [chromium] › e2e/whiteboard-connectors.spec.ts:110:1 › a seeded side-less endpoint reconnects and its label edits without losing unknown keys (8.2s)
+(node:75723) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  553 [chromium] › e2e/whiteboard-editor.spec.ts:116:1 › Shift resize keeps ratio; marquee selects only cards; a group drag carries both members (5.4s)
+  ✓  556 [chromium] › e2e/whiteboard-editor.spec.ts:151:1 › Delete removes a card and its connection together; cancelled drag and view gestures never save (4.1s)
+  ✓  555 [chromium] › e2e/whiteboard-inspector.spec.ts:64:1 › preset and hex colours, align and distribute each save once and Undo restores the prior scene (9.0s)
+  ✓  557 [chromium] › e2e/whiteboard-render.spec.ts:124:1 › draws every item, pans and zooms without a write, and remembers the camera (2.3s)
+  ✓  559 [chromium] › e2e/whiteboard-render.spec.ts:178:1 › exports every card with literal paints as SVG and PNG (2.9s)
+  ✓  560 [chromium] › e2e/whiteboard-render.spec.ts:226:1 › standalone bounds contain outward curves and long connection labels (1.8s)
+  ✓  558 [chromium] › e2e/whiteboard-inspector.spec.ts:125:1 › clipboard keeps only copied connections, cut, Duplicate and Alt-drag are each one undo step (8.9s)
+  ✓  561 [chromium] › e2e/whiteboard-tools.spec.ts:53:1 › shape, verbatim markdown, pencil and eraser are four edits and four Undos restore the seed (9.1s)
+  ✓  563 [chromium] › e2e/whiteboard-tools.spec.ts:96:1 › typing tool letters stays in the text editor, and leaving the board saves the current draft (1.9s)
+  ✓  564 [chromium] › e2e/workspace-redesign.spec.ts:13:1 › the rail opens contextual shelves while retaining every workspace destination (2.2s)
+  ✘  554 [chromium] › e2e/whiteboard-readonly.spec.ts:19:1 › Studio previews a board fence and a canvas file; Open reaches its page without writing (30.0s)
+  ✓  565 [chromium] › e2e/workspace-redesign.spec.ts:53:1 › collapse and narrow drawers keep the rail, readable canvas, and stored sidebar width (1.7s)
+(node:75985) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  566 [chromium] › e2e/workspace-redesign.spec.ts:91:3 › the quiet shell keeps its controls and operational status usable in light (2.0s)
+  ✓  567 [chromium] › e2e/whiteboard-readonly.spec.ts:51:1 › a knowledge board offers no editing input and a real drag leaves its bytes untouched (2.9s)
+  ✓  568 [chromium] › e2e/workspace-redesign.spec.ts:91:3 › the quiet shell keeps its controls and operational status usable in dark (2.4s)
+  ✓  570 [chromium] › e2e/workspace-surfaces.spec.ts:40:1 › Work lends one Explorer to the shell and keeps the open file through compact keyboard navigation (1.9s)
+  ✓  571 [chromium] › e2e/workspace-surfaces.spec.ts:88:3 › file preview controls stay reachable and retain their behavior in light (1.5s)
+  ✓  572 [chromium] › e2e/workspace-surfaces.spec.ts:126:3 › History and whiteboard keep a clear heading and usable canvas in light (1.7s)
+  ✓  573 [chromium] › e2e/workspace-surfaces.spec.ts:88:3 › file preview controls stay reachable and retain their behavior in dark (1.5s)
+  ✓  574 [chromium] › e2e/workspace-surfaces.spec.ts:126:3 › History and whiteboard keep a clear heading and usable canvas in dark (2.3s)
+  ✓  575 [chromium] › e2e/workspace.spec.ts:51:3 › workspace › browses a mounted repo and reads a doc (1.6s)
+  ✓  576 [chromium] › e2e/workspace.spec.ts:77:3 › workspace › a relative link navigates in-app (1.5s)
+  ✓  577 [chromium] › e2e/workspace.spec.ts:98:3 › workspace › a code file opens read-only in the code viewer (2.0s)
+  ✘  562 [chromium] › e2e/whiteboard.spec.ts:67:1 › whiteboard: a legacy Mermaid tab stays editable, takes a record, and opens it (32.3s)
+  ✓  578 [chromium] › e2e/workspace.spec.ts:120:3 › workspace › opening files stacks tabs, and closing one falls back left (2.3s)
+(node:76239) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  579 [chromium] › e2e/workspace.spec.ts:159:3 › workspace › the editor splits into two panes and each keeps its own file (1.6s)
+  ✓  581 [chromium] › e2e/workspace.spec.ts:194:3 › workspace › Cmd+\ splits, and closing a pane’s last tab removes the pane (1.4s)
+  ✓  580 [chromium] › e2e/whiteboard.spec.ts:178:1 › whiteboard: reopening the tab finds the same canvas, not a second file (3.8s)
+  ✓  582 [chromium] › e2e/workspace.spec.ts:220:3 › workspace › a code file shows numbered lines and a breadcrumb (1.5s)
+  ✓  584 [chromium] › e2e/workspace.spec.ts:243:3 › workspace › the explorer is a keyboard-operable tree (1.7s)
+V2 {"activeDescendant":"whiteboard-add-option-1","options":25,"marked":1,"painted":1,"markedIsSecond":true}
+  ✓  583 [chromium] › e2e/whiteboard.spec.ts:217:1 › whiteboard: the record picker marks the row Enter will take (2.6s)
+  ✓  585 [chromium] › e2e/workspace.spec.ts:270:3 › workspace › file icons can be turned off from the explorer settings (1.4s)
+  ✓  587 [chromium] › e2e/workspace.spec.ts:286:3 › workspace › the mount dialog opens and closes without mounting anything (1.3s)
+  ✓  588 [chromium] › e2e/workspace.spec.ts:306:3 › workspace › an empty workspace says how to fill it (1.2s)
+  ✓  589 [chromium] › e2e/workspace.spec.ts:319:3 › workspace git › a repo root badges its branch and counts, a plain folder stays silent (1.1s)
+  ✓  590 [chromium] › e2e/workspace.spec.ts:339:3 › workspace git › a non-repo root refuses without a toast, and the tree stays usable (1.1s)
+  ✘  569 [chromium] › e2e/whiteboard-readonly.spec.ts:95:1 › a missing embed retains its pointer and a changed file refreshes the read-only preview (30.0s)
+(node:76433) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  591 [chromium] › e2e/workspace.spec.ts:362:3 › workspace git sync › a root that is only behind fast-forwards and the badge clears (1.2s)
+  ✓  593 [chromium] › e2e/workspace.spec.ts:382:3 › workspace git sync › a diverged root is not pulled and its counts stand (1.5s)
+  ✓  594 [chromium] › e2e/workspace.spec.ts:407:3 › workspace git sync › a root whose credentials fail says so on the row, with the hint (1.3s)
+  ✓  595 [chromium] › e2e/workspace.spec.ts:431:3 › workspace git sync › a root nested in a larger repository shows a quiet nested state (1.3s)
+(node:76489) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  592 [chromium] › e2e/editor-writing-polish.spec.ts:109:3 › writing controls form one durable session in light (6.1s)
+  ✓  596 [webkit] › e2e/chat-canvas.spec.ts:17:1 › conversation canvas gives the greeting and composer a centered reading column (2.4s)
+  ✓  598 [webkit] › e2e/chat-canvas.spec.ts:65:1 › docking a live conversation keeps its draft, turn, and transcript exactly once (1.7s)
+  ✓  599 [webkit] › e2e/chat-canvas.spec.ts:105:3 › empty chat stays usable in a short light window, including context completion (2.5s)
+  ✓  597 [chromium] › e2e/editor-writing-polish.spec.ts:109:3 › writing controls form one durable session in dark (6.2s)
+  ✓  600 [webkit] › e2e/chat-canvas.spec.ts:105:3 › empty chat stays usable in a short dark window, including context completion (2.8s)
+  ✓  601 [chromium] › e2e/editor-writing-polish.spec.ts:227:1 › selection tools stay reachable at narrow width and 200 percent scale (2.8s)
+(node:76673) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  602 [webkit] › e2e/chat-canvas.spec.ts:145:1 › conversation navigation reuses existing threads and a narrow composer keeps every action reachable (2.6s)
+  ✓  603 [webkit] › e2e/data-display-polish.spec.ts:50:1 › six-column Gantt budgets a readable axis, resizes by keyboard and scrolls columns independently (2.7s)
+  ✓  604 [webkit] › e2e/chat-canvas.spec.ts:192:1 › a full queue and multiline draft keep the transcript and Stop reachable in a short window (2.0s)
+  ✓  605 [webkit] › e2e/data-display-polish.spec.ts:83:1 › default gallery cards and lists reflow in a 360px content host without writing defaults (3.3s)
+  ✓  606 [webkit] › e2e/chat-canvas.spec.ts:223:1 › an open approval survives docking and expanding and writes only after Allow (2.3s)
+  ✘  586 [chromium] › e2e/whiteboard.spec.ts:247:1 › whiteboard: a chip adds only what the node does not say, and drags it (32.3s)
+(node:76757) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  608 [webkit] › e2e/editor-carriers.spec.ts:98:1 › a page holding every carrier opens editable and writes each one back unchanged (6.1s)
+  ✘  607 [webkit] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus (7.5s)
+(node:76791) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  609 [chromium] › e2e/whiteboard.spec.ts:298:1 › whiteboard: a new tab writes JSON Canvas and adds a record with one undo step (4.7s)
+(node:76816) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  611 [webkit] › e2e/data-display-polish.spec.ts:172:3 › table chrome and a refused scalar remain legible in light (3.3s)
+  ✓  612 [webkit] › e2e/home-document-polish.spec.ts:5:3 › Home gives actual work a clear first view in light (3.4s)
+  ✓  610 [webkit] › e2e/editor-carriers.spec.ts:171:1 › / inserts each block, writes it as its carrier, and opens it again as itself (8.6s)
+  ✓  613 [webkit] › e2e/data-display-polish.spec.ts:172:3 › table chrome and a refused scalar remain legible in dark (3.7s)
+  ✓  616 [webkit] › e2e/data-display-polish.spec.ts:253:1 › database destruction has entity scope and remains outside view settings (2.9s)
+  ✓  615 [webkit] › e2e/editor-carriers.spec.ts:237:1 › a list-item image keeps its relative url through a save (3.1s)
+  ✓  614 [webkit] › e2e/home-document-polish.spec.ts:57:3 › ordinary document prose has a reading rhythm without changing its bytes in light (5.9s)
+  ✓  617 [webkit] › e2e/data-display-polish.spec.ts:269:1 › Knowledge group bands stick below the same 36px data header (1.8s)
+  ✓  619 [webkit] › e2e/home-document-polish.spec.ts:5:3 › Home gives actual work a clear first view in dark (2.2s)
+  ✓  620 [webkit] › e2e/data-display-polish.spec.ts:282:1 › alternate displays show meaningful data in both themes without writing on open (4.1s)
+  ✓  618 [webkit] › e2e/hover-preview.spec.ts:24:1 › a page link previews its page on hover, and Escape closes only the card (6.1s)
+  ✓  623 [webkit] › e2e/inbox-documents.spec.ts:26:1 › an Office drop keeps its original, files an editable capture and deduplicates a repeat (2.7s)
+  ✓  621 [webkit] › e2e/home-document-polish.spec.ts:57:3 › ordinary document prose has a reading rhythm without changing its bytes in dark (6.4s)
+  ✓  624 [webkit] › e2e/inbox-documents.spec.ts:89:1 › a PDF with no text layer keeps its original and explains the outcome (3.0s)
+  ✓  622 [webkit] › e2e/data-display-polish.spec.ts:315:1 › fixed rows preserve sticky hit targets, offscreen navigation, find and wrapped content (7.0s)
+  ✓  626 [webkit] › e2e/inbox-documents.spec.ts:100:1 › a real text PDF files one editable section per page (2.5s)
+  ✓  625 [webkit] › e2e/inbox-redesign.spec.ts:4:1 › Inbox lends its queue to the context, keeps a wide reader, and folds Organize without replacing the editor (4.5s)
+  ✓  629 [webkit] › e2e/inbox-redesign.spec.ts:40:1 › narrow Inbox exposes its capture drawer, closes on selection, and keeps j/k on the owning pane (2.9s)
+  ✓  627 [webkit] › e2e/page-attachments.spec.ts:38:1 › paste reuses bytes, renders the image, undoes one batch, and survives reopen and later edits (4.9s)
+  ✓  628 [webkit] › e2e/page-title-polish.spec.ts:12:3 › the leading H1 is one native title with unchanged source order (3.5s)
+  ✓  630 [webkit] › e2e/inbox-redesign.spec.ts:89:1 › only the active Inbox pane supplies the queue and receives its navigation keys (3.3s)
+  ✓  631 [webkit] › e2e/page-attachments.spec.ts:91:1 › OS and HTML5 drops name skips once and copy a PDF into a durable file block (3.3s)
+  ✓  632 [webkit] › e2e/page-title-polish.spec.ts:12:3 › the nonleading H1 is one native title with unchanged source order (3.6s)
+  ✓  634 [webkit] › e2e/page-attachments.spec.ts:133:1 › /image Upload states the cap and copies the selected file (4.2s)
+  ✓  633 [webkit] › e2e/pdf-viewer.spec.ts:39:1 › a forty-page PDF renders nearby pages and supports outline, find, page input and zoom (4.4s)
+  ✓  635 [webkit] › e2e/page-title-polish.spec.ts:76:1 › a filename title writes no H1 until the person adopts it (4.0s)
+  ✓  636 [webkit] › e2e/page-attachments.spec.ts:152:1 › a locked page refuses an OS attachment before any copy (2.8s)
+  ✓  637 [webkit] › e2e/pdf-viewer.spec.ts:87:1 › a scanned PDF explains its missing text layer and disables search and browser print (3.2s)
+  ✓  638 [webkit] › e2e/page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic image block (4.0s)
+  ✓  639 [webkit] › e2e/polish-integration.spec.ts:55:1 › a property picker stays usable at 200% zoom (2.6s)
+  ✓  640 [webkit] › e2e/pdf-viewer.spec.ts:99:1 › the upstream legacy engine restores missing early-WebKit APIs and still renders (2.6s)
+  ✓  643 [webkit] › e2e/remote-images.spec.ts:15:1 › a mounted README makes no image request until Load and refuses HTTP (2.5s)
+  ✓  641 [webkit] › e2e/page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic database block (5.3s)
+  ✓  642 [webkit] › e2e/polish-integration.spec.ts:90:1 › table → peek → page preserves an invalid field draft, then commits one corrected value (4.9s)
+  ✓  644 [webkit] › e2e/remote-images.spec.ts:63:1 › editor saves and copies stay inert, Load works, and Mermaid never requests images (4.2s)
+  ✓  646 [webkit] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 125% text (3.4s)
+  ✓  645 [webkit] › e2e/page-title-polish.spec.ts:123:3 › title navigation preserves the first atomic sheet block (4.2s)
+  ✓  647 [webkit] › e2e/remote-images.spec.ts:114:1 › diagram directives and encoded HTML labels cannot load a resource (3.5s)
+  ✓  648 [webkit] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 150% text (2.8s)
+  ✓  649 [webkit] › e2e/page-title-polish.spec.ts:165:1 › an unchanged filename title is adopted only by an explicit Enter (3.6s)
+  ✓  650 [webkit] › e2e/settings-redesign.spec.ts:4:1 › Settings lends its section navigation to the shell and keeps a readable detail column (2.0s)
+  ✓  651 [webkit] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in light at narrow width and 200% text (2.8s)
+  ✓  652 [webkit] › e2e/page-title-polish.spec.ts:185:1 › adopting a filename title on a related tab keeps its body hidden (3.6s)
+  ✓  653 [webkit] › e2e/settings-redesign.spec.ts:48:1 › Settings keeps unsaved local drafts across sections and the theme survives a reload (3.7s)
+  ✓  654 [webkit] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 125% text (4.2s)
+  ✓  655 [webkit] › e2e/page-title-polish.spec.ts:212:1 › wrapped title arrows travel inside the heading before crossing into prose (3.2s)
+  ✓  656 [webkit] › e2e/settings-redesign.spec.ts:76:1 › compact Settings opens its section drawer and returns focus to a usable detail (2.8s)
+  ✓  657 [webkit] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 150% text (2.6s)
+  ✓  659 [webkit] › e2e/sheets.spec.ts:8:1 › Studio computes linked sheet fences and retains unavailable source without changing bytes (2.2s)
+  ✓  658 [webkit] › e2e/page-title-polish.spec.ts:241:1 › a title with nested children retains child order and copies document content only (3.3s)
+  ✓  660 [webkit] › e2e/polish-integration.spec.ts:158:5 › the composed record remains readable in dark at narrow width and 200% text (3.3s)
+  ✓  661 [webkit] › e2e/sheets.spec.ts:30:1 › page sheets retain their exact fences through typing and an unmount flush, with a bounded wide grid (4.8s)
+  ✓  663 [webkit] › e2e/surface-system.spec.ts:24:3 › shared controls retain contrast, size and focus in light (3.8s)
+  ✓  664 [webkit] › e2e/visual-pages.spec.ts:5:3 › document canvas keeps readable space across desktop widths in light (3.1s)
+  ✓  665 [webkit] › e2e/surface-system.spec.ts:128:3 › My work wraps long names and keeps an invalid deadline honest in light (2.1s)
+  ✓  666 [webkit] › e2e/visual-pages.spec.ts:5:3 › document canvas keeps readable space across desktop widths in dark (3.5s)
+  ✓  667 [webkit] › e2e/surface-system.spec.ts:24:3 › shared controls retain contrast, size and focus in dark (4.1s)
+  ✓  669 [webkit] › e2e/surface-system.spec.ts:128:3 › My work wraps long names and keeps an invalid deadline honest in dark (2.4s)
+  ✓  668 [webkit] › e2e/visual-pages.spec.ts:48:3 › a rich document keeps long content within its reading frame in light (4.5s)
+  ✓  662 [webkit] › e2e/surface-states.spec.ts:5:3 › operational surfaces keep five honest states readable in light (15.4s)
+  ✓  670 [webkit] › e2e/workspace-redesign.spec.ts:13:1 › the rail opens contextual shelves while retaining every workspace destination (3.6s)
+  ✓  671 [webkit] › e2e/visual-pages.spec.ts:48:3 › a rich document keeps long content within its reading frame in dark (4.9s)
+  ✓  673 [webkit] › e2e/workspace-redesign.spec.ts:53:1 › collapse and narrow drawers keep the rail, readable canvas, and stored sidebar width (2.3s)
+  ✓  674 [webkit] › e2e/visual-pages.spec.ts:92:1 › Studio lends its page picker to the sidebar and keeps its preview through drawer changes (2.6s)
+  ✓  675 [webkit] › e2e/workspace-redesign.spec.ts:91:3 › the quiet shell keeps its controls and operational status usable in light (2.6s)
+  ✓  677 [webkit] › e2e/workspace-redesign.spec.ts:91:3 › the quiet shell keeps its controls and operational status usable in dark (2.4s)
+  ✓  676 [webkit] › e2e/visual-pages.spec.ts:127:3 › workspace page hierarchy stays readable in light (3.2s)
+  ✓  678 [webkit] › e2e/workspace-surfaces.spec.ts:40:1 › Work lends one Explorer to the shell and keeps the open file through compact keyboard navigation (2.5s)
+  ✓  679 [webkit] › e2e/visual-pages.spec.ts:127:3 › workspace page hierarchy stays readable in dark (3.4s)
+  ✓  680 [webkit] › e2e/workspace-surfaces.spec.ts:88:3 › file preview controls stay reachable and retain their behavior in light (2.4s)
+  ✓  672 [webkit] › e2e/surface-states.spec.ts:5:3 › operational surfaces keep five honest states readable in dark (15.5s)
+  ✘  681 [webkit] › e2e/visual-pages.spec.ts:190:1 › Library keeps a bounded shelf and usable controls from wide to compact windows (2.0s)
+(node:77849) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  682 [webkit] › e2e/workspace-surfaces.spec.ts:126:3 › History and whiteboard keep a clear heading and usable canvas in light (2.8s)
+  ✓  684 [webkit] › e2e/workspace-surfaces.spec.ts:88:3 › file preview controls stay reachable and retain their behavior in dark (1.9s)
+  ✓  685 [webkit] › e2e/workspace-surfaces.spec.ts:126:3 › History and whiteboard keep a clear heading and usable canvas in dark (2.3s)
+  ✓  683 [webkit] › e2e/editor-writing-polish.spec.ts:109:3 › writing controls form one durable session in light (7.5s)
+  ✓  686 [webkit] › e2e/editor-writing-polish.spec.ts:109:3 › writing controls form one durable session in dark (6.9s)
+  ✓  687 [webkit] › e2e/editor-writing-polish.spec.ts:227:1 › selection tools stay reachable at narrow width and 200 percent scale (2.7s)
+
+
+  1) [chromium] › e2e/agent.spec.ts:227:1 › agent: a suggested filing is shown for approval, never applied 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator:  getByTestId('proposal-card')
+    Expected: visible
+    Received: hidden
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for getByTestId('proposal-card')
+        14 × locator resolved to <div data-testid="proposal-card" class="mb-3 rounded-lg border border-synapse-200 bg-synapse-50 p-3">…</div>
+           - unexpected value "hidden"
+
+
+      249 |   const capturePath = PROPOSED;
+      250 |   const card = page.getByTestId('proposal-card');
+    > 251 |   await expect(card).toBeVisible();
+          |                      ^
+      252 |   await expect(card).toContainText('reads as a task-like record');
+      253 |   await expect(card).toContainText('Work item');
+      254 |
+        at /Users/joseflagorio/Development/cerebro/e2e/agent.spec.ts:251:22
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/agent-agent-a-suggested-fi-fd6ff--for-approval-never-applied-chromium/error-context.md
+
+  2) [chromium] › e2e/agent.spec.ts:533:1 › editor: the same AI controls appear on a record, not only in Docs 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByText('The pricing is annual')
+
+
+      550 |   await page.keyboard.press('End');
+      551 |   await page.keyboard.type(' The pricing is annual.');
+    > 552 |   await page.getByText('The pricing is annual').click({ clickCount: 3 });
+          |                                                 ^
+      553 |   await expect(page.getByTestId('selection-ask-ai')).toBeVisible();
+      554 | });
+      555 |
+        at /Users/joseflagorio/Development/cerebro/e2e/agent.spec.ts:552:49
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/agent-editor-the-same-AI-c-bfde2-n-a-record-not-only-in-Docs-chromium/error-context.md
+
+  3) [chromium] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus 
+
+    Error: expect(locator).toHaveCount(expected) failed
+
+    Locator:  getByRole('textbox', { name: 'Title', exact: true })
+    Expected: 0
+    Received: 1
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveCount" with timeout 5000ms
+      - waiting for getByRole('textbox', { name: 'Title', exact: true })
+        14 × locator resolved to 1 element
+           - unexpected value "1"
+
+
+      159 |   );
+      160 |   await input.press('Enter');
+    > 161 |   await expect(input).toHaveCount(0);
+          |                       ^
+      162 |   await expect(page.getByTestId('table-view')).toBeFocused();
+      163 |   expect(
+      164 |     await page.evaluate(
+        at /Users/joseflagorio/Development/cerebro/e2e/data-display-polish.spec.ts:161:23
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/data-display-polish-a-miss-b403f-ts-once-with-keyboard-focus-chromium/error-context.md
+
+  4) [chromium] › e2e/ics-import.spec.ts:37:1 › calendar drop previews times and people, imports once, and re-imports unchanged 
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator:  getByTestId('ics-import-dialog').getByLabel('Calendar database')
+    Expected: "Meeting"
+    Received: "MeetingWork itemDecisionEpicBetSource"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveText" with timeout 5000ms
+      - waiting for getByTestId('ics-import-dialog').getByLabel('Calendar database')
+        14 × locator resolved to <select aria-label="Calendar database">…</select>
+           - unexpected value "MeetingWork itemDecisionEpicBetSource"
+
+
+      58 |   const dialog = page.getByTestId('ics-import-dialog');
+      59 |   await expect(dialog).toBeVisible();
+    > 60 |   await expect(dialog.getByLabel('Calendar database')).toHaveText('Meeting');
+         |                                                        ^
+      61 |   await expect(dialog.getByLabel('Calendar preview')).toContainText('09:00:00+02:00');
+      62 |   await expect(dialog.getByLabel('Calendar import report')).toContainText('People linked: 1');
+      63 |   const imported = () =>
+        at /Users/joseflagorio/Development/cerebro/e2e/ics-import.spec.ts:60:56
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/ics-import-calendar-drop-p-347a5-ce-and-re-imports-unchanged-chromium/error-context.md
+
+  5) [chromium] › e2e/kind-change.spec.ts:44:1 › a lossy change converts into a new property and leaves the old one byte for byte 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.press: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for locator('input:focus, textarea:focus')
+        - locator resolved to <input value="5" type="text" aria-label="Stake" aria-invalid="false" class="min-h-7 w-full min-w-0 rounded-md border border-cortex-500 bg-surface-raised px-1.5 text-ui text-n-900 shadow-[var(--ring)] outline-none"/>
+      - elementHandle.press("Enter")
+      - element was detached from the DOM, retrying
+
+
+      64 |   await expect(input).toHaveCount(1);
+      65 |   await input.fill('5');
+    > 66 |   await input.press('Enter');
+         |               ^
+      67 |   await expect
+      68 |     .poll(async () => stakeLine(await readMockFile(page, BETS[0])))
+      69 |     .toMatch(/^stake: ['"]?5['"]?$/);
+        at /Users/joseflagorio/Development/cerebro/e2e/kind-change.spec.ts:66:15
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/kind-change-a-lossy-change-d8cf8-s-the-old-one-byte-for-byte-chromium/error-context.md
+
+  6) [chromium] › e2e/os-drop.spec.ts:13:1 › OS paths show hover, capture text, name skipped folders, and refuse unsupported targets 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.scrollIntoViewIfNeeded: Test timeout of 30000ms exceeded.
+    Call log:
+      - attempting scroll into view action
+        2 × waiting for element to be stable
+          - element is not visible
+        - retrying scroll into view action
+        - waiting 20ms
+        2 × waiting for element to be stable
+          - element is not visible
+        - retrying scroll into view action
+          - waiting 100ms
+        54 × waiting for element to be stable
+           - element is not visible
+         - retrying scroll into view action
+           - waiting 500ms
+
+
+      4 |
+      5 | async function drop(page: Page, zone: Locator, files: DroppedSeed[], hold = false) {
+    > 6 |   await zone.scrollIntoViewIfNeeded();
+        |              ^
+      7 |   const box = await zone.boundingBox();
+      8 |   if (box === null) throw new Error('Drop zone has no bounds');
+      9 |   // Target visible content; the router still resolves the innermost child.
+        at drop (/Users/joseflagorio/Development/cerebro/e2e/os-drop.spec.ts:6:14)
+        at /Users/joseflagorio/Development/cerebro/e2e/os-drop.spec.ts:37:9
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/os-drop-OS-paths-show-hove-71b55--refuse-unsupported-targets-chromium/error-context.md
+
+  7) [chromium] › e2e/page-cards.spec.ts:153:1 › a card picked among pages sharing a stem shows and opens the one picked 
+
+    Error: expect(locator).toHaveValue(expected) failed
+
+    Locator: getByRole('textbox', { name: 'Title', exact: true })
+    Expected: "Offline sync hardening kickoff"
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toHaveValue" with timeout 10000ms
+      - waiting for getByRole('textbox', { name: 'Title', exact: true })
+
+
+      167 |   // A Meeting is a record: Open lands on its row, with this one's panel open.
+      168 |   await card.getByRole('button', { name: 'Open' }).click();
+    > 169 |   await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue(title, {
+          |                                                                           ^
+      170 |     timeout: 10_000,
+      171 |   });
+      172 | });
+        at /Users/joseflagorio/Development/cerebro/e2e/page-cards.spec.ts:169:75
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/page-cards-a-card-picked-a-d8086-ws-and-opens-the-one-picked-chromium/error-context.md
+
+  8) [chromium] › e2e/panel-agent.spec.ts:11:1 › panel agent: binding Release scout names it in the header, and unbinding removes it 
+
+    Error: expect(locator).toHaveValue(expected) failed
+
+    Locator: getByRole('combobox', { name: 'Panel assistant' })
+    Expected: ""
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toHaveValue" with timeout 5000ms
+      - waiting for getByRole('combobox', { name: 'Panel assistant' })
+
+
+      15 |   await openDestination(page, 'Settings');
+      16 |   const select = page.getByRole('combobox', { name: 'Panel assistant' });
+    > 17 |   await expect(select).toHaveValue('');
+         |                        ^
+      18 |   await select.selectOption({ label: 'Release scout' });
+      19 |   await expect(select).toHaveValue('release-scout');
+      20 |
+        at /Users/joseflagorio/Development/cerebro/e2e/panel-agent.spec.ts:17:24
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/panel-agent-panel-agent-bi-d29e1-er-and-unbinding-removes-it-chromium/error-context.md
+
+  9) [chromium] › e2e/people-and-companies.spec.ts:6:1 › the optional pack adds declarations in one batch, shows company mail and undoes exact bytes 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('pack-people')
+    Expected substring: "Creates types/company.md."
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByTestId('pack-people')
+
+
+      27 |   await openDestination(page, 'Settings');
+      28 |   const pack = page.getByTestId('pack-people');
+    > 29 |   await expect(pack).toContainText('Creates types/company.md.');
+         |                      ^
+      30 |   await expect(pack).toContainText('Adds email, company and last interaction to Person.');
+      31 |   await pack.getByRole('button', { name: 'Install', exact: true }).click();
+      32 |   await expect.poll(() => readMockFile(page, 'types/company.md')).toContain('email_domain: domain');
+        at /Users/joseflagorio/Development/cerebro/e2e/people-and-companies.spec.ts:29:22
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/people-and-companies-the-o-0dc9d-mail-and-undoes-exact-bytes-chromium/error-context.md
+
+  10) [chromium] › e2e/pipeline.spec.ts:93:1 › meeting: a transcript files as a record with its matched speakers, only on Apply 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator:  getByTestId('proposal-card')
+    Expected: visible
+    Received: hidden
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for getByTestId('proposal-card')
+        12 × locator resolved to <div data-testid="proposal-card" class="mb-3 rounded-lg border border-synapse-200 bg-synapse-50 p-3">…</div>
+           - unexpected value "hidden"
+
+
+      109 |   await page.getByRole('button', { name: 'Ask the Assistant to file it' }).click();
+      110 |   const card = page.getByTestId('proposal-card');
+    > 111 |   await expect(card).toBeVisible();
+          |                      ^
+      112 |   await expect(card.getByTestId('proposal-summary')).toContainText('rollback');
+      113 |   await expect(card).toContainText('Attendees');
+      114 |   await expect(card).toContainText('Marcus Webb, Priya Nair, Tom Keller');
+        at /Users/joseflagorio/Development/cerebro/e2e/pipeline.spec.ts:111:22
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/pipeline-meeting-a-transcr-9677e-ched-speakers-only-on-Apply-chromium/error-context.md
+
+  11) [chromium] › e2e/pipeline.spec.ts:262:1 › grow: filing a capture hands it to the base without anyone asking 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.selectOption: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('combobox', { name: 'Inspector section' })
+
+
+      306 |     .first()
+      307 |     .click();
+    > 308 |   await page.getByRole('combobox', { name: 'Inspector section' }).selectOption('knowledge');
+          |                                                                   ^
+      309 |   const panel = page.getByTestId('doc-side-panel').getByTestId('page-knowledge');
+      310 |   await expect(panel).toBeVisible();
+      311 |   // Nothing has been distilled from it yet, and the panel says so plainly
+        at /Users/joseflagorio/Development/cerebro/e2e/pipeline.spec.ts:308:67
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/pipeline-grow-filing-a-cap-dd2e0--base-without-anyone-asking-chromium/error-context.md
+
+  12) [chromium] › e2e/unfiled-correspondents.spec.ts:7:1 › on demand creates pages, links a company, dismisses locally and restores 
+
+    Error: mock fs has no file at people/newperson.md
+
+       at boot.ts:208
+
+      206 | export async function readMockFile(page: Page, path: string): Promise<string> {
+      207 |   const text = await page.evaluate((p) => window.__cerebroMockFs.get(p), path);
+    > 208 |   if (text === undefined) throw new Error(`mock fs has no file at ${path}`);
+          |                                 ^
+      209 |   return text;
+      210 | }
+      211 |
+        at readMockFile (/Users/joseflagorio/Development/cerebro/e2e/boot.ts:208:33)
+        at /Users/joseflagorio/Development/cerebro/e2e/unfiled-correspondents.spec.ts:45:3
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/unfiled-correspondents-on--4adc8-misses-locally-and-restores-chromium/error-context.md
+
+  13) [chromium] › e2e/visual-pages.spec.ts:190:1 › Library keeps a bounded shelf and usable controls from wide to compact windows 
+
+    Error: expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 32
+    Received:    28
+
+      210 |     expect(card!.width).toBeGreaterThanOrEqual(260);
+      211 |     if (width === 1920) expect(card!.width).toBeLessThanOrEqual(400);
+    > 212 |     expect(newSkill!.height).toBeGreaterThanOrEqual(32);
+          |                              ^
+      213 |     expect(newSkill!.x + newSkill!.width).toBeLessThanOrEqual(width);
+      214 |     await expect(library.getByRole('textbox', { name: 'Search the library' })).toBeVisible();
+      215 |     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        at /Users/joseflagorio/Development/cerebro/e2e/visual-pages.spec.ts:212:30
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/visual-pages-Library-keeps-c7fbb-rom-wide-to-compact-windows-chromium/error-context.md
+
+  14) [chromium] › e2e/whiteboard-cards.spec.ts:161:1 › live faces, nested guards and record Open keep the board mounted and write nothing 
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator: locator('[data-node-id="record"]').getByTestId('page-card-title')
+    Expected: "Board task"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toHaveText" with timeout 5000ms
+      - waiting for locator('[data-node-id="record"]').getByTestId('page-card-title')
+
+
+      153 |     .click();
+      154 |   await expect(page.getByTestId('canvas-page')).toBeVisible();
+    > 155 |   await expect(page.locator('[data-node-id="record"]').getByTestId('page-card-title')).toHaveText(
+          |                                                                                        ^
+      156 |     'Board task',
+      157 |   );
+      158 | }
+        at open (/Users/joseflagorio/Development/cerebro/e2e/whiteboard-cards.spec.ts:155:88)
+        at /Users/joseflagorio/Development/cerebro/e2e/whiteboard-cards.spec.ts:164:3
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/whiteboard-cards-live-face-5a8bd-d-mounted-and-write-nothing-chromium/error-context.md
+
+  15) [chromium] › e2e/whiteboard-cards.spec.ts:190:1 › missing-card movement preserves its pointer and Add card is one undo step 
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator: locator('[data-node-id="record"]').getByTestId('page-card-title')
+    Expected: "Board task"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toHaveText" with timeout 5000ms
+      - waiting for locator('[data-node-id="record"]').getByTestId('page-card-title')
+
+
+      153 |     .click();
+      154 |   await expect(page.getByTestId('canvas-page')).toBeVisible();
+    > 155 |   await expect(page.locator('[data-node-id="record"]').getByTestId('page-card-title')).toHaveText(
+          |                                                                                        ^
+      156 |     'Board task',
+      157 |   );
+      158 | }
+        at open (/Users/joseflagorio/Development/cerebro/e2e/whiteboard-cards.spec.ts:155:88)
+        at /Users/joseflagorio/Development/cerebro/e2e/whiteboard-cards.spec.ts:193:3
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/whiteboard-cards-missing-c-9edff-d-Add-card-is-one-undo-step-chromium/error-context.md
+
+  16) [chromium] › e2e/whiteboard-cards.spec.ts:223:1 › renaming a cited page leaves the exact old whiteboard pointer visibly missing 
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator: locator('[data-node-id="record"]').getByTestId('page-card-title')
+    Expected: "Board task"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toHaveText" with timeout 5000ms
+      - waiting for locator('[data-node-id="record"]').getByTestId('page-card-title')
+
+
+      153 |     .click();
+      154 |   await expect(page.getByTestId('canvas-page')).toBeVisible();
+    > 155 |   await expect(page.locator('[data-node-id="record"]').getByTestId('page-card-title')).toHaveText(
+          |                                                                                        ^
+      156 |     'Board task',
+      157 |   );
+      158 | }
+        at open (/Users/joseflagorio/Development/cerebro/e2e/whiteboard-cards.spec.ts:155:88)
+        at /Users/joseflagorio/Development/cerebro/e2e/whiteboard-cards.spec.ts:226:3
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/whiteboard-cards-renaming--a307d-ard-pointer-visibly-missing-chromium/error-context.md
+
+  17) [chromium] › e2e/whiteboard-readonly.spec.ts:19:1 › Studio previews a board fence and a canvas file; Open reaches its page without writing 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByTestId('studio-project').filter({ hasText: 'Maps' })
+
+
+      30 |   await scan(page);
+      31 |   await openDestination(page, 'Studio');
+    > 32 |   await page.getByTestId('studio-project').filter({ hasText: 'Maps' }).click();
+         |                                                                        ^
+      33 |   const embed = page.getByTestId('whiteboard-embed');
+      34 |   await expect(embed).toHaveAttribute('data-state', 'ready');
+      35 |   await expect(embed).toContainText('Read-only map');
+        at /Users/joseflagorio/Development/cerebro/e2e/whiteboard-readonly.spec.ts:32:72
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/whiteboard-readonly-Studio-55721-es-its-page-without-writing-chromium/error-context.md
+
+  18) [chromium] › e2e/whiteboard-readonly.spec.ts:95:1 › a missing embed retains its pointer and a changed file refreshes the read-only preview 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByTestId('studio-project').filter({ hasText: 'Maps' })
+
+
+      100 |   await scan(page);
+      101 |   await openDestination(page, 'Studio');
+    > 102 |   await page.getByTestId('studio-project').filter({ hasText: 'Maps' }).click();
+          |                                                                        ^
+      103 |   await expect(page.getByTestId('whiteboard-embed')).toHaveAttribute('data-state', 'missing');
+      104 |   await expect(page.getByTestId('whiteboard-embed')).toContainText(`No whiteboard at ${PATH}`);
+      105 |   await page.evaluate(({ path, source }) => window.__cerebroMockFs.set(path, source), {
+        at /Users/joseflagorio/Development/cerebro/e2e/whiteboard-readonly.spec.ts:102:72
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/whiteboard-readonly-a-miss-b73ab-eshes-the-read-only-preview-chromium/error-context.md
+
+  19) [chromium] › e2e/whiteboard.spec.ts:67:1 › whiteboard: a legacy Mermaid tab stays editable, takes a record, and opens it 
+
+    TimeoutError: locator.waitFor: Timeout 30000ms exceeded.
+    Call log:
+      - waiting for getByTestId('structural-host').locator('svg[id^="cerebro-mermaid-"]') to be visible
+
+
+      106 |   // -- Real mermaid drew the seed -----------------------------------------
+      107 |   const host = page.getByTestId('structural-host');
+    > 108 |   await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 30_000 });
+          |                                                     ^
+      109 |   const hostSvgId = () => host.locator('svg[id^="cerebro-mermaid-"]').getAttribute('id');
+      110 |
+      111 |   // -- An edit through the code overlay reaches the file ------------------
+        at /Users/joseflagorio/Development/cerebro/e2e/whiteboard.spec.ts:108:53
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/whiteboard-whiteboard-a-le-6c49f-takes-a-record-and-opens-it-chromium/error-context.md
+
+  20) [chromium] › e2e/whiteboard.spec.ts:247:1 › whiteboard: a chip adds only what the node does not say, and drags it 
+
+    TimeoutError: locator.waitFor: Timeout 30000ms exceeded.
+    Call log:
+      - waiting for getByTestId('structural-host').locator('svg[id^="cerebro-mermaid-"]') to be visible
+
+
+      254 |     .getByTestId('structural-host')
+      255 |     .locator('svg[id^="cerebro-mermaid-"]')
+    > 256 |     .waitFor({ timeout: 30_000 });
+          |      ^
+      257 |   await page.getByTestId('whiteboard-add-record').click();
+      258 |   await page.getByTestId('whiteboard-add-option').first().click();
+      259 |   await page.waitForTimeout(900);
+        at /Users/joseflagorio/Development/cerebro/e2e/whiteboard.spec.ts:256:6
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/whiteboard-whiteboard-a-ch-f3bfc-e-does-not-say-and-drags-it-chromium/error-context.md
+
+  21) [webkit] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus 
+
+    Error: expect(locator).toHaveCount(expected) failed
+
+    Locator:  getByRole('textbox', { name: 'Title', exact: true })
+    Expected: 0
+    Received: 1
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveCount" with timeout 5000ms
+      - waiting for getByRole('textbox', { name: 'Title', exact: true })
+        14 × locator resolved to 1 element
+           - unexpected value "1"
+
+
+      159 |   );
+      160 |   await input.press('Enter');
+    > 161 |   await expect(input).toHaveCount(0);
+          |                       ^
+      162 |   await expect(page.getByTestId('table-view')).toBeFocused();
+      163 |   expect(
+      164 |     await page.evaluate(
+        at /Users/joseflagorio/Development/cerebro/e2e/data-display-polish.spec.ts:161:23
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/data-display-polish-a-miss-b403f-ts-once-with-keyboard-focus-webkit/error-context.md
+
+  22) [webkit] › e2e/visual-pages.spec.ts:190:1 › Library keeps a bounded shelf and usable controls from wide to compact windows 
+
+    Error: expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 32
+    Received:    28
+
+      210 |     expect(card!.width).toBeGreaterThanOrEqual(260);
+      211 |     if (width === 1920) expect(card!.width).toBeLessThanOrEqual(400);
+    > 212 |     expect(newSkill!.height).toBeGreaterThanOrEqual(32);
+          |                              ^
+      213 |     expect(newSkill!.x + newSkill!.width).toBeLessThanOrEqual(width);
+      214 |     await expect(library.getByRole('textbox', { name: 'Search the library' })).toBeVisible();
+      215 |     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        at /Users/joseflagorio/Development/cerebro/e2e/visual-pages.spec.ts:212:30
+
+    Error Context: ../../../../private/tmp/cerebro-m90/full-e2e-final/visual-pages-Library-keeps-c7fbb-rom-wide-to-compact-windows-webkit/error-context.md
+
+  22 failed
+    [chromium] › e2e/agent.spec.ts:227:1 › agent: a suggested filing is shown for approval, never applied 
+    [chromium] › e2e/agent.spec.ts:533:1 › editor: the same AI controls appear on a record, not only in Docs 
+    [chromium] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus 
+    [chromium] › e2e/ics-import.spec.ts:37:1 › calendar drop previews times and people, imports once, and re-imports unchanged 
+    [chromium] › e2e/kind-change.spec.ts:44:1 › a lossy change converts into a new property and leaves the old one byte for byte 
+    [chromium] › e2e/os-drop.spec.ts:13:1 › OS paths show hover, capture text, name skipped folders, and refuse unsupported targets 
+    [chromium] › e2e/page-cards.spec.ts:153:1 › a card picked among pages sharing a stem shows and opens the one picked 
+    [chromium] › e2e/panel-agent.spec.ts:11:1 › panel agent: binding Release scout names it in the header, and unbinding removes it 
+    [chromium] › e2e/people-and-companies.spec.ts:6:1 › the optional pack adds declarations in one batch, shows company mail and undoes exact bytes 
+    [chromium] › e2e/pipeline.spec.ts:93:1 › meeting: a transcript files as a record with its matched speakers, only on Apply 
+    [chromium] › e2e/pipeline.spec.ts:262:1 › grow: filing a capture hands it to the base without anyone asking 
+    [chromium] › e2e/unfiled-correspondents.spec.ts:7:1 › on demand creates pages, links a company, dismisses locally and restores 
+    [chromium] › e2e/visual-pages.spec.ts:190:1 › Library keeps a bounded shelf and usable controls from wide to compact windows 
+    [chromium] › e2e/whiteboard-cards.spec.ts:161:1 › live faces, nested guards and record Open keep the board mounted and write nothing 
+    [chromium] › e2e/whiteboard-cards.spec.ts:190:1 › missing-card movement preserves its pointer and Add card is one undo step 
+    [chromium] › e2e/whiteboard-cards.spec.ts:223:1 › renaming a cited page leaves the exact old whiteboard pointer visibly missing 
+    [chromium] › e2e/whiteboard-readonly.spec.ts:19:1 › Studio previews a board fence and a canvas file; Open reaches its page without writing 
+    [chromium] › e2e/whiteboard-readonly.spec.ts:95:1 › a missing embed retains its pointer and a changed file refreshes the read-only preview 
+    [chromium] › e2e/whiteboard.spec.ts:67:1 › whiteboard: a legacy Mermaid tab stays editable, takes a record, and opens it 
+    [chromium] › e2e/whiteboard.spec.ts:247:1 › whiteboard: a chip adds only what the node does not say, and drags it 
+    [webkit] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus 
+    [webkit] › e2e/visual-pages.spec.ts:190:1 › Library keeps a bounded shelf and usable controls from wide to compact windows 
+  665 passed (14.4m)
+ ELIFECYCLE  Command failed with exit code 1.

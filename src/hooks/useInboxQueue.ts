@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { inboxEntries, ORGANIZED_KEY, type InboxPeriod } from '@/engine/inbox';
+import { inboxEntries, ORGANIZED_KEY } from '@/engine/inbox';
 import { isAgentWritten, verifyPatch } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
@@ -9,8 +9,11 @@ export interface InboxQueue {
   entries: Entry[];
   selected: Entry | null;
   select(path: string): void;
-  /** Mark organized, then open the next capture when auto-advance is on. */
-  organize(path: string): Promise<void>;
+  /** Mark organized, opening the next capture as it leaves when auto-advance
+   *  is on; settles once the write has. */
+  /** Whether the filing landed: a refused write has said so in its own
+   *  toast (CV-03) and leaves the capture where it was. */
+  organize(path: string): Promise<boolean>;
   /** Send an organized note back to the queue (undo, or rework). */
   unorganize(path: string): Promise<void>;
 }
@@ -27,7 +30,7 @@ export interface InboxQueue {
  * the list until you explicitly finish it. The derived rule decides what
  * ENTERS the queue; only the organize action decides what leaves it.
  */
-export function useInboxQueue(period: InboxPeriod): InboxQueue {
+export function useInboxQueue(): InboxQueue {
   const allEntries = useVaultStore((s) => s.entries);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const autoAdvance = useUiStore((s) => s.inboxAutoAdvance);
@@ -38,17 +41,7 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
   const setSelectedPath = useUiStore((s) => s.setInboxSelectedPath);
   const [pinned, setPinned] = useState<readonly string[]>([]);
 
-  const queued = useMemo(() => inboxEntries(allEntries, period), [allEntries, period]);
-
-  // Pins are scoped to the period they were made in. Without this, every note
-  // opened under "All" was held in the list when you switched to "Week" — the
-  // pill read 0 while the rows it had just filtered out were still on screen,
-  // and the "Nothing captured in this period" empty state could never appear
-  // once you had clicked anything. A period change is a new question, so the
-  // held set starts empty and re-pins whatever the new period opens.
-  useEffect(() => {
-    setPinned([]);
-  }, [period]);
+  const queued = useMemo(() => inboxEntries(allEntries), [allEntries]);
 
   // Pinned notes that no longer match the filter, restored to their place in
   // the queue so the list does not reshuffle around the note being edited.
@@ -105,6 +98,15 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
         setPinned((prev) => prev.filter((p) => p !== path));
       }
 
+      // Only steer the selection when the note we organized was the one on
+      // screen — organizing from a row while reading another must not yank
+      // the reading pane away. Steered BEFORE the write, so the step lands in
+      // the commit whose optimistic patch takes the note out of the queue:
+      // steered after it, the selection fell back to the head of the queue
+      // for as long as the write took, and the reader, the row focus and the
+      // queue's motion all visited the head on the way to the next capture.
+      if (current.autoAdvance && wasOnScreen) setSelectedPath(next?.path ?? null);
+
       // M7: organizing an AI-written note is a REVIEW, so it records who
       // signed off. That is the whole loop — the agent writes, the note
       // lands unverified, and approving it is what earns the human stamp.
@@ -116,7 +118,7 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
           verifyPatch(entry, `human:${useUiStore.getState().actorId}`, new Date().toISOString()),
         );
       }
-      await patchFrontmatter(path, patch);
+      const filed = await patchFrontmatter(path, patch);
 
       // M8.6 named filing as the trigger; M26.4j made the WRITE the trigger
       // instead. The frontmatter patch above is what the ingest pass sees —
@@ -124,11 +126,7 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
       // nothing to hand over and no renderer-side list of organized paths to
       // keep. A note edited any other way is picked up on exactly the same
       // terms, which the old mechanism could not do.
-
-      // Only steer the selection when the note we organized was the one on
-      // screen — organizing from a row while reading another must not yank
-      // the reading pane away.
-      if (current.autoAdvance && wasOnScreen) setSelectedPath(next?.path ?? null);
+      return filed;
     },
     // setSelectedPath is the store's own setter and never changes identity,
     // so listing it keeps the dependency honest without destabilising the
@@ -138,8 +136,10 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
 
   const unorganize = useCallback(
     async (path: string) => {
-      await patchFrontmatter(path, { [ORGANIZED_KEY]: false });
+      // Opened in the commit that brings it back, as organize advances in
+      // the one that takes it away: the row returns as the open capture.
       setSelectedPath(path);
+      await patchFrontmatter(path, { [ORGANIZED_KEY]: false });
     },
     [patchFrontmatter, setSelectedPath],
   );

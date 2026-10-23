@@ -1,6 +1,6 @@
 import { parsePullRequestUrl } from '@/engine/pullRequest';
 import { PullRequestChip } from './PullRequestChip';
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { RepeatEditor } from './RepeatEditor';
 import { repeatAnchor, repeatFieldFor } from '@/engine/recurrence';
 import { writeReciprocal } from '@/app/relatedActions';
@@ -15,6 +15,7 @@ import { FilesField } from '@/detail/FilesField';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
 import {
   findOptionByLabel,
+  isStructure,
   kindMeta,
   normalizeUrl,
   optionId,
@@ -24,6 +25,7 @@ import {
   relationTargetFor,
 } from '@/engine/properties';
 import { createTarget } from '@/engine/createRecord';
+import { StructuredValue } from '@/detail/StructuredValue';
 import { RelationPicker } from '@/detail/RelationPicker';
 import { slugify } from '@/lib/slug';
 import {
@@ -40,6 +42,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { ChipStyle, Entry, FieldDef, Schema } from '@/engine/types';
 import { TABLE_ANATOMY } from '@/views/tableAnatomy';
+import { AnchoredFieldStatus } from './AnchoredFieldStatus';
 
 export const humanize = (s: string) => {
   const t = s.replace(/[-_]/g, ' ');
@@ -67,6 +70,16 @@ const toggle = (values: string[], id: string): string[] =>
  * string concatenation, so `#fff` became `#fff22`, an invalid declaration the
  * browser drops, and a three-digit hex rendered a clear pill (M16.12).
  */
+/** An option's swatch as CSS variables, for a host that paints the value. */
+function swatchVars(color: string | null): React.CSSProperties {
+  const sw = resolveOptionColor(color);
+  return {
+    '--option-solid': sw.solid,
+    '--option-tint': sw.tint,
+    '--option-ink': sw.ink,
+  } as React.CSSProperties;
+}
+
 function OptionTag({ label, color }: { label: string; color: string | null }) {
   const sw = resolveOptionColor(color);
   return (
@@ -120,7 +133,7 @@ function Chevron({ testId, line }: { testId: string; line: number }) {
 }
 
 /** A picker button: one row, never wrapped — its values group wraps inside it. */
-const PICKER = 'inline-flex min-w-0 max-w-full flex-nowrap gap-1 text-left text-sm text-n-800';
+const PICKER = 'inline-flex min-w-0 max-w-full flex-nowrap gap-1 text-left text-ui text-n-800';
 
 /** The first line's height for each kind of value, for `Chevron`. */
 const LINE = {
@@ -162,7 +175,8 @@ export type FieldChrome = 'cell' | 'panel' | 'strip';
 
 const CHROME: Record<FieldChrome, string> = {
   cell: 'rounded-md px-2 py-[3px] hover:bg-n-50',
-  panel: 'min-h-[34px] cursor-pointer overflow-hidden rounded-xs p-1.5',
+  // The row's pitch, which the page inspector narrows to 30px (2026-10-18).
+  panel: 'min-h-[var(--property-row-h,34px)] cursor-pointer overflow-hidden rounded-xs p-1.5',
   strip:
     'min-h-[30px] cursor-pointer overflow-hidden rounded-xs px-1.5 py-1 motion-hover hover:bg-n-50',
 };
@@ -185,9 +199,16 @@ export interface FieldEditorProps {
   chrome?: FieldChrome;
   /** Edit a caller-owned draft instead of writing this record. */
   onPatch?: (value: unknown) => void;
+  /** Keep the owning row stable until this input or picker closes. */
+  onEditingChange?: (editing: boolean) => void;
 }
 
-export function FieldEditor({
+export function FieldEditor(props: FieldEditorProps) {
+  // A draft belongs to a file and property, even if a view reuses its cell.
+  return <FieldEditorValue key={`${props.entry.path}:${props.def.name}`} {...props} />;
+}
+
+function FieldEditorValue({
   entry,
   def,
   schema,
@@ -196,10 +217,18 @@ export function FieldEditor({
   placeholder = 'ghost',
   chrome = 'cell',
   onPatch,
+  onEditingChange,
 }: FieldEditorProps) {
   const wrapClass = compact ? 'flex-nowrap overflow-hidden' : 'flex-wrap';
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
+  const editing = open || draft !== null;
+  const editingCallback = useRef(onEditingChange);
+  editingCallback.current = onEditingChange;
+  useEffect(() => {
+    editingCallback.current?.(editing);
+  }, [editing]);
+  useEffect(() => () => editingCallback.current?.(false), []);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const entries = useVaultStore((s) => s.entries);
   // M20.1: the person branch can create a person. Hooks cannot live inside it —
@@ -226,7 +255,7 @@ export function FieldEditor({
     return (
       <span
         title="Available after this record is created"
-        className="inline-flex items-center gap-1.5 px-2 py-[3px] text-sm text-n-500"
+        className="inline-flex items-center gap-1.5 px-2 py-[3px] text-ui text-n-500"
       >
         {resolved.display || '—'}
         <Icon name="lock" size={10} color="var(--n-300)" />
@@ -358,6 +387,10 @@ export function FieldEditor({
               one. */}
           <span
             data-testid="option-values"
+            // One value carries its swatch, so a host that draws values as
+            // chips (the page inspector) can tint it; elsewhere it is unused.
+            data-single={!multi && chips.length > 0 ? '' : undefined}
+            style={!multi && chips.length > 0 ? swatchVars(chips[0].color) : undefined}
             className={`inline-flex min-w-0 max-w-full ${multi ? wrapClass : 'flex-nowrap'} items-center gap-1`}
           >
             {chips.length === 0 ? (
@@ -627,7 +660,7 @@ export function FieldEditor({
           aria-label={humanize(def.name)}
           data-cell-primary
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} items-center gap-1.5 truncate ${CHROME[chrome]} text-sm text-n-800`}
+          className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} items-center gap-1.5 truncate ${CHROME[chrome]} text-ui text-n-800`}
         >
           {!blank && <Icon name="repeat" size={12} color="var(--n-500)" />}
           {resolved.display || (!blank && <span className="text-n-400">Empty</span>)}
@@ -675,7 +708,7 @@ export function FieldEditor({
           // whitespace-nowrap: a date range is two dates and an arrow, which
           // wrapped onto a second line inside a fixed-height table row and
           // clipped through the row below it (M11 item 3).
-          className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} items-center gap-1.5 truncate whitespace-nowrap ${CHROME[chrome]} text-sm text-n-800`}
+          className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} items-center gap-1.5 truncate whitespace-nowrap ${CHROME[chrome]} text-ui text-n-800`}
         >
           {!blank && <Icon name="calendar" size={12} color="var(--n-500)" />}
           {empty && !blank && <span className="text-n-400">Empty</span>}
@@ -739,7 +772,7 @@ export function FieldEditor({
               href={href}
               target="_blank"
               rel="noreferrer"
-              className="truncate text-sm text-cortex-600 hover:underline"
+              className="truncate text-ui text-cortex-600 hover:underline"
             >
               {url}
             </a>
@@ -774,7 +807,7 @@ export function FieldEditor({
           : `tel:${value.replace(/[^\d+]/g, '')}`;
       return (
         <span className="inline-flex min-w-0 items-center gap-1">
-          <a href={href} className="truncate text-sm text-cortex-600 hover:underline">
+          <a href={href} className="truncate text-ui text-cortex-600 hover:underline">
             {value.replace(/^mailto:/, '')}
           </a>
           <button
@@ -810,7 +843,7 @@ export function FieldEditor({
     return (
       <span
         title="Computed from the vault — read only"
-        className="inline-flex items-center gap-1.5 px-2 py-[3px] text-sm text-n-600"
+        className="inline-flex items-center gap-1.5 px-2 py-[3px] text-ui text-n-600"
       >
         {resolved.display === '' ? <span className="text-n-400">—</span> : resolved.display}
         <Icon name="lock" size={10} color="var(--n-300)" />
@@ -822,74 +855,47 @@ export function FieldEditor({
     return <Switch checked={resolved.raw === true} onChange={(checked) => patch(checked)} />;
   }
 
+  // A map under a text-like key — a stamp a type declares as text, by hand
+  // or through an older adoption — has no text reading. It is shown, never
+  // seeded into a field whose blur would write its text back over the map
+  // (2026-10-18: one reached disk as "[object Object]").
+  if (isStructure(resolved.raw)) {
+    return (
+      <span
+        title="A map — edit it in the file"
+        className={`block min-w-0 ${CHROME[chrome]} text-ui text-n-700`}
+      >
+        {chrome === 'cell' ? (
+          <span className="block truncate">{resolved.display}</span>
+        ) : (
+          <StructuredValue value={resolved.raw} />
+        )}
+      </span>
+    );
+  }
+
   // text | number — inline input on click
   if (draft !== null) {
-    /**
-     * A refused write keeps the draft (M20.3).
-     *
-     * `setDraft(null)` ran unconditionally, so a value the schema turned away
-     * took the text with it: type `example.com` into a URL cell and you got a
-     * toast, the old value back, and nothing left to correct. The write path
-     * reports refusals now (vaultStore.patchFrontmatter), so the editor can
-     * stay open on exactly what was typed.
-     */
-    const commitValue = (value: unknown) => {
-      if (onPatch !== undefined) {
-        onPatch(value);
-        setDraft(null);
-        return;
-      }
-      void (async () => {
-        if (await patchFrontmatter(entry.path, { [def.name]: value })) setDraft(null);
-      })();
-    };
-    const commit = () => {
-      const trimmed = draft.trim();
-      // A number field's display carries its format ("$1,840", "76%"). The
-      // draft is seeded raw (see the read view below), but a user may well
-      // retype the decoration they can see, so strip it before parsing —
-      // the same tolerance progressRatio applies in engine/properties.
-      const numeric = def.kind === 'number' ? trimmed.replace(/[%$,]/g, '').trim() : trimmed;
-      // Number('junk') is NaN, which serde_yaml serializes as `.nan` on disk
-      // (M1.x): refuse the commit instead of poisoning the frontmatter.
-      if (def.kind === 'number' && numeric !== '' && Number.isNaN(Number(numeric))) {
-        useUiStore.getState().toast('Enter a number');
-        return;
-      }
-      if (def.kind === 'number') {
-        commitValue(numeric === '' ? null : Number(numeric));
-        return;
-      }
-      // M20.3: the scheme people leave off. The renderer already prepends one
-      // when it draws the anchor, so refusing `example.com` on the way in held
-      // the value to a stricter standard than the way out.
-      const text = def.kind === 'url' ? normalizeUrl(trimmed) : trimmed;
-      commitValue(text === '' ? null : text);
-    };
     return (
-      <input
-        autoFocus
-        // The right keyboard on touch, and the browser's own affordances
-        // (autofill, the phone keypad). The input was untyped for every kind.
-        type={def.kind === 'email' ? 'email' : def.kind === 'phone' ? 'tel' : 'text'}
-        inputMode={def.kind === 'phone' ? 'tel' : def.kind === 'email' ? 'email' : undefined}
-        aria-label={humanize(def.name)}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commit();
-          if (e.key === 'Escape') {
-            // Abandoning is still one keystroke — keeping a refused draft is
-            // about not LOSING work, not about trapping anyone in the cell.
-            e.stopPropagation();
-            setDraft(null);
+      <ScalarFieldInput
+        label={humanize(def.name)}
+        kind={def.kind}
+        floatingStatus={chrome === 'cell'}
+        submitOnModifiedEnter={onPatch !== undefined}
+        draft={draft}
+        onChange={setDraft}
+        onCancel={() => setDraft(null)}
+        onCommit={async (value) => {
+          if (onPatch !== undefined) {
+            onPatch(value);
+            return true;
           }
+          return patchFrontmatter(entry.path, { [def.name]: value });
         }}
-        className="h-[26px] w-40 rounded-md border border-cortex-500 px-1.5 text-sm text-n-900 shadow-[var(--ring)] outline-none"
       />
     );
   }
+
   const blank = placeholder === 'blank' && resolved.display === '';
   // A progress-formatted number draws its bar as the resting state (M20.3).
   const ratio =
@@ -918,14 +924,18 @@ export function FieldEditor({
             : resolved.display,
         )
       }
-      className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} ${CHROME[chrome]} text-left text-sm text-n-800`}
+      className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} ${CHROME[chrome]} text-left text-ui text-n-800`}
     >
       {resolved.display === '' ? (
         blank ? null : (
           <span className="text-n-400">Empty</span>
         )
       ) : ratio === null ? (
-        <span className="min-w-0 truncate">{resolved.display}</span>
+        <span
+          className={`min-w-0 ${compact || chrome === 'cell' ? 'truncate' : 'whitespace-pre-wrap break-words'}`}
+        >
+          {resolved.display}
+        </span>
       ) : (
         // M20.3: a format is a DISPLAY, not a permission. The bar used to be
         // drawn by the table, which then had to render the cell read-only to
@@ -948,5 +958,141 @@ export function FieldEditor({
         </span>
       )}
     </button>
+  );
+}
+
+/** Enter and blur share one pending write; a refusal keeps the exact input. */
+function ScalarFieldInput({
+  label,
+  kind,
+  floatingStatus,
+  submitOnModifiedEnter,
+  draft,
+  onChange,
+  onCancel,
+  onCommit,
+}: {
+  label: string;
+  kind: FieldDef['kind'];
+  floatingStatus: boolean;
+  submitOnModifiedEnter: boolean;
+  draft: string;
+  onChange: (draft: string) => void;
+  onCancel: () => void;
+  onCommit: (value: unknown) => Promise<boolean>;
+}) {
+  const statusId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const pendingRef = useRef(false);
+  const lastAttempt = useRef<string | null>(null);
+  const cancelled = useRef(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const restoreKeyboardFocus = () => {
+    const grid = inputRef.current?.closest<HTMLElement>('[role="grid"]');
+    const host = inputRef.current?.parentElement?.parentElement;
+    requestAnimationFrame(() => {
+      // A click during a pending save owns focus. Only repair focus left on
+      // the document by the removed input, never override that click.
+      if (document.activeElement !== null && document.activeElement !== document.body) return;
+      if ((grid ?? host)?.closest('[inert], [data-parked="true"], [data-active="false"]')) return;
+      if (grid?.isConnected) {
+        grid.focus({ preventScroll: true });
+      } else if (host?.isConnected) {
+        const trigger = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(
+          (button) =>
+            button.hasAttribute('data-cell-primary') ||
+            button.getAttribute('aria-label') === `Edit ${label}`,
+        );
+        trigger?.focus({ preventScroll: true });
+      }
+    });
+  };
+  const commit = (keyboard = false, focusAfter = keyboard): boolean => {
+    if (pendingRef.current || cancelled.current) return false;
+    // Enter may be refused before its eventual blur. That blur is the same
+    // submission, not another retry; Enter or a changed draft is deliberate.
+    if (!keyboard && lastAttempt.current === draft) return false;
+    lastAttempt.current = draft;
+    const trimmed = draft.trim();
+    const numeric = kind === 'number' ? trimmed.replace(/[%$,]/g, '').trim() : trimmed;
+    if (kind === 'number' && numeric !== '' && !Number.isFinite(Number(numeric))) {
+      setError('Enter a finite number.');
+      useUiStore.getState().toast('Enter a number');
+      return false;
+    }
+    const text = kind === 'url' ? normalizeUrl(trimmed) : trimmed;
+    const value = kind === 'number' ? (numeric === '' ? null : Number(numeric)) : text || null;
+    pendingRef.current = true;
+    setPending(true);
+    setError(null);
+    void (async () => {
+      try {
+        if (await onCommit(value)) {
+          cancelled.current = true;
+          if (focusAfter) restoreKeyboardFocus();
+          onCancel();
+        } else {
+          setError('Could not save. Your draft is kept. Edit it or press Enter to retry.');
+        }
+      } finally {
+        pendingRef.current = false;
+        setPending(false);
+      }
+    })();
+    return true;
+  };
+
+  return (
+    <span className="flex min-w-0 max-w-full flex-1 flex-col gap-1" aria-busy={pending}>
+      <input
+        ref={inputRef}
+        autoFocus
+        type={kind === 'email' ? 'email' : kind === 'phone' ? 'tel' : 'text'}
+        inputMode={kind === 'phone' ? 'tel' : kind === 'email' ? 'email' : undefined}
+        aria-label={label}
+        aria-invalid={error !== null}
+        aria-describedby={pending || error !== null ? statusId : undefined}
+        readOnly={pending}
+        value={draft}
+        onChange={(event) => {
+          lastAttempt.current = null;
+          onChange(event.target.value);
+          setError(null);
+        }}
+        onBlur={() => void commit()}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            // A caller-owned draft patches synchronously before its parent
+            // handles Cmd/Ctrl+Enter (the record composer's create action).
+            // Invalid input still consumes the chord instead of submitting
+            // the parent's previous value. Ordinary grid edits own Enter.
+            const submit = submitOnModifiedEnter && (event.metaKey || event.ctrlKey);
+            const accepted = commit(true, !submit);
+            if (!submit || !accepted) event.stopPropagation();
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            if (pendingRef.current) return;
+            cancelled.current = true;
+            restoreKeyboardFocus();
+            onCancel();
+          }
+        }}
+        className="min-h-7 w-full min-w-0 rounded-md border border-cortex-500 bg-surface-raised px-1.5 text-ui text-n-900 shadow-[var(--ring)] outline-none"
+      />
+      <AnchoredFieldStatus
+        anchor={inputRef}
+        id={statusId}
+        error={error !== null}
+        floating={floatingStatus}
+      >
+        {pending ? 'Saving…' : error}
+      </AnchoredFieldStatus>
+    </span>
   );
 }

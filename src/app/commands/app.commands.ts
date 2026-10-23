@@ -28,6 +28,18 @@ export const commands: readonly CommandDef[] = [
     inModal: true,
   },
   {
+    // The canvas conversation's details rail (M92.1). ⌥⌘B is the composer's
+    // bold (claims.ts keeps ⌘B whatever ⌥ says), so it takes R, which no
+    // editor keeps.
+    id: 'assistant.rail',
+    label: 'Show or hide conversation details',
+    aliases: ['conversation details', 'details rail'],
+    keys: ['alt+mod+r'],
+    scope: 'app',
+    group: 'General',
+    inEditor: true,
+  },
+  {
     id: 'capture.new',
     label: 'New capture',
     keys: ['mod+shift+n'],

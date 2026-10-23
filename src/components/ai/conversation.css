@@ -1,0 +1,907 @@
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   The conversation set (M91.8): Message Scroller, Chat, Message, Prompt
+   Input, Attachment, Suggestion, Model Selector, Context and Questionnaire,
+   on the DS tokens (shadcn's palette classes compile to nothing here,
+   index.css). Unlayered like the app's other surface stylesheets, so a rule
+   of the surface that uses one (its own class, scoped) restyles it; motion
+   spends the tokens only, so reduced motion stills it with everything else. */
+
+/* Message Scroller: a frame that fills its parent, a viewport that scrolls,
+   and a jump button over its foot. */
+.cb-ai-message-scroller {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.cb-ai-message-scroller-viewport {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  outline: none;
+}
+.cb-ai-message-scroller-viewport:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+/* Unseen until its opening position is applied, so the first frame is the
+   frame, not a jump from the top. */
+.cb-ai-message-scroller-viewport[data-pending-scroll] {
+  visibility: hidden;
+}
+.cb-ai-message-scroller-viewport[data-autoscrolling] {
+  scrollbar-color: transparent transparent;
+}
+.cb-ai-message-scroller-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  height: max-content;
+  min-height: 100%;
+}
+.cb-ai-message-scroller-item {
+  flex: none;
+  min-width: 0;
+}
+/* Centred by `left` and its own `translate`, which its entrance and exit
+   move too: the whole value is restated in each state. */
+.cb-ai-message-scroller-button {
+  position: absolute;
+  bottom: var(--sp-4);
+  left: 50%;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) 10px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-full);
+  background: var(--n-0);
+  color: var(--n-600);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-2xs);
+  white-space: nowrap;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  translate: -50% 0;
+  transition:
+    opacity var(--motion-pop),
+    scale var(--motion-pop),
+    translate var(--motion-pop),
+    border-color var(--motion-hover);
+}
+.cb-ai-message-scroller-button:hover {
+  border-color: var(--n-400);
+}
+.cb-ai-message-scroller-button:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.cb-ai-message-scroller-button[data-direction='start'] {
+  top: var(--sp-4);
+  bottom: auto;
+}
+.cb-ai-message-scroller-button[data-active='false'] {
+  opacity: 0;
+  scale: 0.95;
+  translate: -50% 100%;
+  pointer-events: none;
+  transition:
+    opacity var(--motion-exit),
+    scale var(--motion-exit),
+    translate var(--motion-exit);
+}
+.cb-ai-message-scroller-button[data-direction='start'][data-active='false'] {
+  translate: -50% -100%;
+}
+
+/* Chat: the thread over its composer, or the empty state in its place. */
+.cb-ai-chat {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.cb-ai-chat-thread,
+.cb-ai-chat-empty {
+  flex: 1;
+  min-height: 0;
+}
+.cb-ai-chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.cb-ai-chat-composer {
+  flex: none;
+  min-width: 0;
+}
+
+/* Message: one turn. The person's sits at the end, in a filled bubble; the
+   agent's reads as prose at the start. */
+.cb-ai-message-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-message {
+  position: relative;
+  display: flex;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+.cb-ai-message[data-align='end'] {
+  flex-direction: row-reverse;
+}
+.cb-ai-message-avatar {
+  display: flex;
+  flex: none;
+  align-self: flex-start;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  color: var(--text-ai);
+}
+.cb-ai-message-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cb-ai-message[data-align='end'] > .cb-ai-message-content {
+  align-items: flex-end;
+}
+.cb-ai-message-header,
+.cb-ai-message-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  max-width: 100%;
+  min-width: 0;
+  color: var(--text-meta);
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+  line-height: var(--lh-xs);
+}
+.cb-ai-message[data-align='end'] .cb-ai-message-footer {
+  justify-content: flex-end;
+}
+.cb-ai-message-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-meta);
+}
+.cb-ai-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  width: fit-content;
+  max-width: 88%;
+  min-width: 0;
+}
+.cb-ai-bubble[data-align='end'],
+.cb-ai-message[data-align='end'] .cb-ai-bubble {
+  align-self: flex-end;
+}
+.cb-ai-bubble-content {
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px var(--sp-4);
+  border-radius: 18px;
+  font-size: var(--fs-md);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cb-ai-bubble[data-variant='default'] > .cb-ai-bubble-content {
+  background: var(--action-primary);
+  color: var(--on-action-primary);
+}
+.cb-ai-bubble[data-variant='muted'] > .cb-ai-bubble-content {
+  background: var(--n-50);
+  color: var(--text-primary);
+}
+.cb-ai-bubble[data-variant='ghost'] > .cb-ai-bubble-content {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+/* Prompt Input: one pill. The attachments row spans it; the field takes
+   what its tools leave, and the tools drop under it when they do not fit. */
+.cb-ai-prompt-input {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 56px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: 24px;
+  background: var(--surface-raised);
+  cursor: text;
+  transition:
+    border-color var(--motion-move),
+    box-shadow var(--motion-move);
+}
+.cb-ai-prompt-input:focus-within {
+  border-color: var(--border-strong);
+}
+.cb-ai-prompt-input[data-disabled] {
+  cursor: default;
+}
+.cb-ai-prompt-input-header {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  order: -1;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.cb-ai-prompt-input-body {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.cb-ai-prompt-input-textarea {
+  display: block;
+  width: 100%;
+  min-height: 24px;
+  max-height: min(112px, 18dvh);
+  padding: 0;
+  overflow-y: auto;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-ui);
+  line-height: 24px;
+  resize: none;
+  outline: none;
+}
+.cb-ai-prompt-input-textarea::placeholder {
+  color: var(--text-placeholder);
+}
+.cb-ai-prompt-input-textarea:disabled {
+  color: var(--text-disabled);
+}
+.cb-ai-prompt-input-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  min-width: 0;
+  margin-left: auto;
+}
+.cb-ai-prompt-input-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.cb-ai-prompt-input-submit {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-full);
+  background: var(--action-primary);
+  color: var(--on-action-primary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover),
+    scale var(--motion-pop);
+}
+.cb-ai-prompt-input-submit:hover:not(:disabled) {
+  background: var(--action-primary-hover);
+}
+.cb-ai-prompt-input-submit:active:not(:disabled) {
+  background: var(--action-primary-press);
+  scale: 0.94;
+}
+.cb-ai-prompt-input-submit:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 3px;
+}
+.cb-ai-prompt-input-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Attachment: a file chip, its kind or its picture, its name and a remove
+   button. */
+.cb-ai-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-attachment {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 100%;
+  min-width: 0;
+  padding: var(--sp-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  transition: border-color var(--motion-hover);
+}
+.cb-ai-attachment:focus-within {
+  border-color: var(--border-focus);
+}
+.cb-ai-attachment[data-state='idle'] {
+  border-style: dashed;
+}
+.cb-ai-attachment[data-state='error'] {
+  border-color: var(--danger-200);
+}
+.cb-ai-attachment[data-size='sm'] {
+  gap: 6px;
+  padding: 2px;
+  border-radius: var(--r-md);
+}
+.cb-ai-attachment-preview {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--n-50);
+  color: var(--text-meta);
+}
+.cb-ai-attachment[data-size='sm'] .cb-ai-attachment-preview {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+}
+.cb-ai-attachment[data-state='error'] .cb-ai-attachment-preview {
+  background: var(--danger-50);
+  color: var(--danger-600);
+}
+.cb-ai-attachment-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.cb-ai-attachment-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-inline-end: var(--sp-1);
+}
+.cb-ai-attachment-title,
+.cb-ai-attachment-description {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-ai-attachment-title {
+  font-weight: var(--w-medium);
+}
+.cb-ai-attachment-description {
+  color: var(--text-meta);
+}
+.cb-ai-attachment[data-state='error'] .cb-ai-attachment-description {
+  color: var(--danger-600);
+}
+
+/* Suggestion: Cerebro's starters are rows, borderless, one under another
+   (a deliberate deviation from shadcn's outlined pills); the arrow leans the
+   way it points under the pointer. */
+.cb-ai-suggestions {
+  display: grid;
+  gap: var(--sp-1);
+  width: 100%;
+  text-align: left;
+}
+.cb-ai-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  width: 100%;
+  padding: 9px var(--sp-3);
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-hover);
+}
+.cb-ai-suggestion:hover {
+  background: var(--surface-sunken);
+}
+.cb-ai-suggestion:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.cb-ai-suggestion:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cb-ai-suggestion-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cb-ai-suggestion-description {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cb-ai-suggestion > svg {
+  flex: none;
+  color: var(--text-muted);
+  transition: translate var(--motion-turn);
+}
+.cb-ai-suggestion:hover:not(:disabled) > svg {
+  translate: 2px -2px;
+}
+
+/* Model Selector: one trigger, and one panel holding the Model and Effort
+   radio groups (a deliberate deviation from shadcn's two menus). A row is a
+   label over its radio, so the whole row picks. */
+.cb-ai-model-selector-trigger {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 32px;
+  max-width: 200px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--n-500);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.cb-ai-model-selector-trigger:hover:not(:disabled),
+.cb-ai-model-selector-trigger[aria-expanded='true'] {
+  background: var(--n-50);
+  color: var(--n-800);
+}
+.cb-ai-model-selector-trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.cb-ai-model-selector-trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cb-ai-model-selector-trigger[data-appearance='icon'] {
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+}
+.cb-ai-model-selector-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-ai-model-selector {
+  width: 240px;
+  max-width: var(--popover-available-width, 240px);
+  padding: var(--sp-1);
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-lg);
+  background: var(--n-0);
+  box-shadow: var(--shadow-lg);
+}
+.cb-ai-model-selector-note {
+  margin: 0 0 var(--sp-1);
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--n-100);
+  color: var(--n-600);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-ai-model-selector-group + .cb-ai-model-selector-group {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1);
+  border-top: 1px solid var(--n-100);
+}
+.cb-ai-model-selector-heading {
+  padding: var(--sp-1) var(--sp-2) 2px;
+  color: var(--n-400);
+  font-size: var(--fs-2xs);
+  font-weight: var(--w-medium);
+  letter-spacing: var(--track-caps);
+  line-height: var(--lh-2xs);
+  text-transform: uppercase;
+}
+.cb-ai-model-selector-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-md);
+  color: var(--n-700);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  cursor: pointer;
+  transition: background-color var(--motion-hover);
+}
+.cb-ai-model-selector-item:hover {
+  background: var(--n-50);
+}
+.cb-ai-model-selector-item:has(> input:checked) {
+  background: var(--surface-selected);
+  color: var(--cortex-700);
+}
+.cb-ai-model-selector-item:has(> input:focus-visible) {
+  box-shadow: var(--ring);
+}
+.cb-ai-model-selector-item:has(> input:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+/* The radio is the row: drawn over it, unseen, so a press anywhere on the
+   row picks and its focus is the row's ring. */
+.cb-ai-model-selector-item > input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+.cb-ai-model-selector-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-ai-model-selector-other {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+}
+.cb-ai-model-selector-other-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  outline: none;
+  transition: border-color var(--motion-hover);
+}
+.cb-ai-model-selector-other-input:focus-visible {
+  border-color: var(--border-focus);
+}
+.cb-ai-model-selector-other-input[aria-invalid='true'] {
+  border-color: var(--danger-500);
+}
+.cb-ai-model-selector-use {
+  padding: 2px 6px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-700);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+  transition: background-color var(--motion-hover);
+}
+.cb-ai-model-selector-use:hover:not(:disabled) {
+  background: var(--n-50);
+}
+.cb-ai-model-selector-use:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.cb-ai-model-selector-use:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.cb-ai-model-selector-refusal {
+  margin: 0;
+  padding: 0 var(--sp-2) var(--sp-1);
+  color: var(--danger-600);
+  font-size: var(--fs-2xs);
+  line-height: 15px;
+}
+
+/* Context: a ring and its figure in the composer's toolbar, sized to its
+   row; the detail is a hover card. A ring with nothing recorded is a dashed
+   track and no arc: an absent number is never drawn as zero (CV-05). */
+.cb-ai-context {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 32px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--n-500);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  transition:
+    background-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.cb-ai-context:hover {
+  background: var(--n-50);
+  color: var(--n-800);
+}
+.cb-ai-context:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.cb-ai-context[data-level='high'] {
+  color: var(--warn-600);
+}
+.cb-ai-context[data-level='full'] {
+  color: var(--danger-600);
+}
+.cb-ai-context-ring {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.cb-ai-context-track,
+.cb-ai-context-arc {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+}
+.cb-ai-context-track {
+  opacity: 0.25;
+}
+.cb-ai-context:not([data-state='recorded']) .cb-ai-context-track {
+  stroke-dasharray: 2 3;
+  opacity: 0.6;
+}
+.cb-ai-context-arc {
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--motion-move);
+}
+.cb-ai-context-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  color: var(--text-primary);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cb-ai-context-title {
+  margin: 0;
+  font-weight: var(--w-medium);
+}
+.cb-ai-context-detail {
+  margin: 0;
+  color: var(--text-meta);
+}
+.cb-ai-context-meter {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: var(--n-100);
+}
+.cb-ai-context-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--n-500);
+  transition: width var(--motion-move);
+}
+.cb-ai-context-card[data-level='high'] .cb-ai-context-fill {
+  background: var(--warn-500);
+}
+.cb-ai-context-card[data-level='full'] .cb-ai-context-fill {
+  background: var(--danger-500);
+}
+.cb-ai-context-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--sp-3);
+  margin: 0;
+}
+.cb-ai-context-rows dt {
+  color: var(--text-meta);
+}
+.cb-ai-context-rows dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.cb-ai-context-model {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Questionnaire: every question on one page, each a fieldset of native
+   radios or checkboxes (a deliberate deviation from shadcn's one question
+   at a time). */
+.cb-ai-questionnaire {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.cb-ai-questionnaire-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cb-ai-questionnaire-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+}
+.cb-ai-questionnaire-header {
+  width: fit-content;
+  padding: 1px var(--sp-1);
+  border-radius: var(--r-xs);
+  background: var(--cortex-100);
+  color: var(--cortex-700);
+  font-size: var(--fs-meta);
+  font-weight: var(--w-medium);
+  line-height: var(--lh-meta);
+}
+.cb-ai-questionnaire-question {
+  color: var(--n-800);
+  font-weight: var(--w-medium);
+}
+.cb-ai-questionnaire-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cb-ai-questionnaire-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  cursor: pointer;
+}
+.cb-ai-questionnaire-choice > input {
+  flex: none;
+  margin: 3px 0 0;
+  accent-color: var(--action-primary);
+}
+.cb-ai-questionnaire-choice:has(> input:disabled) {
+  cursor: default;
+}
+.cb-ai-questionnaire-choice-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--n-800);
+}
+.cb-ai-questionnaire-choice-description {
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-ai-questionnaire-preview {
+  margin-left: 20px;
+}
+.cb-ai-questionnaire-preview > summary {
+  width: fit-content;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  cursor: pointer;
+}
+.cb-ai-questionnaire-preview > pre {
+  max-height: 160px;
+  margin: var(--sp-1) 0 0;
+  overflow: auto;
+  color: var(--n-600);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.cb-ai-questionnaire-preview[open] > pre {
+  --rise: -4px;
+  animation: cb-rise-in var(--motion-enter) backwards;
+}
+.cb-ai-questionnaire-input {
+  min-width: 0;
+  padding: var(--sp-1) 6px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font: inherit;
+  font-size: var(--fs-xs);
+  outline: none;
+  transition: border-color var(--motion-hover);
+}
+.cb-ai-questionnaire-item .cb-ai-questionnaire-input {
+  margin-left: 20px;
+}
+.cb-ai-questionnaire-input:focus-visible {
+  border-color: var(--border-focus);
+}
+.cb-ai-questionnaire-input:disabled {
+  opacity: 0.6;
+}
+.cb-ai-questionnaire-error {
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-ai-questionnaire-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

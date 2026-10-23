@@ -89,6 +89,23 @@ describe('ActivityFeed', () => {
     );
   });
 
+  it('draws each run as a trace line that says how it ended before it (M91.14)', async () => {
+    await open();
+    const today = day('2026-07-28')!;
+    const row = (id: string) =>
+      within(today)
+        .getAllByTestId('history-run')
+        .find((r) => r.dataset.run === id)!;
+    const status = (id: string) =>
+      row(id).querySelector('[data-slot="trace-line"]')?.getAttribute('data-status');
+    // The legacy run hit its quota: said in its own word, in the error's ink.
+    expect(row('run-legacy-1').textContent).toMatch(/^Quota failed: A run that named no actor ran/);
+    expect(status('run-legacy-1')).toBe('error');
+    // One that succeeded says nothing it does not need to.
+    expect(row('run-scout-1').textContent).toMatch(/^Release scout ran/);
+    expect(status('run-scout-1')).toBeNull();
+  });
+
   it('fails each lane alone, and says no gap while any lane is down', async () => {
     for (const [seed, lanes] of [
       [() => __seedFleet(null), ['runs']],

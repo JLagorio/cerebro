@@ -1,6 +1,7 @@
 import { HomeLanes } from './home/HomeLanes';
 import { useMemo } from 'react';
 import { StarterOffer } from '@/app/StarterOffer';
+import { Suggestion } from '@/components/ai/Suggestion';
 import { Icon } from '@/components/ui/Icon';
 import { collectionsTree, nodeCount } from '@/engine/collections';
 import type { CollectionNode } from '@/engine/types';
@@ -47,12 +48,18 @@ export function CollectionCard({ node }: { node: CollectionNode }) {
  *  levels agree instead of the h2s shipping at two different sizes. */
 export const SECTION_HEADING = 'm-0 text-lg font-semibold tracking-[-0.005em]';
 
+/** Home's ask: the question it opens the Assistant on, and what it is for. */
+export const HOME_ASK = {
+  label: 'What would you like to work on?',
+  description: 'Think it through with your assistant',
+} as const;
+
 export function HomePage() {
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
   const collections = useVaultStore((s) => s.collections);
   const schema = useSchema();
-  const openAssistant = useUiStore((s) => s.openAssistantCanvas);
+  const openAssistant = useUiStore((s) => s.openAssistantFloating);
   const search = useUiStore((s) => s.setQuickOpen);
   const startCreate = useLauncherStore((s) => s.startCreate);
 
@@ -74,18 +81,19 @@ export function HomePage() {
           <p>A little space to think. Everything you’re working on, close at hand.</p>
         </header>
 
-        <button type="button" className="cb-home-ask" onClick={openAssistant}>
+        {/* A Suggestion (M91.14) that sends nothing: it opens the
+            conversation, where the person answers its question. */}
+        <Suggestion
+          className="cb-home-ask"
+          suggestion={HOME_ASK.label}
+          description={HOME_ASK.description}
+          onClick={() => openAssistant()}
+        >
           <span className="cb-home-ask-icon">
             <Icon name="sparkles" size={21} />
           </span>
-          <span className="cb-home-ask-copy">
-            <span>What would you like to work on?</span>
-            <span>Think it through with your assistant</span>
-          </span>
-          <span className="cb-home-ask-arrow">
-            <Icon name="arrow-up-right" size={19} />
-          </span>
-        </button>
+          {HOME_ASK.label}
+        </Suggestion>
         <div className="cb-home-actions" aria-label="Workspace actions">
           <button type="button" onClick={() => startCreate('page')}>
             <Icon name="file-plus" size={16} /> New page

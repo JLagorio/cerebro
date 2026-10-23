@@ -1,3 +1,7 @@
+.history-page {
+  container-type: inline-size;
+}
+
 .history-page-scroll {
   min-height: 0;
   flex: 1;
@@ -22,7 +26,7 @@
   gap: var(--sp-8);
 }
 
-@media (width < 600px) {
+@container (width < 600px) {
   .history-page-scroll {
     padding-right: var(--sp-4);
     padding-left: var(--sp-4);

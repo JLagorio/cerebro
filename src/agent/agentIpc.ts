@@ -16,16 +16,20 @@ import type {
   AgentStreamEvent,
   ClaudeUserSettings,
   CliWorkspace,
+  ForkPoint,
+  LiveTurn,
   PendingInteraction,
   PersonAnswer,
   TranscriptRead,
   UiAction,
 } from './types';
+import type { RunState } from '@/engine/ai/threadStatus';
 import { ASSISTANT_ACTOR } from '@/engine/authors';
 import type { RunCauseRequest } from '@/engine/jobs';
 import { runOptionsRefusal } from '@/engine/runOptions';
 import { namesTool } from '@/engine/toolGrant';
 import { conditionRun, withheldRun } from '@/lib/demoOperational';
+import { faulted } from '@/lib/mockFaults';
 import { settleMockRun } from '@/lib/mockGit';
 import {
   agentAppend,
@@ -70,6 +74,7 @@ import {
   APPROVAL_MESSAGES,
   plan as planApproval,
   subjectIsCut,
+  type DelegateCeiling,
   type RunApproval,
   type ShellCeiling,
 } from '@/lib/policy/toolApproval';
@@ -149,7 +154,11 @@ export async function readCliTranscript(
   lastActiveAt: string | null,
 ): Promise<TranscriptRead> {
   try {
-    if (!inTauri()) return readMockCliTranscript(sessionId);
+    if (!inTauri()) {
+      return await faulted('read_cli_transcript', () =>
+        Promise.resolve(readMockCliTranscript(sessionId)),
+      );
+    }
     return await invokeTauri<TranscriptRead>('read_cli_transcript', {
       vault,
       sessionId,
@@ -169,6 +178,12 @@ export interface RunOptions {
   message: string;
   systemPrompt?: string;
   sessionId?: string | null;
+  /** The turn a branch starts from (M91.6), sent only while its thread has
+   * no session of its own: Rust mints the branch's session, forks it from
+   * `from` at `at` once it finds `at` where a turn of `from` ended, and
+   * refuses in its words otherwise, or when `sessionId` names a session too.
+   * Absent is no branch. */
+  fork?: ForkPoint | null;
   /** The model and effort to ask Claude Code for (M56.5): the conversation's
    * pick, else the addressed or scheduled agent's record. Absent or blank is
    * Claude Code's default; Rust refuses anything outside run-options.v1.json
@@ -184,6 +199,12 @@ export interface RunOptions {
    * what an agent's record leaves out. Absent reads off, as Rust reads a
    * missing `web`, so a caller that never names it never widens a run. */
   web?: boolean;
+  /** The Subagents switch this run may hold (M91.2a). Absent reads as Rust's
+   * `DelegateCeiling::of` reads a missing `delegate`: on for an attended run
+   * and off for any other; anything but "on" reads off. The panel's turns
+   * send Settings' switch as it stands (M91.2d); no run nobody watches sends
+   * one, since none could hold the tool. */
+  delegate?: DelegateCeiling;
   /** Let the run reach the user's own MCP servers (M8.2). */
   connectors: boolean;
   /** Whether a person is watching this run. Only an attended run that names
@@ -255,12 +276,18 @@ export interface RunOptions {
 }
 
 /** The kinds a mock run records for its session's replay (M56.3): what the
- * fold reads off a session file, less the prompt, which is recorded first. */
+ * fold reads off a session file, less the prompt, which is recorded first.
+ * A subagent's steps are among them, as its own transcript is (M91.4); what
+ * only the live stream says (deltas, the Subagent* notes, a denial, the
+ * result) never is. */
 const REPLAYED = new Set<AgentStreamEvent['kind']>([
   'Text',
+  'Thinking',
   'ModelChanged',
   'ToolStart',
   'ToolDone',
+  'ToolPayload',
+  'ToolResult',
   'ToolDeferred',
   'Error',
   'TurnEnded',
@@ -391,8 +418,12 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
     // resumed one, as Rust's CliSession does, and the run's replay events are
     // recorded under it, so a thread whose messages are lost rebuilds in the
     // browser too. The mock takes the id it is handed; Rust validates the
-    // shape, and nothing here reaches a path.
-    const sessionId = options.sessionId ?? crypto.randomUUID();
+    // shape, and nothing here reaches a path. A branch's session is minted
+    // the way Rust mints it (M91.6, `branchMockSession`).
+    const sessionId =
+      options.fork != null
+        ? branchMockSession(options.sessionId, options.fork)
+        : (options.sessionId ?? crypto.randomUUID());
     // M57.1: a call this session left waiting, or one its card cancelled, is
     // refused as Rust's settle refuses it, and the new text runs.
     settleMockSession(sessionId);
@@ -469,7 +500,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
     }
     // The browser keeps no runtime database: a run that withheld tools or was a follow-up
     // books a row (the mock fleet's), and every other has no id to name.
-    return { run, durableId: booked, sessionId, attach: mockAttach(run) };
+    return announced({ run, durableId: booked, sessionId, attach: mockAttach(run) });
   }
   return invokeTauri<
     | { run: number; run_id: string; session_id: string }
@@ -481,10 +512,12 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
       message: options.message,
       system_prompt: options.systemPrompt ?? null,
       session_id: options.sessionId ?? null,
+      fork: options.fork == null ? null : { from: options.fork.from, at: options.fork.at },
       model: options.model ?? null,
       effort: options.effort ?? null,
       shell: options.shell,
       web: options.web ?? false,
+      delegate: options.delegate ?? null,
       connectors: options.connectors,
       attended: options.attended,
       ask_first: options.askFirst ?? false,
@@ -503,12 +536,12 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
   }).then((result) =>
     'deferred' in result || 'settled' in result
       ? result
-      : {
+      : announced({
           run: result.run,
           durableId: result.run_id,
           sessionId: result.session_id,
           attach: result.run_id,
-        },
+        }),
   );
 }
 
@@ -534,6 +567,53 @@ function wokenRunRefusal(options: RunOptions): string | null {
   return null;
 }
 
+/** Why Rust refuses a branch (M91.6), in `transcript::ForkRefused`'s words,
+ * which the browser's mock gives as they are. */
+export const FORK_REFUSED = {
+  alsoResumes:
+    'A branch starts a Claude Code session of its own, and this one also names a session to continue, so nothing was started.',
+  malformed:
+    'The turn this branch starts from is not named by a Claude Code session and line, so nothing was started.',
+  noSource:
+    'Claude Code no longer has the conversation this branch starts from, so nothing was started.',
+  unreadable:
+    "Claude Code's record of the conversation this branch starts from could not be read, so nothing was started.",
+  notAnAnchor:
+    "Claude Code's record of that conversation has no turn ending where this branch starts, so nothing was started.",
+} as const;
+
+/** A session id as Rust's `parse_session_id` reads one: a lowercase UUID. */
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The session a branch runs in, in the browser (M91.6), as Rust's
+ * `CliSession::for_request` and `check_fork` make it: no session beside the
+ * branch, its source and anchor shaped as session ids, and the anchor where
+ * one of the source's turns ended in its replay. The id is minted here, and
+ * the source's replay up to that turn is recorded under it, as Claude Code
+ * copies the source's lines into the branch's file, so the branch rebuilds
+ * in the browser too. A refusal throws Rust's words and records nothing.
+ */
+function branchMockSession(sessionId: string | null | undefined, fork: ForkPoint): string {
+  if (sessionId != null && sessionId.trim() !== '') throw new Error(FORK_REFUSED.alsoResumes);
+  if (!SESSION_ID.test(fork.from) || !SESSION_ID.test(fork.at)) {
+    throw new Error(FORK_REFUSED.malformed);
+  }
+  const source = readMockCliTranscript(fork.from);
+  if (source.state !== 'read') {
+    throw new Error(
+      source.reason === 'unreadable' ? FORK_REFUSED.unreadable : FORK_REFUSED.noSource,
+    );
+  }
+  const end = source.events.findIndex(
+    (event) => event.kind === 'TurnEnded' && event.last_uuid === fork.at,
+  );
+  if (end === -1) throw new Error(FORK_REFUSED.notAnAnchor);
+  const minted = crypto.randomUUID();
+  recordMockCliTranscript(minted, source.events.slice(0, end + 1));
+  return minted;
+}
+
 /**
  * A mock run's tool-approval plan (M57.2), as `plan_for` makes Rust's: the
  * mock's gate is always there for an attended run, so only an attended run
@@ -545,6 +625,7 @@ function mockApproval(options: RunOptions): RunApproval {
     kind: options.attended ? 'attended' : 'unattended',
     shell: options.shell,
     web: options.web === true ? 'on' : 'off',
+    delegate: options.delegate,
     askFirst: options.askFirst ?? false,
     readScoped: options.readScope != null,
     narrowing:
@@ -633,10 +714,14 @@ function startMockRun(
   // Rust's claim holds them; the commit comes before its closing events.
   beginMockRun(stamp.runId, actor);
   // M63.1: how the run ended, for the wake it claimed — stopped on purpose
-  // is interrupted, an Error before Done failed, and anything else succeeded.
+  // is interrupted, an Error of its own before Done failed, and anything else
+  // succeeded. A subagent's Error (one with a `parent`, M91.3b) failed only
+  // its own Agent call, which the main thread reads and goes on from.
   let stopped = false;
   let errored = false;
   let settled = false;
+  // M91.5: the model the run reports answering, once it reached one.
+  let answering: string | null = null;
   const settle = () => {
     if (settled) return;
     settled = true;
@@ -653,14 +738,20 @@ function startMockRun(
     options.message,
     (event) => {
       if (REPLAYED.has(event.kind)) replay.push(event);
+      if (event.kind === 'ModelChanged') answering = event.model;
       if (event.kind === 'Cancelled') stopped = true;
-      if (event.kind === 'Error') errored = true;
+      if (event.kind === 'Error' && event.parent === undefined) errored = true;
       if (event.kind === 'Done') {
         finishMockWake(stamp.runId, stopped ? 'cancelled' : errored ? 'failed' : 'succeeded');
         // A turn held on a call is suspended, not stopped (M57.1).
         const held = replay.some((e) => e.kind === 'ToolDeferred');
         if (!held && !replay.some((e) => e.kind === 'TurnEnded')) {
           replay.push({ kind: 'TurnInterrupted', reason: 'stopped' });
+        }
+        // M91.5: filed before Done, as Rust's reader files it, so a panel
+        // that pulls at the turn's end reads this run's.
+        if (options.attended && answering !== null) {
+          fillMockContext(sessionId, answering, replay, options.systemPrompt);
         }
         recordMockCliTranscript(sessionId, replay.splice(0));
         if (booked !== null)
@@ -990,12 +1081,12 @@ export async function answerInteraction(
     // The resume took the next run id as it started.
     const run = mockRunSeq > before ? mockRunSeq : before;
     return {
-      resumed: {
+      resumed: announced({
         run,
         durableId: null,
         sessionId: taken.card.session_id,
         attach: mockAttach(run),
-      },
+      }),
     };
   }
   const result = await invokeTauri<
@@ -1010,12 +1101,12 @@ export async function answerInteraction(
   return 'refused' in result
     ? { refused: result.refused }
     : {
-        resumed: {
+        resumed: announced({
           run: result.run,
           durableId: result.run_id,
           sessionId: result.session_id,
           attach: result.run_id,
-        },
+        }),
       };
 }
 
@@ -1051,9 +1142,13 @@ export async function cancelInteraction(id: string): Promise<boolean> {
   return invokeTauri<boolean>('cancel_interaction', { id });
 }
 
-/** The calls waiting for the person in `vault`, oldest first (M57.1). */
+/** The calls waiting for the person in `vault`, oldest first (M57.1).
+ * Rejects when the book cannot be read, which a reader shows as
+ * unavailable, never as nothing waiting (CV-05). */
 export async function listInteractions(vault: string): Promise<PendingInteraction[]> {
-  if (!inTauri()) return listMockInteractions(vault);
+  if (!inTauri()) {
+    return faulted('list_interactions', () => Promise.resolve(listMockInteractions(vault)));
+  }
   return invokeTauri<PendingInteraction[]>('list_interactions', { vault });
 }
 
@@ -1125,8 +1220,10 @@ export const mockJournal = (() => {
   const runs = new Map<number, { events: AgentEvent[]; first: number; done: boolean }>();
   const finished: number[] = [];
   return {
-    open(run: number): void {
+    /** Open `run`'s journal; the attach key it answers under. */
+    open(run: number): string {
       runs.set(run, { events: [], first: 1, done: false });
+      return mockAttach(run);
     },
     /** Number one event of `run` and hold it; the seq it took. */
     append(run: number, event: AgentStreamEvent): number {
@@ -1232,6 +1329,128 @@ export async function attachRun(
   return { state: answer.state, done: answer.done, detach };
 }
 
+/**
+ * Whether the run a thread left going still goes (M92.7), as Rust's journal
+ * answers `agent_events_since` after the last seq a run could reach, so it
+ * copies no event: `running` until the run said its last, `done` after it,
+ * `unknown` when nothing is held for the run under its key (as after a
+ * restart), and `unavailable` when the read failed. Never rejects, and never
+ * reads a failure as unknown (CV-05).
+ */
+export async function runState(turn: Pick<LiveTurn, 'run' | 'attach'>): Promise<RunState> {
+  const after = Number.MAX_SAFE_INTEGER;
+  try {
+    const answer = inTauri()
+      ? await invokeTauri<EventsSince>('agent_events_since', {
+          run: turn.run,
+          runId: turn.attach,
+          after,
+        })
+      : await faulted('agent_events_since', () =>
+          Promise.resolve(mockJournal.since(turn.run, turn.attach, after)),
+        );
+    if (answer.state === 'unknown') return 'unknown';
+    return answer.done ? 'done' : 'running';
+  } catch {
+    return 'unavailable';
+  }
+}
+
+// --- Context use (M91.5) -----------------------------------------------------
+
+/**
+ * A session's latest context reading, as Rust's `meter::ContextUse` crosses
+ * the wire: the tokens its latest turn's request sent, the model's window
+ * and the model when Claude Code reported them (absent, never 0, when it
+ * did not), and when it was read (RFC 3339).
+ */
+export interface ContextUseRecorded {
+  state: 'recorded';
+  used: number;
+  window?: number;
+  model?: string;
+  at: string;
+}
+
+/** What `agent_context_usage` answers (M91.5): a reading, or `not_recorded`
+ * when none was filed for the session since Cerebro started, never 0
+ * (CV-05). */
+export type ContextUseAnswer = ContextUseRecorded | { state: 'not_recorded' };
+
+/**
+ * How much of its model's context window the Claude Code session
+ * `sessionId` has used (M91.5). Pulled, never pushed: no event carries a
+ * token count, and nothing stores the answer (Q7). Rejects when the read
+ * fails, which `useContextUse` shows as unavailable, never as not recorded
+ * (CV-05). In the browser the mock's book answers, through the lab's fault
+ * seam.
+ */
+export function agentContextUsage(sessionId: string): Promise<ContextUseAnswer> {
+  return inTauri()
+    ? invokeTauri<ContextUseAnswer>('agent_context_usage', { sessionId })
+    : faulted('agent_context_usage', () => Promise.resolve(mockContextBook.read(sessionId)));
+}
+
+/** The most sessions the mock's book holds, as Rust's `CONTEXT_SESSIONS`;
+ * past it, the one recorded longest ago goes. */
+export const MOCK_CONTEXT_SESSIONS = 64;
+
+/**
+ * The browser's context book (M91.5), standing in for Rust's: each
+ * attended mock run that reached its model files a reading for its session
+ * before its Done (`fillMockContext`), the newest last. Memory only.
+ * Exported for the adapter's and the hook's tests, which seed it.
+ */
+export const mockContextBook = (() => {
+  const sessions = new Map<string, ContextUseRecorded>();
+  return {
+    record(sessionId: string, reading: ContextUseRecorded): void {
+      sessions.delete(sessionId);
+      sessions.set(sessionId, { ...reading });
+      for (const oldest of sessions.keys()) {
+        if (sessions.size <= MOCK_CONTEXT_SESSIONS) break;
+        sessions.delete(oldest);
+      }
+    },
+    read(sessionId: string): ContextUseAnswer {
+      const reading = sessions.get(sessionId);
+      return reading === undefined ? { state: 'not_recorded' } : { ...reading };
+    },
+  };
+})();
+
+/** What Claude Code's own system prompt and tool definitions take before a
+ * word of the conversation: where a mock session's first reading starts. */
+const MOCK_CONTEXT_FLOOR = 14_000;
+
+/**
+ * File a plausible reading for a mock run of `sessionId` (M91.5): the
+ * session's last reading, or the floor and the run's system prompt for a
+ * new one, grown by what the run said, at about four characters a token.
+ * The window is the one Claude Code reports for its models, a million for
+ * a `[1m]` pick.
+ */
+function fillMockContext(
+  sessionId: string,
+  model: string,
+  said: readonly AgentStreamEvent[],
+  systemPrompt: string | undefined,
+): void {
+  const last = mockContextBook.read(sessionId);
+  const before =
+    last.state === 'recorded'
+      ? last.used
+      : MOCK_CONTEXT_FLOOR + Math.ceil((systemPrompt?.length ?? 0) / 4);
+  const chars = said.reduce((sum, event) => sum + JSON.stringify(event).length, 0);
+  mockContextBook.record(sessionId, {
+    state: 'recorded',
+    used: before + Math.ceil(chars / 4),
+    window: model.endsWith('[1m]') ? 1_000_000 : 200_000,
+    model,
+    at: new Date().toISOString(),
+  });
+}
+
 // --- Event fan-out ---------------------------------------------------------
 
 type Listener = (event: AgentEvent) => void;
@@ -1273,6 +1492,28 @@ export function onAgentEvent(listener: Listener, run?: number): () => void {
     });
   }
   return () => listeners.delete(scoped);
+}
+
+type StartListener = (turn: Pick<LiveTurn, 'run' | 'attach'>) => void;
+const startListeners = new Set<StartListener>();
+
+/** `handle`, once every start listener has heard the run it names. */
+function announced(handle: RunHandle): RunHandle {
+  const { run, attach } = handle;
+  if (attach !== undefined) for (const listener of [...startListeners]) listener({ run, attach });
+  return handle;
+}
+
+/**
+ * Hear every run this window starts (M92.7), as `runAgent` or an answer's
+ * resume hands its handle back: its process tag and its attach key. No event
+ * carries the key, and a tag names a run only until the next launch numbers
+ * its runs again, so the conversation list keys a run's card and its Done by
+ * the pair it heard here.
+ */
+export function onRunStarted(listener: StartListener): () => void {
+  startListeners.add(listener);
+  return () => startListeners.delete(listener);
 }
 
 type UiListener = (action: UiAction) => void;

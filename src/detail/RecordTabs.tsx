@@ -126,7 +126,7 @@ export interface RecordTabsProps {
    *
    * Named for the MEASUREMENT, not the host: a fourth surface should pick the
    * gutter it has, not add itself to a union of surface names. */
-  gutter?: 'sm' | 'md';
+  gutter?: 'sm' | 'md' | 'none';
 }
 
 export function RecordTabs({
@@ -273,8 +273,8 @@ export function RecordTabs({
 
   return (
     <div
-      className={`flex min-w-0 flex-none items-end border-b border-n-200 ${
-        gutter === 'sm' ? 'px-4' : 'px-6'
+      className={`cb-record-tab-bar flex min-w-0 flex-none items-end border-b border-n-200 ${
+        gutter === 'none' ? '' : gutter === 'sm' ? 'px-4' : 'px-6'
       }`}
     >
       {deleting !== null && (
@@ -567,7 +567,6 @@ function ViewSourcePicker({
     relationFieldTargeting(typeName, hostType, schema) !== null;
 
   const roster = [
-    { value: '', label: 'Choose a database…' },
     ...listTypes(entries, schema).map((t) => ({ value: `type:${t.name}`, label: t.name })),
     // Labeled the way the dashboard "Saved view…" submenu labels them, but
     // VALUED by roster index: option values are UI-transient, and a
@@ -582,7 +581,7 @@ function ViewSourcePicker({
       : 'type' in src
         ? `type:${src.type}`
         : // -1 (a dead pointer under "Change source…") matches no option, so
-          // the select falls back to the placeholder row.
+          // the select shows its placeholder.
           `list:${lists.findIndex(
             (l) => l.id === src.list && (l.collection ?? null) === (src.collection ?? null),
           )}`;
@@ -632,7 +631,8 @@ function ViewSourcePicker({
         testId="view-tab-source"
         options={roster}
         value={sourceValue}
-        onChange={(e) => pick(e.target.value)}
+        placeholder="Choose a database…"
+        onChange={pick}
       />
       {facts !== null && facts.views.length > 1 && (
         <Select
@@ -643,7 +643,7 @@ function ViewSourcePicker({
           className="mt-1.5"
           options={facts.views.map((v) => ({ value: v.id, label: v.name }))}
           value={value.view ?? facts.views[0].id}
-          onChange={(e) => onChange({ ...value, view: e.target.value })}
+          onChange={(view) => onChange({ ...value, view })}
         />
       )}
       {facts !== null && offersRelated(facts.typeName) && (
@@ -799,7 +799,7 @@ function NewTabForm({
               data-testid="create-record-tab"
               disabled={!ready}
               onClick={commit}
-              className="rounded-md border-0 bg-cortex-500 px-2.5 py-1 text-xs font-medium text-n-0 hover:bg-cortex-600 disabled:cursor-default disabled:opacity-50"
+              className="rounded-md border-0 bg-action-primary px-2.5 py-1 text-xs font-medium text-on-action-primary hover:bg-action-primary-hover active:bg-action-primary-press disabled:cursor-default disabled:opacity-50"
             >
               {content === 'view' ? 'Add view' : 'Create'}
             </button>
@@ -873,7 +873,7 @@ function ChangeSourceForm({
               data-testid="change-source-save"
               disabled={value.source === null}
               onClick={() => onCommit(value)}
-              className="rounded-md border-0 bg-cortex-500 px-2.5 py-1 text-xs font-medium text-n-0 hover:bg-cortex-600 disabled:cursor-default disabled:opacity-50"
+              className="rounded-md border-0 bg-action-primary px-2.5 py-1 text-xs font-medium text-on-action-primary hover:bg-action-primary-hover active:bg-action-primary-press disabled:cursor-default disabled:opacity-50"
             >
               Save
             </button>

@@ -1,0 +1,54 @@
+{
+  "started_utc": "2026-10-17T18:56:57.377600+00:00",
+  "base_commit": "23479518c2827d361c9c970abfac8245f9d84600",
+  "algorithm": "SHA-256 of lexically sorted repository-relative POSIX UTF-8 path + NUL + exact file bytes + NUL, for every regular file recursively in each named tree; no exclusions.",
+  "src": {
+    "sha256": "e0212e5feef0d4f44d88134fdba0f01e22a80930fb9cb2b4dcaba6cdf52a1435",
+    "file_count": 1580
+  },
+  "e2e": {
+    "sha256": "0d1da6e6126108e3583989d8157359e52cc3936d0035cf3c8b771ddc04e51974",
+    "file_count": 169
+  },
+  "port": 5384,
+  "workers": 2,
+  "output": "/private/tmp/cerebro-m90/full-e2e-fresh-final",
+  "log": "/private/tmp/cerebro-m90/full-e2e-fresh-final.log",
+  "result": {
+    "passed": 687,
+    "failed": 0,
+    "skipped": 0,
+    "files": 158,
+    "duration_display": "14.8m",
+    "exit_code": 0,
+    "retries": 0,
+    "snapshot_updates": false
+  },
+  "recorded_utc": "2026-10-17T19:15:09.047443+00:00",
+  "final_tree_hashes": {
+    "src": {
+      "sha256": "7e8164d494d693bed75d192a791363e0a7e8313e7e6dabd18228cb02032a5242",
+      "file_count": 1580
+    },
+    "e2e": {
+      "sha256": "0d1da6e6126108e3583989d8157359e52cc3936d0035cf3c8b771ddc04e51974",
+      "file_count": 169
+    }
+  },
+  "post_launch_src_files_by_mtime": [
+    {
+      "path": "src/app/renameActions.test.ts",
+      "mtime_utc": "2026-10-17T18:57:27.208498+00:00",
+      "sha256": "b4dbdcee692f0a7676b108d3bf3d4946dd3b4d18cd70f030452245379f0d2096"
+    },
+    {
+      "path": "src/stores/undoStore.test.ts",
+      "mtime_utc": "2026-10-17T18:57:27.228742+00:00",
+      "sha256": "e512f5cf0f5bd003d48275ae51e3363ff2c70a2fae6ddafbbc16b2a90b6d2e82"
+    }
+  ],
+  "post_launch_delta": "Only src/app/renameActions.test.ts and src/stores/undoStore.test.ts changed after launch: explicit utf8 typing on existing test-only filesystem audits. No application/runtime file changed. The final e2e hash matches launch.",
+  "application_freeze": "No application source edits during the complete final run. Fresh Vite module graph; owned port5384 stopped after completion.",
+  "command": "PATH=\"/private/tmp/cerebro-toolchain/bin:$PATH\" PORT=5384 CEREBRO_E2E_REUSE=1 pnpm e2e --workers=2 --output=/private/tmp/cerebro-m90/full-e2e-fresh-final",
+  "scope_note": "Browser mocks and screenshot comparison; not native acceptance or owner aesthetic approval."
+}

@@ -127,6 +127,27 @@ describe('QuickOpen', () => {
     expect(useUiStore.getState().quickOpenVisible).toBe(false);
   });
 
+  // M91.14 — the ask row is a Suggestion that is one of the list's options:
+  // its label says where the words go, and the words are what it sends.
+  it('draws the ask row as a Suggestion option: the label shown, the words sent', () => {
+    render(<QuickOpen />);
+    fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER), {
+      target: { value: 'why is onboarding stalling' },
+    });
+    const ask = screen.getByTestId('quick-open-ask');
+    expect(ask.getAttribute('role')).toBe('option');
+    expect(ask.dataset.slot).toBe('suggestion');
+    expect(ask.getAttribute('aria-selected')).toBe('false');
+    expect(ask.getAttribute('tabindex')).toBe('-1');
+    expect(ask.textContent).toBe('Ask the Assistant: why is onboarding stallingAsk');
+    fireEvent.click(ask);
+    expect(useUiStore.getState().handoffs.at(-1)).toMatchObject({
+      text: 'why is onboarding stalling',
+      subject: null,
+      label: null,
+    });
+  });
+
   it('keeps the typed match selected when layout puts a row under a stationary pointer', () => {
     render(<QuickOpen />);
     const input = screen.getByPlaceholderText(PLACEHOLDER);

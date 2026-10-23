@@ -471,9 +471,13 @@ export async function startAgentJob(job: AgentJob, ctx: JobContext): Promise<Job
         const path = writtenPath(event.tool_name, event.input ?? null);
         if (path !== null && !wrote.includes(path)) wrote.push(path);
       }
-      if (event.kind === 'Error') failure = event.message;
+      // A subagent's Error (one with a `parent`, M91.3b) failed only its own
+      // Agent call, which the run reads and goes on from: as Rust's reader
+      // takes it, it is never the run's failure and never its end.
+      const failed = event.kind === 'Error' && event.parent === undefined ? event.message : null;
+      if (failed !== null) failure = failed;
       if (event.kind === 'ToolDeferred') failure = pausedByHook(event.tool_name);
-      if (event.kind === 'Done' || event.kind === 'Error') finish();
+      if (event.kind === 'Done' || failed !== null) finish();
     });
     // Replay can finish synchronously before attachRun hands back detach.
     if (attached.state === 'unknown') {

@@ -1,15 +1,32 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The real scripts, unless a test scripts one run's stream itself.
+vi.mock('./mockAgent', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./mockAgent')>();
+  return { ...actual, runMockAgent: vi.fn(actual.runMockAgent) };
+});
+
+// Tauri's invoke, for the cases that run as if inside Tauri.
+const { invokeSpy } = vi.hoisted(() => ({ invokeSpy: vi.fn() }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeSpy }));
+
 import {
   MOCK_JOURNAL_EVENTS,
+  answerInteraction,
   attachRun,
+  listInteractions,
   mockJournal,
   onAgentEvent,
+  onRunStarted,
   runAgent,
+  runState,
   stopAgent,
   type RunHandle,
 } from './agentIpc';
-import { releaseHeldMockRuns } from './mockAgent';
-import type { AgentEvent } from './types';
+import { releaseHeldMockRuns, runMockAgent } from './mockAgent';
+import { resetMockInteractions } from './mockInteractions';
+import type { AgentEvent, AgentStreamEvent, PendingInteraction } from './types';
+import { failNext, resetFaults } from '@/lib/mockFaults';
 import { resetMockGit } from '@/lib/mockGit';
 import * as mock from '@/lib/mockIpc';
 
@@ -271,6 +288,49 @@ describe('a mock woken run claims its wake (M63.1)', () => {
     expect(row(id)).toMatchObject({ state: 'finished', outcome: 'failed' });
   });
 
+  // M91.2d: an Error under an Agent call is that subagent's, never the
+  // run's, as Rust's reader takes it (M91.3b).
+  it("finishes it succeeded when only a subagent's Error came", async () => {
+    const scripted = (events: AgentStreamEvent[]) =>
+      vi.mocked(runMockAgent).mockImplementationOnce((_message, emit) => {
+        const timers = events.map((event, at) => setTimeout(() => emit(event), at));
+        return { cancel: () => timers.forEach((timer) => clearTimeout(timer)) };
+      });
+    const call: AgentStreamEvent = {
+      kind: 'ToolStart',
+      tool_name: 'Agent',
+      tool_id: 'toolu_agent',
+      input: JSON.stringify({
+        description: 'Read the risks',
+        subagent_type: 'cerebro-researcher',
+        prompt: 'Go',
+      }),
+    };
+    const closing: AgentStreamEvent[] = [
+      { kind: 'TurnEnded', stop_reason: 'end_turn' },
+      { kind: 'Done' },
+    ];
+    const outcomeOf = async (key: string, error: AgentStreamEvent) => {
+      const id = await admitOne(key);
+      scripted([
+        call,
+        error,
+        { kind: 'ToolDone', tool_id: 'toolu_agent', is_error: true },
+        ...closing,
+      ]);
+      const start = await woken('research the risks', id);
+      if (!('run' in start)) throw new Error('a pending wake starts');
+      await doneOf(start.run);
+      return row(id)?.outcome;
+    };
+    const message = 'API Error: Request rejected (429)';
+    expect(await outcomeOf('a', { kind: 'Error', message, parent: 'toolu_agent' })).toBe(
+      'succeeded',
+    );
+    // The control: the same words as the run's own Error still fail it.
+    expect(await outcomeOf('b', { kind: 'Error', message })).toBe('failed');
+  });
+
   it('finishes it interrupted when stopped, and a busy agent defers its next wake', async () => {
     const id = await admitOne('a');
     const next = await admitOne('b');
@@ -382,5 +442,131 @@ describe('follow-up run binding', () => {
       runAgent(VAULT, { ...options, followup: null, cause: { kind: 'followup' } }),
     ).rejects.toThrow('never named by the renderer');
     expect((await mock.listFollowups(VAULT))[0].state).toBe('claimed');
+  });
+});
+
+describe('runState (M92.7)', () => {
+  /** A run as a thread's live turn names it. */
+  const turnOf = (handle: RunHandle) => ({ run: handle.run, attach: handle.attach ?? '' });
+
+  afterEach(resetFaults);
+
+  it('reads a run the journal holds as running until its Done, then done', async () => {
+    const handle = await start('wait for me');
+    expect(await runState(turnOf(handle))).toBe('running');
+    await first(handle.run, 'ToolStart');
+    const done = doneOf(handle.run);
+    // The script reaches its hold a step after its ToolStart.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    releaseHeldMockRuns();
+    await done;
+    expect(await runState(turnOf(handle))).toBe('done');
+  });
+
+  it('reads a key the journal never held as unknown, as after a restart', async () => {
+    const handle = await start('hello');
+    await doneOf(handle.run);
+    expect(await runState({ run: handle.run, attach: `mock-earlier-${handle.run}` })).toBe(
+      'unknown',
+    );
+  });
+
+  it('reads a refused read as unavailable, never unknown, and the next read goes through', async () => {
+    const run = 940_001;
+    const attach = mockJournal.open(run);
+    failNext('agent_events_since');
+    expect(await runState({ run, attach })).toBe('unavailable');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await runState({ run, attach })).toBe('running');
+  });
+
+  describe('in Tauri', () => {
+    const TAURI = '__TAURI_INTERNALS__';
+    beforeEach(() => {
+      (window as unknown as Record<string, unknown>)[TAURI] = {};
+    });
+    afterEach(() => {
+      delete (window as unknown as Record<string, unknown>)[TAURI];
+      invokeSpy.mockReset();
+    });
+
+    it('asks after the last seq a run could reach, so the journal copies no event', async () => {
+      invokeSpy.mockResolvedValueOnce({ state: 'held', events: [], done: false });
+      expect(await runState({ run: 7, attach: 'durable-7' })).toBe('running');
+      expect(invokeSpy).toHaveBeenCalledWith('agent_events_since', {
+        run: 7,
+        runId: 'durable-7',
+        after: Number.MAX_SAFE_INTEGER,
+      });
+    });
+
+    it('reads each of the journal’s answers, and a refused invoke as unavailable', async () => {
+      const turn = { run: 7, attach: 'durable-7' };
+      invokeSpy.mockResolvedValueOnce({ state: 'held', events: [], done: true });
+      expect(await runState(turn)).toBe('done');
+      invokeSpy.mockResolvedValueOnce({ state: 'gap', first: 9, events: [], done: false });
+      expect(await runState(turn)).toBe('running');
+      invokeSpy.mockResolvedValueOnce({ state: 'unknown' });
+      expect(await runState(turn)).toBe('unknown');
+      invokeSpy.mockRejectedValueOnce(new Error('the IPC bridge is gone'));
+      expect(await runState(turn)).toBe('unavailable');
+    });
+  });
+});
+
+describe('listInteractions (M92.7)', () => {
+  afterEach(resetFaults);
+
+  it('fails a read the lab arms, as a book that cannot be read, and reads again after it', async () => {
+    failNext('list_interactions');
+    await expect(listInteractions(VAULT)).rejects.toThrow('list_interactions');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(listInteractions(VAULT)).resolves.toEqual([]);
+  });
+});
+
+describe('onRunStarted (M92.7)', () => {
+  const asks = globalThis as { __cerebroMockAsk?: unknown };
+
+  beforeEach(() => resetMockInteractions());
+  afterEach(() => {
+    delete asks.__cerebroMockAsk;
+    resetMockInteractions();
+  });
+
+  it('hears a send’s start and an answer’s resume, by tag and attach key', async () => {
+    const heard: { run: number; attach: string }[] = [];
+    const off = onRunStarted((turn) => heard.push(turn));
+    asks.__cerebroMockAsk = ['append_to_note'];
+    const asking = await runAgent(VAULT, {
+      message: 'append "Escalate it." to notes/inbox.md',
+      shell: 'off',
+      connectors: false,
+      attended: true,
+    });
+    if (!('run' in asking)) throw new Error('an attended run starts');
+    expect(heard).toEqual([{ run: asking.run, attach: asking.attach }]);
+    // Its card, its deferral and its Done come in one step.
+    const ended = doneOf(asking.run);
+    const card = await new Promise<PendingInteraction>((resolve) => {
+      const stop = onAgentEvent((event) => {
+        if (event.kind !== 'Interaction') return;
+        stop();
+        resolve(event.interaction);
+      }, asking.run);
+    });
+    await ended;
+    const answered = await answerInteraction(VAULT, card.id, { kind: 'deny' });
+    if (!('resumed' in answered)) throw new Error('a waiting card takes its answer');
+    const { resumed } = answered;
+    expect(heard).toEqual([
+      { run: asking.run, attach: asking.attach },
+      { run: resumed.run, attach: resumed.attach },
+    ]);
+    await doneOf(resumed.run);
+    off();
+    const after = await start('hello');
+    await doneOf(after.run);
+    expect(heard).toHaveLength(2);
   });
 });

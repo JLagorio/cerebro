@@ -15,6 +15,7 @@ describe('WorkspacePage', () => {
   it('prompts to mount when nothing is mounted', async () => {
     render(<WorkspacePage selection={{ kind: 'workspace' }} />);
     expect(await screen.findByTestId('workspace-empty')).toBeTruthy();
+    expect(screen.getByText('Explorer', { exact: true })).toBeTruthy();
   });
 
   it('renders the tree once a root is mounted', async () => {
@@ -56,6 +57,15 @@ describe('WorkspacePage', () => {
     try {
       const tree = await within(target).findByTestId('root-tree');
       expect(screen.getAllByTestId('root-tree')).toHaveLength(1);
+      expect(within(target).queryByText('Explorer', { exact: true })).toBeNull();
+      expect(within(target).getByRole('button', { name: 'Mount a folder' }).textContent).toContain(
+        'Mount folder',
+      );
+      fireEvent.click(within(target).getByRole('button', { name: 'Explorer settings' }));
+      expect(
+        within(target).getByRole('menuitemcheckbox', { name: 'File type icons' }),
+      ).toBeTruthy();
+      fireEvent.click(within(target).getByRole('button', { name: 'Explorer settings' }));
       expect(screen.getByTestId('workspace-page').contains(tree)).toBe(false);
       fireEvent.click(within(tree).getByRole('treeitem', { name: /alpha/ }));
       expect(controls.hide).not.toHaveBeenCalled();

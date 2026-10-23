@@ -320,7 +320,10 @@ fn the_deferred_recording_folds_to_its_suspension_from_both_formats() {
         "{:?}",
         session.classes
     );
-    let Some(super::AgentEvent::ToolDeferred { tool_id, tool_name }) = stream.events.last() else {
+    let Some(super::AgentEvent::ToolDeferred {
+        tool_id, tool_name, ..
+    }) = stream.events.last()
+    else {
         panic!("the stream ends suspended: {:?}", stream.events);
     };
     assert_eq!(tool_name, "mcp__probe__slow_echo");

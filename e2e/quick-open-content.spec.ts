@@ -83,7 +83,7 @@ test('Enter on a page row opens that page', async ({ page }) => {
   await input(page).fill('draining');
   const first = contentRows(page).first();
   await expect(first).toBeVisible();
-  const title = (await first.locator('span.text-sm').textContent()) ?? '';
+  const title = (await first.locator('span.text-ui').textContent()) ?? '';
   expect(title).not.toBe('');
   // Ask stays unselected; the first arriving match takes the untouched highlight.
   await expect(first).toHaveAttribute('aria-selected', 'true');

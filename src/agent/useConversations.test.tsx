@@ -15,7 +15,7 @@ vi.mock('./agentIpc', () => ({
 }));
 
 import * as agentIpc from './agentIpc';
-import { useConversations } from './useConversations';
+import { NO_BRANCH_POINT, NO_SUCH_REPLY, useConversations } from './useConversations';
 import type { AgentChat } from './useAgentChat';
 import type { AgentStreamEvent, ChatMessage, Conversation, TranscriptRead } from './types';
 import type { Place } from '@/engine/place';
@@ -101,6 +101,25 @@ describe('useConversations', () => {
   it('records the active conversation so the next mount can find it', () => {
     const { result } = renderHook(() => useConversations(chat));
     expect(window.localStorage.getItem('cerebro.activeConversation')).toBe(result.current.activeId);
+  });
+
+  it('is ready only once the stored thread has been handed to the chat hook', () => {
+    const kept = conversation('kept', {
+      messages: [{ id: 'k-1', role: 'user', text: 'What did we decide?', tools: [] }],
+    });
+    window.localStorage.setItem('cerebro.conversations', JSON.stringify([kept]));
+    const restoring = stubChat({ restore: vi.fn() });
+    const seen: boolean[] = [];
+    renderHook(() => {
+      const state = useConversations(restoring);
+      seen.push(state.ready);
+      return state;
+    });
+    // The first render's chat hook holds an empty start, not the thread.
+    expect(seen[0]).toBe(false);
+    expect(seen.at(-1)).toBe(true);
+    expect(restoring.restore).toHaveBeenCalledOnce();
+    expect(vi.mocked(restoring.restore).mock.calls[0][0]).toEqual(kept.messages);
   });
 
   it('persists the exchange when the panel is closed MID-TURN', () => {
@@ -561,5 +580,224 @@ describe('useConversations — a turn outlives its panel (M57.6)', () => {
     act(() => useUiStore.getState().showConversation('c-3'));
     expect(result.current.activeId).toBe('c-3');
     expect(useUiStore.getState().panelConversation).toBeNull();
+  });
+});
+
+/**
+ * Branch from here (M91.6): a new thread holding a reply and the turns
+ * before it, opened, whose sends fork the reply's session at its anchor
+ * until the thread has a session of its own.
+ */
+describe('useConversations branches a thread (M91.6)', () => {
+  const SOURCE = '00000000-0000-4000-8000-000000000001';
+  const FIRST = '00000000-0000-4000-8000-000000000011';
+  const SECOND = '00000000-0000-4000-8000-000000000022';
+  const MINTED = '00000000-0000-4000-8000-000000000033';
+  const ROADMAP: Place = { kind: 'list', id: 'roadmap', collection: 'product' };
+  const thread: ChatMessage[] = [
+    { id: 'u-1', role: 'user', text: 'What is at risk?', tools: [] },
+    {
+      id: 'a-1',
+      role: 'assistant',
+      text: 'The scanner delivery.',
+      tools: [],
+      anchor: { sessionId: SOURCE, uuid: FIRST },
+      changesets: [],
+    },
+    { id: 'u-2', role: 'user', text: 'And if it slips?', tools: [] },
+    {
+      id: 'a-2',
+      role: 'assistant',
+      text: 'The rollout moves a week.',
+      tools: [],
+      anchor: { sessionId: SOURCE, uuid: SECOND },
+    },
+  ];
+  const source = (over: Partial<Conversation> = {}): Conversation => ({
+    id: 'c-source',
+    title: 'Release risks',
+    usesDefaultTitle: false,
+    sessionId: SOURCE,
+    messages: thread,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    archived: false,
+    vault: '/demo-vault',
+    place: ROADMAP,
+    placeLabel: 'Roadmap',
+    model: 'sonnet',
+    effort: 'high',
+    ...over,
+  });
+  const seed = (...threads: Conversation[]) =>
+    window.localStorage.setItem('cerebro.conversations', JSON.stringify(threads));
+
+  /** A chat stand-in whose restore holds the thread it is handed, as the
+   * real hook does, so the list mirrors the thread it opened. */
+  const holding = (): AgentChat => {
+    const chat = stubChat();
+    chat.restore = vi.fn((messages: ChatMessage[], sessionId: string | null) => {
+      chat.messages = messages;
+      chat.sessionId = sessionId;
+    });
+    return chat;
+  };
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    useUiStore.setState({ toasts: [], panelConversation: null });
+    vi.mocked(agentIpc.stopAgent).mockClear();
+    vi.mocked(agentIpc.cancelInteraction).mockClear();
+    vi.mocked(agentIpc.readCliTranscript).mockClear();
+  });
+
+  it('opens a new thread holding the turns up to the reply, forking its session there', () => {
+    seed(conversation('c-other'), source());
+    const chat = holding();
+    const { result } = renderHook(() =>
+      useConversations(chat, undefined, undefined, '/demo-vault'),
+    );
+    expect(result.current.activeId).toBe('c-other');
+    let id: string | null = null;
+    act(() => {
+      id = result.current.branchFrom('c-source', 'a-1');
+    });
+    expect(id).not.toBeNull();
+    expect(result.current.activeId).toBe(id);
+    const branch = result.current.active;
+    expect(branch).toMatchObject({
+      title: 'Release risks',
+      usesDefaultTitle: false,
+      sessionId: null,
+      fork: { from: SOURCE, at: FIRST },
+      vault: '/demo-vault',
+      place: ROADMAP,
+      placeLabel: 'Roadmap',
+      model: 'sonnet',
+      effort: 'high',
+    });
+    expect(branch?.messages).toEqual(thread.slice(0, 2));
+    // Opened in the chat hook with its fork, and nothing read: it has no
+    // session file of its own yet.
+    expect(vi.mocked(chat.restore).mock.calls.at(-1)).toEqual([
+      thread.slice(0, 2),
+      null,
+      undefined,
+      null,
+      { from: SOURCE, at: FIRST },
+    ]);
+    expect(agentIpc.readCliTranscript).not.toHaveBeenCalled();
+    expect(result.current.transcript).toEqual({ state: 'idle' });
+    // Persisted first in the list, beside its source, which keeps every turn.
+    const saved = stored();
+    expect(saved[0]).toMatchObject({ id, fork: { from: SOURCE, at: FIRST } });
+    expect(saved.find((c) => c.id === 'c-source')?.messages).toHaveLength(4);
+    expect(result.current.conversations[0].id).toBe(id);
+  });
+
+  it('copies the open thread as its chat hook holds it, without its live turn', () => {
+    seed(source({ messages: thread.slice(0, 3) }));
+    const chat = holding();
+    const { result, rerender } = renderHook(() => useConversations(chat));
+    // The turn since: its reasoning in memory only, and a new one streaming.
+    const reasoned: ChatMessage = {
+      ...thread[3],
+      parts: [
+        { kind: 'reasoning', id: 'r-1', text: 'Weighing the dates.' },
+        { kind: 'text', id: 't-1', text: 'The rollout moves a week.' },
+      ],
+    };
+    chat.messages = [
+      ...thread.slice(0, 3),
+      reasoned,
+      { id: 'u-3', role: 'user', text: 'Who decides?', tools: [] },
+      { id: 'a-3', role: 'assistant', text: 'Half an an', tools: [], streaming: true, seq: 4 },
+    ];
+    chat.streaming = true;
+    rerender();
+    act(() => {
+      result.current.branchFrom('c-source', 'a-2');
+    });
+    const branch = result.current.active;
+    expect(branch?.messages).toEqual([...thread.slice(0, 3), reasoned]);
+    expect(branch?.fork).toEqual({ from: SOURCE, at: SECOND });
+    // The thread it leaves keeps its turn running and its card waiting.
+    expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+    expect(agentIpc.cancelInteraction).not.toHaveBeenCalled();
+    expect(stored().find((c) => c.id === 'c-source')?.messages).toHaveLength(6);
+  });
+
+  it('forks a reply carried from an earlier branch at the session its anchor names', () => {
+    const OLDER = '00000000-0000-4000-8000-000000000044';
+    seed(
+      source({
+        sessionId: null,
+        fork: { from: OLDER, at: SECOND },
+        messages: thread.map((m) =>
+          m.anchor === undefined ? m : { ...m, anchor: { sessionId: OLDER, uuid: m.anchor.uuid } },
+        ),
+      }),
+    );
+    const chat = holding();
+    const { result } = renderHook(() => useConversations(chat));
+    act(() => {
+      result.current.branchFrom('c-source', 'a-1');
+    });
+    expect(result.current.active?.fork).toEqual({ from: OLDER, at: FIRST });
+  });
+
+  it('refuses, with a toast and no new thread, a reply with no anchor or no reply at all', () => {
+    seed(
+      source({
+        messages: [thread[0], { ...thread[1], anchor: undefined }, thread[2], thread[3]],
+      }),
+    );
+    const chat = holding();
+    const { result } = renderHook(() => useConversations(chat));
+    const restores = vi.mocked(chat.restore).mock.calls.length;
+    for (const [thread, messageId, words] of [
+      ['c-source', 'a-1', NO_BRANCH_POINT],
+      ['c-source', 'u-2', NO_BRANCH_POINT],
+      ['c-source', 'a-404', NO_SUCH_REPLY],
+      ['c-404', 'a-2', NO_SUCH_REPLY],
+    ] as const) {
+      let id: string | null = 'unset';
+      act(() => {
+        id = result.current.branchFrom(thread, messageId);
+      });
+      expect(id, messageId).toBeNull();
+      expect(useUiStore.getState().toasts.at(-1)?.message, messageId).toBe(words);
+    }
+    expect(result.current.conversations.map((c) => c.id)).toEqual(['c-source']);
+    expect(result.current.activeId).toBe('c-source');
+    expect(vi.mocked(chat.restore).mock.calls.length).toBe(restores);
+  });
+
+  it('spends the fork once the chat hook names the session Rust minted, and not before', () => {
+    seed(source());
+    const chat = holding();
+    const { result, rerender } = renderHook(() => useConversations(chat));
+    let id: string | null = null;
+    act(() => {
+      id = result.current.branchFrom('c-source', 'a-1');
+    });
+    // A send that failed leaves the thread with no session: its fork waits
+    // for the retry.
+    chat.messages = [
+      ...thread.slice(0, 2),
+      { id: 'u-3', role: 'user', text: 'Who decides?', tools: [] },
+      { id: 'a-3', role: 'assistant', text: '', tools: [], error: 'Claude Code was not found.' },
+    ];
+    rerender();
+    expect(stored().find((c) => c.id === id)).toMatchObject({
+      sessionId: null,
+      fork: { from: SOURCE, at: FIRST },
+    });
+    expect(stored().find((c) => c.id === id)?.messages).toHaveLength(4);
+    chat.sessionId = MINTED;
+    rerender();
+    const saved = stored().find((c) => c.id === id);
+    expect(saved?.sessionId).toBe(MINTED);
+    expect(saved !== undefined && 'fork' in saved).toBe(false);
+    expect(result.current.active?.fork).toBeUndefined();
   });
 });

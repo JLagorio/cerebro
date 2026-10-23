@@ -18,7 +18,12 @@ test('Settings lends its section navigation to the shell and keeps a readable de
   );
   await expect(settings.getByRole('tablist', { name: 'Theme' })).toBeVisible();
   await expect(page.getByTestId('nav-surfaces')).toBeHidden();
-  const frame = (await settings.boundingBox())!;
+  // WebKit's non-overlay scrollbar occupies the outer box. The reading
+  // column is centered in the scrollport, just like Home's content.
+  const frame = await settings.evaluate((node) => ({
+    x: node.getBoundingClientRect().x,
+    width: node.clientWidth,
+  }));
   const column = (await settings.locator('.cb-settings-content').boundingBox())!;
   expect(column.width).toBeLessThanOrEqual(840);
   expect(column.width).toBeGreaterThan(700);

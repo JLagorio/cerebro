@@ -120,25 +120,27 @@ function LauncherBody() {
           >
             {recent.length > 0 && (
               <div role="group" aria-label="Recent">
-                <p className="mb-1 mt-2 text-2xs text-n-500">Recent</p>
+                <p className="mb-1 mt-2 text-metadata text-(--text-meta)">Recent</p>
                 {recent.map(option)}
               </div>
             )}
             {groups.map((group) => (
               <div key={group.id} role="group" aria-label={group.label}>
-                <p className="mb-1 mt-3 text-2xs text-n-500">{group.label}</p>
+                <p className="mb-1 mt-3 text-metadata text-(--text-meta)">{group.label}</p>
                 {group.rows.map((row) => option(row, recent.length + rows.indexOf(row)))}
               </div>
             ))}
-            {listed.length === 0 && <p className="py-4 text-sm text-n-500">Nothing matches.</p>}
+            {listed.length === 0 && (
+              <p className="py-4 text-sm text-(--text-meta)">Nothing matches.</p>
+            )}
           </div>
           <div data-testid="create-details" className="border-l border-n-100 pl-4 pt-3">
             {selected && (
               <>
                 <Icon name={selected.icon} size={24} color="var(--n-500)" />
-                <h3 className="mb-2 mt-3 text-base font-semibold">{selected.label}</h3>
-                <p className="text-sm text-n-600">{selected.tagline}</p>
-                <p data-testid="create-lands" className="my-4 text-xs leading-5 text-n-500">
+                <h3 className="mb-2 mt-3 text-section-title font-semibold">{selected.label}</h3>
+                <p className="text-ui text-n-600">{selected.tagline}</p>
+                <p data-testid="create-lands" className="my-4 text-ui text-(--text-meta)">
                   {selected.lands(ctx)}
                 </p>
                 <Keycaps command={`create.${selected.id}`} />

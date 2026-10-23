@@ -4,11 +4,13 @@ import { Tooltip } from '@/components/ui/Tooltip';
 
 /* The hover wash spends `--motion-hover` (M46.2): 120ms was long enough to
  * trail the pointer across a toolbar of these, which is the lag Notion's
- * measured 20ms exists to avoid. Colour only — `background`, never `all`. */
+ * measured 20ms exists to avoid. Colour only — `background`, never `all`.
+ * Pressed, the button gives under the pointer and springs back on the pop
+ * pair, which reduced motion stills. */
 const css = `
-.cb-ibtn{display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-sm);border:1px solid transparent;background:transparent;color:var(--n-600);cursor:pointer;transition:background var(--motion-hover),color var(--motion-hover);outline:none;padding:0}
+.cb-ibtn{display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-sm);border:1px solid transparent;background:transparent;color:var(--n-600);cursor:pointer;transition:background var(--motion-hover),color var(--motion-hover),scale var(--motion-pop);outline:none;padding:0}
 .cb-ibtn:hover:not([disabled]){background:var(--n-100);color:var(--n-800)}
-.cb-ibtn:active:not([disabled]){background:var(--n-200)}
+.cb-ibtn:active:not([disabled]){background:var(--n-200);scale:.92}
 .cb-ibtn:focus-visible{border-color:var(--border-focus);box-shadow:var(--ring)}
 .cb-ibtn[disabled]{opacity:.45;cursor:not-allowed}
 .cb-ibtn-outline{border-color:var(--n-300);background:var(--n-0)}
@@ -73,6 +75,7 @@ export function IconButton({
         ref={ref}
         type="button"
         aria-label={label}
+        aria-pressed={active}
         disabled={disabled}
         onClick={onClick}
         className={`cb-ibtn ${variant === 'outline' ? 'cb-ibtn-outline' : ''} ${active ? 'cb-ibtn-active' : ''} ${className}`}

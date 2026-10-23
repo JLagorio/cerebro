@@ -1,21 +1,18 @@
 :root {
-  /* neutrals — cool graphite */
+  /* Neutral paper and graphite; brand accents remain separate. */
   --n-0: #ffffff;
-  --n-25: #fbfbfd;
-  --n-50: #f6f7fa;
-  --n-100: #eef0f5;
-  --n-200: #e3e6ee;
-  --n-300: #cdd2df;
-  /* M15: was #a8afc2 — 2.19:1 on --n-0, below even the 3:1 non-text floor, yet
-     it carries ~160 real text sites. Darkened to 3.23:1 on --n-0 / 3.01:1 on
-     --n-50 so borders, icon strokes and disabled labels are perceivable. It is
-     still NOT an AA body-text colour: use --text-meta for anything readable. */
-  --n-400: #888fa3;
-  --n-500: #7e8699;
-  --n-600: #5a6274;
-  --n-700: #3f4657;
-  --n-800: #272d3b;
-  --n-900: #161a24;
+  --n-25: #fafafa;
+  --n-50: #f5f5f6;
+  --n-100: #ededf0;
+  --n-200: #e3e3e6;
+  --n-300: #c9cbd1;
+  /* Disabled ink and icon strokes; readable secondary text uses --n-600. */
+  --n-400: #868993;
+  --n-500: #767983;
+  --n-600: #61646c;
+  --n-700: #45484e;
+  --n-800: #2f3237;
+  --n-900: #202226;
   /* primary — cortex ultramarine */
   --cortex-50: #eef1fe;
   --cortex-100: #dde4fd;
@@ -95,10 +92,7 @@
      1.8:1 — which is the failure mode M15 spent a phase removing from the
      neutral ramp. Nothing here reuses #A8AFC2, the value that ramp dropped.
 
-     These triples are also the seam a dark theme would override
-     (`:root[data-theme='dark']`). No such block exists yet: the app has no
-     dark mode at all, and inventing half of one here would be worse than
-     leaving the seam visible. */
+     The dark-theme overrides below preserve the same ink-on-tint contract. */
   --opt-gray: #7e8699;
   --opt-gray-bg: #eef0f4;
   --opt-gray-ink: #4a5163;
@@ -127,6 +121,17 @@
   --opt-red-bg: #fdeaec;
   --opt-red-ink: #99202f;
 
+  /* Filled actions are independent of ramps used as ink on tinted surfaces.
+     These six fills retain white-label contrast in both themes. */
+  --action-primary: #25272b;
+  --action-primary-hover: #3b3e44;
+  --action-primary-press: #191b1f;
+  --on-action-primary: #ffffff;
+  --action-danger: #bc2438;
+  --action-danger-hover: #a61f31;
+  --action-danger-press: #89192a;
+  --on-action-danger: #ffffff;
+
   /* avatar backgrounds — same eight hues as --swatch-*, darkened so white
      initials clear 4.5:1 (5.2–6.9:1). The tinted swatches themselves top out
      around 2:1 against white and made every avatar's initials unreadable. */
@@ -151,6 +156,8 @@
   --health-off: #de3b4e;
   --health-none: #a8afc2;
   /* semantic aliases */
+  --surface-frame: #eeeef0;
+  --surface-navigation: #f7f7f8;
   --surface-app: var(--n-0);
   --surface-board: var(--n-25);
   --surface-sunken: var(--n-50);
@@ -171,13 +178,11 @@
   --canvas-6: var(--opt-purple);
   --text-primary: var(--n-900);
   --text-secondary: var(--n-600);
-  --text-muted: var(--n-500);
-  /* Small informational text — keys, counts, timestamps, hints. AA at 6.12:1,
-     because none of --n-400 (3.23:1) or --n-500 (3.65:1) reaches 4.5:1 and all
-     of it ships at 10–12px. --text-disabled stays on --n-400 and is for
-     genuinely disabled controls, borders and icon strokes only. */
+  --text-muted: var(--n-600);
+  /* Metadata remains readable on every neutral surface (contrast.test.ts). */
   --text-meta: var(--n-600);
   --text-disabled: var(--n-400);
+  --text-placeholder: var(--n-600);
   --text-inverse: #ffffff;
   --text-link: var(--cortex-500);
   --text-ai: var(--synapse-600);
@@ -220,30 +225,23 @@
  * here would be a second, silent decider that could disagree with an explicit
  * user choice.
  *
- * Contrast was checked against --n-0 (#15181f), not against black:
- *   --n-900 ink        16.3:1   body text
- *   --n-600 meta        8.1:1   AA at the 11-13px this ships at
- *   --n-400 disabled    3.9:1   clears the 3:1 non-text floor for borders and
- *                               icon strokes; still NOT an AA body colour, the
- *                               same caveat the light ramp carries.
- * --accent deliberately stays on cortex-500. Lightening it to cortex-400 would
- * have dropped white labels on a filled accent button to 3.6:1; the lighter
- * steps are used where the accent is ink or an outline instead of a fill.
+ * Shared contrast checks hold primary and secondary ink against every
+ * neutral surface. Filled actions have their own light/dark tokens.
  */
 :root[data-theme='dark'] {
-  /* neutrals — inverted, same cool graphite cast */
-  --n-0: #15181f;
-  --n-25: #191d25;
-  --n-50: #1e222b;
-  --n-100: #252a35;
-  --n-200: #2e3440;
-  --n-300: #3c4350;
-  --n-400: #6e7688;
-  --n-500: #8b93a5;
-  --n-600: #a8b0c0;
-  --n-700: #c5cbd7;
-  --n-800: #e0e4ec;
-  --n-900: #f4f6fa;
+  /* Neutral graphite surfaces; quiet elevation replaces the blue cast. */
+  --n-0: #242528;
+  --n-25: #28292c;
+  --n-50: #2e2f33;
+  --n-100: #36373c;
+  --n-200: #41434a;
+  --n-300: #565960;
+  --n-400: #888b94;
+  --n-500: #a0a3ac;
+  --n-600: #b8bac3;
+  --n-700: #d1d2d8;
+  --n-800: #e6e7eb;
+  --n-900: #f3f4f6;
 
   /* tint steps of the brand ramps become dark tints; the saturated mid steps
      still read on a dark ground and are left as they are. The 700 ink step
@@ -256,7 +254,7 @@
 
      The 600 step moves too (M52.3), and for the same reason: it is the LINK
      ink — every `text-cortex-600` in the app (concept links, source links,
-     the update log, the Details tab) — and light-mode #2e48c2 on --n-0 is
+     the update log, the Details panel) — and light-mode #2e48c2 on --n-0 is
      2.4:1, under AA for the 12-13px it ships at. #7d93f0 sits between the 400
      and 300 steps and measures 6.2:1 on --n-0, 5.9 on --n-25, 5.5 on --n-50,
      5.0 on --n-100 and 5.2 on the dark 50 ground. It is too light to carry a
@@ -326,6 +324,12 @@
   /* semantic aliases. --surface-raised sits ABOVE the app ground here: on dark,
      elevation reads as lighter, the inverse of the light theme where a raised
      surface is white on a tinted ground. */
+  --surface-frame: #191a1c;
+  --surface-navigation: #202124;
+  --action-primary: #eeeef1;
+  --action-primary-hover: #d7d9df;
+  --action-primary-press: #c1c4cc;
+  --on-action-primary: #202226;
   --surface-app: var(--n-0);
   --surface-board: var(--n-25);
   --surface-sunken: var(--n-50);
@@ -345,9 +349,10 @@
   --canvas-6: var(--opt-purple);
   --text-primary: var(--n-900);
   --text-secondary: var(--n-600);
-  --text-muted: var(--n-500);
+  --text-muted: var(--n-600);
   --text-meta: var(--n-600);
   --text-disabled: var(--n-400);
+  --text-placeholder: var(--n-600);
   --text-inverse: #ffffff;
   --text-link: var(--cortex-300);
   --text-ai: var(--synapse-300);

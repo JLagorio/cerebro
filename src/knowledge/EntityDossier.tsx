@@ -1,7 +1,10 @@
 import { useMemo } from 'react';
 import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
-import { Button } from '@/components/ui/Button';
+import { askBaseAsk, distillAsk, sendAsk } from '@/agent/elements/decisionsAsks';
+import { Suggestion, Suggestions } from '@/components/ai/Suggestion';
 import { Icon } from '@/components/ui/Icon';
+import { InspectorSubhead } from '@/detail/InspectorParts';
+import { formatDate } from '@/engine/dates';
 import { buildDossier, isEmptyDossier, type Unsettled } from '@/engine/dossier';
 import { listConcepts, recheckDue, type Concept } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
@@ -10,13 +13,6 @@ import { FacetLines } from '@/knowledge/FacetChips';
 import { ReviewChip } from '@/knowledge/ReviewChip';
 import { chipsFor, useBeliefChips } from '@/knowledge/useBeliefChips';
 import type { BeliefChips } from '@/lib/ipc';
-import {
-  ASK_BASE_LABEL,
-  askBasePrompt,
-  askedAbout,
-  DISTILL_LABEL,
-  distillPrompt,
-} from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
 import { useOpenPath } from '@/app/useOpenPath';
@@ -38,21 +34,71 @@ import { useVaultStore } from '@/stores/vaultStore';
  */
 
 // Inset like the rows beneath it (M52.3): flush left, the sub-labels read as
-// siblings of the groups they sit inside.
+// siblings of the groups they sit inside. Embedded, the inspector's subhead
+// says them instead (owner, 2026-10-18).
 const LABEL = 'px-2 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500';
+
+/** A group's label: the inspector's subhead embedded, the overline elsewhere. */
+function GroupLabel({ label, embedded }: { label: string; embedded: boolean }) {
+  return embedded ? <InspectorSubhead label={label} /> : <div className={LABEL}>{label}</div>;
+}
+
+/** Embedded rows: their text on the section's edge, their hover past it. */
+const ROWS = '-mx-2 flex flex-col gap-px';
 
 function ConceptRow({
   concept,
   chips = null,
   retired = false,
+  embedded = false,
   onOpen,
 }: {
   concept: Concept;
   /** The three axes for this concept's belief, when anybody derived them. */
   chips?: BeliefChips | null;
   retired?: boolean;
+  /** One group of a page's Knowledge: a row in the inspector's voice. */
+  embedded?: boolean;
   onOpen: (path: string) => void;
 }) {
+  // M52.3 — the Concepts list's rule: only the review states worth reading.
+  // "Unreviewed" on every row was a tag on none.
+  const review = !retired && concept.review !== 'unreviewed' && (
+    <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
+  );
+  if (embedded) {
+    // One line in the inspector's voice (owner, 2026-10-18): a glyph, the
+    // title, and a review worth reading as its own glyph; the summary is the
+    // row's tooltip, so a narrow panel never shortens the name for it.
+    return (
+      <button
+        type="button"
+        data-testid="dossier-concept"
+        data-path={concept.entry.path}
+        data-retired={retired ? 'true' : 'false'}
+        title={concept.description ?? undefined}
+        onClick={() => onOpen(concept.entry.path)}
+        className="flex w-full min-w-0 flex-col rounded-md bg-transparent px-2 text-left hover:bg-n-50"
+      >
+        <span className="flex h-7 w-full min-w-0 items-center gap-2">
+          <Icon name="lightbulb" size={14} color="var(--n-400)" />
+          <span
+            className={`min-w-0 flex-1 truncate text-ui ${
+              retired ? 'text-n-400 line-through' : 'text-n-800'
+            }`}
+          >
+            {concept.title}
+          </span>
+          {!retired && concept.review !== 'unreviewed' && (
+            <ReviewChip status={concept.review} by={concept.reviewedBy} size="glyph" />
+          )}
+        </span>
+        {/* A retired row says one thing — that it was replaced or
+            deprecated — so the axes stay on the rows still standing. */}
+        {!retired && <FacetLines chips={chips} />}
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -78,35 +124,48 @@ function ConceptRow({
             a reader is here for, so they stay on the rows still standing. */}
         {!retired && <FacetLines chips={chips} />}
       </span>
-      {/* M52.3 — the Concepts list's rule: only the review states worth
-          reading. "Unreviewed" on every row was a tag on none. */}
-      {!retired && concept.review !== 'unreviewed' && (
-        <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
-      )}
+      {review}
     </button>
   );
 }
 
-function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string) => void }) {
+function UnsettledRow({
+  item,
+  embedded,
+  onOpen,
+}: {
+  item: Unsettled;
+  embedded: boolean;
+  onOpen: (path: string) => void;
+}) {
   // A horizon that is no date is stale all the same (M52.4) — said as such,
-  // never printed as one.
+  // never printed as one. A date is said as the page's footer says one.
   const due = recheckDue(item.concept);
+  // Embedded, the sentence is the panel's text and a concept's name is its
+  // ink, not a link's blue: the panel's rows open things without one.
+  const link = embedded
+    ? 'bg-transparent p-0 font-medium text-n-800 decoration-n-300 underline-offset-2 hover:underline'
+    : 'border-0 bg-transparent p-0 text-xs text-cortex-600 hover:underline';
   return (
-    <li className="flex items-start gap-2 px-2 py-1">
-      <span className="mt-[3px] flex-none text-warn-600">
+    <li className={`flex items-start gap-2 py-1 ${embedded ? '' : 'px-2'}`}>
+      <span className={`flex-none text-warn-600 ${embedded ? 'mt-0.5 flex' : 'mt-[3px]'}`}>
         <Icon
           name={item.reason === 'contradicts' ? 'git-compare-arrows' : 'clock-alert'}
-          size={12}
+          size={embedded ? 14 : 12}
         />
       </span>
-      <span className="min-w-0 flex-1 text-xs leading-[17px] text-n-700">
+      <span
+        className={`min-w-0 flex-1 ${
+          embedded ? 'text-ui text-n-600' : 'text-xs leading-[17px] text-n-700'
+        }`}
+      >
         {item.reason === 'contradicts' ? (
           <>
             <button
               type="button"
               data-testid="dossier-unsettled-link"
               onClick={() => onOpen(item.concept.entry.path)}
-              className="border-0 bg-transparent p-0 text-xs text-cortex-600 hover:underline"
+              className={link}
             >
               {item.concept.title}
             </button>{' '}
@@ -115,7 +174,7 @@ function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string
               type="button"
               data-testid="dossier-unsettled-link"
               onClick={() => item.other !== null && onOpen(item.other.entry.path)}
-              className="border-0 bg-transparent p-0 text-xs text-cortex-600 hover:underline"
+              className={link}
             >
               {item.other?.title ?? 'another concept'}
             </button>
@@ -127,13 +186,18 @@ function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string
               type="button"
               data-testid="dossier-unsettled-link"
               onClick={() => onOpen(item.concept.entry.path)}
-              className="border-0 bg-transparent p-0 text-xs text-cortex-600 hover:underline"
+              className={link}
             >
               {item.concept.title}
             </button>{' '}
-            {due === null
-              ? "is due a recheck — its recheck date can't be read."
-              : `was due a recheck on ${due}.`}
+            {due === null ? (
+              "is due a recheck — its recheck date can't be read."
+            ) : (
+              <>
+                was due a recheck on{' '}
+                <span className="whitespace-nowrap">{formatDate(due, 'short', due)}</span>.
+              </>
+            )}
           </>
         )}
       </span>
@@ -178,27 +242,14 @@ export function EntityDossier({
     navigate({ kind: 'doc', path });
   };
 
-  const ask = () => {
-    // The entity travels WITH the prompt (M17.6) — it becomes a context
-    // chip, so the agent reads this record rather than whatever surface the
-    // user happened to be standing on when they clicked.
-    askAgent(
-      distillPrompt(entry.path, entry.title),
-      entry.path,
-      askedAbout(DISTILL_LABEL, entry.title),
-    );
-  };
-
-  // The same question the list below already answers, handed to the assistant
+  // The entity travels WITH each ask (M17.6) — it becomes a context chip, so
+  // the agent reads this record rather than whatever surface the user
+  // happened to be standing on when they clicked. Asking the base is the
+  // same question the list below already answers, handed to the assistant
   // so it can follow the threads this section only names (M33a.5) — it calls
   // `knowledge_about`, which resolves by anchor rather than by keyword.
-  const askBase = () => {
-    askAgent(
-      askBasePrompt(entry.path, entry.title),
-      entry.path,
-      askedAbout(ASK_BASE_LABEL, entry.title),
-    );
-  };
+  const askBase = askBaseAsk(entry);
+  const distill = distillAsk(entry);
 
   const since = relativeDay(dossier.firstLearned, today);
   const latest = relativeDay(dossier.lastLearned, today);
@@ -235,12 +286,13 @@ export function EntityDossier({
         )
       ) : (
         <>
-          <ul className={`m-0 flex list-none flex-col gap-px p-0 ${embedded ? '' : 'mt-2'}`}>
+          <ul className={embedded ? ROWS : 'm-0 mt-2 flex list-none flex-col gap-px p-0'}>
             {dossier.current.map((concept) => (
               <li key={concept.entry.path}>
                 <ConceptRow
                   concept={concept}
                   chips={chipsFor(chipIndex, concept.entry.path)}
+                  embedded={embedded}
                   onOpen={openConcept}
                 />
               </li>
@@ -248,13 +300,14 @@ export function EntityDossier({
           </ul>
 
           {dossier.unsettled.length > 0 && (
-            <div className="mt-4" data-testid="dossier-unsettled">
-              <div className={LABEL}>Unsettled</div>
-              <ul className="m-0 mt-1 flex list-none flex-col p-0">
+            <div className={embedded ? 'mt-3.5' : 'mt-4'} data-testid="dossier-unsettled">
+              <GroupLabel label="Unsettled" embedded={embedded} />
+              <ul className={embedded ? 'flex flex-col' : 'm-0 mt-1 flex list-none flex-col p-0'}>
                 {dossier.unsettled.map((item) => (
                   <UnsettledRow
                     key={`${item.reason}:${item.concept.entry.path}`}
                     item={item}
+                    embedded={embedded}
                     onOpen={openConcept}
                   />
                 ))}
@@ -263,9 +316,9 @@ export function EntityDossier({
           )}
 
           {dossier.readFrom.length > 0 && (
-            <div className="mt-4" data-testid="dossier-sources">
-              <div className={LABEL}>Read from</div>
-              <ul className="m-0 mt-1 flex list-none flex-col gap-px p-0">
+            <div className={embedded ? 'mt-3.5' : 'mt-4'} data-testid="dossier-sources">
+              <GroupLabel label="Read from" embedded={embedded} />
+              <ul className={embedded ? ROWS : 'm-0 mt-1 flex list-none flex-col gap-px p-0'}>
                 {dossier.readFrom.map((source) => (
                   <li key={source.resource}>
                     <button
@@ -273,14 +326,27 @@ export function EntityDossier({
                       data-testid="dossier-source"
                       data-path={source.resource}
                       onClick={() => openPath(source.resource)}
-                      className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1 text-left hover:bg-n-50"
+                      className={
+                        embedded
+                          ? 'flex w-full min-w-0 items-center gap-2 rounded-md bg-transparent px-2 py-[5px] text-left text-ui hover:bg-n-50'
+                          : 'flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1 text-left hover:bg-n-50'
+                      }
                     >
-                      <Icon name="file-text" size={12} color="var(--n-400)" />
-                      <span className="min-w-0 flex-1 truncate text-xs text-n-700">
+                      <Icon name="file-text" size={embedded ? 14 : 12} color="var(--n-400)" />
+                      <span
+                        className={`min-w-0 flex-1 truncate ${embedded ? 'text-n-800' : 'text-xs text-n-700'}`}
+                      >
                         {source.title ?? source.resource}
                       </span>
                       {source.citedBy > 1 && (
-                        <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
+                        <span
+                          title={`Cited by ${source.citedBy} concepts`}
+                          className={
+                            embedded
+                              ? 'flex-none text-xs text-n-400 tabular-nums'
+                              : 'flex-none [font-family:var(--font-mono)] text-2xs text-n-400'
+                          }
+                        >
                           ×{source.citedBy}
                         </span>
                       )}
@@ -292,12 +358,17 @@ export function EntityDossier({
           )}
 
           {dossier.retired.length > 0 && (
-            <div className="mt-4" data-testid="dossier-retired">
-              <div className={LABEL}>Replaced or deprecated</div>
-              <ul className="m-0 mt-1 flex list-none flex-col gap-px p-0">
+            <div className={embedded ? 'mt-3.5' : 'mt-4'} data-testid="dossier-retired">
+              <GroupLabel label="Replaced or deprecated" embedded={embedded} />
+              <ul className={embedded ? ROWS : 'm-0 mt-1 flex list-none flex-col gap-px p-0'}>
                 {dossier.retired.map((concept) => (
                   <li key={concept.entry.path}>
-                    <ConceptRow concept={concept} retired onOpen={openConcept} />
+                    <ConceptRow
+                      concept={concept}
+                      retired
+                      embedded={embedded}
+                      onOpen={openConcept}
+                    />
                   </li>
                 ))}
               </ul>
@@ -312,20 +383,20 @@ export function EntityDossier({
           to ask it anything: they got "read this page into the base" and not
           "what do you know that bears on it". Two different acts — one
           writes, one only reads. Embedded in a page's Knowledge (M52.3) the
-          host's one action row carries both, so they are drawn only when the
-          dossier stands alone.
+          host's asks carry both, so they are drawn only when the dossier
+          stands alone.
 
           Still passive, and deliberately still last on the section. Nothing
           here speaks first (M8.1); a person scrolls to it and presses. */}
       {!embedded && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button variant="secondary" size="sm" icon="sparkles" onClick={askBase}>
-            {ASK_BASE_LABEL}
-          </Button>
-          <Button variant="secondary" size="sm" icon="sparkles" onClick={ask}>
-            {DISTILL_LABEL}
-          </Button>
-        </div>
+        <Suggestions aria-label="Ask Knowledge" className="mt-3">
+          <Suggestion suggestion={askBase.prompt} onClick={sendAsk(askBase, askAgent)}>
+            {askBase.label}
+          </Suggestion>
+          <Suggestion suggestion={distill.prompt} onClick={sendAsk(distill, askAgent)}>
+            {distill.label}
+          </Suggestion>
+        </Suggestions>
       )}
     </section>
   );

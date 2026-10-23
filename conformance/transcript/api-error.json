@@ -46,7 +46,8 @@
     "events": [
       {
         "kind": "UserPrompt",
-        "text": "What changed in the vault this week?"
+        "text": "What changed in the vault this week?",
+        "uuid": "00000000-0000-4000-8000-000000000310"
       },
       {
         "kind": "Error",
@@ -96,7 +97,8 @@
           }
         },
         {
-          "kind": "TurnEnded"
+          "kind": "TurnEnded",
+          "last_uuid": null
         }
       ]
     }

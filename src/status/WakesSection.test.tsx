@@ -119,10 +119,11 @@ describe('WakesSection', () => {
     );
   });
 
-  it('renders nothing while the read is out', () => {
+  it('identifies the unfinished read without claiming that nothing waits', () => {
     vi.spyOn(ipc, 'fleetWakes').mockImplementation(() => new Promise(() => undefined));
-    const { container } = render(<WakesSection vaultPath={VAULT} />);
-    expect(container.innerHTML).toBe('');
+    render(<WakesSection vaultPath={VAULT} />);
+    expect(screen.getByRole('status').textContent).toBe('Reading waiting work…');
+    expect(screen.queryByTestId('agent-wakes-empty')).toBeNull();
   });
 
   it('a failed read says it could not tell, never that nothing waits', async () => {
@@ -269,6 +270,57 @@ describe('WakesSection', () => {
     expect(gone.tagName).toBe('SPAN');
     expect(gone.getAttribute('data-gone')).toBe('true');
     expect(gone.textContent).toBe('records/risks/gone.md');
+  });
+
+  it('queues what waits apart from what ended, each section headed with its count (M91.14)', async () => {
+    __seedWakes([
+      pending(),
+      pending({ admittedAt: ago(MINUTE) }),
+      pending({ outcome: 'skipped', reason: 'cycle', finishedAt: ago(2 * MINUTE) }),
+      pending({
+        admittedAt: ago(8 * 24 * 60 * MINUTE),
+        finishedAt: ago(60 * MINUTE),
+        outcome: 'cancelled',
+        reason: 'expired',
+      }),
+    ]);
+    const { container } = render(<WakesSection vaultPath={VAULT} />);
+    await screen.findAllByTestId('agent-wake');
+    const group = (name: string) => container.querySelector<HTMLElement>(`[data-group="${name}"]`)!;
+    expect(within(group('waiting')).getByRole('heading', { level: 3 }).textContent).toBe(
+      '2 waiting',
+    );
+    expect(within(group('ended')).getByRole('heading', { level: 3 }).textContent).toBe(
+      '2 skipped or expired this week',
+    );
+    expect(
+      within(group('waiting'))
+        .getAllByTestId('agent-wake')
+        .map((row) => row.getAttribute('data-state')),
+    ).toEqual(['pending', 'pending']);
+    expect(
+      within(group('ended'))
+        .getAllByTestId('agent-wake')
+        .map((row) => row.getAttribute('data-state')),
+    ).toEqual(['skipped', 'expired']);
+  });
+
+  it('says each wake’s state in a word before its agent, never inside its own words', async () => {
+    __seedWakes([
+      pending(),
+      pending({ outcome: 'skipped', reason: 'cycle', finishedAt: ago(2 * MINUTE) }),
+      pending({ finishedAt: ago(60 * MINUTE), outcome: 'cancelled', reason: 'expired' }),
+    ]);
+    render(<WakesSection vaultPath={VAULT} />);
+    await screen.findAllByTestId('agent-wake');
+    expect(rows().map((row) => row.textContent?.match(/^(\w+): Release scout/)?.[1])).toEqual([
+      'Waiting',
+      'Skipped',
+      'Expired',
+    ]);
+    for (const words of screen.getAllByTestId('agent-wake-words')) {
+      expect(words.querySelector('.sr-only')).toBeNull();
+    }
   });
 
   it('on an agent page lists only that agent’s wakes', async () => {

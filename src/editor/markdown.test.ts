@@ -1581,6 +1581,13 @@ describe('every toolbar and block-menu action survives a save or is not offered'
     addCommentButton: 'renders only with a comments extension, and the editor has none',
     addTiptapCommentButton: 'renders only with a comments extension, and the editor has none',
     removeBlockItem: 'removes the block',
+    turnIntoItem:
+      'converts inline content to a supported text block; blockActions.test.ts retains nesting and marks',
+    duplicateBlockItem:
+      'copies supported subtrees with new editor IDs; blockActions.test.ts reopens the result',
+    moveBlockUpItem: 'moves a subtree unchanged; blockActions.test.ts verifies undo and roundtrip',
+    moveBlockDownItem:
+      'moves a subtree unchanged; blockActions.test.ts verifies undo and roundtrip',
   };
 
   /** What each action in UNCARRIED_ACTIONS does to a page, all of it lost by a save. */
@@ -1643,6 +1650,10 @@ describe('every toolbar and block-menu action survives a save or is not offered'
 
   const TOOLBAR = getFormattingToolbarItems().map((item) => String(item.key));
   const BLOCK_MENU = [
+    'turnIntoItem',
+    'duplicateBlockItem',
+    'moveBlockUpItem',
+    'moveBlockDownItem',
     'removeBlockItem',
     'blockColorsItem',
     'tableRowHeaderItem',
@@ -1662,7 +1673,13 @@ describe('every toolbar and block-menu action survives a save or is not offered'
     const toolbar = formattingToolbarItems().map((item) => String(item.key));
     const menu = blockMenuItems(en).map((item) => String(item.key));
     expect(toolbar.filter((key) => key in UNCARRIED_ACTIONS)).toEqual([]);
-    expect(menu).toEqual(['removeBlockItem']);
+    expect(menu).toEqual([
+      'turnIntoItem',
+      'duplicateBlockItem',
+      'moveBlockUpItem',
+      'moveBlockDownItem',
+      'removeBlockItem',
+    ]);
     expect(toolbar).toEqual(TOOLBAR.filter((key) => !(key in UNCARRIED_ACTIONS)));
   });
 

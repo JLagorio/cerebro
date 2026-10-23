@@ -1,0 +1,960 @@
+{
+  "review_date": "2026-10-23",
+  "captured_at_utc": "2026-10-23T14:35:25.776423+00:00",
+  "scope": "Milestone naming, document organization, M91/M92 handoff and reference validation only. Original source-observation provenance remains below unchanged.",
+  "documents": {
+    "markdown_count": 21,
+    "specs": 8,
+    "plans": 8,
+    "research_documents": 5,
+    "word_count": 49739,
+    "paths": [
+      "docs/superpowers/plans/2026-10-23-m93-m99-master-roadmap.md",
+      "docs/superpowers/plans/2026-10-23-m93-reliable-workspace.md",
+      "docs/superpowers/plans/2026-10-23-m94-ui-polish-and-journeys.md",
+      "docs/superpowers/plans/2026-10-23-m95-chat-and-supervised-agents.md",
+      "docs/superpowers/plans/2026-10-23-m96-connectors-mcp-and-actions.md",
+      "docs/superpowers/plans/2026-10-23-m97-knowledge-evidence-and-evaluation.md",
+      "docs/superpowers/plans/2026-10-23-m98-workflows-and-automation.md",
+      "docs/superpowers/plans/2026-10-23-m99-rust-services-and-storage.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-program-design.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/README.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/decisions.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/evidence.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/review-record.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/traceability.md",
+      "docs/superpowers/specs/2026-10-23-m93-reliable-workspace-design.md",
+      "docs/superpowers/specs/2026-10-23-m94-ui-polish-and-journeys-design.md",
+      "docs/superpowers/specs/2026-10-23-m95-chat-and-supervised-agents-design.md",
+      "docs/superpowers/specs/2026-10-23-m96-connectors-mcp-and-actions-design.md",
+      "docs/superpowers/specs/2026-10-23-m97-knowledge-evidence-and-evaluation-design.md",
+      "docs/superpowers/specs/2026-10-23-m98-workflows-and-automation-design.md",
+      "docs/superpowers/specs/2026-10-23-m99-rust-services-and-storage-design.md"
+    ]
+  },
+  "coverage": {
+    "ranked_findings": 78,
+    "prior_packages": 34,
+    "ui_review_ids": 31,
+    "requirements": {
+      "REL": [
+        "REL-01",
+        "REL-02",
+        "REL-03",
+        "REL-04",
+        "REL-05",
+        "REL-06",
+        "REL-07",
+        "REL-08",
+        "REL-09",
+        "REL-10",
+        "REL-11",
+        "REL-12",
+        "REL-13"
+      ],
+      "UX": [
+        "UX-01",
+        "UX-02",
+        "UX-03",
+        "UX-04",
+        "UX-05",
+        "UX-06",
+        "UX-07",
+        "UX-08",
+        "UX-09",
+        "UX-10"
+      ],
+      "CHAT": [
+        "CHAT-01",
+        "CHAT-02",
+        "CHAT-03",
+        "CHAT-04",
+        "CHAT-05",
+        "CHAT-06",
+        "CHAT-07",
+        "CHAT-08",
+        "CHAT-09"
+      ],
+      "ACT": [
+        "ACT-01",
+        "ACT-02",
+        "ACT-03",
+        "ACT-04",
+        "ACT-05",
+        "ACT-06",
+        "ACT-07",
+        "ACT-08",
+        "ACT-09",
+        "ACT-10"
+      ],
+      "KNOW": [
+        "KNOW-01",
+        "KNOW-02",
+        "KNOW-03",
+        "KNOW-04",
+        "KNOW-05",
+        "KNOW-06",
+        "KNOW-07",
+        "KNOW-08",
+        "KNOW-09",
+        "KNOW-10",
+        "KNOW-11"
+      ],
+      "FLOW": [
+        "FLOW-01",
+        "FLOW-02",
+        "FLOW-03",
+        "FLOW-04",
+        "FLOW-05",
+        "FLOW-06",
+        "FLOW-07",
+        "FLOW-08",
+        "FLOW-09",
+        "FLOW-10"
+      ],
+      "CORE": [
+        "CORE-01",
+        "CORE-02",
+        "CORE-03",
+        "CORE-04",
+        "CORE-05",
+        "CORE-06",
+        "CORE-07",
+        "CORE-08",
+        "CORE-09",
+        "CORE-10",
+        "CORE-11",
+        "CORE-12"
+      ]
+    },
+    "milestone_phases": {
+      "M93": [
+        "M93.1",
+        "M93.2",
+        "M93.3",
+        "M93.4",
+        "M93.5",
+        "M93.6",
+        "M93.7",
+        "M93.8",
+        "M93.9",
+        "M93.10",
+        "M93.11"
+      ],
+      "M94": ["M94.1", "M94.2", "M94.3", "M94.4", "M94.5", "M94.6", "M94.7", "M94.8", "M94.9"],
+      "M95": ["M95.1", "M95.2", "M95.3", "M95.4", "M95.5", "M95.6", "M95.7"],
+      "M96": ["M96.1", "M96.2", "M96.3", "M96.4", "M96.5", "M96.6", "M96.7", "M96.8"],
+      "M97": ["M97.1", "M97.2", "M97.3", "M97.4", "M97.5", "M97.6", "M97.7", "M97.8"],
+      "M98": ["M98.1", "M98.2", "M98.3", "M98.4", "M98.5", "M98.6", "M98.7", "M98.8", "M98.9"],
+      "M99": ["M99.1", "M99.2", "M99.3", "M99.4", "M99.5", "M99.6", "M99.7", "M99.8"]
+    },
+    "coordination_checklists": 6
+  },
+  "naming_checkpoint": {
+    "renamed_paths": {
+      "docs/superpowers/plans/2026-10-23-cerebro-reliability-plan.md": "docs/superpowers/plans/2026-10-23-m93-reliable-workspace.md",
+      "docs/superpowers/specs/2026-10-23-cerebro-reliability-design.md": "docs/superpowers/specs/2026-10-23-m93-reliable-workspace-design.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-ui-plan.md": "docs/superpowers/plans/2026-10-23-m94-ui-polish-and-journeys.md",
+      "docs/superpowers/specs/2026-10-23-cerebro-ui-design.md": "docs/superpowers/specs/2026-10-23-m94-ui-polish-and-journeys-design.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-chat-agents-plan.md": "docs/superpowers/plans/2026-10-23-m95-chat-and-supervised-agents.md",
+      "docs/superpowers/specs/2026-10-23-cerebro-chat-agents-design.md": "docs/superpowers/specs/2026-10-23-m95-chat-and-supervised-agents-design.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-connected-actions-plan.md": "docs/superpowers/plans/2026-10-23-m96-connectors-mcp-and-actions.md",
+      "docs/superpowers/specs/2026-10-23-cerebro-connected-actions-design.md": "docs/superpowers/specs/2026-10-23-m96-connectors-mcp-and-actions-design.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-knowledge-plan.md": "docs/superpowers/plans/2026-10-23-m97-knowledge-evidence-and-evaluation.md",
+      "docs/superpowers/specs/2026-10-23-cerebro-knowledge-design.md": "docs/superpowers/specs/2026-10-23-m97-knowledge-evidence-and-evaluation-design.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-workflows-plan.md": "docs/superpowers/plans/2026-10-23-m98-workflows-and-automation.md",
+      "docs/superpowers/specs/2026-10-23-cerebro-workflows-design.md": "docs/superpowers/specs/2026-10-23-m98-workflows-and-automation-design.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-rust-storage-plan.md": "docs/superpowers/plans/2026-10-23-m99-rust-services-and-storage.md",
+      "docs/superpowers/specs/2026-10-23-cerebro-rust-storage-design.md": "docs/superpowers/specs/2026-10-23-m99-rust-services-and-storage-design.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-research-program-plan.md": "docs/superpowers/plans/2026-10-23-m93-m99-master-roadmap.md",
+      "docs/superpowers/specs/2026-10-23-cerebro-research-program-design.md": "docs/superpowers/specs/2026-10-23-m93-m99-program-design.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-program-review/source-manifest.json": "docs/superpowers/specs/2026-10-23-m93-m99-research/source-manifest.json",
+      "docs/superpowers/plans/2026-10-23-cerebro-program-review/evidence.md": "docs/superpowers/specs/2026-10-23-m93-m99-research/evidence.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-program-review/review-record.md": "docs/superpowers/specs/2026-10-23-m93-m99-research/review-record.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-program-review/traceability.md": "docs/superpowers/specs/2026-10-23-m93-m99-research/traceability.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-program-review/README.md": "docs/superpowers/specs/2026-10-23-m93-m99-research/README.md",
+      "docs/superpowers/plans/2026-10-23-cerebro-program-review/decisions.md": "docs/superpowers/specs/2026-10-23-m93-m99-research/decisions.md"
+    },
+    "historical_task_aliases": {
+      "REL-T01": "M93.1",
+      "REL-T02": "M93.2",
+      "REL-T03": "M93.3",
+      "REL-T04": "M93.4",
+      "REL-T05": "M93.5",
+      "REL-T06": "M93.6",
+      "REL-T07": "M93.7",
+      "REL-T08": "M93.8",
+      "REL-T09": "M93.9",
+      "REL-T10": "M93.10",
+      "REL-T11": "M93.11",
+      "UX-T01": "M94.1",
+      "UX-T02": "M94.2",
+      "UX-T03": "M94.3",
+      "UX-T04": "M94.4",
+      "UX-T05": "M94.5",
+      "UX-T06": "M94.6",
+      "UX-T07": "M94.7",
+      "UX-T08": "M94.8",
+      "UX-T09": "M94.9",
+      "CHAT-T01": "M95.1",
+      "CHAT-T02": "M95.2",
+      "CHAT-T03": "M95.3",
+      "CHAT-T04": "M95.4",
+      "CHAT-T05": "M95.5",
+      "CHAT-T06": "M95.6",
+      "CHAT-T07": "M95.7",
+      "ACT-T01": "M96.1",
+      "ACT-T02": "M96.2",
+      "ACT-T03": "M96.3",
+      "ACT-T04": "M96.4",
+      "ACT-T05": "M96.5",
+      "ACT-T06": "M96.6",
+      "ACT-T07": "M96.7",
+      "ACT-T08": "M96.8",
+      "KNOW-T01": "M97.1",
+      "KNOW-T02": "M97.2",
+      "KNOW-T03": "M97.3",
+      "KNOW-T04": "M97.4",
+      "KNOW-T05": "M97.5",
+      "KNOW-T06": "M97.6",
+      "KNOW-T07": "M97.7",
+      "KNOW-T08": "M97.8",
+      "FLOW-T01": "M98.1",
+      "FLOW-T02": "M98.2",
+      "FLOW-T03": "M98.3",
+      "FLOW-T04": "M98.4",
+      "FLOW-T05": "M98.5",
+      "FLOW-T06": "M98.6",
+      "FLOW-T07": "M98.7",
+      "FLOW-T08": "M98.8",
+      "FLOW-T09": "M98.9",
+      "CORE-T01": "M99.1",
+      "CORE-T02": "M99.2",
+      "CORE-T03": "M99.3",
+      "CORE-T04": "M99.4",
+      "CORE-T05": "M99.5",
+      "CORE-T06": "M99.6",
+      "CORE-T07": "M99.7",
+      "CORE-T08": "M99.8"
+    },
+    "validation": {
+      "local_links_checked": 280,
+      "markdown_anchors_checked": 2,
+      "missing_links": [],
+      "structure_errors": [],
+      "application_suites_executed": false
+    },
+    "preservation": {
+      "starting_paths_checked": 3259,
+      "expected_reorganized_paths": 22,
+      "observed_concurrent_changes_outside_packet": [],
+      "observed_new_paths_outside_packet": [],
+      "write_scope": "Only the 22 renamed documentation files, including their content and manifest. No staging, commit or application edit performed by this correction."
+    },
+    "document_sha256": {
+      "docs/superpowers/plans/2026-10-23-m93-reliable-workspace.md": "a0f0b819bea72c4ba9af3253bdcf2ceb0b1aae38b4062d95f29708990081dcb6",
+      "docs/superpowers/specs/2026-10-23-m93-reliable-workspace-design.md": "360021aa5355557d223613b43de7ad05d79cd4e61c4079c04d8bc95769ba5181",
+      "docs/superpowers/plans/2026-10-23-m94-ui-polish-and-journeys.md": "675dfbafef9ebb268957d4960ce037b7b39b9314ebf4901617d441ea6b3301f9",
+      "docs/superpowers/specs/2026-10-23-m94-ui-polish-and-journeys-design.md": "68edbe5d93f64bbb4b1e98b5cdd3bb14c3186be9c3501e96bb9fd4280a58ad93",
+      "docs/superpowers/plans/2026-10-23-m95-chat-and-supervised-agents.md": "aa80d5aef8d15a9bfae819e2f1d21f6cc9a2443555d694032af64d281e534aba",
+      "docs/superpowers/specs/2026-10-23-m95-chat-and-supervised-agents-design.md": "99b7e8dbdd474d6f45ef59b91df78c751db8298b80dcd49d4074d849e68174f0",
+      "docs/superpowers/plans/2026-10-23-m96-connectors-mcp-and-actions.md": "622238859f0930f3f22eb2f430ccb6f9551a9c1e426cb724abba5964d61efb64",
+      "docs/superpowers/specs/2026-10-23-m96-connectors-mcp-and-actions-design.md": "f42e8bec27d39e7832ce409adc1a584c836d3528fa5aebecd654effd55950302",
+      "docs/superpowers/plans/2026-10-23-m97-knowledge-evidence-and-evaluation.md": "41a68facca6da4d060fb042209ff9fe0e5326e7f961ccadbad480e61a3a1fd50",
+      "docs/superpowers/specs/2026-10-23-m97-knowledge-evidence-and-evaluation-design.md": "9b1cad26044939b64c3bba311852ad7354d1027f3f17969b5ea48ffc9affc45e",
+      "docs/superpowers/plans/2026-10-23-m98-workflows-and-automation.md": "91760f23568b703922a37fe80cef4195fe8aceed69f83a6383127d9c7d2f73da",
+      "docs/superpowers/specs/2026-10-23-m98-workflows-and-automation-design.md": "1c05004b66b82020ecab38feb1f7e7b07a93f89c580a451215a03df971b2dc4f",
+      "docs/superpowers/plans/2026-10-23-m99-rust-services-and-storage.md": "6df6dd93d1234a335b2e22f9217847c3e2eabff10ca6a248f5c161a5ec3f4c5a",
+      "docs/superpowers/specs/2026-10-23-m99-rust-services-and-storage-design.md": "502ad4a3a4993f1030197c49f6e32189bd3c7f4d3536829c58653c771b66fe64",
+      "docs/superpowers/plans/2026-10-23-m93-m99-master-roadmap.md": "492b99a36370ce9d9af7f693e7d539523457d499ca7f85f1009f2ace9adc0592",
+      "docs/superpowers/specs/2026-10-23-m93-m99-program-design.md": "9e4952cffaddf41497f8308217c32659aec66d60a68446abc60cc006370e0462",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/evidence.md": "cf9990a361b15fa2cd284768d3f1f1c707c97414578c3a7f63be10fdd8d02cf1",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/review-record.md": "a5d26f1751852e6267bdaa8e1247db8eb1ead1c0977b7ecbf06ffd92abe3da78",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/traceability.md": "11e5b631e22dd6df18d266cef44991a8b4e415ebf061574c5b3a97dfb14bf6b9",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/README.md": "2f2548e668e8a84e4d8d8c81325f42b6d56c63b3d3e8b8bcc17621a8ee80b9a5",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/decisions.md": "73188e159971ff845dd80e05aec2d6deb6b5ceef6859a95a55ddec79a496e498"
+    }
+  },
+  "original_drafting_checkpoint": {
+    "review_date": "2026-10-23",
+    "captured_at_utc": "2026-10-23T14:02:06.690073+00:00",
+    "cerebro_head": "23479518c2827d361c9c970abfac8245f9d84600",
+    "scope": "Directly linked local sources and named integration seams; final checkpoint, not an atomic snapshot of every reviewer observation. Historical packets unchanged. Reference upstream identity remains as qualified in original dossiers.",
+    "documents": {
+      "markdown_count": 21,
+      "specs": 8,
+      "plans": 8,
+      "review_documents": 5,
+      "word_count": 47702,
+      "paths": [
+        "docs/superpowers/specs/2026-10-23-cerebro-chat-agents-design.md",
+        "docs/superpowers/specs/2026-10-23-cerebro-connected-actions-design.md",
+        "docs/superpowers/specs/2026-10-23-cerebro-knowledge-design.md",
+        "docs/superpowers/specs/2026-10-23-cerebro-reliability-design.md",
+        "docs/superpowers/specs/2026-10-23-cerebro-research-program-design.md",
+        "docs/superpowers/specs/2026-10-23-cerebro-rust-storage-design.md",
+        "docs/superpowers/specs/2026-10-23-cerebro-ui-design.md",
+        "docs/superpowers/specs/2026-10-23-cerebro-workflows-design.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-chat-agents-plan.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-connected-actions-plan.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-knowledge-plan.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-reliability-plan.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-research-program-plan.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-rust-storage-plan.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-ui-plan.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-workflows-plan.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-program-review/README.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-program-review/decisions.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-program-review/evidence.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-program-review/review-record.md",
+        "docs/superpowers/plans/2026-10-23-cerebro-program-review/traceability.md"
+      ]
+    },
+    "coverage": {
+      "ranked_findings": 78,
+      "prior_packages": 34,
+      "ui_review_ids": 31,
+      "requirements": {
+        "REL": [
+          "REL-01",
+          "REL-02",
+          "REL-03",
+          "REL-04",
+          "REL-05",
+          "REL-06",
+          "REL-07",
+          "REL-08",
+          "REL-09",
+          "REL-10",
+          "REL-11",
+          "REL-12",
+          "REL-13"
+        ],
+        "CHAT": [
+          "CHAT-01",
+          "CHAT-02",
+          "CHAT-03",
+          "CHAT-04",
+          "CHAT-05",
+          "CHAT-06",
+          "CHAT-07",
+          "CHAT-08",
+          "CHAT-09"
+        ],
+        "ACT": [
+          "ACT-01",
+          "ACT-02",
+          "ACT-03",
+          "ACT-04",
+          "ACT-05",
+          "ACT-06",
+          "ACT-07",
+          "ACT-08",
+          "ACT-09",
+          "ACT-10"
+        ],
+        "FLOW": [
+          "FLOW-01",
+          "FLOW-02",
+          "FLOW-03",
+          "FLOW-04",
+          "FLOW-05",
+          "FLOW-06",
+          "FLOW-07",
+          "FLOW-08",
+          "FLOW-09",
+          "FLOW-10"
+        ],
+        "KNOW": [
+          "KNOW-01",
+          "KNOW-02",
+          "KNOW-03",
+          "KNOW-04",
+          "KNOW-05",
+          "KNOW-06",
+          "KNOW-07",
+          "KNOW-08",
+          "KNOW-09",
+          "KNOW-10",
+          "KNOW-11"
+        ],
+        "CORE": [
+          "CORE-01",
+          "CORE-02",
+          "CORE-03",
+          "CORE-04",
+          "CORE-05",
+          "CORE-06",
+          "CORE-07",
+          "CORE-08",
+          "CORE-09",
+          "CORE-10",
+          "CORE-11",
+          "CORE-12"
+        ],
+        "UX": [
+          "UX-01",
+          "UX-02",
+          "UX-03",
+          "UX-04",
+          "UX-05",
+          "UX-06",
+          "UX-07",
+          "UX-08",
+          "UX-09",
+          "UX-10"
+        ]
+      },
+      "subsystem_tasks": {
+        "REL": [
+          "REL-T01",
+          "REL-T02",
+          "REL-T03",
+          "REL-T04",
+          "REL-T05",
+          "REL-T06",
+          "REL-T07",
+          "REL-T08",
+          "REL-T09",
+          "REL-T10",
+          "REL-T11"
+        ],
+        "CHAT": [
+          "CHAT-T01",
+          "CHAT-T02",
+          "CHAT-T03",
+          "CHAT-T04",
+          "CHAT-T05",
+          "CHAT-T06",
+          "CHAT-T07"
+        ],
+        "ACT": [
+          "ACT-T01",
+          "ACT-T02",
+          "ACT-T03",
+          "ACT-T04",
+          "ACT-T05",
+          "ACT-T06",
+          "ACT-T07",
+          "ACT-T08"
+        ],
+        "FLOW": [
+          "FLOW-T01",
+          "FLOW-T02",
+          "FLOW-T03",
+          "FLOW-T04",
+          "FLOW-T05",
+          "FLOW-T06",
+          "FLOW-T07",
+          "FLOW-T08",
+          "FLOW-T09"
+        ],
+        "KNOW": [
+          "KNOW-T01",
+          "KNOW-T02",
+          "KNOW-T03",
+          "KNOW-T04",
+          "KNOW-T05",
+          "KNOW-T06",
+          "KNOW-T07",
+          "KNOW-T08"
+        ],
+        "CORE": [
+          "CORE-T01",
+          "CORE-T02",
+          "CORE-T03",
+          "CORE-T04",
+          "CORE-T05",
+          "CORE-T06",
+          "CORE-T07",
+          "CORE-T08"
+        ],
+        "UX": [
+          "UX-T01",
+          "UX-T02",
+          "UX-T03",
+          "UX-T04",
+          "UX-T05",
+          "UX-T06",
+          "UX-T07",
+          "UX-T08",
+          "UX-T09"
+        ]
+      },
+      "program_task_count": 6
+    },
+    "validation": {
+      "local_links_checked": 218,
+      "missing_links": [],
+      "structure_errors": [],
+      "mermaid_diagrams_parsed": 1,
+      "mermaid_environment": "JSDOM browser globals before dynamic Mermaid import; syntax parse only",
+      "external_links_listed_not_revalidated_by_this_script": [
+        "https://modelcontextprotocol.io/extensions/apps/overview",
+        "https://modelcontextprotocol.io/extensions/tasks/overview",
+        "https://modelcontextprotocol.io/specification/2026-07-28/changelog"
+      ],
+      "directory_links_checked": []
+    },
+    "preservation": {
+      "starting_paths_checked": 3235,
+      "changed_existing_paths": [
+        "e2e/m91-plan.spec.ts",
+        "src/agent/AiPanel.floating.test.tsx",
+        "src/agent/AiPanel.tsx",
+        "src/agent/RunOptionsPicker.test.tsx",
+        "src/agent/conversations.test.ts",
+        "src/agent/conversations.ts",
+        "src/agent/elements/panelPlan.test.ts",
+        "src/agent/elements/panelPlan.ts",
+        "src/agent/transcript.test.ts",
+        "src/agent/transcript.ts",
+        "src/agent/useAgentChat.test.tsx",
+        "src/agent/useAgentChat.ts",
+        "src/components/ai/ModelSelector.tsx",
+        "src/components/ai/StepLine.test.tsx",
+        "src/components/ai/StepLine.tsx",
+        "src/components/ai/trace-steps.css",
+        "src/components/ui/Popover.tsx",
+        "src/editor/AskAiPopover.tsx",
+        "src/status/RunTranscript.test.tsx",
+        "src/status/RunTranscript.tsx"
+      ],
+      "observed_concurrent_drift": [
+        {
+          "path": "e2e/m91-plan.spec.ts",
+          "start_sha256": "cb50a489503d02135bd34f61f413a169191038c204d02ff859e69bd5aa1cd542",
+          "final_sha256": "21f63f879db0113bcf71352538b0cb1cfdb43948d591f0cecdbb9a5ba12900cb"
+        },
+        {
+          "path": "src/agent/AiPanel.floating.test.tsx",
+          "start_sha256": "003f2743ecad984fa15fd9487bd6fd4c529c9fbed9c5c8681c30765177b66fe4",
+          "final_sha256": "c67c09d80ee71ee79f06e1cf548b0b65a5a3c24df16d593029b1bae9ab88e6d0"
+        },
+        {
+          "path": "src/agent/AiPanel.tsx",
+          "start_sha256": "c410d18a6bc2235a23b9c2d0ad0d25cf5c585dc23bccb0588c7208c3077b8dd5",
+          "final_sha256": "f4891155550c729e54440dbb2155d78172c801aecdf43094ab3e8a7b3841208f"
+        },
+        {
+          "path": "src/agent/RunOptionsPicker.test.tsx",
+          "start_sha256": "4c05d5fc106338dec25d9cd9e800861ddbd14617d1d0a35d0604c6999af980d2",
+          "final_sha256": "3b662e2ad6c0d9217314ef17458df91a2d04d252994a47c601c35231de9d9340"
+        },
+        {
+          "path": "src/agent/conversations.test.ts",
+          "start_sha256": "be14a3159e1e54272beadb9f98a430ee4895968319134b9b2d19e8671870f115",
+          "final_sha256": "711bdf3f322b4dc69835212608c1b5d968ce171bf26d829de6a18b063ca82e44"
+        },
+        {
+          "path": "src/agent/conversations.ts",
+          "start_sha256": "7c5e2b6dda8ccfca32ad1ad2740b28b21fd58ae3499712800e1aa56a1d0b5bc9",
+          "final_sha256": "730ed0c5e02622501264ff9395dbb9faed4c20429c1d1db9ee522e7254c77318"
+        },
+        {
+          "path": "src/agent/elements/panelPlan.test.ts",
+          "start_sha256": "4efe23f474b067176bac217f68b129fd459285726860b7e1eceb630e13ac454b",
+          "final_sha256": "93596e4304fb8ddf444ce0603cd3343bc57463394989b76f20903c0148898749"
+        },
+        {
+          "path": "src/agent/elements/panelPlan.ts",
+          "start_sha256": "01ae15a103d08198d35e92f84372897263b8666e3dc1e553614060609dc3b0b3",
+          "final_sha256": "412df347357e996b1ed5de054040fb6a9ec2a9d264038500af8b0ac1b6f77881"
+        },
+        {
+          "path": "src/agent/transcript.test.ts",
+          "start_sha256": "ea82d3d47a56a6cab7b803fc4c38326867f31479183c9dcde113ef7659ef17f4",
+          "final_sha256": "2dbb8694dc7482d3717d4908b3e143df7ec3a70d11a472e089990060da32466c"
+        },
+        {
+          "path": "src/agent/transcript.ts",
+          "start_sha256": "86a7073e2b7d25ebe8f5dfaeeca1b23c0c4370e84957a61a10596f17b698b3b0",
+          "final_sha256": "50b2e63c35a9e27647791a6abf2f2b330608121da6ffbb1d5232766fc3c13204"
+        },
+        {
+          "path": "src/agent/useAgentChat.test.tsx",
+          "start_sha256": "1223c77bb8a058eca7bf4a4688a7e5a8017b4371b3eb2e81289061de59b44082",
+          "final_sha256": "3950eb4e4a04c3c545f1b42c2161acff514f3994bd2b9c32368543065c1a6fc4"
+        },
+        {
+          "path": "src/agent/useAgentChat.ts",
+          "start_sha256": "34acfdc8b628f1ca6058c7e5049ab94e42efe8b9d8e7086ef0e86437f82f23d3",
+          "final_sha256": "439b2bfa33c2fb2495fbe1ceda9b97ca87084b294eb799b722b8d9699770b57e"
+        },
+        {
+          "path": "src/components/ai/ModelSelector.tsx",
+          "start_sha256": "3f893a636d42ca736228caa2c06cbc70091b439e1276e1bca1ce2a3f6e375651",
+          "final_sha256": "ee1974d9026b75b531620de9861b5b621085faa33426f9b54be0b17900333a8b"
+        },
+        {
+          "path": "src/components/ai/StepLine.test.tsx",
+          "start_sha256": "7eca2a066cb05395d9ecd1faa854af8a47ed3067e7ce5d907ed09c445234a3fe",
+          "final_sha256": "30137c0f487fb2aeef38ca1ddc47773b0219ef0540aee454092725d2f402be90"
+        },
+        {
+          "path": "src/components/ai/StepLine.tsx",
+          "start_sha256": "d2a7d2fb1cbf0c043e4949c6de3b5bacc5892d95b51e52d7dae40d406e326eca",
+          "final_sha256": "a89e2290a4bc72c3e38a320dfff716ef579c480de888f3e923a7127699b9badd"
+        },
+        {
+          "path": "src/components/ai/trace-steps.css",
+          "start_sha256": "f17be500eb269fe01649cafacd9eeab2ff96415f3c0c4cfb6f25a99e2b26df61",
+          "final_sha256": "2fe7f84444382e153ff451be1bb40fe8dc65b8dd12af4ef6a50d7164b6bc4624"
+        },
+        {
+          "path": "src/components/ui/Popover.tsx",
+          "start_sha256": "fea211dc965abfd0b8e4b2978fd1207dc3a60c570e939d4dc375f3ef67bc3f44",
+          "final_sha256": "fc417cfea1f1f16da2bb6625cfe2dc3970ce9f5cb8b99bc972c5a0d3b1613588"
+        },
+        {
+          "path": "src/editor/AskAiPopover.tsx",
+          "start_sha256": "de79213b5cc482d757ef8535025371ae9eb71c859e81771be703a76294ef9968",
+          "final_sha256": "0ff4ceb3bd5f3c35a1786dbd7a26b5ed9e6f0d95ef07f826aafd09918c76814c"
+        },
+        {
+          "path": "src/status/RunTranscript.test.tsx",
+          "start_sha256": "76fab9bd59592d802edd9800cdafd503dca78666d7818bb81cb1c941c9bc524a",
+          "final_sha256": "ba17378c1f7d91885a31b2af08988d604fad4ee02675400aeb517d8ede56b979"
+        },
+        {
+          "path": "src/status/RunTranscript.tsx",
+          "start_sha256": "2254d41043bbbb144738a554fe7f5f57d65d4ab74418d7554d457b027643e3e2",
+          "final_sha256": "b6dc1cecd7e0c18548759e722c914f89518679435f7bcb1b607603fbd36079fb"
+        }
+      ],
+      "additional_unreconciled_drift": [],
+      "new_non_documentation_paths": [],
+      "preexisting_content_unchanged": false,
+      "application_code_changed_by_review": false,
+      "review_write_scope": "New documentation only, confirmed by author/tool-operation audit; concurrent pre-existing source/test changes are preserved and recorded, not attributed to a particular outside author.",
+      "existing_git_staging_not_modified_by_review": true
+    },
+    "application_suites_browser_native_cli_provider_reference_apps_executed": false,
+    "sources": {
+      "AGENTS.md": {
+        "sha256": "2b5ab7a1b3e33419c5d0690cc7732993e60020683737ac6a1b1b05592d91353b",
+        "bytes": 74552
+      },
+      "docs/superpowers/plans/2026-10-22-ai-expansion-plan.md": {
+        "sha256": "a4ae25d619c3c87f50cc926342093949b17c54a47f3fde6d7d24ad8e36bc0d0a",
+        "bytes": 40711
+      },
+      "docs/superpowers/plans/2026-10-22-ai-expansion-review/README.md": {
+        "sha256": "2efa4d77148d888ea69161e2c124fcfc8c2721ef9729044c876069c35f331733",
+        "bytes": 7875
+      },
+      "docs/superpowers/plans/2026-10-22-ai-expansion-review/appflowy.md": {
+        "sha256": "0aa132884658e9654f52ac57e8ff56f8cb192739f446138b736094819fd7b8ff",
+        "bytes": 26928
+      },
+      "docs/superpowers/plans/2026-10-22-ai-expansion-review/chat-and-agent-experience.md": {
+        "sha256": "b6a7836c83a4d62f9254a718ecbf7e768681909283f812ce15e875907d5e9332",
+        "bytes": 21207
+      },
+      "docs/superpowers/plans/2026-10-22-ai-expansion-review/connectors-and-workflows.md": {
+        "sha256": "d00251de7c5abf8bf4a1ac022cf2f44ccd021c6392d9e7606168ade32fbe3d29",
+        "bytes": 30559
+      },
+      "docs/superpowers/plans/2026-10-22-ai-expansion-review/m91-current-state.md": {
+        "sha256": "5d4ed4db536729214fc295156d4d960e4e20d996523b2340e26bbb827a7e3875",
+        "bytes": 22040
+      },
+      "docs/superpowers/plans/2026-10-22-ai-expansion-review/n8n.md": {
+        "sha256": "657710c60a4b97bbc598bf220f602ddc062865a0f8e080845bbff06aa30c3bab",
+        "bytes": 35335
+      },
+      "docs/superpowers/plans/2026-10-22-ai-expansion-review/plane.md": {
+        "sha256": "757c1454e9757610f0957f09d390dc14eaf4028169bac999a43f2e261cf72b23",
+        "bytes": 24672
+      },
+      "docs/superpowers/plans/2026-10-22-ai-expansion-review/protocol-compatibility.md": {
+        "sha256": "6c757549a9f7827ef42e395868d38de5bdcd7e30f33df5c4782bb82d71298b2b",
+        "bytes": 8614
+      },
+      "docs/superpowers/plans/2026-10-22-ai-expansion-review/rust-and-storage.md": {
+        "sha256": "95d2e9e2419072a74e1818ba385fed2cd312037d106fb29c5a7cbaf75d305658",
+        "bytes": 31331
+      },
+      "docs/superpowers/plans/2026-10-22-m91-ai-elements-and-subagents.md": {
+        "sha256": "0478eb292e3930edc074c90feba8f7af3d69afc43cce5ae9b2689184999ebb44",
+        "bytes": 37337
+      },
+      "docs/superpowers/plans/2026-10-22-reference-review/README.md": {
+        "sha256": "df45f13df3e1aae2e87185930c652d02cb5cff2c883589861376ed5ca6f527c2",
+        "bytes": 17607
+      },
+      "docs/superpowers/plans/2026-10-22-reference-review/activepieces.md": {
+        "sha256": "09f833b99df1a341b7435846c9465b596980e0ebfa0daf09b56c23494420b87b",
+        "bytes": 25397
+      },
+      "docs/superpowers/plans/2026-10-22-reference-review/macro.md": {
+        "sha256": "f910f7c2445e816aac76b40c6b001a8de2bdfc7e7feca502c03fa8cf64e363c3",
+        "bytes": 27467
+      },
+      "docs/superpowers/plans/2026-10-22-reference-review/morrow.md": {
+        "sha256": "e12866675cac0bef3b957808f3a6cf2a5bd7b07cd86fc6481dfc2ce28a504f6d",
+        "bytes": 25229
+      },
+      "docs/superpowers/plans/2026-10-22-reference-review/thought-desk.md": {
+        "sha256": "73c8bc729f3d41cd90d91d8fa0365292b9d465d34951087cc348bfbffce0dea2",
+        "bytes": 24031
+      },
+      "docs/superpowers/plans/2026-10-22-reference-review/tolaria.md": {
+        "sha256": "2b9439288b178bedb5d68ac4eef0fefb04abca78eb3aecb4df17b2f35d31e309",
+        "bytes": 23524
+      },
+      "docs/superpowers/plans/2026-10-22-reference-strengthening-plan.md": {
+        "sha256": "94ba101d4b1b3f775993c52b736ea52211a45fd0880981f51da0c085b6eebd67",
+        "bytes": 56347
+      },
+      "docs/superpowers/plans/2026-10-22-ui-refresh-plan.md": {
+        "sha256": "14ef37c57d9ed85e3b79d41d354dfd29791d14b0bf8425ad518ff51dd97815a0",
+        "bytes": 26501
+      },
+      "docs/superpowers/plans/2026-10-22-ui-refresh-review/02-visual-system.md": {
+        "sha256": "c107d16fd08982163cd8c3c13f9ffa58950654948486356af5178292567937d7",
+        "bytes": 21571
+      },
+      "docs/superpowers/plans/2026-10-22-ui-refresh-review/03-product-journeys.md": {
+        "sha256": "bebeff12be83f44040a89f5e8776b89e47ca08a6da5b83d13ca9359f70763c37",
+        "bytes": 21680
+      },
+      "docs/superpowers/plans/2026-10-22-ui-refresh-review/04-acceptance-challenge.md": {
+        "sha256": "e9eb500627e7a040a705964b103c68e5226eb14076e04dddd11ddc3df77db414",
+        "bytes": 15991
+      },
+      "docs/superpowers/plans/2026-10-22-ui-refresh-review/README.md": {
+        "sha256": "c2104e72995ac7559da39f1318bc2df764ff73e763a6b4e3e6c7353c7c2482de",
+        "bytes": 9056
+      },
+      "docs/superpowers/specs/2026-10-17-polish-implementation/data/performance/production-report.md": {
+        "sha256": "3c38badb0ef87a4c3669393f5b5d54f64150bc078d0133301582cce79aa5873a",
+        "bytes": 5775
+      },
+      "docs/superpowers/specs/2026-10-22-ui-refresh-evidence/README.md": {
+        "sha256": "01b5a35cb5dc354e1530d4f9815347a9495c2e562babbf9f6d4715656b880aa9",
+        "bytes": 5964
+      },
+      "e2e/m91-subagents.spec.ts": {
+        "sha256": "af4329ec77232c120a7d47be5ac09ee17947979568cc2550b1ee56fdab967583",
+        "bytes": 4169
+      },
+      "package.json": {
+        "sha256": "e23f243c4c9b8b79223fdaef2c10596e700da4b7120b5a48939320ca6c8a9c52",
+        "bytes": 2502
+      },
+      "shared/policy/subagents.v1.json": {
+        "sha256": "a2c731302ce8f45add865709614f5276c655ce886e27854fe2f8c09d8369b6c2",
+        "bytes": 895
+      },
+      "shared/starter/README.md": {
+        "sha256": "83a4c74a0318f9d06d8be449ba2cb301a359bf80b8c22f9ec449a088c5b8c664",
+        "bytes": 1039
+      },
+      "src-tauri/src/agent/cli_agents.rs": {
+        "sha256": "ef7a640f1e71f980292a284942ca2a0e4bc38d8e7ffee05b0bbee15932be4f13",
+        "bytes": 57543
+      },
+      "src-tauri/src/agent/interaction.rs": {
+        "sha256": "ad0469047b9a1c21235e066695018f65b108fbea3b577de322be0a2d6768250b",
+        "bytes": 143427
+      },
+      "src-tauri/src/agent/meter.rs": {
+        "sha256": "6193a1d54cc7ca9132a0d31cd2e3c0a65f22e00852e2b26cbe55db9783491dca",
+        "bytes": 113739
+      },
+      "src-tauri/src/agent/mod.rs": {
+        "sha256": "a0ae340ba52b8b9c9add4ef837ba39cd1b629c534e16db31897d3ed159fc418f",
+        "bytes": 419781
+      },
+      "src-tauri/src/agent/transcript.rs": {
+        "sha256": "8b176680c49371662bae5e7dba86f4874911671b3e8758f89a9c7cdc45a44920",
+        "bytes": 71695
+      },
+      "src-tauri/src/agent/usage.rs": {
+        "sha256": "44d505e9d6b848340e37b2246cd202c9f0546d770b29aef4d0127ecaf5018a02",
+        "bytes": 48338
+      },
+      "src-tauri/src/assembly/manifest.rs": {
+        "sha256": "edb27ddf513a7b8d8abdc254641713cd25592afb51a6a86869703abb6d154da5",
+        "bytes": 41218
+      },
+      "src-tauri/src/client_access.rs": {
+        "sha256": "4ae7d23a967264eaef77dcca624a064fd3666e542bac19cfdd9c25e4ab9430f2",
+        "bytes": 2579
+      },
+      "src-tauri/src/connectors.rs": {
+        "sha256": "e75c93a218cdcb05bad3876b19578b593cc1568f4a647f7966af151c490cfbc9",
+        "bytes": 92827
+      },
+      "src-tauri/src/mcp.rs": {
+        "sha256": "68b7f9d610a6b6d20ba7efe3f4ff1d70591c86dd1c0ecb6aa07d775364dab49c",
+        "bytes": 864445
+      },
+      "src-tauri/src/policy/subagents.rs": {
+        "sha256": "4c9509af504727524ed1eeb87429b549b9ca4b31a70e83e910db525bef99138a",
+        "bytes": 35034
+      },
+      "src-tauri/src/runtime/catchup.rs": {
+        "sha256": "b291ec5ea3d16073686dc6cbea7a9822976648d351b509a986f09f4ae55ac381",
+        "bytes": 43770
+      },
+      "src-tauri/src/runtime/dispatch.rs": {
+        "sha256": "7a4b0187d0ca2ef3b5138ee7664e30406513e0d1efda35f9a466d6c5ae4d34d6",
+        "bytes": 189174
+      },
+      "src-tauri/src/runtime/fleet.rs": {
+        "sha256": "d36c0ccfb0e3a80ed30de4485fd7eba1c08c24cd955d8d832c5e672128ea2da0",
+        "bytes": 94836
+      },
+      "src-tauri/src/runtime/followups.rs": {
+        "sha256": "712c81cc7ce95f318ce0aec75eacde283e906758c12bac79cd19ea36c81f5db9",
+        "bytes": 26956
+      },
+      "src-tauri/src/runtime/mod.rs": {
+        "sha256": "faf67c241c71fce435515f3b526fa269bdf6812b4fff35830a976a117d1a01b9",
+        "bytes": 122444
+      },
+      "src-tauri/src/runtime/scope.rs": {
+        "sha256": "1f674239564bfed3057361143bdf375567c510b8e4e5f1fd466cb3f81ed00c86",
+        "bytes": 7652
+      },
+      "src-tauri/src/runtime/wakes.rs": {
+        "sha256": "238b8efd5291413bb1876d05159025773e570839d58a9d05b11e98fe342e9270",
+        "bytes": 72995
+      },
+      "src-tauri/src/search.rs": {
+        "sha256": "c337dfd85960cc4196e4aa3da59fa0d024b21474ad92dc341024248317239e5e",
+        "bytes": 72525
+      },
+      "src-tauri/src/vault/parse.rs": {
+        "sha256": "aacc41994b69386af7110f59e738aa53f980e1621d71a50fc6cb0cae0326edd8",
+        "bytes": 18024
+      },
+      "src-tauri/src/vault/write.rs": {
+        "sha256": "5cbd0e287f25182bcb00165a70fb163e7ac6a5e193933f93ecd852f9ea37c698",
+        "bytes": 313483
+      },
+      "src/agent/AiPanel.tsx": {
+        "sha256": "f4891155550c729e54440dbb2155d78172c801aecdf43094ab3e8a7b3841208f",
+        "bytes": 80871
+      },
+      "src/agent/ChatTurn.tsx": {
+        "sha256": "344225eb3881640a7c881424c97c2c4950784dcdcc1f8b14821b66dba4c53d07",
+        "bytes": 15157
+      },
+      "src/agent/attachments.ts": {
+        "sha256": "e283a899f03ae650ec091694116cde887c7a903248dff6569262c3cc22d74487",
+        "bytes": 7782
+      },
+      "src/agent/conversations.ts": {
+        "sha256": "730ed0c5e02622501264ff9395dbb9faed4c20429c1d1db9ee522e7254c77318",
+        "bytes": 27921
+      },
+      "src/agent/transcript.ts": {
+        "sha256": "50b2e63c35a9e27647791a6abf2f2b330608121da6ffbb1d5232766fc3c13204",
+        "bytes": 44758
+      },
+      "src/agent/types.ts": {
+        "sha256": "8a1641bce0d41cfcba7a30d1ad40cbd8d201ba070488eef01e4a0e3fb0cfed41",
+        "bytes": 27563
+      },
+      "src/agent/useContextUse.ts": {
+        "sha256": "311231f20f1f294f31fcb1fd0305a6cd2437ed4d9bc483cc9f984da06342d399",
+        "bytes": 3000
+      },
+      "src/agent/useJobRunner.ts": {
+        "sha256": "952b1ff6cbb7fd7d428b23bd71dabba472862a1c58a15bcc07b0eea3bd7c8910",
+        "bytes": 21874
+      },
+      "src/app/QuickOpen.tsx": {
+        "sha256": "6de84efe59daea15f33fdda205a482cbb191613d9971412f9675221fe90b34c4",
+        "bytes": 29832
+      },
+      "src/app/RecordComposer.tsx": {
+        "sha256": "115fc019f17ae904d79ce464ed3bbe1ab6ba6e8ef16ed17a5083222f0e317ff8",
+        "bytes": 9276
+      },
+      "src/app/quit.ts": {
+        "sha256": "2bd9e936efa8691cc07c779ad7eb5286849f83609c1eb8ef481aec727e32dd8e",
+        "bytes": 8230
+      },
+      "src/components/pageFrame.css": {
+        "sha256": "3456fa30ab33f740b7d65a3f90f34899d21ff550ff910ce77f9e32fea58a81e6",
+        "bytes": 6266
+      },
+      "src/editor/MarkdownEditor.tsx": {
+        "sha256": "74c5cbff05a369f2236ddac5b3c8ec193c153134544ae99b69dbf199b4ce780d",
+        "bytes": 79268
+      },
+      "src/editor/NoteBodyEditor.tsx": {
+        "sha256": "b675d2cf5b5394eabdcb178de672c3b4600fa94061317c508c68a03756927bc2",
+        "bytes": 26404
+      },
+      "src/editor/openPages.ts": {
+        "sha256": "01787d4b8c55384da84f76efaa249f5df7532e9c71241ff91f0f81f9804ba11d",
+        "bytes": 6748
+      },
+      "src/engine/links.ts": {
+        "sha256": "c52c63a38d49f2ed2645e4cf00b529665b24cc24e71dcd504243db19eba37857",
+        "bytes": 3254
+      },
+      "src/engine/triggers.ts": {
+        "sha256": "61edf1d17872f34ba22de276afc25bb813cfbdf3b7019fe2f2e63c2c65bc7fa6",
+        "bytes": 8043
+      },
+      "src/engine/wakes.ts": {
+        "sha256": "c4a8ac3f2d38d93387eea0b768575d1509c956beca06b8b0cfc46735f4c13d60",
+        "bytes": 7036
+      },
+      "src/knowledge/KnowledgePanel.tsx": {
+        "sha256": "ccd3354e232c981043370212b487f54e5bf926b14c7ddddc6278aa787bbe247f",
+        "bytes": 19543
+      },
+      "src/lib/capture.ts": {
+        "sha256": "933149c101ac478a2d36ecc5187a8cba6e160c4ec69b8a72cb11a70024c60ccc",
+        "bytes": 1481
+      },
+      "src/lib/policy/toolApproval.ts": {
+        "sha256": "fc297dbd2fa1f5b1e4ec048077f299fe711c5fd5eb07e24cc195fa349798dbbd",
+        "bytes": 45571
+      },
+      "src/library/AgentProperties.tsx": {
+        "sha256": "f1b269b57f8e6359c9c371604d4eba2797d8bf31ec78c094e30e2103412ca4c3",
+        "bytes": 53621
+      },
+      "src/pages/ClaudeCodeRow.tsx": {
+        "sha256": "ac22750a645db5130e73f5d25e1371fcadff854fe2c9af7fcb0743aadc589b1e",
+        "bytes": 3181
+      },
+      "src/status/AgentRunHistory.tsx": {
+        "sha256": "80235d07600b0b946789239791dfc79e99fcb3af193c4423f01f6947b860a589",
+        "bytes": 8420
+      },
+      "src/status/RunDetailPanel.tsx": {
+        "sha256": "f5653137491dec013cef57015a3fd1bd14ffce35bf1023c2593d257cbb582fd7",
+        "bytes": 19720
+      },
+      "src/status/RunTranscript.tsx": {
+        "sha256": "b6dc1cecd7e0c18548759e722c914f89518679435f7bcb1b607603fbd36079fb",
+        "bytes": 11963
+      },
+      "src/styles/surface-system.css": {
+        "sha256": "3340d631d9c93a7b169853bf71954f91427460f8a8e8193f6541c56fa0cdf5c6",
+        "bytes": 2800
+      },
+      "src/styles/tokens/spacing.css": {
+        "sha256": "818acd1e8785570a48352da79868ea0965602580bef16eb3727011a150291f0c",
+        "bytes": 5981
+      },
+      "src/views/TableView.tsx": {
+        "sha256": "f5e5241c8b78880738d060f62b02abf6539c59aa6bb97d464976c35610cb500b",
+        "bytes": 136954
+      },
+      "src/views/tableAnatomy.tsx": {
+        "sha256": "e08fabebccbdd62555433eaed2801dec257b987c836ea20bbe895ee2b611a5b8",
+        "bytes": 10967
+      }
+    }
+  }
+}

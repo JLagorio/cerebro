@@ -1,0 +1,70 @@
+{
+  "environment": {
+    "at": "2026-10-17T17:51:02.528Z",
+    "platform": "darwin",
+    "release": "24.6.0",
+    "architecture": "arm64",
+    "cpu": "Apple M1 Pro",
+    "logicalCpus": 10,
+    "memoryGiB": 32,
+    "loadBefore": [
+      12.65185546875,
+      11.87939453125,
+      11.173828125
+    ],
+    "node": "v26.3.1",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "samples": 20,
+    "modulePath": "/src/views/TableView.tsx",
+    "mode": "Vite development, unthrottled headless Chromium, sequential fixture mounts",
+    "externalNetwork": "blocked; localhost:5382 only",
+    "input": "Synthetic ArrowDown at row level; dispatch to two animation frames; all text fields 140px; title + 12/24 declared scalar fields; no record limit; no edits; each scroll +80px"
+  },
+  "browser": "149.0.7827.55",
+  "results": [
+    {
+      "count": 1000,
+      "cols": 12,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 2155,
+        "scrollHeight": 36036
+      },
+      "inputMs": [
+        470.60000002384186,
+        437.80000001192093,
+        441.39999997615814,
+        453.69999998807907,
+        486.10000002384186,
+        444.30000001192093,
+        425.0999999642372,
+        489.30000001192093,
+        454.9000000357628,
+        430.2999999523163,
+        471.80000001192093,
+        437.80000001192093,
+        417.30000001192093,
+        474.30000001192093,
+        444.0999999642372,
+        422.19999998807907,
+        503.80000001192093,
+        455.30000001192093,
+        469.60000002384186,
+        447.0999999642372
+      ],
+      "mountedMs": 553.6000000238419,
+      "p95InputMs": 489.30000001192093,
+      "maxWarmedTaskMs": 454,
+      "renderedRows": 1000
+    }
+  ],
+  "loadAfter": [
+    10.962890625,
+    11.5419921875,
+    11.06494140625
+  ]
+}

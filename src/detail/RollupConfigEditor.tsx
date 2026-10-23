@@ -56,6 +56,13 @@ export function RollupConfigEditor({
       ? targetFields.filter((field) => field.kind === 'status' || field.kind === 'checkbox')
       : targetFields;
 
+  const propertyPrompt =
+    !mail && relationDef === null && def.from === undefined
+      ? 'Pick a relation first'
+      : !mail && targetType === null
+        ? 'That relation targets any record'
+        : 'Pick a property…';
+
   return (
     <div className="flex flex-col gap-2">
       {def.from === undefined || mail || offersMail ? (
@@ -65,6 +72,8 @@ export function RollupConfigEditor({
             size="sm"
             label="Relation to follow"
             width={200}
+            // A relation field removed since reads as the prompt.
+            placeholder="Pick a relation…"
             options={[
               { value: NONE, label: 'Pick a relation…' },
               ...(def.from === undefined || mail
@@ -129,17 +138,12 @@ export function RollupConfigEditor({
             label="Property to aggregate"
             width={200}
             options={[
-              {
-                value: NONE,
-                label:
-                  !mail && relationDef === null && def.from === undefined
-                    ? 'Pick a relation first'
-                    : !mail && targetType === null
-                      ? 'That relation targets any record'
-                      : 'Pick a property…',
-              },
+              { value: NONE, label: propertyPrompt },
               ...offeredFields.map((f) => ({ value: f.name, label: humanize(f.name) })),
             ]}
+            // A property the calculation no longer offers (Percent done
+            // narrows the list) reads as the prompt, not as a blank.
+            placeholder={propertyPrompt}
             value={def.property ?? NONE}
             onChange={(v) => onChange({ property: v === NONE ? null : v })}
           />

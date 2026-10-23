@@ -28,7 +28,6 @@
   text-align: center;
 }
 .pdf-toolbar input,
-.pdf-toolbar select,
 .pdf-find input {
   border: 1px solid var(--border-subtle);
   background: var(--surface-raised);

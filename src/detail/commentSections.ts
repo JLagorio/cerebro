@@ -2,8 +2,8 @@ import type { AnchorResolution } from '@/engine/commentAnchor';
 import { visibleThreads, type CommentThread, type CommentsFile } from '@/engine/comments';
 
 /**
- * A page's threads, sorted into the Comments tab's sections (M70.2b). Pure:
- * the tab draws what this returns, and the tests read it without an editor.
+ * A page's threads, sorted into the Comments panel's sections (M70.2b). Pure:
+ * the panel draws what this returns, and the tests read it without an editor.
  *
  * - **On the page**: open threads whose quote the editor found, by where they
  *   sit on the page.

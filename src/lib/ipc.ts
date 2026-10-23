@@ -1036,7 +1036,7 @@ export function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
 export function fleetRunTranscript(runId: string): Promise<RunTranscript> {
   return inTauri()
     ? invokeTauri('fleet_run_transcript', { runId })
-    : mock.fleetRunTranscript(runId);
+    : faulted('fleet_run_transcript', () => mock.fleetRunTranscript(runId));
 }
 
 /** What one actor's runs add up to (M33.6). An actor with no runs answers

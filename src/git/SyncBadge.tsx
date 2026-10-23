@@ -31,7 +31,7 @@ const TONE: Record<SyncState, { icon: string; color: string; label: (n: number) 
   conflict: { icon: 'triangle-alert', color: 'var(--danger-500)', label: (n) => `${n} conflicted` },
 };
 
-export function SyncBadge() {
+export function SyncBadge({ quiet = false }: { quiet?: boolean }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
@@ -80,7 +80,7 @@ export function SyncBadge() {
         data-testid="sync-badge"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-n-200 bg-n-0 px-2 text-xs text-n-600 hover:border-n-300"
+        className={`cb-sync-badge ${quiet ? 'cb-sync-badge--quiet' : ''} inline-flex h-7 items-center gap-1.5 rounded-md border border-n-200 bg-n-0 px-2 text-xs text-n-600 hover:border-n-300`}
       >
         <Icon name={tone.icon} size={12} color={tone.color} />
         {tone.label(count)}

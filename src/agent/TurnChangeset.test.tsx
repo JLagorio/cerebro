@@ -51,9 +51,15 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+/** A committed file's row in the tree: its line, its actions and what hangs
+ * under it. */
 const fileRow = (path: string) =>
-  screen.getAllByTestId('turn-changeset-file').find((row) => row.textContent?.includes(path)) as
+  (document.querySelector(`[data-slot="file-tree-file"][data-path="${path}"]`) ?? undefined) as
     HTMLElement | undefined;
+
+/** The toggle that unfolds a committed file's patch. */
+const patchToggle = (path: string) =>
+  screen.getByRole('button', { name: `Show the changes to ${path}` });
 
 describe('TurnChangeset (M58.3)', () => {
   it('reads the commit as files and line counts, and names who else edited', () => {
@@ -62,18 +68,31 @@ describe('TurnChangeset (M58.3)', () => {
     expect(footer?.textContent).toContain('Changed 2 files · +3 −1');
     expect(footer?.textContent).toContain('0123456');
     expect(screen.getAllByTestId('turn-changeset-file')).toHaveLength(2);
-    expect(fileRow('notes/a.md')?.textContent).toContain('+2 −1');
+    expect(fileRow('notes/a.md')?.textContent).toContain('modified · +2 −1');
     expect(fileRow('notes/a.md')?.textContent).toContain('also edited by you');
+    expect(fileRow('notes/b.md')?.textContent).toContain('added · +1 −0');
     expect(fileRow('notes/b.md')?.textContent).not.toContain('also edited');
+    // A folder tree (M91.13): the folder counts its files and their lines.
+    const folder = document.querySelector('[data-slot="file-tree-folder"]') as HTMLElement;
+    expect(folder.dataset.path).toBe('notes');
+    expect(folder.textContent).toContain('2 files · +3 −1');
+  });
+
+  it('opens a file the run changed through the app, never an href (CV-16)', () => {
+    const onOpenPath = vi.fn();
+    render(<TurnChangeset changesets={[committed]} onOpenPath={onOpenPath} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Open a\.md/ }));
+    expect(onOpenPath).toHaveBeenCalledWith('notes/a.md');
+    expect(document.querySelectorAll('a')).toHaveLength(0);
   });
 
   it('fetches nothing until a file is expanded, then exactly once', async () => {
     render(<TurnChangeset changesets={[committed]} />);
     expect(getFilePatch).not.toHaveBeenCalled();
-    const toggle = within(fileRow('notes/a.md') as HTMLElement).getByRole('button', {
-      name: /notes\/a\.md/,
-    });
+    const toggle = patchToggle('notes/a.md');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect((await screen.findByTestId('turn-changeset-patch')).textContent).toContain('+More.');
     fireEvent.click(toggle);
     fireEvent.click(toggle);
@@ -87,18 +106,14 @@ describe('TurnChangeset (M58.3)', () => {
       binary: false,
     });
     render(<TurnChangeset changesets={[committed]} />);
-    fireEvent.click(
-      within(fileRow('notes/a.md') as HTMLElement).getByRole('button', { name: /notes\/a\.md/ }),
-    );
+    fireEvent.click(patchToggle('notes/a.md'));
     expect(await screen.findByText('Showing the first 2 MB.')).toBeTruthy();
   });
 
   it('reads a failed load as unavailable, never as an empty patch', async () => {
     getFilePatch.mockRejectedValueOnce(new Error('bad revision'));
     render(<TurnChangeset changesets={[committed]} />);
-    fireEvent.click(
-      within(fileRow('notes/a.md') as HTMLElement).getByRole('button', { name: /notes\/a\.md/ }),
-    );
+    fireEvent.click(patchToggle('notes/a.md'));
     expect((await screen.findByTestId('section-unavailable')).textContent).toContain(
       "This file's changes could not be read.",
     );
@@ -173,7 +188,9 @@ describe('TurnChangeset (M58.3)', () => {
     expect(screen.getByTestId('turn-changeset')?.textContent).toContain(
       "Couldn't commit this turn's changes: History was busy.",
     );
-    expect(fileRow('notes/a.md')).toBeDefined();
+    // No commit, so no kinds or counts to draw a tree from: the paths alone.
+    expect(screen.getByTestId('turn-changeset-file').textContent).toBe('notes/a.md');
+    expect(document.querySelector('[data-slot="file-tree"]')).toBeNull();
   });
 
   it('says shell changes are not recorded, and says nothing for a run that changed nothing', () => {

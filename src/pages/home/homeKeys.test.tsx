@@ -20,7 +20,7 @@ beforeEach(async () => {
   useDoneMarksStore.getState().reset(null);
   useReminderStore.getState().reset(null);
   await useVaultStore.getState().openVault('/demo-vault');
-  useUiStore.setState({ inboxEnabled: true, inboxPeriod: 'all', homeTaskAssignee: '', toasts: [] });
+  useUiStore.setState({ inboxEnabled: true, homeTaskAssignee: '', toasts: [] });
   useNavStore.setState({ selection: { kind: 'home' } });
 });
 async function ready() {

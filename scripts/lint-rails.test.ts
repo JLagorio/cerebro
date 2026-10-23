@@ -130,6 +130,26 @@ describe('engine/ imports only its allowlist', () => {
       [],
     );
   });
+
+  it('holds src/engine/ai/ to the same rail, its siblings by ./ and the engine by alias (M91.10)', async () => {
+    const AI = 'src/engine/ai/probe.ts';
+    for (const code of [
+      "import type { ToolCall } from '@/agent/types';",
+      "import { readCliTranscript } from '@/lib/ipc';",
+      "import { Trace } from '@/components/ai/Trace';",
+      "import type { RunChangeset } from '../changeset';",
+    ])
+      expect(await railMessages(AI, code), code).toEqual([
+        expect.stringContaining('engine/ is the pure core'),
+      ]);
+    const allowed = [
+      "import './types';",
+      "import type { ChangeKind } from '@/engine/changeset';",
+      "import { parseURL } from 'whatwg-url';",
+      'export const p = parseURL;',
+    ].join('\n');
+    expect(await railMessages(AI, allowed)).toEqual([]);
+  });
 });
 
 describe('engine imports admit the two scene libraries and no subpath', () => {
@@ -229,11 +249,12 @@ describe('only mockIpc reads mockParse', () => {
 /**
  * Every file class against every rail. A class keeps every rail but its own
  * exemption, so a class that dropped a rail by composing too few shows up
- * here as an import that passed. Each rail is told apart by its own message:
+ * here as a probe that passed. Each rail is told apart by its own message:
  * in engine/ a Tauri import breaks the allowlist too, and draws both.
  */
 describe('each file class keeps every rail but its own exemption', () => {
-  type Rail = 'pdfjs' | 'tauri' | 'mermaid' | 'ironcalc' | 'mockParse' | 'comments' | 'engine';
+  type Rail =
+    'pdfjs' | 'tauri' | 'mermaid' | 'ironcalc' | 'mockParse' | 'comments' | 'engine' | 'select';
   const MARK: Record<Rail, string> = {
     pdfjs: 'load pdfjs-dist',
     tauri: 'Tauri loads only in the IPC adapters',
@@ -242,6 +263,7 @@ describe('each file class keeps every rail but its own exemption', () => {
     mockParse: 'reads mockParse',
     comments: "loads '@blocknote/core/comments'",
     engine: 'engine/ is the pure core',
+    select: 'No native <select>',
   };
   const PROBES: Record<Rail, string[]> = {
     pdfjs: [
@@ -272,6 +294,10 @@ describe('each file class keeps every rail but its own exemption', () => {
       "export const c = () => import('@blocknote/core/comments');",
     ],
     engine: ["import { useUiStore } from '@/stores/uiStore';\nexport const u = useUiStore;"],
+    select: [
+      "export const s = document.createElement('select');",
+      "export const s = React.createElement('select', null);",
+    ],
   };
   const CLASSES: [path: string, allowed: Rail[]][] = [
     ['src/workspace/viewers/pdf/pdfjs.ts', ['pdfjs', 'engine']],
@@ -292,6 +318,7 @@ describe('each file class keeps every rail but its own exemption', () => {
     ['src/engine/probe.test.ts', ['engine']],
     ['src/editor/commentSpike.test.ts', ['comments', 'engine']],
     ['src/editor/Probe.test.tsx', ['engine']],
+    ['src/components/FileImage.tsx', ['engine']],
   ];
   const cases = CLASSES.flatMap(([path, allowed]) =>
     (Object.keys(PROBES) as Rail[]).flatMap((rail) =>
@@ -379,5 +406,55 @@ describe('only the image components draw <img>', () => {
     'src/components/ui/Avatar.tsx',
   ])('allows the reviewed boundary %s', async (path) => {
     expect(await railMessages(path, code)).toEqual([]);
+  });
+});
+
+/**
+ * CV-63: every select is the design system's `Select` (or `Dropdown`, which
+ * renders it), and the rail has no exemption. Third-party UI that builds a
+ * native one is wrapped where it is wired in, as BlockNote's code block is.
+ */
+describe('no native select draws anywhere', () => {
+  const selectMessages = async (path: string, code: string) =>
+    (await railMessages(path, code)).filter((m) => m.includes('No native <select>'));
+
+  it.each([
+    'src/pages/Probe.tsx',
+    'src/editor/Probe.tsx',
+    'src/components/ui/Probe.tsx',
+    'src/engine/Probe.tsx',
+    'src/components/FileImage.tsx',
+    'src/pages/Probe.test.tsx',
+  ])('refuses a JSX select in %s, and names the fix', async (path) => {
+    expect(
+      await selectMessages(path, 'export const Pick = () => <select aria-label="Pick" />;'),
+    ).toEqual([expect.stringContaining("'@/components/ui/Select'")]);
+  });
+
+  it.each([
+    "document.createElement('select')",
+    "host.ownerDocument.createElement('SELECT')",
+    "React.createElement('select', null)",
+    "createElement('select')",
+  ])('refuses a select built by %s', async (call) => {
+    expect(
+      await selectMessages('src/editor/probe.ts', `export const s = () => ${call};`),
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    'export const P = () => <Select options={[]} value="" onChange={() => {}} />;',
+    "export const q = (el: Element) => el.querySelector('select');",
+    'export const t = (el: unknown) => el instanceof HTMLSelectElement;',
+    "export const o = () => document.createElement('option');",
+    '// A native <select> named in a comment.\nexport const c = 1;',
+  ])('passes %s', async (code) => {
+    expect(await selectMessages('src/pages/Probe.tsx', code)).toEqual([]);
+  });
+
+  it('needs no exemption for the design system Select or the code block that wraps one', async () => {
+    for (const path of ['src/components/ui/Select.tsx', 'src/editor/codeBlock.tsx']) {
+      expect(await selectMessages(path, readFileSync(join(REPO, path), 'utf8')), path).toEqual([]);
+    }
   });
 });

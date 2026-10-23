@@ -7,7 +7,8 @@
 //! description and schema the model reads. The generated
 //! `propose_<op>` tools take their facts from one `generated` block (their
 //! names, descriptions and schemas stay policy.v3's), and the CLI's own
-//! built-ins are one list, in argv order.
+//! built-ins are one list, in argv order, each under its name and any aliases
+//! Claude Code also spells it by (M91.1).
 //!
 //! `mcp.rs` serves `tools/list` from these rows, and derives the scope
 //! targets, the announcements and the read-to-replace guard from them;
@@ -156,7 +157,9 @@ impl TargetKind {
 
 /// How a transcript shows a call (M56.8): a step in the run, a change card,
 /// or one of the rows a cerebro tool owns: a concept to review, a handoff to
-/// another agent, a commit of proposals, or a checked view suggestion.
+/// another agent, a commit of proposals, or a checked view suggestion. Since
+/// M91.1 two draw one of the CLI's own tools: a subagent's work and a todo
+/// list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Renderer {
@@ -166,6 +169,8 @@ pub enum Renderer {
     Handoff,
     Commit,
     View,
+    Subagent,
+    Todo,
 }
 
 impl Renderer {
@@ -177,6 +182,8 @@ impl Renderer {
             Renderer::Handoff => "handoff",
             Renderer::Commit => "commit",
             Renderer::View => "view",
+            Renderer::Subagent => "subagent",
+            Renderer::Todo => "todo",
         }
     }
 
@@ -188,8 +195,14 @@ impl Renderer {
             Renderer::Handoff => Some("run"),
             Renderer::Commit => Some("ledger"),
             Renderer::View => Some("none"),
-            Renderer::Step | Renderer::Change => None,
+            Renderer::Step | Renderer::Change | Renderer::Subagent | Renderer::Todo => None,
         }
+    }
+
+    /// Does it draw what one of the CLI's own tools does (M91.1), so that no
+    /// cerebro row may take it?
+    fn cli_only(self) -> bool {
+        matches!(self, Renderer::Subagent | Renderer::Todo)
     }
 }
 
@@ -202,6 +215,30 @@ impl Renderer {
 pub struct FoldPhrases {
     pub one: String,
     pub many: String,
+    /// The same row while its calls still run (M91.1): "reading a note",
+    /// "reading {n} notes". Optional; the shipped manifest names it beside
+    /// every fold.
+    pub running: Option<RunningFold>,
+}
+
+/// A fold's words while its calls run (M91.1), held to the rules `one` and
+/// `many` are.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunningFold {
+    pub one: String,
+    pub many: String,
+}
+
+/// How one call's row reads by its status (M91.1): while it runs, once it is
+/// done, and when it failed. Optional on a row; owner-read copy, lowercase,
+/// one call each, so no `{n}`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StatusPhrases {
+    pub running: String,
+    pub done: String,
+    pub failed: String,
 }
 
 /// The text a `{{name}}` in a description or schema stands for.
@@ -270,6 +307,8 @@ pub struct ToolRow {
     pub renderer: Renderer,
     /// Set only on a read: what a run of its calls folds under.
     pub fold: Option<FoldPhrases>,
+    /// How one call reads by its status (M91.1); optional.
+    pub phrases: Option<StatusPhrases>,
     /// A lucide icon name.
     pub icon: String,
     pub always_load: bool,
@@ -312,6 +351,12 @@ pub struct Generated {
 #[serde(deny_unknown_fields)]
 pub struct CliTool {
     pub name: String,
+    /// The other names Claude Code spells this tool by (M91.1): 2.1.250's
+    /// init lists `Task` for the subagent tool its calls name `Agent`. Each
+    /// answers with this row's facts (`cli_tool`); argv names the row by
+    /// `name` alone. Optional, absent reads as none.
+    #[serde(default)]
+    pub aliases: Vec<String>,
     /// Its tool-approval family (M57.2): the row of
     /// `shared/policy/tool-approval.v1.json` that decides whether it runs,
     /// asks or is refused. Required: a row with none fails the load.
@@ -323,6 +368,8 @@ pub struct CliTool {
     pub renderer: Renderer,
     /// Set only on a reader: what a run of its calls folds under.
     pub fold: Option<FoldPhrases>,
+    /// How one call reads by its status (M91.1); optional.
+    pub phrases: Option<StatusPhrases>,
     pub icon: String,
 }
 
@@ -476,22 +523,66 @@ fn check_fold(
             format!("is set on a {} row; only a step folds", renderer.as_str()),
         ));
     }
-    if !fits(&fold.one, FOLD_LIMIT) || fold.one.contains(FOLD_COUNT) {
+    check_fold_pair(subject, "fold", &fold.one, &fold.many)?;
+    match &fold.running {
+        Some(running) => check_fold_pair(subject, "fold.running", &running.one, &running.many),
+        None => Ok(()),
+    }
+}
+
+/// One fold's `one` and `many` under `at` (`fold`, or `fold.running` since
+/// M91.1): `one` without the count, `many` with it once, both short and
+/// lowercase.
+fn check_fold_pair(subject: &str, at: &str, one: &str, many: &str) -> Result<(), String> {
+    if !fits(one, FOLD_LIMIT) || one.contains(FOLD_COUNT) {
         return Err(refusal(
             subject,
-            "fold.one",
+            &format!("{at}.one"),
             format!("must be 1 to {FOLD_LIMIT} characters, without {FOLD_COUNT}"),
         ));
     }
-    if !fits(&fold.many, FOLD_LIMIT) || fold.many.matches(FOLD_COUNT).count() != 1 {
+    if !fits(many, FOLD_LIMIT) || many.matches(FOLD_COUNT).count() != 1 {
         return Err(refusal(
             subject,
-            "fold.many",
+            &format!("{at}.many"),
             format!("must be 1 to {FOLD_LIMIT} characters, with exactly one {FOLD_COUNT}"),
         ));
     }
-    for (field, phrase) in [("fold.one", &fold.one), ("fold.many", &fold.many)] {
-        if phrase.chars().next().is_some_and(char::is_uppercase) {
+    for (field, phrase) in [("one", one), ("many", many)] {
+        if starts_uppercase(phrase) {
+            return Err(refusal(
+                subject,
+                &format!("{at}.{field}"),
+                "must start lowercase; the row capitalizes the label it joins",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn starts_uppercase(phrase: &str) -> bool {
+    phrase.chars().next().is_some_and(char::is_uppercase)
+}
+
+/// A row's status phrases (M91.1): each names one call, so it is as short
+/// as a fold's `one`, has no count, and starts lowercase.
+fn check_phrases(subject: &str, phrases: Option<&StatusPhrases>) -> Result<(), String> {
+    let Some(phrases) = phrases else {
+        return Ok(());
+    };
+    for (field, phrase) in [
+        ("phrases.running", &phrases.running),
+        ("phrases.done", &phrases.done),
+        ("phrases.failed", &phrases.failed),
+    ] {
+        if !fits(phrase, FOLD_LIMIT) || phrase.contains(FOLD_COUNT) {
+            return Err(refusal(
+                subject,
+                field,
+                format!("must be 1 to {FOLD_LIMIT} characters, without {FOLD_COUNT}"),
+            ));
+        }
+        if starts_uppercase(phrase) {
             return Err(refusal(
                 subject,
                 field,
@@ -594,6 +685,24 @@ impl ToolsManifest {
         }
         for tool in &self.cli_tools {
             check_cli(tool)?;
+        }
+        self.check_aliases()
+    }
+
+    /// The CLI rows' names and aliases are one namespace (M91.1): a spelling
+    /// answers with exactly one row's facts, so none is held twice.
+    fn check_aliases(&self) -> Result<(), String> {
+        let mut held: BTreeSet<&str> = self.cli_tools.iter().map(|t| t.name.as_str()).collect();
+        for tool in &self.cli_tools {
+            for alias in &tool.aliases {
+                if !held.insert(alias.as_str()) {
+                    return Err(refusal(
+                        &format!("cli tool {}", tool.name),
+                        "aliases",
+                        format!("names {alias}, which a CLI row already answers to"),
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -774,6 +883,7 @@ impl ToolsManifest {
                 .as_deref(),
             row.renderer,
         )?;
+        check_phrases(subject, row.phrases.as_ref())?;
         check_comment_door(subject, row)?;
         self.check_facts(
             subject,
@@ -1086,6 +1196,16 @@ impl ToolsManifest {
                 ));
             }
         }
+        if facts.renderer.cli_only() {
+            return Err(refusal(
+                subject,
+                "renderer",
+                format!(
+                    "{} draws one of the CLI's own tools, never a cerebro tool",
+                    facts.renderer.as_str()
+                ),
+            ));
+        }
         if !is_kebab(facts.icon) {
             return Err(refusal(
                 subject,
@@ -1167,12 +1287,20 @@ fn check_cli(tool: &CliTool) -> Result<(), String> {
     if !is_pascal(&tool.name) {
         return Err(refusal(subject, "name", "must match [A-Z][A-Za-z]*"));
     }
+    if !tool.aliases.iter().all(|alias| is_pascal(alias)) {
+        return Err(refusal(
+            subject,
+            "aliases",
+            "must each match [A-Z][A-Za-z]*",
+        ));
+    }
     check_fold(
         subject,
         tool.fold.as_ref(),
         tool.writes.then_some("a tool that writes"),
         tool.renderer,
     )?;
+    check_phrases(subject, tool.phrases.as_ref())?;
     if tool.renderer.door().is_some() {
         return Err(refusal(
             subject,
@@ -1339,11 +1467,7 @@ pub fn writes_disk(name: &str) -> bool {
         return door(&generated().door).is_some_and(|door| door.writes)
             && PolicyTable::load().is_ok_and(|table| generated_op(bare, &table).is_some());
     }
-    manifest()
-        .cli_tools
-        .iter()
-        .find(|tool| tool.name == bare)
-        .is_some_and(|tool| tool.writes)
+    cli_tool(bare).is_some_and(|tool| tool.writes)
 }
 
 /// How a transcript draws a call to `name` (M56.8): the row's renderer, the
@@ -1359,11 +1483,7 @@ pub fn renderer(name: &str) -> Renderer {
     {
         return generated().renderer;
     }
-    manifest()
-        .cli_tools
-        .iter()
-        .find(|tool| tool.name == bare)
-        .map_or(Renderer::Step, |tool| tool.renderer)
+    cli_tool(bare).map_or(Renderer::Step, |tool| tool.renderer)
 }
 
 /// The phrases a run of calls to `name` folds under (M56.8), or `None` for a
@@ -1373,11 +1493,7 @@ pub fn fold(name: &str) -> Option<&'static FoldPhrases> {
     if let Some(row) = row(bare) {
         return row.fold.as_ref();
     }
-    manifest()
-        .cli_tools
-        .iter()
-        .find(|tool| tool.name == bare)
-        .and_then(|tool| tool.fold.as_ref())
+    cli_tool(bare).and_then(|tool| tool.fold.as_ref())
 }
 
 /// Does `name` name a confirmable tool (M57.4)? Spelled any way the one
@@ -1482,12 +1598,17 @@ pub fn validate_input(name: &str, input: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// The CLI built-in named `name`, as the CLI spells it.
+/// The CLI built-in named `name`, as the CLI spells it: its row's name or one
+/// of its aliases (M91.1), so `Task` and `Agent` answer with one row's facts.
+/// The one lookup every reader of a built-in's facts goes through.
 pub fn cli_tool(name: &str) -> Option<&'static CliTool> {
-    manifest().cli_tools.iter().find(|tool| tool.name == name)
+    manifest()
+        .cli_tools
+        .iter()
+        .find(|tool| tool.name == name || tool.aliases.iter().any(|alias| alias == name))
 }
 
-/// The CLI built-ins `select` keeps, in argv order.
+/// The CLI built-ins `select` keeps, in argv order, by their names.
 pub fn cli_names(select: impl Fn(&CliTool) -> bool) -> Vec<&'static str> {
     manifest()
         .cli_tools
@@ -2195,25 +2316,148 @@ mod tests {
                 ("Grep", Some("file_read"), Some("pattern")),
                 ("WebFetch", Some("web"), Some("url")),
                 ("WebSearch", Some("web"), Some("query")),
-                ("Task", Some("delegate"), Some("description")),
+                ("Agent", Some("delegate"), Some("description")),
                 ("AskUserQuestion", Some("question"), None),
                 ("ExitPlanMode", Some("plan"), None),
+                ("EnterPlanMode", Some("plan"), None),
+                ("TodoWrite", Some("todo"), None),
+                ("TaskCreate", Some("task_list"), None),
+                ("TaskGet", Some("task_list"), None),
+                ("TaskList", Some("task_list"), None),
+                ("TaskUpdate", Some("task_list"), None),
+                ("TaskOutput", Some("background"), None),
+                ("TaskStop", Some("background"), None),
+                ("SendMessage", Some("cross_session"), None),
+                ("ListAgents", Some("cross_session"), None),
+                ("CronCreate", Some("schedule"), None),
+                ("CronDelete", Some("schedule"), None),
+                ("CronList", Some("schedule"), None),
+                ("ScheduleWakeup", Some("schedule"), None),
+                ("RemoteTrigger", Some("schedule"), None),
+                ("Artifact", Some("outside"), None),
+                ("PushNotification", Some("outside"), None),
+                ("DesignSync", Some("outside"), None),
+                ("ReportFindings", Some("outside"), None),
+                ("Workflow", Some("outside"), None),
+                ("EnterWorktree", Some("outside"), None),
+                ("ExitWorktree", Some("outside"), None),
+                ("SendUserMessage", Some("outside"), None),
+                ("REPL", Some("outside"), None),
+                ("ListMcpResourcesTool", Some("outside"), None),
+                ("ReadMcpResourceTool", Some("outside"), None),
+                ("ReadMcpResourceDirTool", Some("outside"), None),
+                ("LSP", Some("outside"), None),
+                ("Monitor", Some("outside"), None),
+                ("Skill", Some("skill"), None),
+                ("ToolSearch", Some("meta"), None),
             ]
         );
         assert_eq!(cli_tool("Bash").unwrap().icon, "terminal");
         assert!(cli_tool("bash").is_none(), "the CLI's spelling, exactly");
-        for tool in ["AskUserQuestion", "ExitPlanMode"] {
+        for tool in [
+            "AskUserQuestion",
+            "ExitPlanMode",
+            "EnterPlanMode",
+            "ToolSearch",
+        ] {
             assert!(!writes_disk(tool));
             assert_eq!(renderer(tool), Renderer::Step);
         }
+        assert_eq!(renderer("TodoWrite"), Renderer::Todo);
+        assert!(
+            !writes_disk("TodoWrite"),
+            "its list is Claude Code's, not a file"
+        );
+    }
+
+    // M91.1: the subagent tool is `Agent` in a call and `Task` in an init.
+    // The manifest says so as data, and every reader of a built-in's facts
+    // asks the one lookup, so both spellings answer with one row.
+    #[test]
+    fn agent_and_task_answer_with_one_row() {
+        let agent = cli_tool("Agent").expect("the subagent row");
+        assert_eq!(agent.aliases, ["Task"]);
+        assert!(std::ptr::eq(cli_tool("Task").unwrap(), agent));
+        assert_eq!(agent.family.as_deref(), Some("delegate"));
+        assert_eq!(agent.icon, "bot");
+        for name in ["Agent", "Task"] {
+            assert_eq!(renderer(name), Renderer::Subagent, "{name}");
+            assert!(!writes_disk(name), "{name}");
+            assert!(fold(name).is_none(), "{name}");
+        }
+        // Spelled the CLI's way only, and never as a cerebro tool.
+        for name in ["task", "agent", "mcp__cerebro__Task", "Tasks"] {
+            assert!(cli_tool(name).is_none(), "{name}");
+        }
+        // argv names the row by its name alone.
+        assert!(cli_names(|_| true).contains(&"Agent"));
+        assert!(!cli_names(|_| true).contains(&"Task"));
+        // Every other row answers to its name alone.
+        let aliased: Vec<&str> = manifest()
+            .cli_tools
+            .iter()
+            .filter(|tool| !tool.aliases.is_empty())
+            .map(|tool| tool.name.as_str())
+            .collect();
+        assert_eq!(aliased, ["Agent"]);
+    }
+
+    #[test]
+    fn an_alias_is_a_cli_spelling_held_by_one_row() {
+        let cases: Vec<Case> = vec![
+            (
+                Box::new(|v| cli(v, "Agent")["aliases"] = json!(["task"])),
+                &[
+                    "cli tool Agent",
+                    "`aliases`",
+                    "must each match [A-Z][A-Za-z]*",
+                ],
+            ),
+            (
+                Box::new(|v| cli(v, "Agent")["aliases"] = json!(["Bash"])),
+                &[
+                    "cli tool Agent",
+                    "`aliases`",
+                    "names Bash, which a CLI row already answers to",
+                ],
+            ),
+            (
+                Box::new(|v| cli(v, "Agent")["aliases"] = json!(["Task", "Task"])),
+                &["cli tool Agent", "`aliases`", "names Task"],
+            ),
+            (
+                Box::new(|v| cli(v, "Read")["aliases"] = json!(["Task"])),
+                &["cli tool Agent", "`aliases`", "names Task"],
+            ),
+            (
+                Box::new(|v| cli(v, "Agent")["aliases"] = json!(["Agent"])),
+                &["cli tool Agent", "`aliases`", "names Agent"],
+            ),
+        ];
+        for (mutate, fragments) in cases {
+            assert_names(&refused(mutate), fragments);
+        }
+        // A list it must be, as serde reads it; absent reads as none.
+        assert_names(
+            &refused(|v| cli(v, "Agent")["aliases"] = Value::Null),
+            &[TOOLS_PATH, "invalid type"],
+        );
+        let mut raw: Value = serde_json::from_str(TOOLS_JSON).unwrap();
+        cli(&mut raw, "Agent")
+            .as_object_mut()
+            .unwrap()
+            .remove("aliases");
+        let loaded = parse(&raw.to_string()).expect("a row with no aliases loads");
+        let agent = loaded.cli_tools.iter().find(|t| t.name == "Agent").unwrap();
+        assert!(agent.aliases.is_empty());
     }
 
     #[test]
     fn the_cli_refusals_name_the_row_and_the_field() {
         let cases: Vec<Case> = vec![
             (
-                Box::new(|v| cli(v, "Task")["name"] = json!("task")),
-                &["cli tool task", "`name`", "[A-Z][A-Za-z]*"],
+                Box::new(|v| cli(v, "Agent")["name"] = json!("agent")),
+                &["cli tool agent", "`name`", "[A-Z][A-Za-z]*"],
             ),
             (
                 Box::new(|v| cli(v, "Read")["family"] = json!(null)),
@@ -2306,6 +2550,28 @@ mod tests {
                 }),
                 &["tool get_note", "`fold.many`", "1 to 40"],
             ),
+            // M91.1: a fold's running words answer to the same rules.
+            (
+                Box::new(|v| tool(v, "get_note")["fold"]["running"]["one"] = json!("reading {n}")),
+                &["tool get_note", "`fold.running.one`", "without {n}"],
+            ),
+            (
+                Box::new(|v| {
+                    tool(v, "get_note")["fold"]["running"]["many"] = json!("reading notes")
+                }),
+                &["tool get_note", "`fold.running.many`", "exactly one {n}"],
+            ),
+            (
+                Box::new(|v| cli(v, "Read")["fold"]["running"]["one"] = json!("Reading a file")),
+                &["cli tool Read", "`fold.running.one`", "lowercase"],
+            ),
+            (
+                Box::new(|v| {
+                    cli(v, "Grep")["fold"]["running"]["many"] =
+                        json!(format!("{}{{n}}", "s".repeat(38)))
+                }),
+                &["cli tool Grep", "`fold.running.many`", "1 to 40"],
+            ),
         ];
         for (mutate, fragments) in cases {
             assert_names(&refused(mutate), fragments);
@@ -2314,9 +2580,101 @@ mod tests {
         let mut raw: Value = serde_json::from_str(TOOLS_JSON).unwrap();
         tool(&mut raw, "get_note")["fold"]["one"] = json!("r".repeat(40));
         parse(&raw.to_string()).expect("a 40-character phrase loads");
-        // And an unknown field inside a fold fails the parse.
+        // A fold may leave its running words out, absent or null.
+        let mut raw: Value = serde_json::from_str(TOOLS_JSON).unwrap();
+        tool(&mut raw, "get_note")["fold"]
+            .as_object_mut()
+            .unwrap()
+            .remove("running");
+        cli(&mut raw, "Read")["fold"]["running"] = Value::Null;
+        let loaded = parse(&raw.to_string()).expect("a fold without running words loads");
+        let note = loaded
+            .tools
+            .iter()
+            .find(|row| row.name == "get_note")
+            .unwrap();
+        assert_eq!(note.fold.as_ref().unwrap().running, None);
+        // And an unknown field inside a fold, or inside its running words,
+        // fails the parse.
         let err = refused(|v| tool(v, "get_note")["fold"]["few"] = json!("read a few notes"));
         assert_names(&err, &[TOOLS_PATH, "few"]);
+        let err = refused(|v| tool(v, "get_note")["fold"]["running"]["all"] = json!("reading"));
+        assert_names(&err, &[TOOLS_PATH, "all"]);
+    }
+
+    // M91.1: a row's status words, optional on any row, are one call's.
+    #[test]
+    fn status_phrases_name_one_call_in_lowercase() {
+        let phrases = json!({
+            "running": "running a command",
+            "done": "ran a command",
+            "failed": "failed to run a command"
+        });
+        let mut raw: Value = serde_json::from_str(TOOLS_JSON).unwrap();
+        cli(&mut raw, "Bash")["phrases"] = phrases.clone();
+        tool(&mut raw, "create_note")["phrases"] = json!({
+            "running": "making a note",
+            "done": "made a note",
+            "failed": "failed to make a note"
+        });
+        let loaded = parse(&raw.to_string()).expect("phrases on a reader and a writer load");
+        let bash = loaded.cli_tools.iter().find(|t| t.name == "Bash").unwrap();
+        assert_eq!(bash.phrases.as_ref().unwrap().done, "ran a command");
+        // M91.13: the rows a conversation names ship them; a read keeps its
+        // name on a line of its own, and its fold words a run of it.
+        let shipped = manifest();
+        let shipped_bash = shipped.cli_tools.iter().find(|t| t.name == "Bash").unwrap();
+        assert_eq!(shipped_bash.phrases.as_ref().unwrap().done, "ran a command");
+        assert!(shipped
+            .tools
+            .iter()
+            .filter(|row| row.fold.is_some())
+            .all(|row| row.phrases.is_none()));
+        let cases: Vec<Case> = vec![
+            (
+                Box::new(|v| {
+                    cli(v, "Bash")["phrases"] = json!({
+                        "running": "running {n} commands", "done": "ran it", "failed": "failed"
+                    })
+                }),
+                &["cli tool Bash", "`phrases.running`", "without {n}"],
+            ),
+            (
+                Box::new(|v| {
+                    tool(v, "get_note")["phrases"] = json!({
+                        "running": "reading", "done": "Read a note", "failed": "failed to read"
+                    })
+                }),
+                &["tool get_note", "`phrases.done`", "lowercase"],
+            ),
+            (
+                Box::new(|v| {
+                    tool(v, "get_note")["phrases"] = json!({
+                        "running": "reading", "done": "read", "failed": " "
+                    })
+                }),
+                &["tool get_note", "`phrases.failed`", "1 to 40"],
+            ),
+            (
+                Box::new(|v| {
+                    tool(v, "get_note")["phrases"] =
+                        json!({ "running": "r".repeat(41), "done": "read", "failed": "failed" })
+                }),
+                &["tool get_note", "`phrases.running`", "1 to 40"],
+            ),
+        ];
+        for (mutate, fragments) in cases {
+            assert_names(&refused(mutate), fragments);
+        }
+        for err in [
+            refused(|v| cli(v, "Bash")["phrases"] = json!({ "running": "running", "done": "ran" })),
+            refused(|v| {
+                cli(v, "Bash")["phrases"] =
+                    json!({ "running": "a", "done": "b", "failed": "c", "paused": "d" })
+            }),
+        ] {
+            assert_names(&err, &[TOOLS_PATH]);
+        }
     }
 
     #[test]
@@ -2379,13 +2737,40 @@ mod tests {
                 ],
             ),
             (
-                Box::new(|v| cli(v, "Task")["renderer"] = json!("handoff")),
-                &["cli tool Task", "`renderer`", "never a CLI tool"],
+                Box::new(|v| cli(v, "Agent")["renderer"] = json!("handoff")),
+                &["cli tool Agent", "`renderer`", "never a CLI tool"],
+            ),
+            // M91.1: the two renderers that draw the CLI's own work sit on
+            // its rows alone.
+            (
+                Box::new(|v| tool(v, "hand_to")["renderer"] = json!("subagent")),
+                &[
+                    "tool hand_to",
+                    "`renderer`",
+                    "subagent draws one of the CLI's own tools, never a cerebro tool",
+                ],
+            ),
+            (
+                Box::new(|v| tool(v, "open_note")["renderer"] = json!("todo")),
+                &[
+                    "tool open_note",
+                    "`renderer`",
+                    "todo draws one of the CLI's own tools",
+                ],
+            ),
+            (
+                Box::new(|v| v["generated"]["renderer"] = json!("subagent")),
+                &["generated", "`renderer`", "never a cerebro tool"],
             ),
         ];
         for (mutate, fragments) in cases {
             assert_names(&refused(mutate), fragments);
         }
+        // Either sits on any CLI row that does not write.
+        let mut raw: Value = serde_json::from_str(TOOLS_JSON).unwrap();
+        cli(&mut raw, "Bash")["renderer"] = json!("subagent");
+        cli(&mut raw, "WebSearch")["renderer"] = json!("todo");
+        parse(&raw.to_string()).expect("a CLI row may draw a subagent or a todo list");
     }
 
     #[test]
@@ -2433,6 +2818,20 @@ mod tests {
             (note.one.as_str(), note.many.as_str()),
             ("read a note", "read {n} notes")
         );
+        // M91.1: every fold the manifest ships names its running words too.
+        let running = note.running.as_ref().expect("get_note's running words");
+        assert_eq!(
+            (running.one.as_str(), running.many.as_str()),
+            ("reading a note", "reading {n} notes")
+        );
+        let folds = manifest()
+            .tools
+            .iter()
+            .filter_map(|row| row.fold.as_ref())
+            .chain(manifest().cli_tools.iter().filter_map(|t| t.fold.as_ref()));
+        for fold in folds {
+            assert!(fold.running.is_some(), "{} has no running words", fold.one);
+        }
         for name in [
             "create_note",
             "Write",
@@ -2454,6 +2853,9 @@ mod tests {
             ("suggest_view", Renderer::View),
             ("MultiEdit", Renderer::Change),
             ("mcp__gmail__search", Renderer::Step),
+            ("Agent", Renderer::Subagent),
+            ("Task", Renderer::Subagent),
+            ("TodoWrite", Renderer::Todo),
         ] {
             assert_eq!(renderer(name), expected, "{name}");
         }

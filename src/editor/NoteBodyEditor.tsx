@@ -1,15 +1,40 @@
 import { usePaneId } from '@/stores/navStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useExtensionState } from '@blocknote/react';
+import { PageTitleFallback } from './PageTitleFallback';
+import { PageTitleProjection } from './pageTitleProjection';
 import { readNote, saveNote } from '@/lib/ipc';
 import { refusalText } from '@/lib/refusal';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { LazyMarkdownEditor } from './LazyMarkdownEditor';
 import type { ChoiceView, EditorReadyInfo } from './MarkdownEditor';
-import type { LossyCause } from './markdown';
+import { type LossyCause } from './markdown';
 import { MergeChoices } from './MergeChoices';
 import { NotePathContext } from './notePath';
 import { holdEditor, onExternalWrite, registerFlush, registerHold } from './openPages';
+
+/** Read the live projection rather than caching title presence in the file
+ * loader. The metadata portal remains mounted while editors load or refresh. */
+function OwnedPageTitle(
+  props: Omit<React.ComponentProps<typeof PageTitleFallback>, 'editor' | 'flushPendingSave'> & {
+    owner: EditorReadyInfo;
+  },
+) {
+  const titleId = useExtensionState(PageTitleProjection, {
+    editor: props.owner.editor,
+    selector: (state) => state.titleId,
+  });
+  if (titleId !== null) return null;
+  return (
+    <PageTitleFallback
+      {...props}
+      editor={props.owner.editor}
+      flushPendingSave={props.owner.flushPendingSave}
+    />
+  );
+}
 
 /** Where the body currently stands relative to disk. */
 export type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'failed';
@@ -85,6 +110,9 @@ export function NoteBodyEditor({
   onBodyLoaded,
   readOnly = false,
   sections = false,
+  pageChrome,
+  pageTitle,
+  bodyVisible,
 }: {
   path: string;
   /** The global peek owns its editor independently of its backdrop pane. */
@@ -110,8 +138,23 @@ export function NoteBodyEditor({
   /** `#` headings are sections, not the page title: a concept keeps its title
    *  in frontmatter (OKF), so its body's H1s render at section size. */
   sections?: boolean;
+  pageChrome?: import('react').ReactNode;
+  pageTitle?: string;
+  bodyVisible?: boolean;
 }) {
   const pane = usePaneId();
+  const [chromeHost] = useState(() => {
+    const node = document.createElement('div');
+    node.className = 'cb-page-editor-chrome';
+    node.contentEditable = 'false';
+    node.dataset.testid = 'page-editor-chrome';
+    return node;
+  });
+  const [titleOwner, setTitleOwner] = useState<{
+    path: string;
+    gen: number;
+    info: EditorReadyInfo;
+  } | null>(null);
   useEffect(() => holdEditor(path, owner ?? pane), [path, owner, pane]);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
@@ -174,6 +217,7 @@ export function NoteBodyEditor({
   readOnlyRef.current = readOnly;
   const isLocked = () => readOnlyRef.current || (lossyRef.current !== null && !unlockedRef.current);
   const flushRef = useRef<(() => Promise<void>) | null>(null);
+  const titleDraftRef = useRef<(() => void) | null>(null);
   const cancelRef = useRef<(() => void) | null>(null);
 
   const onSaveStateRef = useRef(onSaveState);
@@ -345,6 +389,11 @@ export function NoteBodyEditor({
       remount();
       return;
     }
+    // An IME may still own the filename fallback's local composition. Move
+    // that exact draft into this editor before merging outside bytes, so the
+    // same reconcile can preserve it or present a choice rather than unmount
+    // the field underneath the person's composition.
+    titleDraftRef.current?.();
     const result = at.info.applyExternal(raw, was.canon, {
       allowLoss: lossyRef.current !== null && unlockedRef.current,
     });
@@ -516,16 +565,55 @@ export function NoteBodyEditor({
     release();
   };
 
+  const frame = (content: import('react').ReactNode, loading = false) =>
+    pageTitle === undefined ? (
+      content
+    ) : (
+      <div className={compact ? 'cerebro-editor-compact' : undefined}>
+        <div
+          className="cb-page-chrome-parking"
+          ref={(node) => {
+            if (node !== null && !chromeHost.isConnected) node.appendChild(chromeHost);
+          }}
+        />
+        {createPortal(
+          <>
+            {loading ? (
+              <h1 className="cb-page-title-fallback">{pageTitle}</h1>
+            ) : (
+              titleOwner !== null &&
+              titleOwner.path === loaded?.path &&
+              titleOwner.gen === loaded.gen && (
+                <OwnedPageTitle
+                  owner={titleOwner.info}
+                  title={pageTitle}
+                  bodyVisible={bodyVisible !== false}
+                  settleRef={titleDraftRef}
+                  readOnly={readOnly || (lossy !== null && !unlocked)}
+                />
+              )
+            )}
+            {pageChrome}
+            {bodyVisible !== false && <div data-testid="page-body-start" aria-hidden="true" />}
+          </>,
+          chromeHost,
+        )}
+        {content}
+      </div>
+    );
   if (failed) {
-    return <p className="m-0 px-1 py-2 text-sm text-n-500">This page couldn't be loaded.</p>;
+    return frame(
+      <p className="m-0 px-1 py-2 text-sm text-n-500">This page couldn't be loaded.</p>,
+      true,
+    );
   }
   if (loaded === null || loaded.path !== path) {
-    return <div data-testid="note-body-loading" />;
+    return frame(<div data-testid="note-body-loading" />, true);
   }
 
   const locked = readOnly || (lossy !== null && !unlocked);
 
-  return (
+  return frame(
     <div
       className={`flex min-h-0 flex-1 flex-col${compact ? ' cerebro-editor-compact' : ''}${
         sections ? ' cerebro-editor-sections' : ''
@@ -570,6 +658,7 @@ export function NoteBodyEditor({
             lossyRef.current = info.lossyCause;
             setLossy(info.lossyCause);
             ready.current = { path: loaded.path, info };
+            setTitleOwner({ path: loaded.path, gen: loaded.gen, info });
             base.current = { raw: loaded.body, canon: info.loadedAs };
             onReady?.(info);
             if (missed.current) {
@@ -579,8 +668,11 @@ export function NoteBodyEditor({
           }}
           autoFocus={autoFocus}
           debounceMs={debounceMs}
+          pageChromeHost={chromeHost}
+          pageTitle={pageTitle}
+          bodyVisible={bodyVisible}
         />
       </NotePathContext.Provider>
-    </div>
+    </div>,
   );
 }

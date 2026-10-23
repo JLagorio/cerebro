@@ -1,5 +1,5 @@
 import type { ToolCall } from './types';
-import { bareToolName, toolFacts, type ToolFacts } from '@/lib/policy/tools';
+import { bareToolName, toolFacts, type FoldPhrases, type ToolFacts } from '@/lib/policy/tools';
 
 /**
  * A message's tool calls as transcript rows (M56.8): pure, no DOM.
@@ -38,6 +38,9 @@ export interface ToolGroupRow {
   key: string;
   /** "Read 5 notes", from the manifest's phrases. */
   label: string;
+  /** "Reading 5 notes": the same row in its running words (M91.1's
+   * `fold.running`), or null where a member's row names none. */
+  runningLabel: string | null;
   members: ToolRow[];
   /** A member is still running. */
   running: boolean;
@@ -76,6 +79,25 @@ function joinParts(parts: string[]): string {
  * as a list and capitalized. Five get_note calls read "Read 5 notes".
  */
 export function groupLabel(tools: ToolCall[], factsOf: FactsOf = toolFacts): string {
+  return labelOf(tools, factsOf, (fold) => fold) ?? '';
+}
+
+/**
+ * The same label in its running words (M91.1's `fold.running`): "Reading 5
+ * notes". Null when a tool's fold names no running words, so the row keeps
+ * its label and says it runs in words of its own.
+ */
+export function runningGroupLabel(tools: ToolCall[], factsOf: FactsOf = toolFacts): string | null {
+  return labelOf(tools, factsOf, (fold) => fold.running ?? null);
+}
+
+/** Each tool counted in the phrases `pick` takes from its fold, or null when
+ * one of them has none. */
+function labelOf(
+  tools: ToolCall[],
+  factsOf: FactsOf,
+  pick: (fold: FoldPhrases) => { one: string; many: string } | null,
+): string | null {
   const counts = new Map<string, { name: string; count: number }>();
   for (const tool of tools) {
     const key = bareToolName(tool.name);
@@ -83,11 +105,14 @@ export function groupLabel(tools: ToolCall[], factsOf: FactsOf = toolFacts): str
     if (seen === undefined) counts.set(key, { name: tool.name, count: 1 });
     else seen.count += 1;
   }
-  const parts = [...counts.values()].flatMap(({ name, count }) => {
+  const parts: string[] = [];
+  for (const { name, count } of counts.values()) {
     const fold = factsOf(name)?.fold;
-    if (fold == null) return [];
-    return [count === 1 ? fold.one : fold.many.replace('{n}', String(count))];
-  });
+    if (fold == null) continue;
+    const phrases = pick(fold);
+    if (phrases === null) return null;
+    parts.push(count === 1 ? phrases.one : phrases.many.replace('{n}', String(count)));
+  }
   const label = joinParts(parts);
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
@@ -109,13 +134,12 @@ export function transcriptRows(
   const flush = () => {
     if (run.length >= 2) {
       const members = run;
+      const tools = members.map((m) => m.tool);
       rows.push({
         kind: 'group',
         key: `group-${members[0].key}`,
-        label: groupLabel(
-          members.map((m) => m.tool),
-          factsOf,
-        ),
+        label: groupLabel(tools, factsOf),
+        runningLabel: runningGroupLabel(tools, factsOf),
         members,
         running: members.some((m) => m.status === 'running'),
       });

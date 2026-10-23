@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { boot, openDestination } from './boot';
+import { chooseOption } from './select';
 import { makePdf } from '../src/test/makePdf';
 
 async function openPdf(page: Page, name: 'report.pdf' | 'scan.pdf') {
@@ -80,6 +81,16 @@ test('a forty-page PDF renders nearby pages and supports outline, find, page inp
   await page.getByLabel('PDF pages', { exact: true }).focus();
   await page.keyboard.press(`${modifier}+0`);
   await expect(zoom).toHaveText('100%');
+  // The presets are the design system's select, and it names the one the
+  // view is at: 100% after ⌘0, nothing once a step leaves them.
+  const preset = viewer.getByRole('button', { name: 'PDF zoom preset' });
+  await expect(viewer.locator('select')).toHaveCount(0);
+  await expect(preset).toHaveAttribute('data-value', '100');
+  await chooseOption(preset, 'Page fit');
+  await expect(preset).toHaveText('Page fit');
+  await expect(zoom).not.toHaveText('100%');
+  await viewer.getByRole('button', { name: 'Zoom in' }).click();
+  await expect(preset).toHaveText('Custom');
   await expect(viewer.getByRole('button', { name: 'Print…' })).toBeDisabled();
   await page.screenshot({ path: `/private/tmp/cerebro-pdf-${test.info().project.name}.png` });
 });

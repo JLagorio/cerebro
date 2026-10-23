@@ -145,6 +145,36 @@ it('a row names the recorded assignment, resolves titles, groups a hop, and open
   expect((await screen.findByTestId('opened-run')).textContent).toContain('root');
   expect(detail).toHaveBeenCalledWith('root');
 });
+it("nests a hop's own hop under it on the trace's rule, each row keeping its depth", async () => {
+  read.mockResolvedValue([
+    run({ run_id: 'hop-2', actor: null, parent_run_id: 'hop-1', cause: null }),
+    run(),
+    run({ run_id: 'hop-1', actor: null, parent_run_id: 'root', cause: null }),
+  ]);
+  mount();
+  const rows = await screen.findAllByTestId('page-run-row');
+  expect(rows.map((row) => [row.getAttribute('data-run'), row.getAttribute('data-depth')])).toEqual(
+    [
+      ['root', '0'],
+      ['hop-1', '1'],
+      ['hop-2', '2'],
+    ],
+  );
+  expect(rows[1].closest('[data-hops]')?.getAttribute('data-hops')).toBe('root');
+  expect(rows[2].closest('[data-hops]')?.getAttribute('data-hops')).toBe('hop-1');
+});
+it('says how each run ended in a word before it, and how long only as recorded', async () => {
+  read.mockResolvedValue([
+    run({ run_id: 'failed', outcome: 'failed', ended_at: '2026-07-28T12:00:30Z' }),
+    run({ run_id: 'live', outcome: 'running', ended_at: null }),
+  ]);
+  mount();
+  await screen.findAllByTestId('page-run-row');
+  const row = (id: string) => document.querySelector<HTMLElement>(`[data-run="${id}"]`)!;
+  expect(row('failed').textContent).toMatch(/^Failed: Scoutfailed30s/);
+  expect(row('live').textContent).toMatch(/^Running: Scoutrunning/);
+  expect(row('live').querySelector('[data-slot="trace-description"]')).toBeNull();
+});
 it('bounds subjects at 500 and tells how many pages were searched', async () => {
   mount([
     ...entries,

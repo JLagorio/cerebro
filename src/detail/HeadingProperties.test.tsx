@@ -63,34 +63,8 @@ describe('HeadingProperties (M45.1)', () => {
     expect(screen.getByText('Priority')).toBeTruthy();
   });
 
-  it('sets the strip label smaller AND heavier than a panel row label (§A8)', () => {
-    // The portable half of the measurement: 13/500/18 here against 14/400/20
-    // in the panel, because this label is a COLUMN HEADER rather than a row
-    // label. Ours made them identical — 12/400/20 on both — which was the
-    // real defect; the sizes themselves come from our own ramp.
-    setup({ heading: ['status'] });
-    const label = screen.getByText('Status');
-    expect(label.className).toContain('text-sm');
-    expect(label.className).toContain('font-medium');
-    expect(label.className).toContain('leading-[18px]');
-    expect(label.className).toContain('truncate');
-  });
-
-  it('gaps the strip icon at 2px and keeps the panel row slot (§A10)', () => {
-    setup({ heading: ['status'] });
-    const cell = screen.getByTestId('heading-strip').querySelector('[data-field]')!;
-    const labelRow = cell.firstElementChild as HTMLElement;
-    // 2px here, 6px in the panel — measured, and the one number of the row
-    // anatomy that is deliberately different between the two surfaces.
-    expect(labelRow.className).toContain('gap-0.5');
-    expect(labelRow.className).not.toContain('gap-1.5');
-    // The 18 x 24 slot is shared with the panel, so a strip cell and a row
-    // start their text at the same offset even though the glyph is smaller.
-    const slot = labelRow.firstElementChild as HTMLElement;
-    expect(slot.className).toContain('h-6');
-    expect(slot.className).toContain('w-[18px]');
-    expect(slot.querySelector('svg')?.getAttribute('width')).toBe('14');
-  });
+  // The inline label/value geometry is measured in visual-pages.spec.ts.
+  // jsdom cannot establish that the byline shares a baseline or fits a pane.
 
   it('gives the strip value the measured 30px box (§A.2)', () => {
     setup({ heading: ['status'] });

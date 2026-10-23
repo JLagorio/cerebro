@@ -1,0 +1,530 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "synthetic": "hand-shaped from Claude Code 2.1.250's measured shapes (M91.3a), not recorded: synthetic ids, and M91.R's live recording replaces it; the stream alone says permission_denied",
+    "cwd": "/vault",
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "tools": ["Bash", "Read", "ToolSearch"],
+    "mcp_servers": [
+      {
+        "name": "cerebro",
+        "status": "connected"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "permissionMode": "default",
+    "apiKeySource": "none",
+    "claude_code_version": "2.1.250",
+    "uuid": "00000000-0000-4000-8000-000009400001"
+  },
+  {
+    "type": "system",
+    "subtype": "status",
+    "status": "requesting",
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400501"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_start",
+      "message": {
+        "model": "claude-haiku-4-5-20251001",
+        "id": "msg_000000000000000000009401",
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "stop_reason": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400502"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": {
+        "type": "tool_use",
+        "id": "toolu_000000000000000000009401",
+        "name": "Bash",
+        "input": {}
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400503"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "input_json_delta",
+        "partial_json": "{\"command\":\"grep -rl vendor notes | wc -l; grep -rl vendor archive | wc -l\",\"description\":\"Count the notes that mention the vendor\"}"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400504"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009401",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009401",
+          "name": "Bash",
+          "input": {
+            "command": "grep -rl vendor notes | wc -l; grep -rl vendor archive | wc -l",
+            "description": "Count the notes that mention the vendor"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400101",
+    "timestamp": "2026-10-22T12:00:02.000Z",
+    "request_id": "req_000000000000000000009401"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 0
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400505"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_delta",
+      "delta": {
+        "stop_reason": "tool_use",
+        "stop_sequence": null
+      },
+      "usage": {
+        "output_tokens": 40
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400506"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_stop"
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400507"
+  },
+  {
+    "type": "system",
+    "subtype": "permission_denied",
+    "tool_name": "Bash",
+    "tool_use_id": "toolu_000000000000000000009401",
+    "decision_reason_type": "subcommandResults",
+    "message": "This Bash command contains multiple operations. The following parts require approval: grep -rl vendor archive",
+    "uuid": "00000000-0000-4000-8000-000009400508",
+    "session_id": "00000000-0000-4000-8000-000000009400"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009401",
+          "type": "tool_result",
+          "content": "This Bash command contains multiple operations. The following parts require approval: grep -rl vendor archive",
+          "is_error": true
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400102",
+    "timestamp": "2026-10-22T12:00:02.100Z",
+    "tool_use_result": "Error: This Bash command contains multiple operations. The following parts require approval: grep -rl vendor archive",
+    "tool_result_meta": [
+      {
+        "id": "toolu_000000000000000000009401",
+        "non_execution_kind": "user-rejected"
+      }
+    ]
+  },
+  {
+    "type": "system",
+    "subtype": "status",
+    "status": "requesting",
+    "uuid": "00000000-0000-4000-8000-000009400509",
+    "session_id": "00000000-0000-4000-8000-000000009400"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_start",
+      "message": {
+        "model": "claude-haiku-4-5-20251001",
+        "id": "msg_000000000000000000009402",
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "stop_reason": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400510"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": {
+        "type": "text",
+        "text": ""
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400511"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "text_delta",
+        "text": "The archive part needs approval, so "
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400512"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "text_delta",
+        "text": "I will count the notes folder alone."
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400513"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009402",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "The archive part needs approval, so I will count the notes folder alone."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400103",
+    "timestamp": "2026-10-22T12:00:03.000Z",
+    "request_id": "req_000000000000000000009402"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 0
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400514"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 1,
+      "content_block": {
+        "type": "tool_use",
+        "id": "toolu_000000000000000000009402",
+        "name": "Bash",
+        "input": {}
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400515"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": {
+        "type": "input_json_delta",
+        "partial_json": "{\"command\":\"grep -rl vendor notes | wc -l\",\"description\":\"Count the notes that mention the vendor\"}"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400516"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009402",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009402",
+          "name": "Bash",
+          "input": {
+            "command": "grep -rl vendor notes | wc -l",
+            "description": "Count the notes that mention the vendor"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400104",
+    "timestamp": "2026-10-22T12:00:03.300Z",
+    "request_id": "req_000000000000000000009402"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 1
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400517"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_delta",
+      "delta": {
+        "stop_reason": "tool_use",
+        "stop_sequence": null
+      },
+      "usage": {
+        "output_tokens": 40
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400518"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_stop"
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400519"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009402",
+          "type": "tool_result",
+          "content": "3"
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400105",
+    "timestamp": "2026-10-22T12:00:03.600Z",
+    "tool_use_result": {
+      "stdout": "3",
+      "stderr": "",
+      "interrupted": false,
+      "isImage": false
+    }
+  },
+  {
+    "type": "system",
+    "subtype": "status",
+    "status": "requesting",
+    "uuid": "00000000-0000-4000-8000-000009400520",
+    "session_id": "00000000-0000-4000-8000-000000009400"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_start",
+      "message": {
+        "model": "claude-haiku-4-5-20251001",
+        "id": "msg_000000000000000000009403",
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "stop_reason": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400521"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": {
+        "type": "text",
+        "text": ""
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400522"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "text_delta",
+        "text": "Three notes in notes"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400523"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "text_delta",
+        "text": "/ mention the vendor."
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400524"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009403",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Three notes in notes/ mention the vendor."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400106",
+    "timestamp": "2026-10-22T12:00:04.200Z",
+    "request_id": "req_000000000000000000009403"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 0
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400525"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_delta",
+      "delta": {
+        "stop_reason": "end_turn",
+        "stop_sequence": null
+      },
+      "usage": {
+        "output_tokens": 40
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400526"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_stop"
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400527"
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "duration_ms": 9000,
+    "duration_api_ms": 7000,
+    "num_turns": 3,
+    "result": "Three notes in notes/ mention the vendor.",
+    "stop_reason": "end_turn",
+    "total_cost_usd": 0.004,
+    "usage": {
+      "input_tokens": 12,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 6100,
+      "output_tokens": 160
+    },
+    "modelUsage": {},
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "session_id": "00000000-0000-4000-8000-000000009400",
+    "uuid": "00000000-0000-4000-8000-000009400999"
+  }
+]

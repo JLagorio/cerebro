@@ -48,32 +48,70 @@ describe('DocProperties', () => {
 
   // M12.1: docs are docs. The type is not a dropdown — the only way a doc
   // becomes a record is the explicit Convert action, which names the change.
-  it('shows Type: Doc with no dropdown', () => {
+  // Its Type value is that action's trigger (owner, 2026-10-18).
+  it('shows Type: Doc as the Convert trigger, never a list of types', () => {
     setup();
-    expect(screen.getByText('Doc')).toBeTruthy();
+    const trigger = screen.getByRole('button', { name: 'Doc, convert to record…' });
+    expect(trigger.textContent).toBe('Doc');
+    expect(trigger.getAttribute('title')).toBe('Convert to record…');
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    // The value of the Type row, not a row of its own under it.
+    expect(trigger.closest('[data-testid="property-row"]')?.getAttribute('data-property')).toBe(
+      'Type',
+    );
     expect(screen.queryByRole('button', { name: 'Type' })).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
+    // A doc's type is not a select of any kind (M12.1): no native one, and no
+    // design-system listbox button either.
+    expect(
+      document.querySelector('select, [role="combobox"], [aria-haspopup="listbox"]'),
+    ).toBeNull();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
   });
 
-  // M61.8: an instant prints the day this machine's clock said, not UTC's.
-  it('prints Created and Modified as local dates', () => {
-    const tz = process.env.TZ;
-    process.env.TZ = 'America/Los_Angeles';
-    try {
-      // 03:00Z is the evening BEFORE in Los Angeles.
-      setup({ createdAt: '2026-07-01T03:00:00Z', modifiedAt: '2026-07-02T03:00:00Z' });
-      expect(screen.getByText('Created 2026-06-30')).toBeTruthy();
-      expect(screen.getByText('Modified 2026-07-01')).toBeTruthy();
-    } finally {
-      if (tz === undefined) delete process.env.TZ;
-      else process.env.TZ = tz;
-    }
+  // Owner's vault, 2026-10-18: a capture's `generated: {by, at}` drew as
+  // JSON here and "[object Object]" elsewhere. A map reads as its lines, is
+  // shown rather than edited, and leads with a map's glyph.
+  it('draws a loose map as key and value lines, with no field to round-trip it', () => {
+    setup({ properties: { generated: { by: 'claude-code', at: 'soon' } as never } });
+    const row = screen
+      .getAllByTestId('property-row')
+      .find((r) => r.getAttribute('data-property') === 'generated') as HTMLElement;
+    const lines = within(row).getByTestId('structured-value');
+    expect(
+      [...lines.querySelectorAll('dt')].map(
+        (dt) => `${dt.textContent} ${dt.nextElementSibling?.textContent}`,
+      ),
+    ).toEqual(['by claude-code', 'at soon']);
+    expect(row.textContent).not.toMatch(/\[object Object\]|\{/);
+    expect(within(row).queryByRole('textbox')).toBeNull();
+    expect(row.querySelector('svg.lucide-braces')).not.toBeNull();
+  });
+
+  it("draws a record's type as a chip in its colour", () => {
+    setup({ type: 'Risk' });
+    const chip = screen.getByTestId('type-chip');
+    expect(chip.textContent).toBe('Risk');
+    expect(chip.getAttribute('style')).toMatch(/background/);
+    expect(chip.closest('[data-testid="property-row"]')?.getAttribute('data-property')).toBe(
+      'Type',
+    );
+  });
+
+  // The inspector's Info section says when the page was made and changed, once.
+  it('leaves the dates to the Info section', () => {
+    setup();
+    expect(screen.getByTestId('doc-properties').textContent).not.toMatch(/Created|Modified/);
   });
 
   // M60.7: one labelled batch, so the store toasts "Converted to …" with Undo.
   it('converts a doc to a record through the explicit Convert action, undoably', async () => {
     const user = userEvent.setup();
     const { patchFrontmatter, applyBatch } = setup({ hash: 'c'.repeat(64) });
-    await user.click(screen.getByRole('button', { name: 'Convert to record…' }));
+    await user.click(screen.getByRole('button', { name: 'Doc, convert to record…' }));
     expect(screen.queryByText(/cannot be undone|not from the app/)).toBeNull();
     await user.click(screen.getByRole('option', { name: 'Work item' }));
     await user.click(screen.getByRole('button', { name: 'Convert to Work item' }));
@@ -88,7 +126,7 @@ describe('DocProperties', () => {
   it('converts a page under knowledge/ through patchFrontmatter, never undoably', async () => {
     const user = userEvent.setup();
     const { patchFrontmatter, applyBatch } = setup({ path: 'knowledge/notes/welcome.md' });
-    await user.click(screen.getByRole('button', { name: 'Convert to record…' }));
+    await user.click(screen.getByRole('button', { name: 'Doc, convert to record…' }));
     await user.click(screen.getByRole('option', { name: 'Work item' }));
     await user.click(screen.getByRole('button', { name: 'Convert to Work item' }));
     await vi.waitFor(() =>
@@ -104,7 +142,7 @@ describe('DocProperties', () => {
   it('selects a type without converting until the footer action is pressed', async () => {
     const user = userEvent.setup();
     const { patchFrontmatter, applyBatch } = setup();
-    await user.click(screen.getByRole('button', { name: 'Convert to record…' }));
+    await user.click(screen.getByRole('button', { name: 'Doc, convert to record…' }));
     const row = screen.getByRole('option', { name: 'Work item' });
     expect(row.getAttribute('aria-selected')).toBe('false');
     await user.click(row);
@@ -118,7 +156,7 @@ describe('DocProperties', () => {
   it('closes the convert dialog on Escape', async () => {
     const user = userEvent.setup();
     setup();
-    await user.click(screen.getByRole('button', { name: 'Convert to record…' }));
+    await user.click(screen.getByRole('button', { name: 'Doc, convert to record…' }));
     expect(screen.getByRole('dialog')).toBeTruthy();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -146,7 +184,7 @@ describe('DocProperties', () => {
   // text box (a Checkbox opened as a text input containing "false").
   it('offers only plain kinds on an untyped doc', () => {
     setup();
-    fireEvent.click(screen.getByText('+ Add property'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add property' }));
     expect((screen.getByTestId('property-kind-text') as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByTestId('property-kind-number') as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByTestId('property-kind-checkbox') as HTMLButtonElement).disabled).toBe(true);
@@ -156,7 +194,7 @@ describe('DocProperties', () => {
   it('never offers Convert on an already-typed entry', () => {
     setup({ type: 'Person', properties: { type: 'Person' } });
     expect(screen.getByText('Person')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Convert to record…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Doc, convert to record…' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Type' })).toBeNull();
   });
 
@@ -171,6 +209,8 @@ describe('DocProperties', () => {
     const { patchFrontmatter } = setup({ properties: { source: 'imported' } });
     const input = screen.getByLabelText('Source') as HTMLInputElement;
     expect(input.value).toBe('imported');
+    // A ghost field: text like the values around it until it is found.
+    expect(input.closest('.cb-input')?.classList.contains('cb-inspector-input')).toBe(true);
     fireEvent.change(input, { target: { value: 'manual' } });
     fireEvent.blur(input);
     expect(patchFrontmatter).toHaveBeenCalledWith(DOC, { source: 'manual' });
@@ -190,9 +230,24 @@ describe('DocProperties', () => {
     expect(patchFrontmatter).toHaveBeenCalledWith(DOC, { source: null });
   });
 
+  // A quiet row like the properties above it: its plus where their icons sit,
+  // its words where their names do. It still anchors the add surface.
+  it('draws Add property as a row and opens the add surface from it', () => {
+    setup();
+    const add = screen.getByRole('button', { name: 'Add property' });
+    expect(add.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(add.getAttribute('aria-expanded')).toBe('false');
+    expect(add.textContent).toBe('Add property');
+    expect(add.querySelector('svg')).toBeTruthy();
+    expect(add.className).toContain('h-[var(--property-row-h,34px)]');
+    fireEvent.click(add);
+    expect(add.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByLabelText('Property name')).toBeTruthy();
+  });
+
   it('adds a new empty property', () => {
     const { patchFrontmatter } = setup();
-    fireEvent.click(screen.getByText('+ Add property'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add property' }));
     fireEvent.change(screen.getByLabelText('Property name'), { target: { value: 'audience' } });
     fireEvent.keyDown(screen.getByLabelText('Property name'), { key: 'Enter' });
     expect(patchFrontmatter).toHaveBeenCalledWith(DOC, { audience: '' });
@@ -205,7 +260,7 @@ describe('DocProperties', () => {
   // field the open record happens to leave empty.
   it('refuses a duplicate property name in place, before any write', () => {
     const { patchFrontmatter } = setup({ properties: { source: 'x' } });
-    fireEvent.click(screen.getByText('+ Add property'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add property' }));
     fireEvent.change(screen.getByLabelText('Property name'), { target: { value: 'source' } });
 
     expect(screen.getByRole('alert').textContent).toContain('already a property here');
@@ -219,8 +274,8 @@ describe('DocProperties', () => {
 describe('DocProperties display config (M44.1 follow-up)', () => {
   afterEach(cleanup);
 
-  // Mirrors RecordProperties.test.tsx's fixture mechanics (the Info tab is
-  // reachable for a typed record too, via DocPage's side panel): the
+  // Mirrors RecordProperties.test.tsx's fixture mechanics (the Properties
+  // section is reachable for a typed record too, via DocPage's side panel): the
   // work-item fields declare no `visibility` by default, so marking `due`
   // `hide_when_empty` is enough to fold it without blanking a field that IS
   // set on fld-1. `hideField` adds a field marked `visibility: 'hide'`
@@ -245,8 +300,15 @@ describe('DocProperties display config (M44.1 follow-up)', () => {
 
   it('folds empty properties behind the count by default', () => {
     setupTyped();
-    expect(screen.queryByTestId('hidden-properties-toggle')).toBeTruthy();
+    const toggle = screen.getByTestId('hidden-properties-toggle');
     expect(screen.queryByText('Due')).toBeNull();
+    // The same quiet row as Add property, its chevron in the icon slot.
+    expect(toggle.textContent).toBe('1 hidden property');
+    expect(toggle.className).toBe(screen.getByRole('button', { name: 'Add property' }).className);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.textContent).toBe('Hide 1 property');
+    expect(screen.getByText('Due')).toBeTruthy();
   });
 
   it('show_empty unfolds them and retires the toggle — nothing left to fold', () => {
@@ -296,7 +358,9 @@ describe('DocProperties layout groups (M45.1)', () => {
     });
     const group = screen.getByTestId('property-group');
     expect(group.getAttribute('data-group')).toBe('g-main');
-    expect(within(group).getByText('Main')).toBeTruthy();
+    // The inspector's group label, in sentence case — not a tracked overline.
+    expect(within(group).getByText('Main').closest('.cb-inspector-subhead')).toBeTruthy();
+    expect(group.querySelector('.uppercase')).toBeNull();
     expect(within(group).getByText('Priority')).toBeTruthy();
     // Heading-claimed fields live in the strip, not this stack.
     expect(screen.queryByText('Status')).toBeNull();

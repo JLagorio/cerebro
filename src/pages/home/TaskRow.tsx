@@ -29,10 +29,10 @@ export function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: bo
         aria-label={`Mark "${task.text}" ${task.done ? 'open' : 'done'}`}
         onClick={() => onToggle(!task.done)}
         className={[
-          'flex h-4 w-4 flex-none items-center justify-center rounded-sm border',
+          'flex h-4 w-4 flex-none items-center justify-center rounded-full border',
           task.done
-            ? 'border-cortex-500 bg-cortex-500 text-n-0'
-            : 'border-n-300 bg-n-0 hover:border-cortex-500',
+            ? 'border-cortex-500 bg-cortex-500 text-inverse'
+            : 'border-n-400 bg-n-0 hover:border-cortex-500',
         ].join(' ')}
       >
         {task.done && <Icon name="check" size={11} />}
@@ -43,7 +43,7 @@ export function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: bo
           them apart sat at the opposite end from the checkbox you click. */}
       <span
         className={[
-          'min-w-0 max-w-[62%] truncate text-sm',
+          'min-w-0 max-w-[62%] truncate text-ui',
           task.done ? 'text-[var(--text-disabled)] line-through' : 'text-n-800',
         ].join(' ')}
       >

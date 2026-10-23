@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { makeEntry } from '@/test/factories';
 import type { Entry } from '@/engine/types';
 import type { ImportInput } from '@/engine/inlets';
@@ -38,9 +39,10 @@ it('opens a preview through the inlet, exposes mappings, and writes only on Impo
   expect(screen.getByText('Paris meeting')).toBeTruthy();
   expect(screen.getByLabelText('Calendar preview').textContent).toContain('09:00:00+02:00');
   expect(importIcs).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('Calendar location property'), {
-    target: { value: 'venue' },
-  });
+  const location = screen.getByRole('button', { name: 'Calendar location property' });
+  expect(optionLabels(location)).toEqual(['Keep in page text', 'Venue']);
+  chooseOption(location, 'Venue');
+  expect(location.getAttribute('data-value')).toBe('venue');
   fireEvent.click(screen.getByTestId('ics-import-submit'));
   await waitFor(() => expect(importIcs).toHaveBeenCalledOnce());
   expect(vi.mocked(importIcs).mock.calls[0][1]).toMatchObject({

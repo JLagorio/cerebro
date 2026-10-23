@@ -184,6 +184,7 @@ test('/ inserts each block, writes it as its carrier, and opens it again as itse
   await slash(page, 'file', 'File');
   await embed(page, 'docs/contract.pdf');
   await slash(page, 'table', 'Table');
+  await page.getByRole('button', { name: 'Insert table', exact: true }).click();
   await slash(page, 'toggle list', 'Toggle List');
   await page.keyboard.type('Open questions');
   await slash(page, 'toggle heading 1', 'Toggle Heading 1');

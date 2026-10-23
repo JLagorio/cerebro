@@ -1,0 +1,582 @@
+{
+  "format": 1,
+  "primary_run": "system/full-browser-source.json",
+  "primary_result": "687/687 passed; no retries or snapshot updates",
+  "focused_history": "Lane reports retain earlier focused runs as diagnostic history. Final browser captures were refreshed from the complete run.",
+  "provenance_parts": [
+    "capture-provenance-root.json",
+    "capture-provenance-system.json"
+  ],
+  "artifacts": [
+    {
+      "destination": "P02-record-dark-125-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/polish-integration-the-com-851b4-t-narrow-width-and-125-text-webkit/record-dark-125.png",
+      "sha256": "14e7356d2a1c1a6250a9e83b8afb57bab0b1341562b6e82e4fe7b0e38d1d0df2",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "P02-record-fullpage-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/polish-integration-table-\u2192-e08a4-commits-one-corrected-value-chromium/record-fullpage.png",
+      "sha256": "6fb1469aaadf5c22fe2fc6ea6967041cbe62770a90d1fc0171def93ac2eb4695",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "P02-record-fullpage-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/polish-integration-table-\u2192-e08a4-commits-one-corrected-value-webkit/record-fullpage.png",
+      "sha256": "b596c9c39ab020d8647d9c051c40faa21683fbf6efac1fa98e2f33168e0826c6",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "P02-record-light-125-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/polish-integration-the-com-92e6d-t-narrow-width-and-125-text-webkit/record-light-125.png",
+      "sha256": "ef6c5af8cb7f43d0b9d6bab65c594680f8c5727d7bd2cb71f2ac7adf97a6610a",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/board-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-altern-e1257-mes-without-writing-on-open-webkit/board-dark.png",
+      "sha256": "f0767daa37d0d43ef95ed627e65018ca53b800d8d4b731cf93f51b117cf3aaf8",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/board-light-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-altern-e1257-mes-without-writing-on-open-webkit/board-light.png",
+      "sha256": "a8094bd811249e22488038337202609d3f01b9aa0d8db08b654bcce1194a7b3c",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/calendar-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-altern-e1257-mes-without-writing-on-open-webkit/calendar-dark.png",
+      "sha256": "ed09d7f00d4ca5a5a9578f76ee46edf31038ec557d1b9c3b2faf5a75bb843247",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/calendar-light-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-altern-e1257-mes-without-writing-on-open-webkit/calendar-light.png",
+      "sha256": "f9321622a6b1c9430466f18a84be9c278911f7612845b0b81735bfa0496123f8",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/chart-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-altern-e1257-mes-without-writing-on-open-webkit/chart-dark.png",
+      "sha256": "0c0c2fee26609ccd015928510762fd3f60546e2178aef92ee6f46bb9611c3e05",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/chart-light-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-altern-e1257-mes-without-writing-on-open-webkit/chart-light.png",
+      "sha256": "52647b84c23b8f597998dff58ed4405e80b0fd76fc6ce42ea7e57a32f95bec27",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/dashboard-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-altern-e1257-mes-without-writing-on-open-webkit/dashboard-dark.png",
+      "sha256": "05246fd280c3dba87331f9bd20bd9c95ba4c2243304ff3a44554fa865e0f4d08",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/dashboard-light-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-altern-e1257-mes-without-writing-on-open-webkit/dashboard-light.png",
+      "sha256": "a0758100983393f4a03c9aee843ebbeecaed6f7d08bfafabf06708a7b6d9ae37",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/gallery-360-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-defaul-1a84c-st-without-writing-defaults-chromium/gallery-360.png",
+      "sha256": "a6d080609ec679640941af33a8726df7dd65d89ea93df687c3f8370ab5ae3571",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/gallery-360-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-defaul-1a84c-st-without-writing-defaults-webkit/gallery-360.png",
+      "sha256": "97af518357b07e58c8204aa0951305a40cbef21077ccb8721d75efee653e82af",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/gallery-wide-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-defaul-1a84c-st-without-writing-defaults-webkit/gallery-wide-dark.png",
+      "sha256": "5a91508995b3e49a814f5504a6cdd01cf437a2850f1a763412efaf13f04e49e1",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/gallery-wide-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-defaul-1a84c-st-without-writing-defaults-webkit/gallery-wide.png",
+      "sha256": "cb99b3da6a5c9917558c069d3a2c568821c153763bb9ace89baf0d4495d0e3cc",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/gantt-wide-dark-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-six-co-7a18d-rolls-columns-independently-chromium/gantt-wide-dark.png",
+      "sha256": "06b38eb591bfc4140e46dc34d1d1c1d9604930a8864740f545137cf7c99dc562",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/gantt-wide-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-six-co-7a18d-rolls-columns-independently-webkit/gantt-wide-dark.png",
+      "sha256": "ff007149d49c45fb5bd68a22877610e957d45fd46d932df1a9c29ef2eb799916",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/gantt-wide-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-six-co-7a18d-rolls-columns-independently-webkit/gantt-wide.png",
+      "sha256": "7e2c0ff681c690e17cff9370f1618188451cb50e42431ff214c87014dbcc3ba1",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/list-360-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-defaul-1a84c-st-without-writing-defaults-webkit/list-360-dark.png",
+      "sha256": "16495c665cbc5ac54a154a4376bb86fbb561b3fd94211e19b6256f57fe48b921",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/list-360-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-defaul-1a84c-st-without-writing-defaults-webkit/list-360.png",
+      "sha256": "29c0962886c8448daf4a017d3b87b36cd82a4ba1248be8d251b7a77be895283e",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/table-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-table--2e99b-alar-remain-legible-in-dark-webkit/table-dark.png",
+      "sha256": "cf0f8d649c65a1cbe1f49994eeaebc2636151964f6bb8319d2d77c0ab577b6d1",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/table-light-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-table--aa3be-lar-remain-legible-in-light-chromium/table-light.png",
+      "sha256": "cd17a9e79c641811f7636485b70117ad1a7711bed40b01c3c4c8376df829e158",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/table-light-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-table--aa3be-lar-remain-legible-in-light-webkit/table-light.png",
+      "sha256": "a54913bc79ba2797f6ccb0c6659fa8fe7e7b009233f1e05ce49664cab981218d",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/table-offscreen-endpoint-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-fixed--d1ace-on-find-and-wrapped-content-chromium/table-offscreen-endpoint.png",
+      "sha256": "930f22c773178573570e62690ebe452f72229e99688355515d072fbb000b2267",
+      "unchanged_from_focused_capture": false,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/table-offscreen-endpoint-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-fixed--d1ace-on-find-and-wrapped-content-webkit/table-offscreen-endpoint.png",
+      "sha256": "f6ae8e8cd5325480e61d88996cc45a020fc8b532b799b491a7a3ffa42bc29b32",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/table-scalar-refusal-dark-200-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-table--2e99b-alar-remain-legible-in-dark-chromium/table-scalar-refusal-dark-200.png",
+      "sha256": "e054ec71e5c6b92fc7a9167585889b33c9cfc7d3652f30248a5f79416a5dfd93",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/table-scalar-refusal-dark-200-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-table--2e99b-alar-remain-legible-in-dark-webkit/table-scalar-refusal-dark-200.png",
+      "sha256": "2bc61f3a67f7ad22d87b9d9532da6e99b98559f6c09adb8a78b0e1f567a04d98",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/table-scalar-refusal-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-table--2e99b-alar-remain-legible-in-dark-webkit/table-scalar-refusal-dark.png",
+      "sha256": "76fe84217bc9f67a2e4dc9909cc1a9638b9f0d0f90cdab62d7870215b77bd42d",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/table-scalar-refusal-light-200-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-table--aa3be-lar-remain-legible-in-light-webkit/table-scalar-refusal-light-200.png",
+      "sha256": "c204bdb7478a6243d578e56ac537527f35601d6fcf532aaf173eca94fa552d3f",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/table-scalar-refusal-light-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-table--aa3be-lar-remain-legible-in-light-webkit/table-scalar-refusal-light.png",
+      "sha256": "65890666f2f5f484c2d531b010448d716843610a8eac46b27b9b897203a29042",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/table-title-refusal-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-a-miss-b403f-ts-once-with-keyboard-focus-webkit/table-title-refusal.png",
+      "sha256": "10392019eb3e1b281ad5cc592da5caaa8a3a222eecc864a904ba494edd297465",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/timeline-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-altern-e1257-mes-without-writing-on-open-webkit/timeline-dark.png",
+      "sha256": "cec7f18abd3c518fec9f7a36ba840986865bd3a9e690a22bbabea8d632b03df9",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "data/timeline-light-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/data-display-polish-altern-e1257-mes-without-writing-on-open-webkit/timeline-light.png",
+      "sha256": "e38dfeb77254a7ffd517df834c1087895942021af9e328ec26fba8f2f61c968d",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/title-database-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/page-title-polish-title-na-d4e0b-first-atomic-database-block-chromium/title-database.png",
+      "sha256": "c2db4170b6e103c4fdc91a1208d196de637fbd98ee689a4b2aa8e1935ee8f884",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/title-database-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/page-title-polish-title-na-d4e0b-first-atomic-database-block-webkit/title-database.png",
+      "sha256": "fbecb8733ec98b5eea781f38bc28e8bb5824ddd0671414e91c1d9818e146c107",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/title-image-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/page-title-polish-title-na-fef18-he-first-atomic-image-block-chromium/title-image.png",
+      "sha256": "cdcde386c4f76fedbc30674bd53850d1cf59fb0e50d3df9ca2fadd712517f82c",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/title-image-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/page-title-polish-title-na-fef18-he-first-atomic-image-block-webkit/title-image.png",
+      "sha256": "6f326184a6fa99f384ed465a13e743ab4c6b679fbe56aef26f99b94726e5dfbe",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/title-nonleading-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/page-title-polish-the-nonl-b876f-with-unchanged-source-order-chromium/title-nonleading.png",
+      "sha256": "5a83c3ca2e7899b824eb989e8fb65a19f38bcc455de2430e20239b6f422f90a6",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/title-nonleading-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/page-title-polish-the-nonl-b876f-with-unchanged-source-order-webkit/title-nonleading.png",
+      "sha256": "8c53b0ae703eeaa0cc8be9e77db650789659003af64567939622289ed42f4e47",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/title-sheet-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/page-title-polish-title-na-6ec43-he-first-atomic-sheet-block-chromium/title-sheet.png",
+      "sha256": "887d291733651ddae7d944038f3b34e8a728cf53f21c93d54834a96a4a1212b3",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/title-sheet-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/page-title-polish-title-na-6ec43-he-first-atomic-sheet-block-webkit/title-sheet.png",
+      "sha256": "6e66130b157528ac911a333a4da0d7012914993b4dc38c9e0d01848abfa59175",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-document-dark-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-2df9a-one-durable-session-in-dark-chromium/writing-document-dark.png",
+      "sha256": "fd2204fd07b05eeb463766053596b0b4aa07b335c41e6cc73203fabf0e227640",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-document-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-2df9a-one-durable-session-in-dark-webkit/writing-document-dark.png",
+      "sha256": "50b046b7bf2b193d7184e725e74e4767e6a83df59dd655fd6ae6d90336ab9b45",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-document-light-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-793f7-ne-durable-session-in-light-chromium/writing-document-light.png",
+      "sha256": "2c3248627c9a6145dbc2061d8e8e6a52c415cd5155cfb5221cdf7c2d7d46ba89",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-document-light-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-793f7-ne-durable-session-in-light-webkit/writing-document-light.png",
+      "sha256": "a8dc5cffedf5ccfb2160a7add56cf9cba29d7de2c1f8214ee76896981d9341b9",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-selection-200-percent-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-sele-ee3f8-width-and-200-percent-scale-chromium/writing-selection-200-percent.png",
+      "sha256": "929230e8631526c7d529c5276cbc0b18df002411945d4b40ea5304cc4d8ba094",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-selection-200-percent-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-sele-ee3f8-width-and-200-percent-scale-webkit/writing-selection-200-percent.png",
+      "sha256": "21390c08431b31dcc489ee6815eae3bbfcbd24830c24fe88b93121b6ddabcbdd",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-selection-dark-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-2df9a-one-durable-session-in-dark-chromium/writing-selection-dark.png",
+      "sha256": "c66af04411189c14333a71c5c1a343a039366af2a627fe6fd367b4b6b684899f",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-selection-dark-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-2df9a-one-durable-session-in-dark-webkit/writing-selection-dark.png",
+      "sha256": "4be352fab21f317953663a344ac4b0e0c89295c85350240b5666c86ee849828b",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-selection-light-chromium.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-793f7-ne-durable-session-in-light-chromium/writing-selection-light.png",
+      "sha256": "3a685507acdce5c25b1bd9aaf093360b274ae5a92f7eb984ca548a1d7e995bea",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-selection-light-webkit.png",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-793f7-ne-durable-session-in-light-webkit/writing-selection-light.png",
+      "sha256": "647c68fcb20fd7db91c158ee349df5be8eae57deda2f056291e445379fc4bf9a",
+      "unchanged_from_focused_capture": true,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-session-dark-chromium.webm",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-2df9a-one-durable-session-in-dark-chromium/video.webm",
+      "sha256": "6b4f29667e136da3a94acb77647141d9911669fcb00168f920dba8549eec6d07",
+      "unchanged_from_focused_capture": false,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-session-dark-webkit.webm",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-2df9a-one-durable-session-in-dark-webkit/video.webm",
+      "sha256": "9f69c18e18b28abe11b30af70c75311ef0b4635dd01cdcd0a38c779b310eb722",
+      "unchanged_from_focused_capture": false,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-session-light-chromium.webm",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-793f7-ne-durable-session-in-light-chromium/video.webm",
+      "sha256": "e8f079fad6d5fdcd39d7667df3523504f27799c8e4ad7a7dfb27c5f83edd6961",
+      "unchanged_from_focused_capture": false,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "destination": "editor/writing-session-light-webkit.webm",
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/editor-writing-polish-writ-793f7-ne-durable-session-in-light-webkit/video.webm",
+      "sha256": "52325bd98e5a13b854f321fef7e27e5324eefae56c713d60ab31cc14fd2f87f3",
+      "unchanged_from_focused_capture": false,
+      "run": "complete 687-case Chromium/WebKit run on fresh Vite5384",
+      "source_metadata": "system/full-browser-source.json"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-shared-cont-c7339-ast-size-and-focus-in-light-webkit/foundation-library-light.png",
+      "destination": "W02-library-light-webkit.png",
+      "sha256": "b88f776fd2e9364f3198f4ba4084bfbba9afefc89ccb5c29f03f9828decd0afc",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-states-operational-f1beb-st-states-readable-in-light-webkit/agent-spend-partial-light.png",
+      "destination": "W02-agent-partial-light-webkit.png",
+      "sha256": "d80d56ea1f3051fd80ebfdeb5ec09116cf02ecf88e086663ac409dc07b8a7373",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-shared-cont-2fef9-rast-size-and-focus-in-dark-webkit/foundation-library-dark.png",
+      "destination": "system/library-dark-webkit.png",
+      "sha256": "e127f7ebe4afaea3b2608dd616503823ed640adb16f78c879e62084ef9ffa415",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-shared-cont-c7339-ast-size-and-focus-in-light-webkit/foundation-mail-light.png",
+      "destination": "system/mail-light-webkit.png",
+      "sha256": "bebf1c23a7f2ebea61ac5c9f2226f5599bc291930053940186f208f72fb3f2e7",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-shared-cont-2fef9-rast-size-and-focus-in-dark-webkit/foundation-mail-dark.png",
+      "destination": "system/mail-dark-webkit.png",
+      "sha256": "08c3619448062dfe8d4644000ddd605c96d97ac8f35f5bfdadc2ae96548d4dd7",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-My-work-wra-4770f-id-deadline-honest-in-light-webkit/mywork-long-title-light.png",
+      "destination": "system/mywork-long-title-light-webkit.png",
+      "sha256": "e1dc18de2dd1dcfc03aa1a41e0357d970676a3f1d09c40d44d68d8ddeb38562a",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-My-work-wra-21631-lid-deadline-honest-in-dark-webkit/mywork-long-title-dark.png",
+      "destination": "system/mywork-long-title-dark-webkit.png",
+      "sha256": "8c8d221d76439d79a953714a049e869327bd34f7b8f77e414b5efe83ad458969",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-states-operational-1df1c-est-states-readable-in-dark-webkit/fleet-runs-partial-dark.png",
+      "destination": "system/fleet-partial-dark-webkit.png",
+      "sha256": "7f5a6329051a23cf4b048a8eff522e0a37b4c2f020ac22dd3e3ed31787f67805",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-states-operational-1df1c-est-states-readable-in-dark-webkit/home-mywork-unavailable-dark.png",
+      "destination": "system/home-mywork-unavailable-dark-webkit.png",
+      "sha256": "21c6a9b89c46cf29ff7a8c303d9fba99dc538119b5f3126039fcec7a178a78d6",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-shared-cont-c7339-ast-size-and-focus-in-light-chromium/foundation-library-light.png",
+      "destination": "system/library-light-chromium.png",
+      "sha256": "4a87bb538f7df12401a2d2d37fc982418eb799804a622c1ce94581162865f5b2",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-states-operational-f1beb-st-states-readable-in-light-chromium/agent-spend-partial-light.png",
+      "destination": "system/agent-partial-light-chromium.png",
+      "sha256": "ee3055a37207fea4a6be8b81195f55dcf3e8a01c7eb3138036de37d3147a7234",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final.log",
+      "destination": "system/full-browser-result.txt",
+      "sha256": "be185a8e006be50b656eb15d4e2dd33e1e874e786b8f1adc6dc3ab0269df4b0a",
+      "kind": "final full-suite log"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final-list.log",
+      "destination": "system/full-browser-inventory.txt",
+      "sha256": "070ef9eba634d66b0fe46fe7418dd00567aad93c100a82a836ea3d1a86084019",
+      "kind": "final full-suite inventory"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final-source.json",
+      "destination": "system/full-browser-launch-source.json",
+      "sha256": "db98cb9230a3910e3dd317512bcac866086cee128246f72db4f7ed45c4473217",
+      "kind": "unchanged launch source metadata"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-final.log",
+      "destination": "system/diagnostic-browser-result.txt",
+      "sha256": "4719f98ba3d722b650fd3d4580c8e40bffcb137a3da687980fcfa4eb6ce020f0",
+      "kind": "first complete diagnostic run log"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/fresh-focused-22.log",
+      "destination": "system/focused-browser-result.txt",
+      "sha256": "34dde486d69209f31dcfed2dd51669ac8db2e02111dc65cb2563ffb76b344096",
+      "kind": "23-case focused rerun log"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/fresh-title-retry.log",
+      "destination": "system/title-retry-result.txt",
+      "sha256": "468dd36ad8ac07f987ece8b62f2679dc88d1a0db841b41256799429606f2cb8c",
+      "kind": "2-case fixture helper verification log"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/system-stale-expectations.json",
+      "destination": "system/stale-expectations.json",
+      "sha256": "ee7a31890f4d12b284f90d6cf8ccfb74b654710b345bfb22a55234b5d21763eb",
+      "kind": "75-test assertion cleanup result"
+    },
+    {
+      "source": "launch metadata plus final local fingerprint computation",
+      "destination": "system/full-browser-source.json",
+      "sha256": "7fa9761277ecb25d8e8651efa6aa022ae029c2db457a5771bed7a96b0e7247d9",
+      "kind": "final browser result and source provenance"
+    },
+    {
+      "destination": "data/performance/production-correctness-preflight.png",
+      "source": "/private/tmp/cerebro-m87-perf/production-correctness-preflight.png",
+      "sha256": "8e08290a3c1165a1dc1c52162c116834b8b6d93761deda4b4bc91a9e8a353782",
+      "run": "Correctness-only production preflight; no timing claim",
+      "clock": "Unpinned; static undated fixture",
+      "report": "data/performance/production-report.md"
+    }
+  ]
+}

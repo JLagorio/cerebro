@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactElement } from 'react';
+import { type ReactElement } from 'react';
 import { SideMenuExtension } from '@blocknote/core/extensions';
 import {
   BlockColorsItem,
@@ -17,38 +17,20 @@ import {
   useExtensionState,
 } from '@blocknote/react';
 import { Icon } from '@/components/ui/Icon';
-import { MenuItem, MenuSurface } from '@/components/ui/Menu';
-import { Popover } from '@/components/ui/Popover';
 import { usePageCommentsContext } from './PageCommentsContext';
+import {
+  canConvertBlock,
+  duplicateBlock,
+  duplicationProblem,
+  moveBlock,
+  siblingOf,
+  TEXT_BLOCK_CHOICES,
+} from './blockActions';
+import type { CerebroEditor } from './MarkdownEditor';
+import { inPlace } from './reconcile';
 
-/**
- * The AI controls you can actually see (M18).
- *
- * M17.16 built the rewrite surface and bound it to Cmd-K, and nothing on
- * screen said so. An affordance whose only advertisement is a keystroke is one
- * that exists for the person who wrote it: selecting a paragraph looked exactly
- * as it had before the assistant was built.
- *
- * ## Inside BlockNote's toolbar, not beside it
- *
- * The first version of this floated its own dark pill on selection — and
- * BlockNote already floats one, so selecting a sentence produced TWO bars
- * fighting for the same few pixels. Bold and Ask AI are the same kind of act
- * ("do this to what I selected"), so they belong on the same bar, with AI
- * first because it is the one you came for.
- *
- * ## Why the presets are here and not only in the popover
- *
- * "Improve writing" and "Make it shorter" are the overwhelming majority of what
- * anyone asks of selected text, and each is one word typed into a box that then
- * has to be submitted. Putting them on the bar collapses three actions into one
- * and, more usefully, TEACHES the feature: someone who has never opened the
- * popover can see what it is for without composing an instruction first.
- *
- * Comment and Promote are non-AI actions on the same selected text.
- * Every preset lands in the same per-hunk decision surface — a preset is a
- * pre-written instruction, never a different path with fewer safeguards.
- */
+/** Selection actions share one toolbar. Writing presets live inside Ask AI,
+ * preserving their instructions and the same per-hunk decision path. */
 
 export interface Preset {
   label: string;
@@ -145,10 +127,14 @@ type Dictionary = ReturnType<typeof useDictionary>;
 
 /**
  * BlockNote's block menu (its `DragHandleMenu` default), keyed so the actions
- * a save would drop can leave it: today that leaves Delete.
+ * a save would drop can leave it; carried structural actions join Delete.
  */
 export function blockMenuItems(dict: Dictionary): ReactElement[] {
   return [
+    <CarriedBlockAction key="turnIntoItem" action="convert" />,
+    <CarriedBlockAction key="duplicateBlockItem" action="duplicate" />,
+    <CarriedBlockAction key="moveBlockUpItem" action="up" />,
+    <CarriedBlockAction key="moveBlockDownItem" action="down" />,
     <RemoveBlockItem key="removeBlockItem">{dict.drag_handle.delete_menuitem}</RemoveBlockItem>,
     <BlockColorsItem key="blockColorsItem">{dict.drag_handle.colors_menuitem}</BlockColorsItem>,
     <TableRowHeaderItem key="tableRowHeaderItem">
@@ -158,6 +144,63 @@ export function blockMenuItems(dict: Dictionary): ReactElement[] {
       {dict.drag_handle.header_column_menuitem}
     </TableColumnHeaderItem>,
   ].filter(offered);
+}
+
+function CarriedBlockAction({ action }: { action: 'convert' | 'duplicate' | 'up' | 'down' }) {
+  const editor = useBlockNoteEditor() as CerebroEditor;
+  const Components = useComponentsContext();
+  const block = useExtensionState(SideMenuExtension, { editor, selector: (state) => state?.block });
+  if (Components === undefined || block === undefined) return null;
+  const Menu = Components.Generic.Menu;
+  if (action === 'convert') {
+    if (!canConvertBlock(block)) return null;
+    return (
+      <Menu.Root position="right" sub>
+        <Menu.Trigger sub>
+          <Menu.Item className="bn-menu-item" subTrigger>
+            Turn into
+          </Menu.Item>
+        </Menu.Trigger>
+        <Menu.Dropdown sub className="bn-menu-dropdown">
+          {TEXT_BLOCK_CHOICES.map((choice) => (
+            <Menu.Item
+              key={choice.label}
+              className="bn-menu-item"
+              onClick={() => {
+                inPlace(editor, () =>
+                  editor.updateBlock(block.id, { type: choice.type, props: choice.props } as never),
+                );
+                editor.focus();
+              }}
+            >
+              {choice.label}
+            </Menu.Item>
+          ))}
+        </Menu.Dropdown>
+      </Menu.Root>
+    );
+  }
+  if (action === 'duplicate') {
+    const problem = duplicationProblem(block);
+    if (problem !== null)
+      return (
+        <Menu.Label className="bn-menu-label">
+          <span title={problem}>Duplicate unavailable for sheets</span>
+        </Menu.Label>
+      );
+    return (
+      <Menu.Item className="bn-menu-item" onClick={() => duplicateBlock(editor, block.id)}>
+        Duplicate
+      </Menu.Item>
+    );
+  }
+  const delta = action === 'up' ? -1 : 1;
+  if (siblingOf(editor.document, block.id, delta) === null) return null;
+  return (
+    <Menu.Item className="bn-menu-item" onClick={() => moveBlock(editor, block.id, delta)}>
+      Move {action}
+    </Menu.Item>
+  );
 }
 
 /** The menu the block grip opens, holding only what a save keeps. */
@@ -183,7 +226,7 @@ export function CarriedBlockMenu({ onPromote }: { onPromote?: (id: string) => vo
 }
 
 /**
- * The formatting toolbar, with AI at its head.
+ * The formatting toolbar, with one Ask AI action after the carried editing tools.
  *
  * `ask` receives the preset the user chose, or undefined for "open the box and
  * let me type". The caller captures the selection — this component never reads
@@ -201,12 +244,8 @@ export function AiFormattingToolbar({
     <FormattingToolbarController
       formattingToolbar={() => (
         <FormattingToolbar>
-          <AiToolbarButtons key="cerebro-ai" onAsk={onAsk} onPromote={onPromote} />
-          {/* What BlockNote would have rendered on its own, less what a save
-              would drop (`formattingToolbarItems`). Listed after the AI group
-              rather than replaced: this is an addition to the editor's
-              toolbar, not a fork of it. */}
           {formattingToolbarItems()}
+          <AiToolbarButtons key="cerebro-ai" onAsk={onAsk} onPromote={onPromote} />
         </FormattingToolbar>
       )}
     />
@@ -223,80 +262,27 @@ export function AiToolbarButtons({
 }) {
   const Components = useComponentsContext();
   const comments = usePageCommentsContext();
-  const [more, setMore] = useState(false);
-  const moreRef = useRef<HTMLSpanElement>(null);
   if (Components === undefined) return null;
   const Button = Components.FormattingToolbar.Button;
 
   return (
     <>
-      <Button
-        className="bn-button"
-        data-testid="selection-ask-ai"
-        label="Ask AI"
-        mainTooltip="Ask AI about the selection"
-        onClick={() => onAsk()}
-      >
-        {/* The icon is in the children rather than in `icon`, which the
-            Mantine button only honours for a label-only button. */}
-        <span className="inline-flex items-center gap-1.5">
-          <Icon name="sparkles" size={14} color="var(--synapse-500)" />
-          Ask AI
-        </span>
-      </Button>
-      {PRESETS.slice(0, 2).map((preset) => (
-        <Button
-          key={preset.label}
-          className="bn-button"
-          data-testid="selection-preset"
-          label={preset.label}
-          mainTooltip={preset.instruction}
-          icon={<Icon name={preset.icon} size={14} />}
-          onClick={() => onAsk(preset)}
-        />
-      ))}
-      <span ref={moreRef} className="inline-flex">
+      <span className="inline-flex" onMouseDown={(event) => event.preventDefault()}>
         <Button
           className="bn-button"
-          label="More AI actions"
-          mainTooltip="More AI actions"
-          icon={<Icon name="chevron-down" size={13} />}
-          isSelected={more}
-          onClick={() => setMore((v) => !v)}
-        />
-      </span>
-      {more && (
-        // A real floating layer, not `absolute` inside the toolbar. The
-        // toolbar is a positioned, clipping, transform-placed element, so an
-        // absolutely-positioned child rendered THERE is cropped at its edge —
-        // which is exactly what it did: the button lit up and no menu
-        // appeared. Popover portals out and anchors to the button.
-        <Popover
-          anchorRef={moreRef}
-          role="menu"
-          ariaLabel="More AI actions"
-          onClose={() => setMore(false)}
+          data-testid="selection-ask-ai"
+          label="Ask AI"
+          mainTooltip="Ask AI about the selection"
+          onClick={() => onAsk()}
         >
-          <MenuSurface width={210}>
-            {PRESETS.map((preset) => (
-              <MenuItem
-                key={preset.label}
-                icon={preset.icon}
-                label={preset.label}
-                testId="selection-preset"
-                title={preset.instruction}
-                // The selection has to survive the click, and mousedown is
-                // where it would be lost.
-                onMouseDown={(e) => e.preventDefault()}
-                onSelect={() => {
-                  setMore(false);
-                  onAsk(preset);
-                }}
-              />
-            ))}
-          </MenuSurface>
-        </Popover>
-      )}
+          {/* The icon is in the children rather than in `icon`, which the
+            Mantine button only honours for a label-only button. */}
+          <span className="inline-flex items-center gap-1.5">
+            <Icon name="sparkles" size={14} color="var(--synapse-500)" />
+            Ask AI
+          </span>
+        </Button>
+      </span>
       <span className="mx-1 h-4 w-px flex-none self-center bg-n-200" aria-hidden="true" />
       {/* M70.2b — comment on the selection. Only where a page provides
           PageCommentsContext: DocPage does, the record peek and read-only

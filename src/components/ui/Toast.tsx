@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
+import { useGhostOnUnmount } from '@/components/ui/motion';
 
 const CFG: Record<string, { icon: string; color: string }> = {
   neutral: { icon: 'info', color: 'var(--n-600)' },
@@ -32,8 +33,13 @@ export function Toast({
   className = '',
 }: ToastProps) {
   const c = CFG[tone] || CFG.neutral;
+  const ref = useRef<HTMLDivElement>(null);
+  // Dismissed, a copy of it fades where it was while the stack closes up
+  // (components/ui/motion.ts).
+  useGhostOnUnmount(ref, 'cb-toast-leave', { float: 'bottom', strip: ['cb-toast'] });
   return (
     <div
+      ref={ref}
       className={className}
       // No role="status" here: ToastHost owns one live region that pre-exists
       // the toast. A second live region on the node being inserted double-
@@ -43,6 +49,7 @@ export function Toast({
         alignItems: 'flex-start',
         gap: 10,
         width: 360,
+        maxWidth: 'calc(100vw - 32px)',
         background: 'var(--n-0)',
         border: '1px solid var(--n-200)',
         borderRadius: 'var(--r-lg)',
@@ -53,11 +60,25 @@ export function Toast({
     >
       <Icon name={c.icon} size={16} color={c.color} style={{ marginTop: 2 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--n-900)' }}>
+        <div
+          style={{
+            fontSize: 'var(--fs-ui)',
+            lineHeight: 'var(--lh-ui)',
+            fontWeight: 600,
+            color: 'var(--n-900)',
+          }}
+        >
           {title}
         </div>
         {description ? (
-          <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)', marginTop: 2 }}>
+          <div
+            style={{
+              fontSize: 'var(--fs-meta)',
+              lineHeight: 'var(--lh-meta)',
+              color: 'var(--text-secondary)',
+              marginTop: 2,
+            }}
+          >
             {description}
           </div>
         ) : null}

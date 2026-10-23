@@ -81,7 +81,8 @@ test('layout editor: strip to vault bytes, inert preview, and the eye folds the 
   // -- The inert claim: a real click on a live chip does nothing -------
   // The previewed record is whatever the picker holds; its bytes are the
   // write target a NON-inert FieldEditor would hit.
-  const previewedPath = await page.getByTestId('layout-preview-picker').inputValue();
+  const previewedPath = await page.getByTestId('layout-preview-picker').getAttribute('data-value');
+  if (previewedPath === null) throw new Error('the preview picker names no record');
   const before = await readMockFile(page, previewedPath);
   // The same chip button the control group just proved opens a listbox —
   // reached through the heading BLOCK's inert content div, because that is

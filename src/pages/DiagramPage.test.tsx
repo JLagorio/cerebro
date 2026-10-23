@@ -148,7 +148,7 @@ describe('DiagramPage', () => {
   // the file is the truth, so only "nothing readable at this path" says gone.
   it('shows the empty state when the read fails', async () => {
     render(<DiagramPage selection={{ kind: 'diagram', path: 'diagrams/gone.mmd' }} />);
-    expect(await screen.findByText('This diagram no longer exists')).toBeTruthy();
+    expect(await screen.findByText('Diagram unavailable')).toBeTruthy();
   });
 
   it('opens a file the scanner has not adopted yet, titled from its stem', async () => {

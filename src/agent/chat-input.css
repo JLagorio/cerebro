@@ -1,0 +1,36 @@
+/* The composer's own additions (ChatInput.tsx, M91.17): the files on the
+   message, and where a drop lands. The pill around them is the Prompt
+   Input's (components/ai/conversation.css), held to one row by chat.css. */
+
+/* With files on the message, their row runs across the pill above its text,
+   so the pill wraps; the text gives way rather than the tools dropping under
+   it, and the composer's own row stays one line. */
+.cb-chat .cb-ai-prompt-input:has(> .cb-chat-attachments) {
+  flex-wrap: wrap;
+}
+.cb-chat .cb-ai-prompt-input:has(> .cb-chat-attachments) > .cb-ai-prompt-input-body {
+  flex-basis: 0;
+}
+.cb-chat-attachments {
+  max-height: min(96px, 20dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Files dragged over the composer: the pill says it takes them. */
+.cb-chat-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  border: 2px dashed var(--border-focus);
+  border-radius: inherit;
+  background: var(--surface-selected);
+  color: var(--text-meta);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  pointer-events: none;
+}

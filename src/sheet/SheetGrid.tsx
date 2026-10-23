@@ -698,8 +698,8 @@ export function SheetGrid(props: Props) {
       className="my-3 min-w-0 overflow-hidden rounded-lg border border-n-200 outline-none focus:border-cortex-400"
       style={{ userSelect: 'none', WebkitUserDrag: 'none' } as React.CSSProperties}
     >
-      <div className="flex items-center justify-between bg-n-25 px-3 py-1">
-        <span data-testid="sheet-name" className="text-xs font-medium text-n-600">
+      <div className="flex min-h-9 flex-wrap items-center justify-between gap-2 border-b border-n-100 bg-n-25 px-3 py-1">
+        <span data-testid="sheet-name" className="text-metadata font-medium text-n-600">
           {prepared.names[index]}
         </span>
         <div className="flex items-center gap-1">
@@ -796,7 +796,7 @@ export function SheetGrid(props: Props) {
               data-row="0"
               data-column={column}
               data-header="column"
-              className="w-30 shrink-0 border-b border-r border-n-200 py-2 text-center text-xs text-n-500"
+              className="w-30 shrink-0 border-b border-r border-n-100 py-1.5 text-center text-metadata text-n-600"
             >
               {a1({ row: 0, column }).replace('1', '')}
             </div>
@@ -848,7 +848,7 @@ export function SheetGrid(props: Props) {
                     data-column={column}
                     data-kind={value?.kind ?? 'blank'}
                     title={paint.title}
-                    className={`relative w-30 shrink-0 overflow-hidden whitespace-pre border-b border-r border-n-200 px-3 py-1.5 text-sm ${selected ? 'bg-cortex-50' : ''} ${paint.className}`}
+                    className={`relative w-30 shrink-0 overflow-hidden whitespace-pre border-b border-r border-n-100 px-2.5 py-1 text-ui ${selected ? 'bg-cortex-50' : ''} ${paint.className}`}
                   >
                     {editing ? (
                       <FormulaInput

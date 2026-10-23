@@ -1,4 +1,7 @@
+import { StateMessage } from '@/components/ui/StateMessage';
 import { useEffect, useMemo, useState } from 'react';
+import { wakeSections, wakeState } from '@/agent/elements/runsQueue';
+import { Queue, QueueItem, QueueList, QueueSection } from '@/components/ai/Queue';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { actorLabel } from '@/engine/authors';
 import { writerWords } from '@/engine/attribution';
@@ -29,6 +32,10 @@ type Read =
  * is recomputed here from `triggerRuns` the way `engine/jobs.ts` reads it.
  * Every other row says Rust's words (`wakes::words`). A read that fails says
  * so, never that nothing is waiting (CV-05).
+ *
+ * The list is a queue (M91.14): what still waits, then what was skipped or
+ * expired, each wake an item whose state its icon draws and a screen reader
+ * hears before its agent's name, in the order the read gave them.
  */
 export function WakesSection({ vaultPath, actor }: { vaultPath: string | null; actor?: string }) {
   const entries = useVaultStore((s) => s.entries);
@@ -60,13 +67,15 @@ export function WakesSection({ vaultPath, actor }: { vaultPath: string | null; a
   }, [entries]);
   const pages = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries]);
 
-  // Loading, or a read for another vault or agent: nothing yet.
-  if (vaultPath === null || read === null || read.key !== key) return null;
+  // A read for another vault or agent cannot describe this one.
+  if (vaultPath === null) return null;
+  if (read === null || read.key !== key)
+    return <StateMessage state="loading" title="Reading waiting work…" compact />;
 
   const header = (
     <div className="mb-1.5">
-      <h2 className="m-0 text-sm font-semibold text-n-800">Waiting to wake</h2>
-      <p className="m-0 text-xs leading-[17px] text-n-500">
+      <h2 className="m-0 text-section-title font-semibold text-n-800">Waiting to wake</h2>
+      <p className="m-0 text-xs leading-[17px] text-(--text-meta)">
         Changes that arrive while an agent waits wake it once, together — up to 20 in one run. Each
         assignment wakes its own run.
       </p>
@@ -79,7 +88,7 @@ export function WakesSection({ vaultPath, actor }: { vaultPath: string | null; a
     return (
       <div data-testid="agent-wakes">
         {header}
-        <p data-testid="agent-wakes-unavailable" className="m-0 text-sm text-n-500">
+        <p data-testid="agent-wakes-unavailable" className="m-0 text-sm text-(--text-meta)">
           Couldn't read what is waiting to wake your agents.
         </p>
       </div>
@@ -90,7 +99,7 @@ export function WakesSection({ vaultPath, actor }: { vaultPath: string | null; a
     return (
       <div data-testid="agent-wakes">
         {header}
-        <p data-testid="agent-wakes-empty" className="m-0 text-sm text-n-500">
+        <p data-testid="agent-wakes-empty" className="m-0 text-sm text-(--text-meta)">
           {actor === undefined
             ? 'Nothing is waiting to wake an agent.'
             : 'Nothing is waiting to wake it.'}
@@ -121,78 +130,112 @@ export function WakesSection({ vaultPath, actor }: { vaultPath: string | null; a
     return null;
   };
 
+  /** One wake, as a queue item: its agent, and under it the page it is
+   *  about, why, who wrote the change and where it stands. */
+  const item = (wake: FleetWake) => {
+    const who = actorLabel(wake.agent, entries);
+    const state = wakeState(wake.state);
+    const subject = wake.cause?.subject ?? null;
+    const page = subject === null ? undefined : pages.get(subject);
+    const waits = wake.state === 'pending' ? stillWaits(wake) : null;
+    return (
+      <QueueItem
+        key={wake.wakeId}
+        data-testid="agent-wake"
+        data-state={wake.state}
+        statusText={state.statusText}
+        icon={state.icon}
+        title={
+          <span className="text-n-800" title={who.raw ?? undefined}>
+            {who.text}
+          </span>
+        }
+      >
+        <span className="flex flex-wrap items-baseline gap-x-2">
+          {subject !== null &&
+            (page !== undefined ? (
+              <button
+                type="button"
+                data-testid="agent-wake-subject"
+                title={subject}
+                onClick={() => navigate({ kind: 'doc', path: subject })}
+                className="min-w-0 truncate border-0 bg-transparent p-0 text-left text-metadata text-cortex-600 hover:underline"
+              >
+                {page.title}
+              </button>
+            ) : (
+              // The page is gone: there is nothing to open.
+              <span
+                data-testid="agent-wake-subject"
+                data-gone="true"
+                className="min-w-0 truncate text-(--text-meta)"
+              >
+                {subject}
+              </span>
+            ))}
+          {wake.cause?.kind === 'assigned' && (
+            <span data-testid="agent-wake-cause" className="text-metadata text-(--text-meta)">
+              {wake.cause.why}
+              {wake.cause.detail === null ? '' : ` (${wake.cause.detail})`}
+            </span>
+          )}
+          <span data-testid="agent-wake-author" className="text-metadata text-(--text-meta)">
+            {(wake.author === 'person' || wake.author === 'run') && wake.authorActor != null
+              ? `by ${writerWords(wake.authorActor, entries)}`
+              : 'author not recorded'}
+          </span>
+          <span data-testid="agent-wake-words" className="text-metadata text-(--text-meta)">
+            {wake.state === 'pending' ? (
+              <span title={wake.admittedAt}>waiting since {instantText(wake.admittedAt)}</span>
+            ) : (
+              <span title={wake.finishedAt ?? undefined}>{wake.words}</span>
+            )}
+          </span>
+          {waits !== null && (
+            <span data-testid="agent-wake-waits" className="text-metadata text-(--text-meta)">
+              {waits}
+            </span>
+          )}
+        </span>
+        {wake.state === 'skipped' && wake.note != null && (
+          <span data-testid="agent-wake-check" className="block text-metadata text-(--text-meta)">
+            “{wake.note.question}” — {wake.note.reason}
+          </span>
+        )}
+      </QueueItem>
+    );
+  };
+  const { waiting, ended } = wakeSections(read.wakes);
+
   return (
     <div data-testid="agent-wakes">
       {header}
-      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-        {read.wakes.map((wake) => {
-          const who = actorLabel(wake.agent, entries);
-          const subject = wake.cause?.subject ?? null;
-          const page = subject === null ? undefined : pages.get(subject);
-          const waits = wake.state === 'pending' ? stillWaits(wake) : null;
-          return (
-            <li
-              key={wake.wakeId}
-              data-testid="agent-wake"
-              data-state={wake.state}
-              className="flex flex-wrap items-baseline gap-x-2 rounded-md px-2 py-1 text-sm"
-            >
-              <span className="flex-none text-n-800" title={who.raw ?? undefined}>
-                {who.text}
-              </span>
-              {subject !== null &&
-                (page !== undefined ? (
-                  <button
-                    type="button"
-                    data-testid="agent-wake-subject"
-                    title={subject}
-                    onClick={() => navigate({ kind: 'doc', path: subject })}
-                    className="min-w-0 truncate border-0 bg-transparent p-0 text-left text-sm text-cortex-600 hover:underline"
-                  >
-                    {page.title}
-                  </button>
-                ) : (
-                  // The page is gone: there is nothing to open.
-                  <span
-                    data-testid="agent-wake-subject"
-                    data-gone="true"
-                    className="min-w-0 truncate text-n-500"
-                  >
-                    {subject}
-                  </span>
-                ))}
-              {wake.cause?.kind === 'assigned' && (
-                <span data-testid="agent-wake-cause" className="text-xs text-n-500">
-                  {wake.cause.why}
-                  {wake.cause.detail === null ? '' : ` (${wake.cause.detail})`}
-                </span>
-              )}
-              <span data-testid="agent-wake-author" className="text-xs text-n-500">
-                {(wake.author === 'person' || wake.author === 'run') && wake.authorActor != null
-                  ? `by ${writerWords(wake.authorActor, entries)}`
-                  : 'author not recorded'}
-              </span>
-              <span data-testid="agent-wake-words" className="text-xs text-n-500">
-                {wake.state === 'pending' ? (
-                  <span title={wake.admittedAt}>waiting since {instantText(wake.admittedAt)}</span>
-                ) : (
-                  <span title={wake.finishedAt ?? undefined}>{wake.words}</span>
-                )}
-              </span>
-              {wake.state === 'skipped' && wake.note != null && (
-                <span data-testid="agent-wake-check" className="basis-full text-xs text-n-500">
-                  “{wake.note.question}” — {wake.note.reason}
-                </span>
-              )}
-              {waits !== null && (
-                <span data-testid="agent-wake-waits" className="text-xs text-n-500">
-                  {waits}
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      <Queue>
+        {waiting.length > 0 && (
+          <QueueSection
+            data-group="waiting"
+            collapsible={false}
+            headingLevel={3}
+            label="waiting"
+            count={waiting.length}
+            icon="clock"
+          >
+            <QueueList>{waiting.map(item)}</QueueList>
+          </QueueSection>
+        )}
+        {ended.length > 0 && (
+          <QueueSection
+            data-group="ended"
+            collapsible={false}
+            headingLevel={3}
+            label="skipped or expired this week"
+            count={ended.length}
+            icon="history"
+          >
+            <QueueList>{ended.map(item)}</QueueList>
+          </QueueSection>
+        )}
+      </Queue>
     </div>
   );
 }

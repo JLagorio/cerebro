@@ -1,0 +1,152 @@
+/* One turn of the conversation (M91.13, ChatTurn.tsx): the person's bubble,
+   the assistant's reply and what it did on the way, on the AI elements'
+   Message, Trace and Code Block. The panel around them is chat.css's. */
+
+/* The person's message: the element's filled bubble at the end, with who it
+   went to and Show more under it. */
+.cb-chat-user > .cb-ai-message-content {
+  gap: 7px;
+}
+
+/* The reply: its lines one under another, the words and the steps. */
+.cb-chat-assistant {
+  min-width: 0;
+}
+.cb-chat-assistant > .cb-ai-message-content {
+  gap: 14px;
+}
+
+/* Its words: the answer, and what it said on the way there, alike. A fence
+   is a Code Block, which sets its own type; the answer's prose never
+   restyles one. */
+.cb-chat-answer,
+.cb-chat-narration {
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+:is(.cb-chat-answer, .cb-chat-narration) p {
+  line-height: inherit;
+}
+:is(.cb-chat-answer, .cb-chat-narration) :is(th, td) {
+  padding: 10px;
+}
+:is(.cb-chat-answer, .cb-chat-narration) li {
+  margin-block: 6px;
+}
+:is(.cb-chat-answer, .cb-chat-narration) .cb-message-markdown > * + * {
+  margin-top: var(--sp-4);
+}
+@container (min-width: 600px) {
+  .cb-chat-answer,
+  .cb-chat-narration,
+  .cb-chat-user .cb-ai-bubble-content {
+    font-size: var(--fs-lg);
+  }
+}
+
+/* Its steps: a trace line is the UI role's 14/20 (trace.css); in a reply it
+   sits a size under the words it leads to. */
+.cb-chat-assistant .cb-ai-trace-line {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+}
+/* A subagent's own words, at a step's size and quiet. */
+.cb-chat-step-text {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  overflow-wrap: anywhere;
+}
+
+/* A message a send appends comes in from where it was written: the person's
+   from the side their bubbles keep, the reply a beat later, rising under it
+   (activepieces' chat). Each is its own row of the transcript (AiPanel's
+   `.cb-chat-item`). What a reply gains once it is on screen — its first
+   words, each block its stream adds, each step, a failure, the footer of
+   what it changed — rises in on its own. History is simply there
+   (`useArrival`, components/ui/motion.ts). */
+@keyframes cb-chat-slide-in {
+  from {
+    opacity: 0;
+    translate: 16px 0;
+  }
+}
+.cb-chat-item > .cb-chat-user[data-arrive] {
+  animation-name: cb-chat-slide-in;
+}
+.cb-chat-item > .cb-chat-assistant[data-arrive] {
+  --rise: 10px;
+  animation-delay: calc(3 * var(--dur-stagger));
+}
+
+/* Branch from here (M91.12c, TurnCheckpoint): the seam between a reply and
+   the turn after it, drawn nearer to both than the turns are to each other,
+   so it reads as theirs. It fades in with the send that made it a seam. */
+.cb-chat-thread > .cb-chat-checkpoint {
+  margin-block: calc(var(--sp-3) * -1);
+}
+.cb-chat-thread > .cb-chat-checkpoint[data-arrive] {
+  animation: cb-fade-in var(--motion-enter) backwards;
+}
+.cb-chat-assistant [data-arrive] {
+  --rise: 6px;
+  animation: cb-rise-in var(--motion-enter) backwards;
+}
+.cb-chat-assistant .cb-chat-row[data-arrive] {
+  --rise: 4px;
+}
+
+/* A turn at work says so where the eye is: three dots rippling on the
+   working light's period, before words the light passes through (Macro's
+   working line; the light is index.css's `.cb-working-text`, in the words'
+   own ink). A loop, so it stops by name for a reader who asks for less
+   motion. */
+.cb-chat-working {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  /* The working line's figure ticks a second at a time (M92.2): its digits
+     keep one width, so the line never shivers as they change. */
+  font-variant-numeric: tabular-nums;
+}
+.cb-chat-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+  color: var(--n-400);
+}
+.cb-chat-dots > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: cb-chat-wave 1.8s ease-in-out infinite;
+}
+.cb-chat-dots > span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.cb-chat-dots > span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes cb-chat-wave {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    translate: 0 0;
+  }
+  30% {
+    opacity: 1;
+    translate: 0 -2px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-chat-dots > span {
+    animation: none;
+    opacity: 0.55;
+  }
+}

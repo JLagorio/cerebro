@@ -68,7 +68,9 @@ export function lookFor(
   const { expanded = false, plain = false } = options;
 
   if (plain) {
-    if (isDir) return { icon: expanded ? 'chevron-down' : 'chevron-right', color: null };
+    // A folder's glyph, not a caret: the explorer draws its own turning caret
+    // beside every directory (RootTree), and a caret glyph made two.
+    if (isDir) return { icon: expanded ? FOLDER_OPEN.icon : FOLDER_CLOSED.icon, color: null };
     return { icon: 'file-text', color: null };
   }
 

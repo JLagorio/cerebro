@@ -1,16 +1,18 @@
-/* One quiet navigation ground; cortex and synapse still identify the active area. */
+/* The canvas meets the window on its right and bottom edges. Its one rounded
+   corner rests on the navigation surface, so the sidebar joins it continuously. */
 .m71-shell {
-  background: var(--surface-sunken);
+  --shell-top-inset: 10px;
+  background: var(--surface-navigation);
 }
 .m71-app-rail {
-  width: 54px;
-  flex: 0 0 54px;
+  width: var(--rail-w);
+  flex: 0 0 var(--rail-w);
   display: flex;
   align-items: center;
   flex-direction: column;
   gap: 8px;
   padding: 16px 8px 12px;
-  background: var(--surface-sunken);
+  background: var(--surface-frame);
   overflow-y: auto;
   scrollbar-width: none;
   z-index: 21;
@@ -23,7 +25,7 @@
   height: 36px;
   border: 0;
   background: transparent;
-  color: var(--cortex-600);
+  color: var(--text-primary);
   font-size: 30px;
   font-weight: 700;
   letter-spacing: -2px;
@@ -32,7 +34,7 @@
   cursor: pointer;
 }
 .m71-brand span {
-  color: var(--synapse-500);
+  color: var(--text-secondary);
 }
 .m71-rail-button {
   position: relative;
@@ -49,25 +51,31 @@
   cursor: pointer;
   transition:
     background-color var(--motion-hover),
-    color var(--motion-hover);
+    color var(--motion-hover),
+    scale var(--motion-pop);
 }
+/* The rail is the frame surface, a step darker than the navigation one, so
+   the navigation's hover fill (n-100) all but vanished on it in the light
+   theme. Half a selected fill reads as hover on either theme and stays short
+   of selection. */
 .m71-rail-button:hover {
-  background: var(--n-100);
+  background: color-mix(in srgb, var(--n-200) 55%, transparent);
   color: var(--n-900);
+}
+/* Pressed, a control gives under the pointer, as IconButton's do. */
+.m71-rail-button:active,
+.m71-icon-button:active {
+  scale: 0.92;
+}
+/* A rail control that appears with a change of layout — Show sidebar, as the
+   sidebar folds away — fades in where it rests. */
+.m71-rail-arrive {
+  animation: cb-fade-in var(--motion-enter) backwards;
 }
 .m71-rail-button[data-active],
 .m71-rail-button[aria-current='page'] {
-  background: var(--surface-selected);
-  color: var(--cortex-600);
-}
-.m71-rail-button[data-active]::before {
-  position: absolute;
-  content: '';
-  width: 2px;
-  height: 14px;
-  background: var(--cortex-500);
-  border-radius: 2px;
-  left: -6px;
+  background: var(--n-200);
+  color: var(--text-primary);
 }
 .m71-rail-assistant {
   color: var(--text-ai);
@@ -75,9 +83,6 @@
 .m71-rail-assistant[data-active] {
   color: var(--text-ai);
   background: var(--surface-ai);
-}
-.m71-rail-assistant[data-active]::before {
-  background: var(--synapse-500);
 }
 .m71-rail-button:focus-visible,
 .m71-brand:focus-visible,
@@ -106,18 +111,78 @@
   padding-top: 24px;
 }
 .m71-sidebar {
-  background: var(--surface-sunken);
-  border-right: 1px solid var(--n-100);
+  background: var(--surface-navigation);
+  border-right: 0;
+  margin-block: var(--shell-top-inset) 0;
+  border-radius: 0;
 }
 .m71-sidebar[hidden] {
   display: none;
+}
+/* The sidebar arriving and leaving (owner, 2026-10-19: "add more animations
+   … feel like Notion and ChatGPT and Morrow"), on the arrival pairs, so a
+   reader who asked for less motion gets each where it belongs at once.
+
+   Docked, the column has nowhere to slide from: once it has been away —
+   folded, or stepped down to the rail — it returns by bringing its contents
+   in from a little way left, under the rail (`data-returns`, Sidebar.tsx;
+   the app's first draw is not a return). Its width arrives at once, as it
+   always has: the canvas beside it is not made to reflow for a frame each. */
+.m71-sidebar[data-returns]:not(.m71-sidebar-drawer) {
+  animation: m71-sidebar-in var(--motion-enter) backwards;
+}
+/* As a drawer (M52) it comes out from behind the rail and goes back under
+   it: it travels its whole width while its clip holds still at the rail's
+   edge, so it is never drawn over the rail, with room in the clip for its
+   shadow. It leaves as a copy (`leaveDrawer`, app/shellMotion.ts): the
+   drawer's layer, its Escape and its focus return all belong to the moment
+   it closed. Its one rounded corner answers the canvas's. */
+.m71-sidebar-drawer {
+  border-start-end-radius: 16px;
+  /* The clip the drawer travels inside, held at rest too: its shadow never
+     falls on the rail, so it does not appear there as the entrance ends. */
+  clip-path: inset(-64px -64px -64px 0);
+  animation: m71-drawer-in var(--motion-enter) backwards;
+}
+.m71-sidebar-drawer.m71-sidebar-leave {
+  animation: m71-drawer-out var(--motion-exit) forwards;
+  pointer-events: none;
+}
+@media (width < 760px) {
+  .m71-sidebar-drawer {
+    border-start-end-radius: 12px;
+  }
+}
+@keyframes m71-sidebar-in {
+  from {
+    opacity: 0;
+    translate: -12px 0;
+  }
+}
+@keyframes m71-drawer-in {
+  from {
+    translate: -100% 0;
+    clip-path: inset(-64px -64px -64px 100%);
+  }
+  to {
+    clip-path: inset(-64px -64px -64px 0);
+  }
+}
+@keyframes m71-drawer-out {
+  from {
+    clip-path: inset(-64px -64px -64px 0);
+  }
+  to {
+    translate: -100% 0;
+    clip-path: inset(-64px -64px -64px 100%);
+  }
 }
 .m71-sidebar-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 68px;
-  padding: 16px 14px;
+  height: 52px;
+  padding: 10px 16px;
   flex: none;
 }
 .m71-workspace-name {
@@ -126,8 +191,8 @@
   align-items: center;
   gap: 8px;
   flex: 1;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
   color: var(--n-800);
 }
 .m71-vault-tile {
@@ -155,33 +220,43 @@
   border: 0;
   border-radius: var(--r-md);
   cursor: pointer;
+  transition:
+    background-color var(--motion-hover),
+    color var(--motion-hover),
+    scale var(--motion-pop);
 }
 .m71-icon-button:hover {
   background: var(--n-100);
   color: var(--n-800);
 }
 .m71-context-heading {
-  padding: 16px 20px 14px;
+  padding: 6px 20px 8px;
   display: flex;
   flex-direction: column;
   flex: none;
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
   line-height: 24px;
 }
-.m81-context-create {
-  margin-bottom: 14px;
+.m71-context-heading--controls {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  padding-right: 16px;
 }
-.m81-context-create > button {
-  border-radius: var(--r-lg);
+.m81-context-create {
+  margin-bottom: 8px;
+}
+.cb-context-create {
+  border-radius: var(--r-full);
   height: 36px;
   padding-inline: 10px;
-  border-color: var(--n-200);
+  border-color: transparent;
   background: transparent;
-  font-size: 13px;
+  font-size: var(--fs-ui);
 }
-.m81-context-create > button:hover {
+.cb-context-create:hover {
   background: var(--n-100);
 }
 .m71-sidebar-footer {
@@ -194,16 +269,147 @@
 .m71-sidebar-footer:empty {
   display: none;
 }
-.m71-sidebar-footer [data-testid='sync-badge'] {
+/* The badge only appears when it has something to say (SyncBadge), so it
+   arrives rather than blinking in. */
+.cb-sync-badge--quiet {
   border-color: transparent;
   background: transparent;
   padding-inline: 6px;
+  transition:
+    background-color var(--motion-hover),
+    border-color var(--motion-hover),
+    color var(--motion-hover);
+  animation: cb-fade-in var(--motion-enter) backwards;
 }
-.m71-sidebar-footer [data-testid='sync-badge']:hover {
+.cb-sync-badge--quiet:hover {
   background: var(--n-100);
 }
 .m71-main {
   background: var(--n-0);
+  position: relative;
+  margin: var(--shell-top-inset) 0 0;
+  border: 0;
+  border-radius: 16px 0 0 0;
+  overflow: hidden;
+}
+.cb-nav-row--selected {
+  background: var(--n-200);
+}
+.cb-nav-row--selected:hover {
+  background: var(--n-200);
+}
+/* A fold's one chevron (`chevronClass`, app/sidebarChrome.ts): it points
+   right while the fold is shut and turns down as it opens, rather than
+   trading one glyph for another, so the change reads as the fold moving. A
+   chevron a header reveals on hover fades the same way its actions do. */
+.cb-chevron {
+  transform-origin: center;
+  transition:
+    rotate var(--motion-turn),
+    opacity var(--motion-pop);
+}
+.cb-chevron--open {
+  rotate: 90deg;
+}
+/* What a fold holds drops in under its header as it opens, and arrives with
+   its shelf when an area or the sidebar itself comes into view. Shutting is
+   instant: nothing below the header should wait on it. */
+.cb-fold-in {
+  --rise: -4px;
+  animation: cb-rise-in var(--motion-enter) backwards;
+}
+/* Controls a header or row reveals on hover fade in and out instead of
+   popping; their own wash keeps the hover guard. Two timings on one element,
+   which neither motion utility can say alone (styles/motion.css). */
+.cb-reveal {
+  transition:
+    opacity var(--motion-pop),
+    background-color var(--motion-hover),
+    color var(--motion-hover);
+}
+/* A control inside a nav row — a caret, a `+` — washes a step past the row
+   it sits in, so it still answers the pointer on a hovered or selected row,
+   where the row's own fill had swallowed it. */
+.cb-row-control:hover,
+.cb-tree-row .cb-ibtn:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--n-300) 45%, transparent);
+  color: var(--n-800);
+}
+.m71-main [data-testid='status-bar'] {
+  border-top-color: var(--n-100);
+  background: var(--surface-app);
+  padding-inline: 12px;
+}
+.m71-panel-slot[data-floating] {
+  display: contents;
+}
+.m71-shell[data-chat-floating] .m71-main {
+  /* The last editable row can scroll clear of the resting assistant button. */
+  --assistant-scroll-clearance: 100px;
+}
+.m71-chat-frame[data-presentation='floating'] {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  width: min(640px, calc(100% - 40px));
+  max-height: calc(100% - 40px);
+  border-radius: 24px;
+  box-shadow:
+    0 4px 12px color-mix(in srgb, var(--text-primary) 5%, transparent),
+    0 16px 48px color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+.m71-chat-frame[data-presentation='floating'] > .cb-chat {
+  max-height: 100%;
+  min-height: 0;
+}
+/* A page whose side panel is docked at the canvas's right edge keeps that
+   column whole (components/pageFrame.css): the floating assistant rests
+   beside it, as Notion's does, not over the panel's last rows (owner,
+   2026-10-19). The panel is 300px, the Inbox's a little more for its wider
+   actions, inside the 320 this clears. A parked pane is not the right edge;
+   with a record docked in the slot, the record is, and nothing moves. */
+.m91-canvas-row:not(:has(.m71-detail-frame)):has(
+    .m71-page-canvas
+      [data-testid='pane']:nth-last-child(1 of [data-testid='pane']:not([data-parked='true']))
+      .cb-page-frame[data-panel='docked']
+  )
+  .m71-chat-frame[data-presentation='floating'] {
+  right: 320px;
+  max-width: calc(100% - 340px);
+}
+/* A parked pane's tab strip takes the row's last 32px beside it. */
+.m91-canvas-row:not(:has(.m71-detail-frame)):has([data-testid='pane'][data-parked='true']):has(
+    .m71-page-canvas
+      [data-testid='pane']:nth-last-child(1 of [data-testid='pane']:not([data-parked='true']))
+      .cb-page-frame[data-panel='docked']
+  )
+  .m71-chat-frame[data-presentation='floating'] {
+  right: 352px;
+  max-width: calc(100% - 372px);
+}
+/* Minimized, the frame is the assistant button's own 48px circle, so the page
+   keeps every click outside it. It keeps its insets (10px below 760px); this
+   selector outranks that query's width. */
+.m71-chat-frame[data-presentation='floating'][data-minimized] {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  box-shadow: var(--shadow-lg);
+}
+@media (width < 760px) {
+  .m71-shell {
+    --shell-top-inset: 6px;
+  }
+  .m71-main {
+    border-top-left-radius: 12px;
+  }
+  .m71-chat-frame[data-presentation='floating'] {
+    right: 10px;
+    bottom: 10px;
+    width: calc(100% - 20px);
+    max-height: calc(100% - 20px);
+  }
 }
 .m71-shell[data-chat-canvas] .m71-page-canvas,
 .m71-shell[data-chat-canvas] .m71-detail-frame {
@@ -231,11 +437,38 @@
   overflow: hidden;
   padding-bottom: 0;
 }
-.m71-sidebar [data-testid='page-navigation']:not([hidden]),
+.m71-page-navigation-slot:not([hidden]),
 .m75-page-navigation {
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
   flex: 1;
+}
+
+/* The rail's theme control: each mode's glyph turns into place as the mode
+   changes (keyed, AppRail.tsx). */
+.m71-theme-glyph {
+  transform-origin: center;
+  animation: m71-theme-glyph-in var(--motion-pop) backwards;
+}
+@keyframes m71-theme-glyph-in {
+  from {
+    opacity: 0;
+    rotate: -60deg;
+    scale: 0.7;
+  }
+}
+/* When light and dark trade places from that control, the new palette
+   spreads out in a circle from it over the old one, in place of the
+   document's default crossfade (`revealTheme`, app/shellMotion.ts, which
+   animates the circle and never starts for a reader who asked for less
+   motion). These hold only while that reveal runs. */
+:root[data-theme-reveal]::view-transition-old(root),
+:root[data-theme-reveal]::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+:root[data-theme-reveal]::view-transition-new(root) {
+  z-index: 1;
 }

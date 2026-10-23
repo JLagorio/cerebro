@@ -590,8 +590,8 @@ function WidgetShell({
       // full strength while a 40% copy of it follows the cursor; it used to
       // dim to 0.6 in place and leave nothing under the pointer at all.
       data-drag-id={widget.id}
-      style={{ flexGrow: widget.w ?? 1, flexBasis: 0, minWidth: 280 }}
-      className="relative flex min-w-0 flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0"
+      style={{ flexGrow: widget.w ?? 1, flexBasis: 0, minWidth: 'min(280px, 100%)' }}
+      className="relative flex min-w-0 flex-col overflow-hidden rounded-lg border border-n-200 bg-n-0"
     >
       {/* The column variant of the insertion line (§C-II.3): 4px wide, full
           height, on the leading edge. Inside the tile's own border rather than
@@ -599,7 +599,7 @@ function WidgetShell({
           target clips is a line that is not there. */}
       {lines !== undefined && <InsertionLine gap={lines.above} side="start" />}
       {lines?.below !== undefined && <InsertionLine gap={lines.below} side="end" />}
-      <header className="flex flex-none items-center gap-2 border-b border-n-100 px-3 py-2">
+      <header className="flex min-h-9 flex-none flex-wrap items-center gap-2 border-b border-n-100 px-3 py-2">
         {edit !== null && (
           <Grip
             kind="block"
@@ -1130,6 +1130,7 @@ function ChartWidget({ widget, entries, spec, schema }: OwnScopeProps<'chart'>) 
           decision. The chart's own typed empty states answer misconfiguration
           — a group-less widget gets its no-group refusal, not a new one. */}
       <ChartView
+        embedded
         entries={scoped}
         presentation={{
           type: 'chart',

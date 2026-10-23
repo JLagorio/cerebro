@@ -72,8 +72,13 @@ describe('lookFor — plain mode is the configurable off switch', () => {
     }
   });
 
-  it('collapses folders to a caret', () => {
-    expect(lookFor('src', true, { plain: true, expanded: false }).icon).toBe('chevron-right');
-    expect(lookFor('src', true, { plain: true, expanded: true }).icon).toBe('chevron-down');
+  it('collapses folders to one neutral folder glyph, never a second caret', () => {
+    // The explorer draws its own turning caret beside every directory; a
+    // caret for a glyph drew two side by side.
+    for (const expanded of [false, true]) {
+      const look = lookFor('src', true, { plain: true, expanded });
+      expect(look.icon).toBe(expanded ? 'folder-open' : 'folder');
+      expect(look.color).toBeNull();
+    }
   });
 });

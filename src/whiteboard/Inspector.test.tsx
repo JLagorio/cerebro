@@ -2,6 +2,8 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest';
 import { createBoard } from '@/engine/scene/board';
 import { createSceneEditor } from '@/engine/scene/editor';
+import { claimsKey, claimsOf } from '@/lib/keys/claims';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { Inspector } from './Inspector';
 import { createBoardState } from './boardState';
 if (typeof window.PointerEvent === 'undefined')
@@ -70,7 +72,47 @@ it('sections follow selection, mixed values stay words, and one position edit is
   expect(editor.canUndo()).toBe(false);
   select('e:e');
   expect(screen.getByRole('textbox', { name: 'X' })).toHaveProperty('disabled', true);
-  expect(screen.getByRole('combobox', { name: 'Start' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Start' }).getAttribute('data-value')).toBe('none');
+  expect(screen.getByRole('button', { name: 'End' }).getAttribute('data-value')).toBe('arrow');
+});
+it('a shape is the design system select: a pick is one step, and mixed is its placeholder', () => {
+  const { editor, select } = setup();
+  select('n:a');
+  const shape = screen.getByRole('button', { name: 'Shape' });
+  expect(shape.getAttribute('data-value')).toBe('rectangle');
+  chooseOption(shape, 'Ellipse');
+  expect(editor.board.nodes.get('a')).toMatchObject({ shape: 'ellipse' });
+  expect(editor.board.nodes.get('b')).toMatchObject({ shape: 'rectangle' });
+  select('n:a', 'n:b');
+  const mixed = screen.getByRole('button', { name: 'Shape' });
+  // Mixed is a state, not a choice: the trigger says it, the list never does.
+  expect(mixed.getAttribute('data-value')).toBe('');
+  expect(mixed.textContent).toBe('Mixed');
+  expect(optionLabels(mixed)).toEqual(['Rectangle', 'Ellipse', 'Diamond']);
+  act(() => editor.undo());
+  expect(editor.board.nodes.get('a')).toMatchObject({ shape: 'rectangle' });
+  expect(editor.canUndo()).toBe(false);
+});
+it("the board's bare keys stand down on a select, as they did on a native one", () => {
+  const { select } = setup();
+  select('e:e');
+  for (const name of ['Start', 'End']) {
+    const claims = claimsOf(screen.getByRole('button', { name }));
+    for (const key of ['ArrowDown', 'Enter', ' ', 'Backspace', 'r'])
+      expect(
+        claimsKey(claims, { key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false }),
+      ).toBe(true);
+    // Undo still reaches the board.
+    expect(
+      claimsKey(claims, {
+        key: 'z',
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      }),
+    ).toBe(false);
+  }
 });
 it('a colour is one durable edit and becomes the next-card session default; None removes it', () => {
   const { editor, select, state } = setup();

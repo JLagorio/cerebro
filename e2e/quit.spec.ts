@@ -66,7 +66,7 @@ test('quit commits an untitled heading typed without Enter or blur', async ({ pa
   await expect(heading).toBeVisible({ timeout: 10_000 });
 
   await heading.fill('Rosa on the offline problem');
-  await expect(heading).toBeFocused();
+  await expect(page.getByTestId('markdown-editor').locator('.bn-editor')).toBeFocused();
   const before = await quitReading(page, UNTITLED);
 
   expect(before).not.toContain('# Rosa on the offline problem');

@@ -29,7 +29,7 @@ const UNAVAILABLE = '[data-testid="section-unavailable"]';
 export const section: LabSection = {
   id: 'concept-history',
   title: "A concept's History",
-  surface: 'A concept · History tab',
+  surface: 'A concept · History panel',
   render: () => <PageHistory path={PAGE} />,
   states: {
     ready: {

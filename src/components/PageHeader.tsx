@@ -10,6 +10,7 @@ export function PageHeader({
   actions,
   headingTestId,
   className = '',
+  variant = 'workspace',
 }: {
   title: ReactNode;
   icon?: ReactNode;
@@ -18,9 +19,10 @@ export function PageHeader({
   actions?: ReactNode;
   headingTestId?: string;
   className?: string;
+  variant?: 'workspace' | 'compact' | 'tool';
 }) {
   return (
-    <header className={`cb-page-header ${className}`}>
+    <header className={`cb-page-header cb-page-header--${variant} ${className}`}>
       <div className="cb-page-header-line">
         {icon !== undefined && <div className="cb-page-header-icon">{icon}</div>}
         <h1 className="cb-page-heading" data-testid={headingTestId}>

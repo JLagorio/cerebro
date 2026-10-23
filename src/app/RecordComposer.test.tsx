@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { fixtureVault, makeEntry } from '@/test/factories';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -36,8 +37,7 @@ function setup(createItem = vi.fn().mockResolvedValue('records/work-items/new-ta
   const { unmount } = render(<RecordComposer onClose={onClose} />);
   return { createItem, onClose, navigate, unmount };
 }
-const selectWork = () =>
-  fireEvent.change(screen.getByTestId('composer-database'), { target: { value: 'Work item' } });
+const selectWork = () => chooseOption(screen.getByTestId('composer-database'), 'Work item');
 const title = (value: string) =>
   fireEvent.change(screen.getByTestId('composer-title'), { target: { value } });
 function highPriority() {
@@ -58,15 +58,14 @@ describe('RecordComposer', () => {
 
   it('excludes reserved databases and resets draft values when the database changes', () => {
     setup();
-    expect(
-      within(screen.getByTestId('composer-database'))
-        .getAllByRole('option')
-        .map((option) => option.textContent),
-    ).toEqual(['Person', 'Project', 'Work item']);
+    const database = screen.getByRole('button', { name: 'Database' });
+    expect(database).toBe(screen.getByTestId('composer-database'));
+    expect(optionLabels(database)).toEqual(['Person', 'Project', 'Work item']);
     selectWork();
     highPriority();
     expect(screen.getByRole('button', { name: 'High' })).toBeTruthy();
-    fireEvent.change(screen.getByTestId('composer-database'), { target: { value: 'Project' } });
+    chooseOption(database, 'Project');
+    expect(database.getAttribute('data-value')).toBe('Project');
     expect(screen.queryByTestId('heading-strip')).toBeNull();
     selectWork();
     expect(screen.queryByRole('button', { name: 'High' })).toBeNull();
@@ -97,6 +96,23 @@ describe('RecordComposer', () => {
     },
   );
 
+  it('Mod+Enter in the open database list creates the record of the database it picks', async () => {
+    const { createItem } = setup();
+    title('New task');
+    const database = screen.getByTestId('composer-database');
+    fireEvent.click(database);
+    fireEvent.keyDown(database, { key: 'End' });
+    fireEvent.keyDown(database, { key: 'Enter', metaKey: true });
+    await waitFor(() =>
+      expect(createItem).toHaveBeenCalledWith({
+        folder: 'records/work-items',
+        slug: 'new-task',
+        frontmatter: { type: 'Work item', status: 'todo' },
+        body: '# New task\n',
+      }),
+    );
+  });
+
   it('a blank title gives a correction and writes nothing', () => {
     const { createItem } = setup();
     fireEvent.click(screen.getByRole('button', { name: 'Create record' }));
@@ -104,7 +120,12 @@ describe('RecordComposer', () => {
     expect(createItem).not.toHaveBeenCalled();
   });
 
-  it('a scalar edit committed by Ctrl+Enter is included in that same create', async () => {
+  it.each([
+    { modifier: 'Ctrl', ctrlKey: true, metaKey: false, value: '8', valid: true },
+    { modifier: 'Cmd', ctrlKey: false, metaKey: true, value: '8', valid: true },
+    { modifier: 'Ctrl', ctrlKey: true, metaKey: false, value: 'Infinity', valid: false },
+    { modifier: 'Cmd', ctrlKey: false, metaKey: true, value: 'Infinity', valid: false },
+  ])('$modifier+Enter settles a scalar draft before create ($value)', async (scenario) => {
     const entries = [...useVaultStore.getState().entries];
     const work = entries.find((entry) => entry.type === 'Type' && entry.title === 'Work item')!;
     work.properties.fields = {
@@ -120,10 +141,20 @@ describe('RecordComposer', () => {
       within(screen.getByTestId('heading-strip')).getByRole('button', { name: 'Empty' }),
     );
     const estimate = screen.getByRole('textbox', { name: 'Estimate' });
-    fireEvent.change(estimate, { target: { value: '8' } });
-    fireEvent.keyDown(estimate, { key: 'Enter', ctrlKey: true });
-    await waitFor(() => expect(createItem).toHaveBeenCalledTimes(1));
-    expect(createItem.mock.calls[0][0].frontmatter).toMatchObject({ estimate: 8 });
+    fireEvent.change(estimate, { target: { value: scenario.value } });
+    fireEvent.keyDown(estimate, {
+      key: 'Enter',
+      ctrlKey: scenario.ctrlKey,
+      metaKey: scenario.metaKey,
+    });
+    if (scenario.valid) {
+      await waitFor(() => expect(createItem).toHaveBeenCalledTimes(1));
+      expect(createItem.mock.calls[0][0].frontmatter).toMatchObject({ estimate: 8 });
+    } else {
+      expect(createItem).not.toHaveBeenCalled();
+      expect((estimate as HTMLInputElement).value).toBe('Infinity');
+      expect(screen.getByRole('status').textContent).toBe('Enter a finite number.');
+    }
   });
 
   it('Create more keeps fields, clears and refocuses the title, and stays open', async () => {

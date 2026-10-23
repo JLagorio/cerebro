@@ -1,5 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, openAgents, readMockFile, openAssistantPanel, openDestination } from './boot';
+import {
+  boot,
+  openAgents,
+  readMockFile,
+  openAssistantPanel,
+  openDestination,
+  showPagePanel,
+} from './boot';
 
 /**
  * A page says who last changed it, and run detail names the pages a run
@@ -25,11 +32,9 @@ async function openSchedule(page: Page): Promise<void> {
   await expect(page.getByTestId('markdown-editor')).toBeVisible({ timeout: 10_000 });
 }
 
-async function showInfo(page: Page): Promise<void> {
-  if (!(await page.getByTestId('doc-side-panel').isVisible())) {
-    await page.getByRole('button', { name: 'Show panel' }).click();
-  }
-  await page.getByTestId('doc-side-panel').getByTestId('doc-panel-tab-info').click();
+/** The side panel, showing Details: who last changed the page is its Info. */
+async function showDetails(page: Page): Promise<void> {
+  await showPagePanel(page, 'Details');
 }
 
 /** Send `text` to the mock assistant and wait for a reply holding `reply`. */
@@ -42,16 +47,22 @@ async function ask(page: Page, text: string, reply: string): Promise<void> {
   });
 }
 
-test("a page's Info says who last changed it: you, outside Cerebro, the Assistant", async ({
+test("a page's Details say who last changed it: you, outside Cerebro, the Assistant", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   await boot(page);
   await page.evaluate(([path, md]) => window.__cerebroMockFs.set(path, md), [PAGE, BODY]);
   await openSchedule(page);
-  await showInfo(page);
-  const line = page.getByTestId('doc-side-panel').getByTestId('last-change-line');
-  await expect(line).toHaveText('Who changed this page was not recorded');
+  await showDetails(page);
+  // The Info section's "Changed by" value; the sentence it stands for is its
+  // tooltip.
+  const line = page
+    .getByTestId('doc-side-panel')
+    .getByTestId('page-info')
+    .getByTestId('last-change-line');
+  await expect(line).toHaveText('Not recorded');
+  await expect(line).toHaveAttribute('title', 'Who changed this page was not recorded');
 
   // Typing saves through the editor's door: it reads as you.
   await page.getByTestId('markdown-editor').getByText('We ship on Thursdays').click();
@@ -59,7 +70,8 @@ test("a page's Info says who last changed it: you, outside Cerebro, the Assistan
   await page.keyboard.press('Enter');
   await page.keyboard.type('Typed by me.');
   await expect.poll(() => readMockFile(page, PAGE)).toContain('Typed by me.');
-  await expect(line).toHaveText(/^Last changed by You · /, { timeout: 10_000 });
+  await expect(line).toHaveText(/^You · /, { timeout: 10_000 });
+  await expect(line).toHaveAttribute('title', /^Last changed by You · /);
 
   // Another editor changes the file while the page is closed, so no save of
   // the editor's lands over it; the page, opened again, reads the new bytes.
@@ -71,17 +83,19 @@ test("a page's Info says who last changed it: you, outside Cerebro, the Assistan
     [PAGE],
   );
   await openSchedule(page);
-  await showInfo(page);
-  await expect(line).toHaveText(/^Changed outside Cerebro since You wrote it .+ — unattributed$/, {
-    timeout: 10_000,
-  });
+  await showDetails(page);
+  await expect(line).toHaveText('Outside Cerebro · unattributed', { timeout: 10_000 });
+  await expect(line).toHaveAttribute(
+    'title',
+    /^Changed outside Cerebro since You wrote it .+ — unattributed$/,
+  );
 
   // The Assistant's append goes through its own door, stamped as it.
   await openAssistantPanel(page);
   await expect(page.getByTestId('ai-panel')).toBeVisible();
   await ask(page, `append "Agent line." to ${PAGE}`, `I appended that to ${PAGE}.`);
-  await showInfo(page);
-  await expect(line).toHaveText(/^Last changed by Assistant · /, { timeout: 10_000 });
+  await showDetails(page);
+  await expect(line).toHaveText(/^Assistant · /, { timeout: 10_000 });
 });
 
 test('run detail names the pages a run wrote, or says it was not recorded', async ({ page }) => {

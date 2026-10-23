@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { parseDateProperty } from '@/engine/dates';
+import { chooseOption } from '@/test/chooseOption';
 import { RepeatEditor } from './RepeatEditor';
 
 afterEach(cleanup);
@@ -20,8 +21,10 @@ function setup(value: unknown = null, date = anchor) {
   );
   return { onChange, onClose };
 }
-const choose = (value: string) =>
-  fireEvent.change(screen.getByTestId('repeat-pattern'), { target: { value } });
+const choose = (value: string) => chooseOption(screen.getByTestId('repeat-pattern'), { value });
+/** A custom-section select, by its accessible name. */
+const pick = (name: string, value: string) =>
+  chooseOption(screen.getByRole('button', { name }), { value });
 const done = () => fireEvent.click(screen.getByRole('button', { name: 'Done' }));
 
 it('offers Tuesday presets and writes only on Done', () => {
@@ -53,29 +56,34 @@ it('builds every two weeks on Monday and Thursday, ending after ten', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Tuesday' }));
   fireEvent.click(screen.getByRole('button', { name: 'Monday' }));
   fireEvent.click(screen.getByRole('button', { name: 'Thursday' }));
-  fireEvent.change(screen.getByRole('combobox', { name: 'Ends' }), { target: { value: 'count' } });
+  pick('Ends', 'count');
   done();
   expect(onChange).toHaveBeenCalledWith('FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH;COUNT=10');
 });
 it('builds the last Friday of each month, ending on an inclusive date', () => {
   const { onChange } = setup();
   choose('custom');
-  fireEvent.change(screen.getByRole('combobox', { name: 'Repeat unit' }), {
-    target: { value: 'MONTHLY' },
-  });
-  fireEvent.change(screen.getByRole('combobox', { name: 'Monthly pattern' }), {
-    target: { value: 'weekday' },
-  });
-  fireEvent.change(screen.getByRole('combobox', { name: 'Week number' }), {
-    target: { value: '-1' },
-  });
-  fireEvent.change(screen.getByRole('combobox', { name: 'Day of week' }), {
-    target: { value: 'FR' },
-  });
-  fireEvent.change(screen.getByRole('combobox', { name: 'Ends' }), { target: { value: 'until' } });
+  pick('Repeat unit', 'MONTHLY');
+  pick('Monthly pattern', 'weekday');
+  pick('Week number', '-1');
+  pick('Day of week', 'FR');
+  pick('Ends', 'until');
   fireEvent.change(screen.getByLabelText('Last repeat date'), { target: { value: '2026-12-31' } });
   done();
   expect(onChange).toHaveBeenCalledWith('FREQ=MONTHLY;BYDAY=-1FR;UNTIL=20261231');
+});
+/** The custom section hears its inputs through a bubbling change event, which
+ * the design system's Select (a button) never sends: a select alone must still
+ * mark the draft touched, or Done saves the rule it replaced. */
+it('a select alone in Custom changes the saved rule', () => {
+  const { onChange } = setup('FREQ=WEEKLY;BYDAY=TU,TH');
+  expect(screen.getByRole('button', { name: 'Pattern' })).toBe(
+    screen.getByTestId('repeat-pattern'),
+  );
+  choose('custom');
+  pick('Repeat unit', 'DAILY');
+  done();
+  expect(onChange).toHaveBeenCalledWith('FREQ=DAILY');
 });
 it('shows invalid values without writing and preserves unknown raw text until replacement', () => {
   const raw = 'FREQ=MONTHLY;BYSETPOS=2';

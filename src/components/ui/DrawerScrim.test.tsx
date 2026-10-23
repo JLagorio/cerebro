@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useRef, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useEscapeLayer } from '@/components/ui/Popover';
-import { hasModalLayers } from './layers';
+import { hasModalLayers, popLayer, pushLayer } from './layers';
 import { DrawerScrim, useDrawerFocus } from './DrawerScrim';
 
 /**
@@ -26,6 +26,21 @@ describe('DrawerScrim', () => {
   it('dismisses on a press on what the drawer covers', () => {
     const onDismiss = vi.fn();
     render(scrim(onDismiss));
+    fireEvent.click(screen.getByTestId('scrim'));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays when a press on it only closes a surface open over the drawer', () => {
+    const onDismiss = vi.fn();
+    render(scrim(onDismiss));
+    const above = 'menu-over-the-drawer';
+    pushLayer(above);
+    fireEvent.pointerDown(screen.getByTestId('scrim'));
+    // The menu's own outside press closes it before the click lands.
+    popLayer(above);
+    fireEvent.click(screen.getByTestId('scrim'));
+    expect(onDismiss).not.toHaveBeenCalled();
+    fireEvent.pointerDown(screen.getByTestId('scrim'));
     fireEvent.click(screen.getByTestId('scrim'));
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });

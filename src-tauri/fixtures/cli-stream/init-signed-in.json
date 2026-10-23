@@ -1,0 +1,50 @@
+{
+  "type": "system",
+  "subtype": "init",
+  "session_id": "00000000-0000-4000-8000-000000000011",
+  "tools": [
+    "Artifact",
+    "Bash",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "DesignSync",
+    "Edit",
+    "EnterWorktree",
+    "ExitWorktree",
+    "ListAgents",
+    "Monitor",
+    "NotebookEdit",
+    "PushNotification",
+    "Read",
+    "RemoteTrigger",
+    "ReportFindings",
+    "ScheduleWakeup",
+    "SendMessage",
+    "Skill",
+    "Task",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskOutput",
+    "TaskStop",
+    "TaskUpdate",
+    "TodoWrite",
+    "ToolSearch",
+    "WebFetch",
+    "WebSearch",
+    "Workflow",
+    "Write",
+    "mcp__cerebro__get_vault_context",
+    "mcp__cerebro__search_notes",
+    "mcp__cerebro__get_note"
+  ],
+  "mcp_servers": [
+    {
+      "name": "cerebro",
+      "status": "connected"
+    }
+  ],
+  "permissionMode": "acceptEdits",
+  "claude_code_version": "2.1.250"
+}

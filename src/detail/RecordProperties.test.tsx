@@ -114,7 +114,7 @@ describe('RecordProperties layout groups (M45.1)', () => {
     // (channel) stays after everything, then the add-property trigger.
     expect(rowNames()).toEqual(['priority', 'assignee', 'due', 'channel']);
     expect(within(group).queryByText('Assignee')).toBeNull();
-    expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
   });
 
   it('pools hidden fields from every container — heading folds included — into the one expander', () => {
@@ -287,7 +287,7 @@ describe('the measured row anatomy (M46.2 Task 7)', () => {
     // hover target is the row's label cell.
     expect(container.className).toContain('gap-1');
     expect(container.className).not.toContain('gap-[7px]');
-    expect(row.className).toContain('min-h-[34px]');
+    expect(row.className).toContain('min-h-[var(--property-row-h,34px)]');
   });
 
   it('gives the value cell the measured box and NO hover wash (§A5, §A6)', () => {
@@ -296,7 +296,7 @@ describe('the measured row anatomy (M46.2 Task 7)', () => {
     expect(cells.length).toBeGreaterThan(0);
     for (const c of cells) {
       expect(c.className).toContain('p-1.5'); // 6px
-      expect(c.className).toContain('min-h-[34px]');
+      expect(c.className).toContain('min-h-[var(--property-row-h,34px)]');
       expect(c.className).toContain('overflow-hidden');
       expect(c.className).toContain('cursor-pointer');
       // 4px — SMALLER than the label cell's 6px. Ours was 8px against 6, the
@@ -320,7 +320,12 @@ describe('the measured row anatomy (M46.2 Task 7)', () => {
     expect(filled).toBeTruthy();
     // Not whole-string equality — kinds differ in whether their chips wrap.
     // What must not differ is the BOX: padding, radius, floor height.
-    for (const token of ['p-1.5', 'rounded-xs', 'min-h-[34px]', 'overflow-hidden']) {
+    for (const token of [
+      'p-1.5',
+      'rounded-xs',
+      'min-h-[var(--property-row-h,34px)]',
+      'overflow-hidden',
+    ]) {
       expect(empty!.className).toContain(token);
       expect(filled!.className).toContain(token);
     }

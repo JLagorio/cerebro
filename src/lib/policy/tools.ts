@@ -69,8 +69,11 @@ export type Axis = 'write' | 'read' | 'read_write' | 'none';
 export type TargetKind = 'note' | 'file' | 'canvas' | 'folder' | 'concept' | 'source_id' | 'bundle';
 /** How a transcript shows a call (M56.8): a step in the run, a change card,
  * or one of the rows a cerebro tool owns: a concept to review, a handoff to
- * another agent, a commit of proposals, or a checked view suggestion. */
-export type Renderer = 'step' | 'change' | 'concept' | 'handoff' | 'commit' | 'view';
+ * another agent, a commit of proposals, or a checked view suggestion. Since
+ * M91.1 two draw one of the CLI's own tools: a subagent's work and a todo
+ * list. */
+export type Renderer =
+  'step' | 'change' | 'concept' | 'handoff' | 'commit' | 'view' | 'subagent' | 'todo';
 
 const SURFACES: readonly Surface[] = ['base', 'proposals'];
 const KINDS: readonly Kind[] = ['read_only', 'additive', 'destructive'];
@@ -84,7 +87,20 @@ const TARGET_KINDS: readonly TargetKind[] = [
   'source_id',
   'bundle',
 ];
-const RENDERERS: readonly Renderer[] = ['step', 'change', 'concept', 'handoff', 'commit', 'view'];
+const RENDERERS: readonly Renderer[] = [
+  'step',
+  'change',
+  'concept',
+  'handoff',
+  'commit',
+  'view',
+  'subagent',
+  'todo',
+];
+
+/** The renderers that draw what one of the CLI's own tools does (M91.1), so
+ * that no cerebro row may take them. */
+const CLI_ONLY_RENDERERS: ReadonlySet<Renderer> = new Set<Renderer>(['subagent', 'todo']);
 
 /** The door the comment tools go through (M70.3): they write a page's
  * comment sidecar, never the page, so the door writes nothing, and its rows
@@ -109,6 +125,26 @@ const RENDERER_DOORS: Partial<Record<Renderer, string>> = {
 export interface FoldPhrases {
   one: string;
   many: string;
+  /** The same row while its calls still run (M91.1): "reading a note",
+   * "reading {n} notes". Optional; the shipped manifest names it beside
+   * every fold. */
+  running?: RunningFold | null;
+}
+
+/** A fold's words while its calls run (M91.1), held to the rules `one` and
+ * `many` are. */
+export interface RunningFold {
+  one: string;
+  many: string;
+}
+
+/** How one call's row reads by its status (M91.1): while it runs, once it is
+ * done, and when it failed. Optional on a row; owner-read copy, lowercase,
+ * one call each, so no `{n}`. */
+export interface StatusPhrases {
+  running: string;
+  done: string;
+  failed: string;
 }
 
 /** The text a `{{name}}` in a description or schema stands for. */
@@ -165,6 +201,8 @@ export interface ToolRow {
   renderer: Renderer;
   /** Set only on a read: what a run of its calls folds under. */
   fold: FoldPhrases | null;
+  /** How one call reads by its status (M91.1); optional. */
+  phrases?: StatusPhrases | null;
   /** A lucide icon name. */
   icon: string;
   always_load: boolean;
@@ -200,6 +238,11 @@ export interface Generated {
 /** One of the CLI's own built-in tools. */
 export interface CliTool {
   name: string;
+  /** The other names Claude Code spells this tool by (M91.1): 2.1.250's init
+   * lists `Task` for the subagent tool its calls name `Agent`. Each answers
+   * with this row's facts (`cliTool`); argv names the row by `name` alone.
+   * Optional, absent reads as none. */
+  aliases?: string[];
   /** Its tool-approval family (M57.2): the row of
    * `shared/policy/tool-approval.v1.json` that decides whether it runs, asks
    * or is refused. Required: a row with none fails the load. */
@@ -211,6 +254,8 @@ export interface CliTool {
   renderer: Renderer;
   /** Set only on a reader: what a run of its calls folds under. */
   fold: FoldPhrases | null;
+  /** How one call reads by its status (M91.1); optional. */
+  phrases?: StatusPhrases | null;
   icon: string;
 }
 
@@ -242,11 +287,14 @@ function refusal(subject: string, field: string, problem: string): Error {
 // --- The shape serde reads on the Rust side --------------------------------
 //
 // Each struct denies unknown fields, each enum is a closed word list, and an
-// `Option` field may be absent, which reads as null.
+// `Option` field may be absent, which reads as null. A field M91.1 added may
+// be left out, and then stays out.
 
 type Check = (value: unknown, subject: string, field: string) => void;
-/** A field's check, or an `Option` around one. */
-type Field = Check | { option: Check };
+/** A field's check, an `Option` around one (absent reads as null), or a
+ * field serde defaults when absent (`omitted`): absent stays absent, and a
+ * present value meets the check as it is. */
+type Field = Check | { option: Check } | { omitted: Check };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -292,9 +340,16 @@ function listOf(item: Check): Check {
   };
 }
 
+/** A check that also takes null, as serde reads an `Option`. */
+function orNull(check: Check): Check {
+  return (value, subject, field) => {
+    if (value !== null) check(value, subject, field);
+  };
+}
+
 /** A struct: exactly `fields`, each checked under `<field>.<name>`. An absent
  * `Option` is written back as null, so the typed manifest never holds an
- * undefined where Rust holds a `None`. */
+ * undefined where Rust holds a `None`; an absent `omitted` field stays out. */
 function struct(fields: Record<string, Field>): Check {
   return (value, subject, field) => {
     if (!isRecord(value)) throw shapeRefusal(subject, field, 'must be an object');
@@ -305,6 +360,10 @@ function struct(fields: Record<string, Field>): Check {
       }
     }
     for (const [key, spec] of Object.entries(fields)) {
+      if (typeof spec !== 'function' && 'omitted' in spec) {
+        if (value[key] !== undefined) spec.omitted(value[key], subject, at(key));
+        continue;
+      }
       const optional = typeof spec !== 'function';
       if (value[key] === undefined) {
         if (!optional) throw shapeRefusal(subject, at(key), 'is missing');
@@ -341,7 +400,13 @@ function mapOf(what: string, fields: Record<string, Field>): Check {
 
 const TARGET = struct({ arg: { option: text }, kind: oneOf(TARGET_KINDS) });
 
-const FOLD = struct({ one: text, many: text });
+const FOLD = struct({
+  one: text,
+  many: text,
+  running: { omitted: orNull(struct({ one: text, many: text })) },
+});
+
+const PHRASES = struct({ running: text, done: text, failed: text });
 
 const GENERATED = struct({
   prefix: text,
@@ -390,6 +455,7 @@ const MANIFEST_SHAPE = struct({
     exempt: { option: text },
     renderer: oneOf(RENDERERS),
     fold: { option: FOLD },
+    phrases: { omitted: orNull(PHRASES) },
     icon: text,
     always_load: flag,
     confirmable: flag,
@@ -401,11 +467,13 @@ const MANIFEST_SHAPE = struct({
   generated: (value) => GENERATED(value, 'generated', ''),
   cli_tools: named('cli tool', 'name', {
     name: text,
+    aliases: { omitted: listOf(text) },
     family: { option: text },
     subject: { option: text },
     writes: flag,
     renderer: oneOf(RENDERERS),
     fold: { option: FOLD },
+    phrases: { omitted: orNull(PHRASES) },
     icon: text,
   }),
   never_call: struct({
@@ -459,26 +527,61 @@ function checkFold(
   if (renderer !== 'step') {
     throw refusal(subject, 'fold', `is set on a ${renderer} row; only a step folds`);
   }
-  if (!fits(fold.one, FOLD_LIMIT) || fold.one.includes(FOLD_COUNT)) {
+  checkFoldPair(subject, 'fold', fold.one, fold.many);
+  const running = fold.running ?? null;
+  if (running !== null) checkFoldPair(subject, 'fold.running', running.one, running.many);
+}
+
+/** One fold's `one` and `many` under `at` (`fold`, or `fold.running` since
+ * M91.1): `one` without the count, `many` with it once, both short and
+ * lowercase. */
+function checkFoldPair(subject: string, at: string, one: string, many: string): void {
+  if (!fits(one, FOLD_LIMIT) || one.includes(FOLD_COUNT)) {
     throw refusal(
       subject,
-      'fold.one',
+      `${at}.one`,
       `must be 1 to ${FOLD_LIMIT} characters, without ${FOLD_COUNT}`,
     );
   }
-  if (!fits(fold.many, FOLD_LIMIT) || fold.many.split(FOLD_COUNT).length - 1 !== 1) {
+  if (!fits(many, FOLD_LIMIT) || many.split(FOLD_COUNT).length - 1 !== 1) {
     throw refusal(
       subject,
-      'fold.many',
+      `${at}.many`,
       `must be 1 to ${FOLD_LIMIT} characters, with exactly one ${FOLD_COUNT}`,
     );
   }
   for (const [field, phrase] of [
-    ['fold.one', fold.one],
-    ['fold.many', fold.many],
+    ['one', one],
+    ['many', many],
   ] as const) {
-    // Rust's `char::is_uppercase` is the Uppercase property.
-    if (/^\p{Uppercase}/u.test(phrase)) {
+    if (startsUppercase(phrase)) {
+      throw refusal(
+        subject,
+        `${at}.${field}`,
+        'must start lowercase; the row capitalizes the label it joins',
+      );
+    }
+  }
+}
+
+/** Rust's `char::is_uppercase` is the Uppercase property. */
+function startsUppercase(phrase: string): boolean {
+  return /^\p{Uppercase}/u.test(phrase);
+}
+
+/** A row's status phrases (M91.1): each names one call, so it is as short as
+ * a fold's `one`, has no count, and starts lowercase. */
+function checkPhrases(subject: string, phrases: StatusPhrases | null | undefined): void {
+  if (phrases === null || phrases === undefined) return;
+  for (const [field, phrase] of [
+    ['phrases.running', phrases.running],
+    ['phrases.done', phrases.done],
+    ['phrases.failed', phrases.failed],
+  ] as const) {
+    if (!fits(phrase, FOLD_LIMIT) || phrase.includes(FOLD_COUNT)) {
+      throw refusal(subject, field, `must be 1 to ${FOLD_LIMIT} characters, without ${FOLD_COUNT}`);
+    }
+    if (startsUppercase(phrase)) {
       throw refusal(subject, field, 'must start lowercase; the row capitalizes the label it joins');
     }
   }
@@ -647,6 +750,13 @@ function checkFacts(manifest: ToolsManifest, subject: string, facts: Facts): voi
   if (needed !== undefined && door.id !== needed) {
     throw refusal(subject, 'renderer', `${facts.renderer} needs door ${needed}, not ${door.id}`);
   }
+  if (CLI_ONLY_RENDERERS.has(facts.renderer)) {
+    throw refusal(
+      subject,
+      'renderer',
+      `${facts.renderer} draws one of the CLI's own tools, never a cerebro tool`,
+    );
+  }
   if (!KEBAB.test(facts.icon)) {
     throw refusal(subject, 'icon', `must be a kebab-case name, not ${JSON.stringify(facts.icon)}`);
   }
@@ -688,6 +798,7 @@ function checkRow(manifest: ToolsManifest, row: ToolRow): void {
     row.kind === 'read_only' ? null : `a tool whose kind is ${row.kind}`,
     row.renderer,
   );
+  checkPhrases(subject, row.phrases);
   checkCommentDoor(subject, row);
   checkFacts(manifest, subject, {
     toolset: row.toolset,
@@ -799,7 +910,11 @@ function checkGenerated(manifest: ToolsManifest): void {
 function checkCli(tool: CliTool): void {
   const subject = `cli tool ${tool.name}`;
   if (!PASCAL.test(tool.name)) throw refusal(subject, 'name', 'must match [A-Z][A-Za-z]*');
+  if (!(tool.aliases ?? []).every((alias) => PASCAL.test(alias))) {
+    throw refusal(subject, 'aliases', 'must each match [A-Z][A-Za-z]*');
+  }
   checkFold(subject, tool.fold, tool.writes ? 'a tool that writes' : null, tool.renderer);
+  checkPhrases(subject, tool.phrases);
   if (RENDERER_DOORS[tool.renderer] !== undefined) {
     throw refusal(
       subject,
@@ -928,6 +1043,25 @@ function validate(manifest: ToolsManifest): void {
     if (!used) throw refusal(`toolset ${toolset.id}`, 'id', 'is used by no tool');
   }
   for (const tool of manifest.cli_tools) checkCli(tool);
+  checkAliases(manifest);
+}
+
+/** The CLI rows' names and aliases are one namespace (M91.1), as tools.rs's
+ * `check_aliases`: a spelling answers with exactly one row's facts. */
+function checkAliases(manifest: ToolsManifest): void {
+  const held = new Set(manifest.cli_tools.map((tool) => tool.name));
+  for (const tool of manifest.cli_tools) {
+    for (const alias of tool.aliases ?? []) {
+      if (held.has(alias)) {
+        throw refusal(
+          `cli tool ${tool.name}`,
+          'aliases',
+          `names ${alias}, which a CLI row already answers to`,
+        );
+      }
+      held.add(alias);
+    }
+  }
 }
 
 /**
@@ -971,12 +1105,26 @@ export function toolsetWrites(id: string): boolean {
 
 const SERVER_PREFIX = `mcp__${TOOLS.server}__`;
 const ROWS = new Map(TOOLS.tools.map((row) => [row.name, row]));
-const CLI_TOOLS = new Map(TOOLS.cli_tools.map((tool) => [tool.name, tool]));
+/** Each CLI row under its name and each of its aliases (M91.1). */
+const CLI_TOOLS = new Map(
+  TOOLS.cli_tools.flatMap((tool) =>
+    [tool.name, ...(tool.aliases ?? [])].map((name) => [name, tool] as const),
+  ),
+);
 const DOOR_WRITES = new Map(TOOLS.doors.map((door) => [door.id, door.writes]));
 /** The ops a generated name may propose: the prefix alone is not enough, which
  * is what keeps `propose_organize` (a row) and `propose_revert_proposal` (an op
  * no agent is offered) out of the generated namespace. */
 const AGENT_FACING = new Set(agentFacingOps(POLICY));
+
+/**
+ * The CLI built-in named `name`, as the CLI spells it: its row's name or one
+ * of its aliases (M91.1), so `Task` and `Agent` answer with one row's facts,
+ * as tools.rs's `cli_tool` reads them. Null for any other name.
+ */
+export function cliTool(name: string): CliTool | null {
+  return CLI_TOOLS.get(name) ?? null;
+}
 
 /** `name` without the `mcp__<server>__` prefix, or as given. */
 export function bareToolName(name: string): string {
@@ -993,6 +1141,9 @@ export interface ToolFacts {
   /** What a run of its calls folds under (M56.8); null for a tool that never
    * folds: a writer, a generated tool. */
   fold: FoldPhrases | null;
+  /** How one call reads by its status (M91.1); null where the manifest names
+   * none. */
+  phrases: StatusPhrases | null;
   /** A lucide icon name. */
   icon: string;
   /** The argument the call is aimed by; generated and CLI tools have none. */
@@ -1008,8 +1159,8 @@ export interface ToolFacts {
  * The manifest's facts for the tool `name` names, in its short or its
  * `mcp__<server>__` spelling, or null for a name it does not know (another
  * server's tool, an op no agent is offered). Rows first, then the generated
- * prefix and an agent-facing op, then the CLI's names, as `writes_disk` reads
- * them in tools.rs.
+ * prefix and an agent-facing op, then the CLI's names and aliases (M91.1), as
+ * `writes_disk` reads them in tools.rs.
  */
 export function toolFacts(name: string): ToolFacts | null {
   const bare = bareToolName(name);
@@ -1020,6 +1171,7 @@ export function toolFacts(name: string): ToolFacts | null {
       writes: DOOR_WRITES.get(row.door) === true,
       renderer: row.renderer,
       fold: row.fold,
+      phrases: row.phrases ?? null,
       icon: row.icon,
       target: row.target,
       title: row.title,
@@ -1033,6 +1185,7 @@ export function toolFacts(name: string): ToolFacts | null {
       writes: DOOR_WRITES.get(generated.door) === true,
       renderer: generated.renderer,
       fold: null,
+      phrases: null,
       icon: generated.icon,
       target: null,
       title: null,
@@ -1046,6 +1199,7 @@ export function toolFacts(name: string): ToolFacts | null {
       writes: cli.writes,
       renderer: cli.renderer,
       fold: cli.fold,
+      phrases: cli.phrases ?? null,
       icon: cli.icon,
       target: null,
       title: null,

@@ -1,7 +1,8 @@
 # Cerebro surface system and quality
 
-**Status: draft for owner review, 2026-10-17.** This is a proposed design contract,
-not an implementation or a claim of visual acceptance. Proposed allocation:
+**Status: design specification, 2026-10-17; implementation subsequently authorized.**
+This contract does not claim visual acceptance. Actual evidence and outstanding checks are in
+the [implementation record](../plans/2026-10-17-m84-m90-implementation-record.md). Allocation:
 **M84 — foundation and approved specimens; M89 — remaining surfaces;
 M90 — integrated visual and native acceptance.** The [milestone plan](../plans/2026-10-17-m84-m90-product-polish.md) defines sequencing. M71–M79 and M80–M83 already have implementation plans and must
 not be reused.

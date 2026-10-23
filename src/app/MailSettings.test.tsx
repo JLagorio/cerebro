@@ -3,7 +3,9 @@ import { cleanup, render, screen } from '@testing-library/react';
 vi.mock('@/lib/ipc', { spy: true });
 import * as ipc from '@/lib/ipc';
 import { __seedMailGate, resetMockFs } from '@/lib/mockIpc';
+import { addDays, toIsoDate } from '@/engine/dates';
 import { useVaultStore } from '@/stores/vaultStore';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { MailSettings } from './MailSettings';
 const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
 beforeEach(async () => {
@@ -108,6 +110,42 @@ it('an open gate offers a scoped sweep, and connector failure is local to its ro
     'Mail connector status could not be read',
   );
   expect(await screen.findByTestId('mail-cached')).toBeTruthy();
+});
+it('choosing another connector reads that connector’s sweep status', async () => {
+  const row = { cli_name: 'gmail', refused: null, signal: null, seen_at: null, run_id: null };
+  vi.mocked(ipc.connectorStatus).mockResolvedValueOnce([
+    { ...row, connector: 'gmail', state: 'needs_sign_in' },
+    { ...row, connector: 'work-mail', cli_name: 'work-mail', state: 'working' },
+  ]);
+  render(<MailSettings />);
+  await screen.findByText('Never swept · needs sign-in');
+  const connector = screen.getByRole('button', { name: 'Gmail connector' });
+  expect(optionLabels(connector)).toEqual(['gmail', 'work-mail']);
+  chooseOption(connector, 'work-mail');
+  expect(connector.getAttribute('data-value')).toBe('work-mail');
+  expect(screen.getByText('Never swept · connector working')).toBeTruthy();
+});
+it('with no connectors the connector select says so and cannot open', async () => {
+  vi.mocked(ipc.connectorStatus).mockResolvedValueOnce([]);
+  render(<MailSettings />);
+  const connector = await screen.findByRole('button', { name: 'Gmail connector' });
+  expect((connector as HTMLButtonElement).disabled).toBe(true);
+  expect(connector.textContent).toBe('No connectors configured');
+});
+it('the retention window re-plans what Remove takes', async () => {
+  const sent = addDays(toIsoDate(new Date()), -60);
+  fs().set(
+    'sources/mail/recent.md',
+    `---\nsource_kind: thread\nsource_id: recent\nlast_message_at: ${sent}T00:00:00Z\n---\n# Recent\n`,
+  );
+  render(<MailSettings />);
+  await screen.findByText('Nothing older than 90 days.');
+  const retention = screen.getByRole('button', { name: 'Mail retention window' });
+  expect(retention.getAttribute('data-value')).toBe('90');
+  expect(optionLabels(retention)).toEqual(['30 days', '90 days', '365 days']);
+  chooseOption(retention, '30 days');
+  expect(retention.getAttribute('data-value')).toBe('30');
+  expect(screen.getByText('1 digest and 0 text pages go to Recently deleted.')).toBeTruthy();
 });
 it('previews retention as digest/text pairs and keeps unknown dates', async () => {
   fs().set(

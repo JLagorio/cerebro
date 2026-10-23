@@ -68,7 +68,7 @@ export function writerWords(actor: string | null, entries: Entry[]): string {
   return actorLabel(actor, entries).text;
 }
 
-/** A page's last change, as the one line its Info tab reads. */
+/** A page's last change, as the one line its inspector's Details reads. */
 export function attributionLine(attribution: PageAttribution, entries: Entry[], now: Date): string {
   switch (attribution.state) {
     case 'recorded': {
@@ -84,6 +84,31 @@ export function attributionLine(attribution: PageAttribution, entries: Entry[], 
       return 'Who changed this page was not recorded';
     case 'knowledge':
       return 'Changed through Knowledge';
+  }
+}
+
+/**
+ * The same answer as `attributionLine`, as the value of the inspector's
+ * "Changed by" row: who, and when, with the sentence left to the row's
+ * tooltip. Still four different facts, never one collapsed into another.
+ */
+export function attributionValue(
+  attribution: PageAttribution,
+  entries: Entry[],
+  now: Date,
+): string {
+  switch (attribution.state) {
+    case 'recorded': {
+      const who = writerWords(attribution.actor, entries);
+      const allowed = attribution.approved_by !== null ? ' · you allowed it' : '';
+      return `${who} · ${relativeWhen(attribution.at, now)}${allowed}`;
+    }
+    case 'unattributed':
+      return 'Outside Cerebro · unattributed';
+    case 'not_recorded':
+      return 'Not recorded';
+    case 'knowledge':
+      return 'Knowledge';
   }
 }
 

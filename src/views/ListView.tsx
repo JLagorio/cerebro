@@ -99,17 +99,16 @@ function ListRow({
           openPath(entry.path);
         }}
         className={[
-          'flex h-10 cursor-pointer items-center gap-2.5 border-b border-n-100 pr-5 hover:bg-n-50',
-          selected ? 'bg-cortex-50 shadow-[inset_2px_0_0_var(--cortex-500)]' : '',
+          'flex min-h-12 cursor-pointer flex-wrap items-center gap-2 rounded-lg border-b border-n-100 py-2 pr-4 hover:bg-n-25',
+          selected ? 'bg-n-50 shadow-[inset_2px_0_0_var(--cortex-500)]' : '',
         ].join(' ')}
-        style={{ paddingLeft: 20 + depth * INDENT }}
+        style={{ paddingLeft: 16 + depth * INDENT }}
       >
-        <span className="w-[52px] flex-none" />
         <span className="inline-flex flex-none text-warn-500">
           <Icon name="triangle-alert" size={14} />
         </span>
-        <span className="truncate text-sm text-n-700">{entry.filename}</span>
-        <span className="inline-flex flex-none items-center rounded-md border border-warn-500 px-1.5 py-0.5 text-2xs text-warn-500">
+        <span className="min-w-0 flex-1 truncate text-ui text-n-700">{entry.filename}</span>
+        <span className="inline-flex flex-none items-center rounded-md border border-warn-500 px-1.5 py-0.5 text-metadata text-warn-500">
           Cannot parse
         </span>
       </div>
@@ -127,14 +126,16 @@ function ListRow({
         openPath(entry.path);
       }}
       className={[
-        'group flex h-10 cursor-pointer items-center gap-2.5 border-b border-n-100 pr-5 hover:bg-n-50',
-        selected ? 'bg-cortex-50 shadow-[inset_2px_0_0_var(--cortex-500)]' : '',
+        'group flex min-h-12 cursor-pointer flex-wrap items-center gap-x-2 gap-y-2 rounded-lg border-b border-n-100 py-2 pr-4 hover:bg-n-25 @min-[720px]/list:flex-nowrap',
+        selected ? 'bg-n-50 shadow-[inset_2px_0_0_var(--cortex-500)]' : '',
       ].join(' ')}
       style={{ paddingLeft: 20 + depth * INDENT }}
     >
-      <span className="w-[52px] flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
-        {key}
-      </span>
+      {key !== '' && (
+        <span className="flex-none [font-family:var(--font-mono)] text-[12px] text-n-400">
+          {key}
+        </span>
+      )}
       {expander}
       <span
         title={entry.type ?? undefined}
@@ -143,31 +144,32 @@ function ListRow({
       >
         <Icon name={typeStyle(entry.type, schema).icon} size={14} />
       </span>
-      <span className="truncate text-sm text-n-900">{entry.title}</span>
-      <span className="flex-1" />
-      {/* M9.6: editable in place, the same FieldEditor the table and
+      <span className="min-w-0 flex-1 truncate text-ui font-medium text-n-900">{entry.title}</span>
+      <span className="order-2 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 @min-[720px]/list:order-none @min-[720px]/list:w-auto @min-[720px]/list:max-w-[55%]">
+        {/* M9.6: editable in place, the same FieldEditor the table and
           hierarchy use. A read-only chip here meant the same property was
           editable or not depending on which layout the view happened to be
           in. stopPropagation so editing a value does not also open the row. */}
-      {visibleColumns(presentation)
-        .filter((c) => c.field !== 'key')
-        .map((c) => {
-          const def = entry.type
-            ? (schema.types.get(entry.type)?.fields ?? []).find((f) => f.name === c.field)
-            : undefined;
-          const resolved = schema.resolveField(entry, c.field);
-          if (def === undefined) return <FieldChip key={c.field} resolved={resolved} />;
-          return (
-            <span
-              key={c.field}
-              className="flex-none"
-              onClick={(e) => e.stopPropagation()}
-              role="presentation"
-            >
-              <FieldEditor entry={entry} def={def} schema={schema} compact />
-            </span>
-          );
-        })}
+        {visibleColumns(presentation)
+          .filter((c) => c.field !== 'key')
+          .map((c) => {
+            const def = entry.type
+              ? (schema.types.get(entry.type)?.fields ?? []).find((f) => f.name === c.field)
+              : undefined;
+            const resolved = schema.resolveField(entry, c.field);
+            if (def === undefined) return <FieldChip key={c.field} resolved={resolved} />;
+            return (
+              <span
+                key={c.field}
+                className="min-w-0 max-w-full [&>*]:max-w-full"
+                onClick={(e) => e.stopPropagation()}
+                role="presentation"
+              >
+                <FieldEditor entry={entry} def={def} schema={schema} compact />
+              </span>
+            );
+          })}
+      </span>
       {/* M16.21: the row's own controls.
           The row is a `<div role="row">` with an onClick — clickable with a
           mouse and openable with the grid's Enter key, but carrying no NAMED
@@ -190,7 +192,7 @@ function ListRow({
             onSelect();
             openPath(entry.path);
           }}
-          className="rounded-sm border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs font-medium uppercase tracking-[0.04em] text-n-500 hover:bg-n-50 hover:text-n-800"
+          className="rounded-full border border-n-200 bg-n-0 px-2.5 py-1 text-metadata font-medium text-n-500 hover:bg-n-50 hover:text-n-800"
         >
           Open
         </button>
@@ -308,20 +310,16 @@ export function ListView({
   });
 
   return (
-    // Deviation from the plan's verbatim root (reported): the shared contract
-    // requires data-testid="list-view" on the root, and ProjectPage/App
-    // provide no scrolling ancestor (App is overflow-hidden) — so the root
-    // keeps the placeholder's scroll-container classes; the plan's
-    // min-w-[720px] block sits inside it.
     <div
       data-testid="list-view"
       role="grid"
       aria-label="Records"
       aria-rowcount={flatRows.length}
-      className="min-h-0 min-w-0 flex-1 overflow-auto focus-visible:shadow-[inset_var(--ring)] focus-visible:outline-none"
+      className="@container/list min-h-0 min-w-0 flex-1 overflow-auto focus-visible:shadow-[inset_var(--ring)] focus-visible:outline-none"
+      style={{ scrollPaddingBottom: 'var(--assistant-scroll-clearance, 0px)' }}
       {...keyboard.containerProps}
     >
-      <div className="min-w-[720px]">
+      <div className="min-w-0" style={{ paddingBottom: 'var(--assistant-scroll-clearance, 0px)' }}>
         {/* An ungrouped run still gets a header: it carries the count, and a
             canvas that opens with rows and no header reads as half-loaded. */}
         {bandless && (

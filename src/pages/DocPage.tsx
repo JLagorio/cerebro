@@ -2,15 +2,23 @@ import { PullRequestStrip } from '@/detail/PullRequestStrip';
 import './pages.css';
 import { PageRunsTab } from '@/detail/PageRunsTab';
 import { PageAgentsTab } from '@/detail/PageAgentsTab';
-import { keycapText } from '@/components/ui/Keycaps';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { pageAsides } from '@/app/shellLayout';
 import { MoveDialog } from '@/components/MoveDialog';
 import { EntryIcon } from '@/components/PageIcon';
+import {
+  Crumb,
+  CrumbSeparator,
+  PANEL_HEAD_CHROME,
+  PageToolbar,
+  PanelButtons,
+  SaveState,
+} from '@/components/PageToolbar';
 import { Button } from '@/components/ui/Button';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
 import { DrawerScrim } from '@/components/ui/DrawerScrim';
+import { Presence, usePageTurn } from '@/components/ui/motion';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { FavoriteStar } from '@/app/FavoriteStar';
@@ -21,13 +29,13 @@ import { DocPagesFloatingButton, DocPagesPanel } from '@/detail/DocPagesPanel';
 import { DocSidePanel } from '@/detail/DocSidePanel';
 import { usePageComments } from '@/detail/usePageComments';
 import { PageCoverBand, PageIconHeader } from '@/detail/PageChrome';
+import { DocOutline } from '@/editor/DocOutline';
 import type { CerebroEditor, EditorReadyInfo } from '@/editor/MarkdownEditor';
-import { hasTitleBlock, spliceTitleIntoBlocks } from '@/editor/markdown';
-import { NoteBodyEditor, type SaveState } from '@/editor/NoteBodyEditor';
+import { spliceTitleIntoBlocks } from '@/editor/markdown';
+import { NoteBodyEditor, type SaveState as EditorSaveState } from '@/editor/NoteBodyEditor';
 import { PageCommentsContext } from '@/editor/PageCommentsContext';
 import { InlineDiff } from '@/git/InlineDiff';
-import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
-import { RecordProperties } from '@/detail/RecordProperties';
+import { RecordPageProperties } from '@/detail/RecordPageProperties';
 import { CorrespondenceSection } from '@/detail/CorrespondenceSection';
 import { ImportProvenance } from '@/detail/ImportProvenance';
 import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
@@ -45,9 +53,8 @@ import {
   descendantPageCount,
   docPagesFor,
   isFolderNote,
-  type Crumb,
+  type Crumb as TrailStep,
 } from '@/engine/docPages';
-import { resolveLayout } from '@/engine/layout';
 import { isKnowledgePath } from '@/engine/okf';
 import { pageIconOf } from '@/engine/pageChrome';
 import { isRecordEntry } from '@/engine/typeCatalog';
@@ -60,8 +67,8 @@ import { ConceptReviewBar } from '@/knowledge/ConceptReviewBar';
 import { KnowledgeStrip } from '@/knowledge/KnowledgeStrip';
 import { ReviewPager } from '@/knowledge/ReviewQueue';
 import { useConcept } from '@/knowledge/useConcepts';
-import { askedAbout, conceptAsk } from '@/lib/prompts';
-import { createFolder, readNote, saveNote, setNoteTitle } from '@/lib/ipc';
+import { conceptAskOf, sendAsk } from '@/agent/elements/decisionsAsks';
+import { createFolder, readNote, saveNote } from '@/lib/ipc';
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
   applyTemplateBody,
@@ -72,7 +79,14 @@ import {
   todayIso,
 } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
-import { DOC_COLUMN_MIN_WIDTH, useUiStore } from '@/stores/uiStore';
+import {
+  DOC_COLUMN_MIN_WIDTH,
+  DOC_PAGES_MIN_WIDTH,
+  DOC_PANEL_MIN_WIDTH,
+  DOC_PANEL_WIDTH,
+  useUiStore,
+  type PagePanel,
+} from '@/stores/uiStore';
 import { useMeasuredWidth } from '@/hooks/useMeasuredWidth';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 
@@ -115,79 +129,6 @@ export function isBlankBody(editor: CerebroEditor): boolean {
   return true;
 }
 
-/**
- * The title of a doc whose body carries no H1 (M15).
- *
- * A note's title IS its first H1; with none, the scanner falls back to the
- * filename. So the app knew this doc's title — it showed it in the sidebar,
- * in Quick Open, in recents and in the breadcrumb — and the document was the
- * single place it never appeared. This renders it where a title belongs, in
- * the editor's own H1 metrics so it reads as the document's first line rather
- * than as page chrome, and committing it writes a real H1 into the body.
- *
- * A textarea, not an input: at 32px in a reading column real titles wrap, and
- * an input would clip its own text with no way to read the rest.
- */
-function UntitledDocHeading({
-  title,
-  onCommit,
-}: {
-  title: string;
-  onCommit: (next: string) => void;
-}) {
-  const [draft, setDraft] = useState(title);
-  const ref = useRef<HTMLTextAreaElement | null>(null);
-  useEffect(() => setDraft(title), [title]);
-  useEffect(() => {
-    const el = ref.current;
-    if (el === null) return;
-    const fit = () => {
-      el.style.height = 'auto';
-      // scrollHeight excludes the border, but the box is border-box, so setting
-      // height to scrollHeight alone clips the last two pixels of a descender.
-      el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
-    };
-    fit();
-    // A narrower column rewraps the title onto lines the old height does not
-    // show (M52). Width only: the fit itself changes the height, and refitting
-    // on that would chase its own tail.
-    let width = el.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (el.clientWidth === width) return;
-      width = el.clientWidth;
-      fit();
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [draft]);
-  return (
-    <textarea
-      ref={ref}
-      data-testid="doc-title-heading"
-      aria-label="Document title"
-      rows={1}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => onCommit(draft)}
-      onKeyDown={(e) => {
-        // Enter commits rather than opening a second line: this is one title,
-        // and the body below is where prose goes.
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          e.currentTarget.blur();
-        }
-        if (e.key === 'Escape') {
-          e.stopPropagation();
-          setDraft(title);
-        }
-      }}
-      // 45 + 1px border + 8px padding = the editor's 54px block gutter, so the
-      // heading and the first paragraph share one left edge.
-      className="mb-1 ml-[45px] block w-[calc(100%-45px)] resize-none overflow-hidden rounded-lg border border-transparent bg-transparent px-2 py-0 text-3xl font-semibold leading-[43px] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
-    />
-  );
-}
-
 /** Floating action bar on blank pages: start from a template (M2.x feedback:
  * templates need a visible surface, not just the New-page dialog). */
 function BlankPageBar({
@@ -228,16 +169,6 @@ function BlankPageBar({
   );
 }
 
-/** What the header says about the body's relationship to disk. `idle` is the
- * quiet default — nothing typed yet, so there is nothing to reassure about. */
-const SAVE_LABEL: Record<SaveState, string | null> = {
-  idle: null,
-  dirty: 'Unsaved',
-  saving: 'Saving…',
-  saved: 'Saved',
-  failed: "Couldn't save",
-};
-
 /**
  * Full-page markdown document (M2 Task 10; M2.x docs polish). The title is
  * the doc's H1, edited inside the editor — each save rescans, so the header
@@ -245,6 +176,9 @@ const SAVE_LABEL: Record<SaveState, string | null> = {
  */
 export function DocPage({ selection }: { selection: DocSelection }) {
   const entry = useEntry(selection.path);
+  // Each page the column shows fades in as it arrives, the editor kept
+  // (`usePageTurn`, pageFrame.css).
+  const turn = usePageTurn(selection.path);
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -258,8 +192,10 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const setDocPanelOpen = useUiStore((s) => s.setDocPanelOpen);
   const conceptPanelOpen = useUiStore((s) => s.conceptPanelOpen);
   const setConceptPanelOpen = useUiStore((s) => s.setConceptPanelOpen);
-  const setDocPanelTab = useUiStore((s) => s.setDocPanelTab);
-  const setConceptPanelTab = useUiStore((s) => s.setConceptPanelTab);
+  const docPanel = useUiStore((s) => s.docPanel);
+  const setDocPanel = useUiStore((s) => s.setDocPanel);
+  const conceptPanel = useUiStore((s) => s.conceptPanel);
+  const setConceptPanel = useUiStore((s) => s.setConceptPanel);
   const pagesOpen = useUiStore((s) => s.docPagesOpen);
   const openLayoutEditor = useUiStore((s) => s.openLayoutEditor);
   const askAgent = useUiStore((s) => s.askAgent);
@@ -274,11 +210,15 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // `usePageAsideOpen` states the same rule for the shell's floor.
   const panelOpen = concept !== null ? conceptPanelOpen : docPanelOpen;
   const setPanelOpen = concept !== null ? setConceptPanelOpen : setDocPanelOpen;
-  // M52: the page body's width decides how its panels are drawn (shellLayout
+  const panel = concept !== null ? conceptPanel : docPanel;
+  const setPanel = concept !== null ? setConceptPanel : setDocPanel;
+  // M52: the page frame's width decides how its panels are drawn (shellLayout
   // `pageAsides`), and the column's decides how wide the editor's gutter is.
   // The fold is decided before paint, or a fast resize draws the side panel
-  // past the canvas for a frame.
-  const [bodyRef, bodyWidth] = useMeasuredWidth({ beforePaint: true });
+  // past the canvas for a frame. The side panel opens under the toolbar's
+  // actions, so their width is its floor too.
+  const [frameRef, frameWidth] = useMeasuredWidth({ beforePaint: true });
+  const [actionsRef, actionsWidth] = useMeasuredWidth({ beforePaint: true, box: 'border' });
   const [columnRef, columnWidth] = useMeasuredWidth();
   // A folded panel opens on request as a drawer over the column. Session
   // state, like the fold it opens over, and held as the PATH it was opened on
@@ -286,10 +226,10 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const [pagesDrawerFor, setPagesDrawerFor] = useState<string | null>(null);
   const [sideDrawerFor, setSideDrawerFor] = useState<string | null>(null);
 
-  // The outline and the comments need the live editor and the scroll
-  // container (Task 15). The editor is held with the mount it came from, set
-  // by onReady below; `editor` is derived further down, once the page knows
-  // whether that mount is still on screen.
+  // The outline and the comments need the live editor, and the outline the
+  // scroll container (Task 15). The editor is held with the mount it came
+  // from, set by onReady below; `editor` is derived further down, once the
+  // page knows whether that mount is still on screen.
   const [mounted, setMounted] = useState<{
     path: string;
     gen: number;
@@ -298,7 +238,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // Debounce controls, so out-of-editor writes can stop a stale in-editor
   // body from being flushed back over them.
   const editorControls = useRef<EditorReadyInfo | null>(null);
-  const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [saveState, setSaveState] = useState<EditorSaveState>('idle');
   // M9.7: reading a diff swaps the editor out for it, in place.
   const diffOpen = useUiStore((s) => s.diffView?.path === selection.path);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -308,8 +248,8 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // M38.2 — a record is a page too. Same canvas, plus the property surface
   // the panel shows, minus nothing.
   // A concept is never a record page, whatever its `type:` names (M50.1):
-  // its frontmatter is provenance, which the review bar and the Details tab
-  // read, not a property stack to edit.
+  // its frontmatter is provenance, which the review bar and the Details
+  // panel read, not a property stack to edit.
   const record = entry !== null && isRecordEntry(entry) && !isKnowledgePath(entry.path);
   // M55.12 — an agent is a page too: its body is its standing instructions,
   // its grants are the properties above the strip, and its tabs are the
@@ -332,57 +272,32 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const { tabs, saved: savedTabs } = recordTabSet(entry, schema);
   const activeTab = tabs.find((t) => t.id === selection.tab) ?? tabs[0] ?? null;
 
-  // Whether the canvas is rendering the body editor at all. The reset below
-  // tracks the editor's MOUNT, not the tab's identity: two Overview tabs share
-  // one mounted editor (one key), so switching between them re-fires no
-  // onReady — nulling on the id would strand the outline on its placeholder.
+  // Related tabs hide body blocks while retaining the title and the one editor owner.
   const showsEditor = agent
     ? agentTab === 'instructions'
     : activeTab === null || activeTab.content === 'overview';
 
-  // The editor is the one on screen, or none. The keyed editor remounts per
-  // doc and per reload, a sections or view tab unmounts it, and a diff stands
-  // in for it (and destroys it); in each case the held instance is dead, so
-  // this render already sees null and the slot is cleared before the next
-  // (the React-sanctioned render-time reset) until the new mount's onReady.
-  // An effect would hand the dead editor on for one more render, and a
-  // comment deep link handled in it would reveal on a detached view and take
-  // the app down (M70.2b review).
+  // The same editor remains live on related tabs so title edits, pending saves
+  // and comment anchors retain their owner. A diff or path/reload replaces it.
   const mountLive =
-    mounted !== null &&
-    mounted.path === selection.path &&
-    mounted.gen === reloadGen &&
-    showsEditor &&
-    !diffOpen;
+    mounted !== null && mounted.path === selection.path && mounted.gen === reloadGen && !diffOpen;
   if (mounted !== null && !mountLive) setMounted(null);
   const editor = mountLive ? mounted.editor : null;
 
-  // Blank-page detection drives the floating template bar. Title detection
-  // drives the heading below: a doc whose body has no H1 has its title only in
-  // the breadcrumb, so the document itself is untitled (M15).
+  // Blank-page detection drives the floating template bar.
   const [blank, setBlank] = useState(false);
-  const [titled, setTitled] = useState(true);
   useEffect(() => {
     if (editor === null) {
       setBlank(false);
-      setTitled(true);
       return;
     }
     const sync = () => {
       setBlank(isBlankBody(editor));
-      setTitled(hasTitleBlock(editor));
     };
     sync();
     const unsubscribe = editor.onChange?.(sync);
     return () => unsubscribe?.();
   }, [editor]);
-
-  // M45.1 — whether the record's full property stack is open under the
-  // heading strip. Sticky per record PATH (a new record resets it), and the
-  // untouched default is derived per render below rather than stored: it must
-  // track whether the strip actually SHOWS, which can change without the path
-  // changing (clearing the strip's last hide_when_empty field folds it away).
-  const [details, setDetails] = useState<{ path: string; shown: boolean } | null>(null);
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [moving, setMoving] = useState(false);
@@ -401,7 +316,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // `openSide` through a ref set each render. No editor while a diff stands
   // in for it (`editor` is already null then): its highlights are not on
   // screen to draw or focus.
-  const openSideRef = useRef<(tab: 'comments') => void>(() => undefined);
+  const openSideRef = useRef<(panel: PagePanel) => void>(() => undefined);
   const comments = usePageComments(
     entry !== null && isCommentPage(entry.path) ? entry.path : null,
     editor,
@@ -427,9 +342,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   const docPages = docPagesFor(entry, entries);
   const asides = pageAsides({
-    row: bodyWidth,
+    row: frameWidth,
     pages: docPages !== null && pagesOpen,
     side: panelOpen,
+    sideFloor:
+      actionsWidth === null
+        ? DOC_PANEL_MIN_WIDTH
+        : Math.max(DOC_PANEL_MIN_WIDTH, actionsWidth + PANEL_HEAD_CHROME),
   });
   // A drawer belongs to the fold it opened over: once the panel fits again,
   // the next fold starts closed.
@@ -441,7 +360,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // Drawn as drawers: over the column, closed by Escape or the scrim.
   const pagesDrawer = pagesDrawn && !asides.pages;
   const sideDrawer = sideDrawn && !asides.sideFits;
-  // The toggle speaks for what is on screen. Hiding writes the stored flag —
+  // The buttons speak for what is on screen. Closing writes the stored flag —
   // that is the user's word; a fold never does. Showing a panel with no room
   // beside the column opens it as a drawer rather than into a fold nobody
   // can see.
@@ -449,20 +368,22 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     if (!panelOpen) setPanelOpen(true);
     if (!asides.sideFits) setSideDrawerFor(entry.path);
   };
-  const toggleSide = () => {
-    if (sideDrawn) {
-      setPanelOpen(false);
-      setSideDrawerFor(null);
-      return;
-    }
-    showSide();
+  const closeSide = () => {
+    setPanelOpen(false);
+    setSideDrawerFor(null);
   };
-  // Open the panel on `tab`, as a drawer when it does not fit (M70.2b).
-  openSideRef.current = (tab) => {
-    if (concept !== null) setConceptPanelTab(tab);
-    else setDocPanelTab(tab);
+  // Open the slot on `which`, as a drawer when it does not fit (M70.2b) —
+  // a comment's highlight asks for its thread this way.
+  openSideRef.current = (which) => {
+    setPanel(which);
     if (!sideDrawn) showSide();
   };
+  // Each panel's button opens it, or closes it when it is the one open.
+  const togglePanel = (which: PagePanel) => {
+    if (sideDrawn && panel === which) closeSide();
+    else openSideRef.current(which);
+  };
+  const openComments = comments.slot?.kind === 'ready' ? (comments.sections?.openCount ?? 0) : 0;
   const fullWidth = entry.properties.full_width === true;
   // Everything under knowledge/ is written through the ledger. A concept is
   // edited as a concept; the rest of the folder (the derived log, cached
@@ -470,36 +391,11 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const knowledgeFile = isKnowledgePath(entry.path);
   const readOnlyFile = knowledgeFile && concept === null;
 
-  // M45.1 (spec §3.4) — the type's `layout.heading` renders as the key
-  // property strip on EVERY tab of the record page. `stripShows` is derived
-  // per render with the strip's own fold predicate (amended Task 7 ruling):
-  // the strip renders null when every cell folds, and the stack must never
-  // stay hidden behind a strip that is not on screen — so the stack renders
-  // whenever `!stripShows || detailsShown`, and the untouched default for
-  // `detailsShown` is `!stripShows` (per path) rather than a stored false.
-  const typeDef = record && entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
-  // M46.1 — one resolution for the whole record, rendered above the tab strip
-  // on every tab. No tab narrows it, so this page, the peek and the
-  // customizer's canvas cannot disagree about what a record shows — and the
-  // canvas, which is a PREVIEW of this page, has nothing left to preview
-  // wrongly.
-  const headingFields =
-    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;
-  const stripShows =
-    headingFields.length > 0 && stripCells(entry, schema, headingFields).length > 0;
-  // Render-time derived-state reset (the React-sanctioned pattern): the lens
-  // FORGETS a record it left. A one-slot {path, shown} cache gave a one-deep
-  // memory — A(toggled) → B → A resurrected A's choice while A → B(toggled)
-  // → A reset it — and RecordProperties' keyed `revealed` resets on every
-  // switch, so remembering here was an accident, not a feature.
-  if (details !== null && details.path !== entry.path) setDetails(null);
-  const detailsShown = details?.path === entry.path ? details.shown : !stripShows;
-
   // Breadcrumb (M55.13): the way up the page tree. Each ancestor folder is the
   // page it is when it has a folder note, and a plain label otherwise; a
   // concept's crumbs are its Knowledge sections, and an agent's place is the
   // Agents surface, not the folder its file sits in.
-  const trail: (Crumb | { kind: 'folder'; label: string; section: string })[] = agent
+  const trail: (TrailStep | { kind: 'folder'; label: string; section: string })[] = agent
     ? []
     : knowledgeFile
       ? (entry.folder === '' ? [] : entry.folder.split('/').slice(1)).map((seg) => ({
@@ -569,31 +465,6 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     navigate({ kind: 'home' });
   };
 
-  /**
-   * Give an untitled doc a real title (M15).
-   *
-   * The scanner derives a title from the filename when the body has no H1, so
-   * the app knew the title all along and the document was the one place it did
-   * not appear. Committing the heading writes it as an actual H1 — through the
-   * same path as Rename, so from then on this doc is an ordinary titled doc
-   * and the heading below unmounts because the editor now shows the real one.
-   */
-  const adoptTitle = async (next: string) => {
-    const trimmed = next.trim();
-    if (vaultPath === null || trimmed === '' || busy) return;
-    if (trimmed === entry.title && editor !== null && hasTitleBlock(editor)) return;
-    setBusy(true);
-    try {
-      await setNoteTitle(vaultPath, entry.path, trimmed);
-      if (editor !== null) spliceTitleIntoBlocks(editor, trimmed);
-      await rescan();
-    } catch {
-      toast("Couldn't set the title");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   // Rename the doc the way the user means it: the visible title (its H1),
   // not the slug on disk. The live editor is spliced too, or its next
   // autosave would write the old title straight back.
@@ -602,9 +473,12 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     if (vaultPath === null || trimmed === '' || busy) return;
     setBusy(true);
     try {
-      await setNoteTitle(vaultPath, entry.path, trimmed);
-      if (editor !== null) spliceTitleIntoBlocks(editor, trimmed);
-      await rescan();
+      if (editor !== null) {
+        spliceTitleIntoBlocks(editor, trimmed);
+        await editorControls.current?.flushPendingSave();
+      } else {
+        if (!(await useVaultStore.getState().setTitle(entry.path, trimmed))) return;
+      }
       setRenaming(null);
     } catch {
       toast("Couldn't rename page");
@@ -686,18 +560,22 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   // Under knowledge/ the file actions refuse (the folder is written through
   // the ledger), so they are not offered; what is left is the concept's own.
-  // Its ask is the review bar's, chosen the same way (M52.3) — and, like the
-  // bar, a replaced concept offers none.
+  // Its ask is the review bar's, the same Ask (M52.3, M91.14): the menu shows
+  // its label and sends its prompt — and, like the bar, a replaced concept
+  // offers none.
   const knowledgeMenu: ContextMenuItem[] = [
     ...(concept !== null && concept.supersededBy === null
-      ? [conceptAsk({ path: concept.entry.path, title: concept.title, stale: concept.stale })].map(
-          (act) => ({
-            icon: 'sparkles',
-            label: act.label,
-            onSelect: () =>
-              askAgent(act.text, concept.entry.path, askedAbout(act.label, concept.title)),
+      ? [
+          conceptAskOf({
+            path: concept.entry.path,
+            title: concept.title,
+            stale: concept.stale,
           }),
-        )
+        ].map((ask) => ({
+          icon: 'sparkles',
+          label: ask.label,
+          onSelect: () => sendAsk(ask, askAgent)(ask.prompt),
+        }))
       : []),
     {
       icon: 'brain',
@@ -760,32 +638,6 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         },
       ];
 
-  // `glyph` is a page's own icon (M55.11), drawn in place of the lucide one.
-  const crumb = (
-    label: string,
-    opts: { icon?: string; glyph?: ReactNode; onClick?: () => void; strong?: boolean },
-  ) =>
-    opts.onClick !== undefined ? (
-      <button
-        type="button"
-        onClick={opts.onClick}
-        className="inline-flex min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-sm text-n-500 hover:bg-n-50 hover:text-n-800"
-      >
-        {opts.glyph ?? (opts.icon !== undefined && <Icon name={opts.icon} size={13} />)}
-        <span className="truncate">{label}</span>
-      </button>
-    ) : (
-      <span
-        className={[
-          'inline-flex min-w-0 items-center gap-1.5 px-1 text-sm',
-          opts.strong === true ? 'font-medium text-n-900' : 'text-n-500',
-        ].join(' ')}
-      >
-        {opts.glyph ??
-          (opts.icon !== undefined && <Icon name={opts.icon} size={13} color="var(--n-500)" />)}
-        <span className="truncate">{label}</span>
-      </span>
-    );
   // A crumb draws the page's own icon only when it has one; otherwise the
   // lucide icon the crumb always drew.
   const pageGlyph = (page: Entry): ReactNode =>
@@ -793,14 +645,113 @@ export function DocPage({ selection }: { selection: DocSelection }) {
       <EntryIcon entry={page} fallback={{ name: 'file-text' }} size={13} />
     );
 
-  const separator = <Icon name="chevron-right" size={12} color="var(--n-300)" />;
-
   // The body editor: ONE block, shared by the untyped page and a record's
   // Overview tab so an edit to one cannot silently miss the other. The page's
-  // history lives in the side panel's History tab (M58.4, D18), not here.
+  // history lives in its History panel (M58.4, D18), not here.
   //
   // M70.2b: the selection toolbar's Comment button reads PageCommentsContext,
   // provided here and nowhere else, and not on a read-only page.
+  const pageChrome = (
+    <>
+      {/* M50.2 — what Knowledge holds about this page, where the
+                      page is read. Silent when there is nothing, and absent
+                      under knowledge/ (a concept's relations are its details). */}
+      {!knowledgeFile && <KnowledgeStrip entry={entry} />}
+      {concept !== null ? (
+        <>
+          <ConceptHeading concept={concept} />
+          {/* Keyed by the concept (M52.4): the pager's Next swaps
+                          the concept under a mounted page, so the bar reads
+                          the proposal queue afresh for the concept now shown,
+                          and a Verify in flight stays with the one it began
+                          on. */}
+          <ConceptReviewBar
+            key={concept.entry.path}
+            concept={concept}
+            viewedBody={viewed !== null && viewed.path === entry.path ? viewed.body : null}
+            verifyBlocked={
+              saveState === 'dirty' || saveState === 'saving'
+                ? 'Saving your edit — Verify when it lands.'
+                : saveState === 'failed'
+                  ? "Your last edit didn't save — Verify would attest the older text."
+                  : null
+            }
+          />
+        </>
+      ) : null}
+      {record && !agent && <RecordPageProperties key={entry.path} entry={entry} schema={schema} />}
+      {!knowledgeFile && <PullRequestStrip entry={entry} schema={schema} />}
+      {/* M44.5 — the record canvas swaps by the open tab: the
+                      body, the tab's free text, or its database. An untyped
+                      doc knows nothing of tabs and keeps its document form. */}
+      {agent ? (
+        <AgentPageBody
+          entry={entry}
+          tab={agentTab}
+          onTab={(tab) => navigate({ kind: 'doc', path: entry.path, tab })}
+          editor={null}
+        />
+      ) : record && activeTab !== null ? (
+        <>
+          <CorrespondenceSection key={entry.path} entry={entry} schema={schema} />
+          <ImportProvenance entry={entry} />
+          {/* M44.5, re-placed by M46.1 — the tab strip divides
+                          the record's own blocks from the ONE tab's content,
+                          so it lives inside the content column now rather
+                          than pinned above the scroll container. It scrolls
+                          with the record it describes (Notion's order, the
+                          peek's order, and the customizer canvas's), and it
+                          costs what that placement costs: reading an inline
+                          diff swaps it out with the rest of the canvas, so
+                          tabs are unavailable until the diff is closed.
+                          M45.2
+                          gates it on SAVED tabs: the synthesized Overview
+                          renders content, never a one-tab strip. */}
+          {savedTabs.length > 0 && (
+            <div className="cb-record-page-tabs">
+              <RecordTabs
+                gutter="none"
+                tabs={tabs}
+                activeId={activeTab.id}
+                hostType={entry.type}
+                onSelect={(tab) => navigate({ kind: 'doc', path: entry.path, tab })}
+                onChange={(next) => {
+                  if (entry.type !== null)
+                    void setTypeTabs({ name: entry.type, docPath: null }, next);
+                }}
+              />
+            </div>
+          )}
+          {activeTab.content === 'agents' && (
+            <PageAgentsTab entry={entry} entries={entries} schema={schema} />
+          )}
+          {activeTab.content === 'runs' && (
+            <PageRunsTab entry={entry} entries={entries} schema={schema} />
+          )}
+          {activeTab.content === 'sections' && (
+            <TabSections key={`${entry.path}#${activeTab.id}`} entry={entry} tabId={activeTab.id} />
+          )}
+          {/* M45.4 — the view arm: resolve the tab's pointer
+                          (the dashboard ViewBlock path, per render like the
+                          dashboard's) and render the embed, or the broken
+                          card — never an empty view for a dead pointer. */}
+          {activeTab.content === 'view' && (
+            <ViewTabEmbed
+              resolution={resolveViewTab(activeTab, entry, entries, schema, views)}
+              entries={entries}
+              schema={schema}
+              scope={`viewtab:${activeTab.id}`}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          <ImportProvenance entry={entry} />
+        </>
+      )}
+    </>
+  );
+
   const editorBlock = (
     <PageCommentsContext.Provider
       value={readOnlyFile || comments.path === null ? null : { start: comments.start }}
@@ -815,139 +766,184 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         }}
         readOnly={readOnlyFile}
         sections={concept !== null}
+        pageTitle={knowledgeFile ? undefined : entry.title}
+        pageChrome={pageChrome}
+        bodyVisible={showsEditor}
         onBodyLoaded={concept !== null ? (path, body) => setViewed({ path, body }) : undefined}
       />
     </PageCommentsContext.Provider>
   );
 
+  const narrowColumn = columnWidth !== null && columnWidth < DOC_NARROW_COLUMN;
+
   return (
-    <div className="cb-document flex min-h-0 min-w-0 flex-1 flex-col" data-testid="doc-page">
-      <div className="cb-document-toolbar flex flex-none items-center gap-0.5 px-3">
-        {knowledgeFile
-          ? crumb('Knowledge', {
-              icon: 'brain',
-              onClick: () => navigate({ kind: 'knowledge' }),
-            })
-          : agent
-            ? crumb('Agents', { icon: 'bot', onClick: () => navigate({ kind: 'agents' }) })
-            : record
-              ? recordFolder !== null
-                ? crumb(humanizeSlug(recordFolder.split('/').pop() ?? recordFolder), {
-                    icon: 'folder',
-                    onClick: () => navigate({ kind: 'collection', folder: recordFolder }),
-                  })
-                : crumb(entry.type ?? 'Records', {
-                    icon: 'database',
-                    onClick:
-                      entry.type === null
-                        ? undefined
-                        : () => navigate({ kind: 'type', name: entry.type as string }),
-                  })
-              : // M38.3: no Docs surface to root at — a doc's crumb is its
-                // folder path, and the Pages tree in the nav is the way up.
-                crumb('Pages', { icon: 'library' })}
-        {trail.map((step, i) => (
-          <span key={i} className="flex min-w-0 items-center gap-0.5">
-            {separator}
-            {step.kind === 'page'
-              ? // An ancestor page (M55.13): a crumb that opens it, wearing its
-                // icon (M55.11). A Collection page opens as its collection.
-                crumb(step.entry.title, {
-                  glyph: (
-                    <EntryIcon entry={step.entry} fallback={{ name: 'file-text' }} size={13} />
-                  ),
-                  onClick: () =>
-                    navigate(
-                      isCollectionPage(step.entry)
-                        ? { kind: 'collection', folder: step.entry.folder }
-                        : { kind: 'doc', path: step.entry.path },
-                    ),
-                })
-              : crumb(
-                  step.label,
-                  // A concept's folder is a Knowledge section, and a place.
-                  'section' in step && i === 0
-                    ? {
-                        onClick: () =>
-                          navigate({
-                            kind: 'knowledge',
-                            nav: { tab: 'section', folder: step.section },
-                          }),
-                      }
-                    : {},
+    <div
+      ref={frameRef}
+      className="cb-document cb-page-frame flex-1"
+      data-testid="doc-page"
+      data-panel={sideDrawn ? (sideDrawer ? 'drawer' : 'docked') : undefined}
+      style={
+        {
+          // The reading column's floor, and the Pages panel's beside it.
+          '--frame-main-min': `${DOC_COLUMN_MIN_WIDTH + (pagesDrawn && !pagesDrawer ? DOC_PAGES_MIN_WIDTH : 0)}px`,
+          '--frame-panel-w': `${DOC_PANEL_WIDTH}px`,
+          '--frame-panel-min': `${DOC_PANEL_MIN_WIDTH}px`,
+        } as CSSProperties
+      }
+    >
+      <PageToolbar
+        crumbs={
+          <>
+            {knowledgeFile ? (
+              <Crumb
+                label="Knowledge"
+                icon="brain"
+                onClick={() => navigate({ kind: 'knowledge' })}
+              />
+            ) : agent ? (
+              <Crumb label="Agents" icon="bot" onClick={() => navigate({ kind: 'agents' })} />
+            ) : record ? (
+              recordFolder !== null ? (
+                <Crumb
+                  label={humanizeSlug(recordFolder.split('/').pop() ?? recordFolder)}
+                  icon="folder"
+                  onClick={() => navigate({ kind: 'collection', folder: recordFolder })}
+                />
+              ) : (
+                <Crumb
+                  label={entry.type ?? 'Records'}
+                  icon="database"
+                  onClick={
+                    entry.type === null
+                      ? undefined
+                      : () => navigate({ kind: 'type', name: entry.type as string })
+                  }
+                />
+              )
+            ) : (
+              // M38.3: no Docs surface to root at — a doc's crumb is its
+              // folder path, and the Pages tree in the nav is the way up.
+              <Crumb label="Pages" icon="library" />
+            )}
+            {trail.map((step, i) => (
+              <span key={i} className="flex min-w-0 items-center gap-0.5">
+                <CrumbSeparator />
+                {step.kind === 'page' ? (
+                  // An ancestor page (M55.13): a crumb that opens it, wearing its
+                  // icon (M55.11). A Collection page opens as its collection.
+                  <Crumb
+                    label={step.entry.title}
+                    glyph={
+                      <EntryIcon entry={step.entry} fallback={{ name: 'file-text' }} size={13} />
+                    }
+                    onClick={() =>
+                      navigate(
+                        isCollectionPage(step.entry)
+                          ? { kind: 'collection', folder: step.entry.folder }
+                          : { kind: 'doc', path: step.entry.path },
+                      )
+                    }
+                  />
+                ) : (
+                  <Crumb
+                    label={step.label}
+                    // A concept's folder is a Knowledge section, and a place.
+                    onClick={
+                      'section' in step && i === 0
+                        ? () =>
+                            navigate({
+                              kind: 'knowledge',
+                              nav: { tab: 'section', folder: step.section },
+                            })
+                        : undefined
+                    }
+                  />
                 )}
-          </span>
-        ))}
-        <span className="flex min-w-0 items-center gap-0.5" data-testid="doc-title">
-          {separator}
-          {crumb(entry.title, {
-            glyph: pageGlyph(entry),
-            icon: concept !== null ? 'lightbulb' : agent ? 'bot' : 'file-text',
-            strong: true,
-          })}
-        </span>
-        <span className="flex-1" />
-        {/* Autosave used to be entirely invisible: no dirty marker, no saved
-            state, and ⌘S did nothing. This is the trust signal — ⌘S now
-            force-flushes the debounce (handled in NoteBodyEditor). */}
-        {SAVE_LABEL[saveState] !== null && (
-          <span
-            data-testid="doc-save-state"
-            title={
-              saveState === 'failed'
-                ? undefined
-                : `Saves automatically — ${keycapText('page.save')} to save now`
-            }
-            className={[
-              'mr-1 flex-none whitespace-nowrap text-xs',
-              saveState === 'failed' ? 'font-medium text-danger-600' : 'text-[var(--text-meta)]',
-            ].join(' ')}
-          >
-            {SAVE_LABEL[saveState]}
-          </span>
-        )}
-        {/* M51.2 — the review queue, walkable from the page it sends you to. */}
-        {/* One line: squeezed beside the assistant it wrapped to "Review 1 of"
-            over "3" and doubled the header's height (M52). */}
-        {concept !== null && (
-          <span className="flex flex-none whitespace-nowrap">
-            <ReviewPager path={entry.path} />
-          </span>
-        )}
-        <FavoriteStar path={entry.path} />
-        {/* M55.9 — copy as a prompt or a path, reveal, open elsewhere, or
-            hand the page to an agent app. */}
-        <OpenWithMenu entry={entry} knowledgeFile={knowledgeFile} />
-        {/* The toolbar is the star, Open with, the overflow menu and the
-            panel toggle. 'Add sub-page' and 'Move to folder' are BOTH in the
-            overflow menu — a labelled toolbar button for either duplicated
-            the action users need least. */}
-        <div ref={menuButtonRef} className="inline-flex">
-          <IconButton
-            icon="ellipsis"
-            label="Page options"
-            size="sm"
-            onClick={() => {
-              const rect = menuButtonRef.current?.getBoundingClientRect();
-              setMenu(
-                rect === undefined ? { x: 0, y: 0 } : { x: rect.right - 180, y: rect.bottom + 4 },
-              );
-            }}
+              </span>
+            ))}
+            <span className="flex min-w-0 items-center gap-0.5" data-testid="doc-title">
+              <CrumbSeparator />
+              <Crumb
+                label={entry.title}
+                glyph={pageGlyph(entry)}
+                icon={concept !== null ? 'lightbulb' : agent ? 'bot' : 'file-text'}
+                strong
+              />
+            </span>
+          </>
+        }
+        status={
+          <>
+            {/* M51.2 — the review queue, walkable from the page it sends you to. */}
+            {/* One line: squeezed beside the assistant it wrapped to "Review 1 of"
+              over "3" and doubled the header's height (M52). */}
+            {concept !== null && (
+              <span className="flex flex-none whitespace-nowrap">
+                <ReviewPager path={entry.path} />
+              </span>
+            )}
+            <SaveState state={saveState} />
+          </>
+        }
+        actions={
+          <>
+            <FavoriteStar path={entry.path} />
+            {/* M55.9 — copy as a prompt or a path, reveal, open elsewhere, or
+              hand the page to an agent app. */}
+            <OpenWithMenu entry={entry} knowledgeFile={knowledgeFile} />
+            {/* The toolbar is the star, Open with, the overflow menu and the
+              panels' buttons. 'Add sub-page' and 'Move to folder' are BOTH in
+              the overflow menu — a labelled toolbar button for either
+              duplicated the action users need least. */}
+            <div ref={menuButtonRef} className="inline-flex">
+              <IconButton
+                icon="ellipsis"
+                label="Page options"
+                size="sm"
+                onClick={() => {
+                  const rect = menuButtonRef.current?.getBoundingClientRect();
+                  setMenu(
+                    rect === undefined
+                      ? { x: 0, y: 0 }
+                      : { x: rect.right - 180, y: rect.bottom + 4 },
+                  );
+                }}
+              />
+            </div>
+            {/* No tooltips while a drawer they opened is up (M52): the
+              pointer that opened it is still resting here, and a tooltip
+              over the drawer took the first Escape, so closing it took two. */}
+            <PanelButtons
+              shown={sideDrawn ? panel : null}
+              onToggle={togglePanel}
+              comments={comments.path === null ? null : openComments}
+              tooltip={!sideDrawer}
+            />
+          </>
+        }
+        onClosePanel={sideDrawn ? closeSide : undefined}
+        closeTooltip={!sideDrawer}
+        actionsRef={actionsRef}
+      />
+      {/* Next to its buttons in the focus order, as it is under them on screen;
+          the frame places it on the right (components/pageFrame.css). Closed,
+          it stays to play its exit, as it was drawn. */}
+      <Presence<HTMLElement>
+        open={sideDrawn}
+        render={({ closing, ref }) => (
+          <DocSidePanel
+            ref={ref}
+            closing={closing}
+            overlay={sideDrawer}
+            entry={entry}
+            schema={schema}
+            panel={panel}
+            concept={concept}
+            comments={comments}
           />
-        </div>
-        <IconButton
-          icon={sideDrawn ? 'panel-right-close' : 'panel-right'}
-          label={sideDrawn ? 'Hide panel' : 'Show panel'}
-          size="sm"
-          // Not while its drawer is open (M52): the pointer that opened it is
-          // still resting here, and the tooltip came up over the drawer and
-          // took the first Escape, so closing it took two.
-          tooltip={!sideDrawer}
-          onClick={toggleSide}
-        />
-      </div>
-      {/* `relative` hosts a folded panel's drawer (M52). */}
-      <div ref={bodyRef} className="relative flex min-h-0 flex-1">
+        )}
+      />
+      <div className="cb-page-frame-body">
         {/* A drawer closes on Escape or a press on the column it covers, and
             neither writes the stored open flag — the fold is not the user's
             word, so neither is its drawer's close (M52). */}
@@ -977,9 +973,10 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         <div
           ref={columnRef}
           data-testid="doc-column"
+          {...turn}
           className={[
             'relative flex min-h-0 flex-1 flex-col',
-            columnWidth !== null && columnWidth < DOC_NARROW_COLUMN ? 'cb-doc-narrow' : '',
+            narrowColumn ? 'cb-doc-narrow' : '',
           ].join(' ')}
           style={{ minWidth: DOC_COLUMN_MIN_WIDTH }}
         >
@@ -988,192 +985,35 @@ export function DocPage({ selection }: { selection: DocSelection }) {
               onOpen={pagesOpen ? () => setPagesDrawerFor(entry.path) : undefined}
             />
           )}
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-10">
+          <div
+            ref={scrollRef}
+            className="min-h-0 flex-1 overflow-y-auto"
+            style={{
+              paddingBottom: 'max(40px, var(--assistant-scroll-clearance, 0px))',
+              scrollPaddingBottom: 'var(--assistant-scroll-clearance, 0px)',
+            }}
+          >
             {/* M55.11 — the cover, full-bleed above the column; the top
                 padding sits below it. */}
             <PageCoverBand entry={entry} editable={!knowledgeFile} />
             <div
               data-testid="doc-content"
               className={
-                fullWidth
-                  ? 'cb-document-content px-6'
-                  : 'cb-document-content mx-auto w-full max-w-[900px] px-6'
+                fullWidth ? 'cb-document-content cb-document-content-wide' : 'cb-document-content'
               }
             >
               {/* M55.11 — the page's icon above its title, and the hover row
                   that adds one; outside the diff lens, so both show there. */}
               <PageIconHeader entry={entry} editable={!knowledgeFile} />
-              {/* M9.7: reading a diff replaces the editor here rather than
-                  opening over it — same page, different lens. */}
               {diffOpen ? (
                 <InlineDiff path={entry.path} />
-              ) : (
+              ) : knowledgeFile ? (
                 <>
-                  {/* Only when the body has no H1 of its own. A doc whose body
-                      starts with one already shows its title as the first line
-                      of the editor — rendering a second heading above it would
-                      show the same string twice, which is the bug this fixes,
-                      not a second copy of it. */}
-                  {/* M50.2 — what Knowledge holds about this page, where the
-                      page is read. Silent when there is nothing, and absent
-                      under knowledge/ (a concept's relations are its details). */}
-                  {!knowledgeFile && <KnowledgeStrip entry={entry} />}
-                  {concept !== null ? (
-                    <>
-                      <ConceptHeading concept={concept} />
-                      {/* Keyed by the concept (M52.4): the pager's Next swaps
-                          the concept under a mounted page, so the bar reads
-                          the proposal queue afresh for the concept now shown,
-                          and a Verify in flight stays with the one it began
-                          on. */}
-                      <ConceptReviewBar
-                        key={concept.entry.path}
-                        concept={concept}
-                        viewedBody={
-                          viewed !== null && viewed.path === entry.path ? viewed.body : null
-                        }
-                        verifyBlocked={
-                          saveState === 'dirty' || saveState === 'saving'
-                            ? 'Saving your edit — Verify when it lands.'
-                            : saveState === 'failed'
-                              ? "Your last edit didn't save — Verify would attest the older text."
-                              : null
-                        }
-                      />
-                    </>
-                  ) : (
-                    !titled &&
-                    !knowledgeFile && (
-                      <UntitledDocHeading
-                        title={entry.title}
-                        onCommit={(next) => void adoptTitle(next)}
-                      />
-                    )
-                  )}
-                  {/* M45.1 — the key-property strip, on every tab. M46.1: so
-                      is its expander, because the stack it opens is the same
-                      stack on every tab — gating the toggle by tab kind would
-                      strand the record's sections behind a strip that has no
-                      way to open. */}
-                  {headingFields.length > 0 && (
-                    <HeadingProperties
-                      key={`strip:${entry.path}`}
-                      entry={entry}
-                      schema={schema}
-                      fields={headingFields}
-                      detailsShown={detailsShown}
-                      onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
-                    />
-                  )}
-                  {!knowledgeFile && <PullRequestStrip entry={entry} schema={schema} />}
-                  {/* M44.5 — the record canvas swaps by the open tab: the
-                      body, the tab's free text, or its database. An untyped
-                      doc knows nothing of tabs and keeps its document form. */}
-                  {agent ? (
-                    <AgentPageBody
-                      entry={entry}
-                      tab={agentTab}
-                      onTab={(tab) => navigate({ kind: 'doc', path: entry.path, tab })}
-                      editor={editorBlock}
-                    />
-                  ) : record && activeTab !== null ? (
-                    <>
-                      {/* M38.2 — the property surface the peek shows, on the
-                          page. The SAME component: one property editor, two
-                          geometries, so a field added here is a field added
-                          there. M45.6 widened that from the surface to the
-                          whole anatomy — the peek grew this strip and these
-                          arms too, so the geometry is the only thing that
-                          differs now; the gate below has a twin in
-                          `DetailPanel`, and a change to one is a change owed
-                          to the other.
-
-                          M46.1 — the stack stands here, ABOVE the tab strip,
-                          on every tab: a section belongs to the record, and
-                          the tabs are for the body and for related data
-                          sources (the user's ruling, 2026-08-29). The strip's
-                          own fold is all that is left of the old gate.
-
-                          Keyed by PATH alone, not by tab: the state this
-                          component owns — the reveal expander, the
-                          add-property flyout, a drag in flight — is about the
-                          record's stack, and it is the same stack on every
-                          tab. A tab-keyed remount would discard a flyout the
-                          user opened and a reveal they asked for on every
-                          press, and discard no stale state, because there is
-                          none. */}
-                      {(!stripShows || detailsShown) && (
-                        <div data-testid="page-properties" className="mb-4">
-                          <RecordProperties
-                            key={`props:${entry.path}`}
-                            entry={entry}
-                            schema={schema}
-                          />
-                        </div>
-                      )}
-                      <CorrespondenceSection key={entry.path} entry={entry} schema={schema} />
-                      <ImportProvenance entry={entry} />
-                      {/* M44.5, re-placed by M46.1 — the tab strip divides
-                          the record's own blocks from the ONE tab's content,
-                          so it lives inside the content column now rather
-                          than pinned above the scroll container. It scrolls
-                          with the record it describes (Notion's order, the
-                          peek's order, and the customizer canvas's), and it
-                          costs what that placement costs: reading an inline
-                          diff swaps it out with the rest of the canvas, so
-                          tabs are unavailable until the diff is closed.
-                          `-mx-6` lets the underline reach both edges of the
-                          820px measure while the tabs keep its inset. M45.2
-                          gates it on SAVED tabs: the synthesized Overview
-                          renders content, never a one-tab strip. */}
-                      {savedTabs.length > 0 && (
-                        <div className="-mx-6 mb-4">
-                          <RecordTabs
-                            tabs={tabs}
-                            activeId={activeTab.id}
-                            hostType={entry.type}
-                            onSelect={(tab) => navigate({ kind: 'doc', path: entry.path, tab })}
-                            onChange={(next) => {
-                              if (entry.type !== null)
-                                void setTypeTabs({ name: entry.type, docPath: null }, next);
-                            }}
-                          />
-                        </div>
-                      )}
-                      {activeTab.content === 'overview' && editorBlock}
-                      {activeTab.content === 'agents' && (
-                        <PageAgentsTab entry={entry} entries={entries} schema={schema} />
-                      )}
-                      {activeTab.content === 'runs' && (
-                        <PageRunsTab entry={entry} entries={entries} schema={schema} />
-                      )}
-                      {activeTab.content === 'sections' && (
-                        <TabSections
-                          key={`${entry.path}#${activeTab.id}`}
-                          entry={entry}
-                          tabId={activeTab.id}
-                        />
-                      )}
-                      {/* M45.4 — the view arm: resolve the tab's pointer
-                          (the dashboard ViewBlock path, per render like the
-                          dashboard's) and render the embed, or the broken
-                          card — never an empty view for a dead pointer. */}
-                      {activeTab.content === 'view' && (
-                        <ViewTabEmbed
-                          resolution={resolveViewTab(activeTab, entry, entries, schema, views)}
-                          entries={entries}
-                          schema={schema}
-                          scope={`viewtab:${activeTab.id}`}
-                        />
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <ImportProvenance entry={entry} />
-                      {editorBlock}
-                    </>
-                  )}
+                  {pageChrome}
+                  {editorBlock}
                 </>
+              ) : (
+                editorBlock
               )}
             </div>
           </div>
@@ -1182,18 +1022,16 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           {blank && !busy && !knowledgeFile && !agent && (
             <BlankPageBar templates={templates} onPick={(t) => void applyTemplate(t)} />
           )}
+          {/* The page's outline, on the page (owner, 2026-10-19 — Notion's):
+              its headings as marks at the column's edge, a list on hover.
+              Only over the body it outlines, not where the column has trimmed
+              the gutter it sits in, and not under a drawer, where the keyboard
+              would reach a list nobody can see. Under knowledge/ the title is
+              the concept's own, so every heading in the body is content. */}
+          {editor !== null && showsEditor && !narrowColumn && !sideDrawer && !pagesDrawer && (
+            <DocOutline editor={editor} scrollRef={scrollRef} skipTitle={!knowledgeFile} />
+          )}
         </div>
-        {sideDrawn && (
-          <DocSidePanel
-            overlay={sideDrawer}
-            entry={entry}
-            schema={schema}
-            editor={editor}
-            scrollRef={scrollRef}
-            concept={concept}
-            comments={comments}
-          />
-        )}
       </div>
 
       {menu !== null && (

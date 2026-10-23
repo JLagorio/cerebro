@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "about": "What a tool call writes and where it is aimed, read off shared/policy/tools.v1.json (M54.1). A name is read in its short or its mcp__cerebro__ spelling. `confirmable` is whether an ask-first agent's call waits for the person's Allow (M57.4): the note writers, in any spelling. `writes_disk` is whether a successful call changes something on disk: the row's door, the generated door for an op the policy table offers agents, or the CLI row, and false for a name the manifest does not know (propose_revert_proposal is no agent-facing op, so it is one). The comment tools (door comment, M70.3) write only a page's comment sidecar, never a page, so they count as no write: no rescan, checkpoint or written path. `write_target` is the path the write scope checks, '' being the vault root when a folder target is missing; `read_target` is the path the read scope checks, the bundle's folder for a bundle target, and a read_write writer (edit_note, M55.5; set_fields, M60.4) has both. `written_path` is what a run log reports for the call: the target argument of a tool that writes, else null, for the frontend's replay (M54.2). `renderer` is how a transcript draws the call and `fold` the phrases a run of its calls folds under, null for a tool that never folds (M56.8): a step with no fold for a name the manifest does not know. Replayed by replays_the_shared_tool_cases in src-tauri/src/mcp.rs.",
+  "about": "What a tool call writes and where it is aimed, read off shared/policy/tools.v1.json (M54.1). A name is read in its short or its mcp__cerebro__ spelling. `confirmable` is whether an ask-first agent's call waits for the person's Allow (M57.4): the note writers, in any spelling. `writes_disk` is whether a successful call changes something on disk: the row's door, the generated door for an op the policy table offers agents, or the CLI row, and false for a name the manifest does not know (propose_revert_proposal is no agent-facing op, so it is one). The comment tools (door comment, M70.3) write only a page's comment sidecar, never a page, so they count as no write: no rescan, checkpoint or written path. `write_target` is the path the write scope checks, '' being the vault root when a folder target is missing; `read_target` is the path the read scope checks, the bundle's folder for a bundle target, and a read_write writer (edit_note, M55.5; set_fields, M60.4) has both. `written_path` is what a run log reports for the call: the target argument of a tool that writes, else null, for the frontend's replay (M54.2). `renderer` is how a transcript draws the call and `fold` the phrases a run of its calls folds under, null for a tool that never folds (M56.8): a step with no fold for a name the manifest does not know. Since M91.1 a fold names its running words too, and a CLI built-in answers to its row's aliases, so Task reads as Agent. Replayed by replays_the_shared_tool_cases in src-tauri/src/mcp.rs.",
   "cases": [
     {
       "tool": "import_notion_page",
@@ -43,7 +43,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a whiteboard",
-        "many": "read whiteboards {n} times"
+        "many": "read whiteboards {n} times",
+        "running": {
+          "one": "reading a whiteboard",
+          "many": "reading whiteboards {n} times"
+        }
       }
     },
     {
@@ -60,7 +64,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a whiteboard",
-        "many": "read whiteboards {n} times"
+        "many": "read whiteboards {n} times",
+        "running": {
+          "one": "reading a whiteboard",
+          "many": "reading whiteboards {n} times"
+        }
       }
     },
     {
@@ -77,7 +85,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a document",
-        "many": "read {n} documents"
+        "many": "read {n} documents",
+        "running": {
+          "one": "reading a document",
+          "many": "reading {n} documents"
+        }
       }
     },
     {
@@ -94,7 +106,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a document",
-        "many": "read {n} documents"
+        "many": "read {n} documents",
+        "running": {
+          "one": "reading a document",
+          "many": "reading {n} documents"
+        }
       }
     },
     {
@@ -110,7 +126,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a sheet",
-        "many": "read sheets {n} times"
+        "many": "read sheets {n} times",
+        "running": {
+          "one": "reading a sheet",
+          "many": "reading sheets {n} times"
+        }
       }
     },
     {
@@ -131,7 +151,11 @@
       "renderer": "step",
       "fold": {
         "one": "calculated on a sheet",
-        "many": "calculated on sheets {n} times"
+        "many": "calculated on sheets {n} times",
+        "running": {
+          "one": "calculating on a sheet",
+          "many": "calculating on sheets {n} times"
+        }
       }
     },
     {
@@ -163,7 +187,11 @@
       "renderer": "step",
       "fold": {
         "one": "checked the agenda",
-        "many": "checked the agenda {n} times"
+        "many": "checked the agenda {n} times",
+        "running": {
+          "one": "checking the agenda",
+          "many": "checking the agenda {n} times"
+        }
       }
     },
     {
@@ -180,7 +208,11 @@
       "renderer": "step",
       "fold": {
         "one": "checked the agenda",
-        "many": "checked the agenda {n} times"
+        "many": "checked the agenda {n} times",
+        "running": {
+          "one": "checking the agenda",
+          "many": "checking the agenda {n} times"
+        }
       }
     },
     {
@@ -196,7 +228,11 @@
       "renderer": "step",
       "fold": {
         "one": "read activity",
-        "many": "read activity {n} times"
+        "many": "read activity {n} times",
+        "running": {
+          "one": "reading activity",
+          "many": "reading activity {n} times"
+        }
       }
     },
     {
@@ -212,7 +248,11 @@
       "renderer": "step",
       "fold": {
         "one": "read activity",
-        "many": "read activity {n} times"
+        "many": "read activity {n} times",
+        "running": {
+          "one": "reading activity",
+          "many": "reading activity {n} times"
+        }
       }
     },
     {
@@ -228,7 +268,11 @@
       "renderer": "step",
       "fold": {
         "one": "described a database",
-        "many": "described {n} databases"
+        "many": "described {n} databases",
+        "running": {
+          "one": "describing a database",
+          "many": "describing {n} databases"
+        }
       }
     },
     {
@@ -244,7 +288,11 @@
       "renderer": "step",
       "fold": {
         "one": "described a database",
-        "many": "described {n} databases"
+        "many": "described {n} databases",
+        "running": {
+          "one": "describing a database",
+          "many": "describing {n} databases"
+        }
       }
     },
     {
@@ -260,7 +308,11 @@
       "renderer": "step",
       "fold": {
         "one": "queried records",
-        "many": "queried records {n} times"
+        "many": "queried records {n} times",
+        "running": {
+          "one": "querying records",
+          "many": "querying records {n} times"
+        }
       }
     },
     {
@@ -276,7 +328,11 @@
       "renderer": "step",
       "fold": {
         "one": "queried records",
-        "many": "queried records {n} times"
+        "many": "queried records {n} times",
+        "running": {
+          "one": "querying records",
+          "many": "querying records {n} times"
+        }
       }
     },
     {
@@ -479,7 +535,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a note",
-        "many": "read {n} notes"
+        "many": "read {n} notes",
+        "running": {
+          "one": "reading a note",
+          "many": "reading {n} notes"
+        }
       }
     },
     {
@@ -495,7 +555,11 @@
       "renderer": "step",
       "fold": {
         "one": "read what Knowledge holds",
-        "many": "read Knowledge {n} times"
+        "many": "read Knowledge {n} times",
+        "running": {
+          "one": "reading what Knowledge holds",
+          "many": "reading Knowledge {n} times"
+        }
       }
     },
     {
@@ -511,7 +575,11 @@
       "renderer": "step",
       "fold": {
         "one": "searched notes",
-        "many": "searched notes {n} times"
+        "many": "searched notes {n} times",
+        "running": {
+          "one": "searching notes",
+          "many": "searching notes {n} times"
+        }
       }
     },
     {
@@ -529,7 +597,11 @@
       "renderer": "step",
       "fold": {
         "one": "listed notes",
-        "many": "listed notes {n} times"
+        "many": "listed notes {n} times",
+        "running": {
+          "one": "listing notes",
+          "many": "listing notes {n} times"
+        }
       }
     },
     {
@@ -749,7 +821,11 @@
       "renderer": "step",
       "fold": {
         "one": "read a file",
-        "many": "read {n} files"
+        "many": "read {n} files",
+        "running": {
+          "one": "reading a file",
+          "many": "reading {n} files"
+        }
       }
     },
     {
@@ -865,6 +941,82 @@
       "read_target": null,
       "written_path": "thread-1",
       "renderer": "change",
+      "fold": null
+    },
+    {
+      "tool": "Agent",
+      "args": {
+        "description": "Read the release notes",
+        "subagent_type": "general-purpose",
+        "prompt": "Summarize them."
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "subagent",
+      "fold": null
+    },
+    {
+      "tool": "Task",
+      "args": {
+        "description": "Read the release notes",
+        "subagent_type": "general-purpose",
+        "prompt": "Summarize them."
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "subagent",
+      "fold": null
+    },
+    {
+      "tool": "TodoWrite",
+      "args": {
+        "todos": [
+          {
+            "content": "Read the notes",
+            "status": "pending",
+            "activeForm": "Reading the notes"
+          }
+        ]
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "todo",
+      "fold": null
+    },
+    {
+      "tool": "ToolSearch",
+      "args": {
+        "query": "select:mcp__cerebro__write_concept"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": null
+    },
+    {
+      "tool": "SendMessage",
+      "args": {
+        "to": "another-session",
+        "message": "hello"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
       "fold": null
     }
   ]

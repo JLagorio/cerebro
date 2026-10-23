@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { onAgentEvent } from '@/agent/agentIpc';
+import { runDuration, runForest, runStatus, type RunNode } from '@/agent/elements/runs';
+import { StepIcon } from '@/components/ai/StepLine';
+import { TraceDescription, TraceLine, TraceTitle } from '@/components/ai/Trace';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { pagesFiledUnder } from '@/engine/filing';
 import type { Entry, Schema } from '@/engine/types';
@@ -9,25 +12,7 @@ import { fleetRunDetail, fleetSubjectRuns, type FleetRun } from '@/lib/ipc';
 import { RunDetailPanel } from '@/status/RunDetailPanel';
 import { RunWhy } from '@/status/RunWhy';
 import { useVaultStore } from '@/stores/vaultStore';
-
-/** Keep a hop directly below its listed parent; an unlisted parent leaves a
- * root row. The seen set bounds malformed historical cycles as well. */
-function runRows(runs: FleetRun[]): { run: FleetRun; depth: number }[] {
-  const byId = new Set(runs.map((run) => run.run_id));
-  const seen = new Set<string>();
-  const rows: { run: FleetRun; depth: number }[] = [];
-  const add = (run: FleetRun, depth: number) => {
-    if (seen.has(run.run_id)) return;
-    seen.add(run.run_id);
-    rows.push({ run, depth });
-    for (const child of runs)
-      if (child.parent_run_id === run.run_id) add(child, Math.min(depth + 1, 2));
-  };
-  for (const run of runs)
-    if (run.parent_run_id === null || !byId.has(run.parent_run_id)) add(run, 0);
-  for (const run of runs) add(run, 0);
-  return rows;
-}
+import '@/status/runs.css';
 
 function OpenRun({ vault, id, close }: { vault: string | null; id: string; close: () => void }) {
   const read = useCallback(() => fleetRunDetail(id), [id]);
@@ -37,6 +22,77 @@ function OpenRun({ vault, id, close }: { vault: string | null; id: string; close
     <p role="status" className="m-0 text-xs text-n-500">
       {detail.kind === 'loading' ? 'Reading run…' : "Couldn't read this run."}
     </p>
+  );
+}
+
+/**
+ * One run about the page, as a trace line (M91.14): who ran it in its
+ * state's icon, ink and word, how it ended, how long it took when both its
+ * ends were recorded, and when; then the page it was about and why it
+ * started, under its name. The hops it caused hang under it on the trace's
+ * rule (`runForest`: a hop stays below its listed parent, an unlisted parent
+ * leaves a root, and a cycle ends where it closes).
+ */
+function RunChain({
+  node,
+  entries,
+  onOpen,
+}: {
+  node: RunNode<FleetRun>;
+  entries: Entry[];
+  onOpen: (id: string) => void;
+}) {
+  const { run, depth } = node;
+  const agent = entries.find((entry) => isAgentEntry(entry) && agentRef(entry).actor === run.actor);
+  const subject = run.cause?.subject;
+  const title =
+    subject == null ? null : (entries.find((entry) => entry.path === subject)?.title ?? subject);
+  const status = runStatus(run.outcome);
+  const took = runDuration(run);
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="page-run-row"
+        data-run={run.run_id}
+        data-depth={depth}
+        onClick={() => onOpen(run.run_id)}
+        className="block w-full rounded-md border-0 bg-transparent px-2 py-2 text-left hover:bg-n-50"
+      >
+        <TraceLine
+          status={status.trace}
+          statusText={status.statusText}
+          className="cb-run-line cb-run-line-xs"
+        >
+          <StepIcon state={status.state} icon={status.icon} />
+          <TraceTitle className="flex-1 text-n-700">
+            {agent?.title ?? run.actor ?? 'unattributed'}
+          </TraceTitle>
+          <span className="text-n-500">{status.words}</span>
+          {took !== undefined && <TraceDescription>{took}</TraceDescription>}
+          <time
+            dateTime={run.started_at}
+            title={localStamp(new Date(run.started_at))}
+            className="text-n-400"
+          >
+            {relativeWhen(run.started_at, new Date())}
+          </time>
+        </TraceLine>
+        {title !== null && (
+          <span className="cb-run-extra mt-0.5 block truncate text-xs text-n-600">{title}</span>
+        )}
+        <span className="cb-run-extra mt-0.5 flex">
+          <RunWhy cause={run.cause} startedAt={run.started_at} />
+        </span>
+      </button>
+      {node.hops.length > 0 && (
+        <div className="cb-run-hops" data-hops={run.run_id}>
+          {node.hops.map((hop) => (
+            <RunChain key={hop.run.run_id} node={hop} entries={entries} onOpen={onOpen} />
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -72,7 +128,7 @@ export function PageRunsTab({
   );
   const state = useFeed(vault, read, pulse);
   const [open, setOpen] = useState<{ vault: string | null; path: string; id: string } | null>(null);
-  const rows = state.kind === 'ready' ? runRows(state.data) : [];
+  const chains = state.kind === 'ready' ? runForest(state.data) : [];
   return (
     <div data-testid="page-runs" className="space-y-3 px-6 py-4">
       {state.kind === 'loading' && (
@@ -85,53 +141,20 @@ export function PageRunsTab({
           Couldn't read this page's runs.
         </p>
       )}
-      {state.kind === 'ready' && rows.length === 0 && (
+      {state.kind === 'ready' && chains.length === 0 && (
         <p data-testid="page-runs-empty" className="m-0 text-sm text-n-500">
           No runs about this page or the pages filed under it yet.
         </p>
       )}
-      {rows.map(({ run, depth }) => {
-        const agent = entries.find(
-          (entry) => isAgentEntry(entry) && agentRef(entry).actor === run.actor,
-        );
-        const subject = run.cause?.subject;
-        const title =
-          subject == null
-            ? null
-            : (entries.find((entry) => entry.path === subject)?.title ?? subject);
-        return (
-          <button
-            type="button"
-            key={run.run_id}
-            data-testid="page-run-row"
-            data-run={run.run_id}
-            data-depth={depth}
-            onClick={() => setOpen({ vault, path: entry.path, id: run.run_id })}
-            className="block w-full rounded-md border-0 bg-transparent px-2 py-2 text-left hover:bg-n-50"
-            style={{ paddingLeft: `${8 + depth * 20}px` }}
-          >
-            <span className="flex items-baseline gap-3 text-xs">
-              <span className="min-w-0 flex-1 truncate text-n-700">
-                {agent?.title ?? run.actor ?? 'unattributed'}
-              </span>
-              <span className="text-n-500">{run.outcome}</span>
-              <time
-                dateTime={run.started_at}
-                title={localStamp(new Date(run.started_at))}
-                className="text-n-400"
-              >
-                {relativeWhen(run.started_at, new Date())}
-              </time>
-            </span>
-            {title !== null && (
-              <span className="mt-0.5 block truncate text-xs text-n-600">{title}</span>
-            )}
-            <span className="mt-0.5 flex">
-              <RunWhy cause={run.cause} startedAt={run.started_at} />
-            </span>
-          </button>
-        );
-      })}
+      {chains.map((node) => (
+        <div key={node.run.run_id}>
+          <RunChain
+            node={node}
+            entries={entries}
+            onOpen={(id) => setOpen({ vault, path: entry.path, id })}
+          />
+        </div>
+      ))}
       <p
         data-testid="page-runs-footnote"
         className="m-0 border-t border-n-100 pt-3 text-xs text-n-500"

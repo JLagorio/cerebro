@@ -1,9 +1,10 @@
 # M84 through M90 product polish implementation sequence
 
-**Draft for owner review · 2026-10-17. All phases below are proposed and unstarted.**
+**Implementation authorized · 2026-10-17. Work in progress; acceptance remains evidence-based.**
 Design entry point: [Cerebro product polish](../specs/2026-10-17-cerebro-product-polish.md).
-This plan follows M71–M83; it changes no earlier completion claim and does not authorize
-implementation before the owner reviews the proposal.
+This plan follows M71–M83 and changes no earlier completion claim. The owner authorized the
+complete sequence on the same branch after checkpoint commit `2347951`. See the
+[implementation record](2026-10-17-m84-m90-implementation-record.md) for actual progress and checks.
 
 ## Sequence and delivery shape
 
@@ -199,8 +200,9 @@ a screenshot matrix.
 
 ## Change ownership and release discipline
 
-- Preserve the user's staged index and existing work. Future implementation should choose
-  an isolated checkout or clearly bounded files; do not reset, stage or commit unrelated work.
+- The owner requested one baseline commit of all existing work, followed by the complete
+  implementation on this same branch. Baseline `2347951` is committed; all subsequent
+  implementation must remain unstaged and uncommitted. Do not switch branches or create a worktree.
 - Shared styles, `FieldEditor`, `DocPage`, `DetailPanel`, view vocabulary and shell layout have
   one lane owner at a time. Parallelism is by surface/component seam, not competing edits.
 - Keep existing DOM/test hooks where their semantic role survives. Deliberately update
@@ -212,10 +214,10 @@ a screenshot matrix.
   Native/live service deferrals remain visible. Owner review of a design does not retroactively
   close older M53–M83 acceptance.
 
-## Review requested
+## Authorization and review
 
-Review the [direction and decisions](../specs/2026-10-17-cerebro-product-polish.md) first, then
-the page and data specifications. The recommended first authorization is M84 and M85's
-bounded title spike followed by one completed record/prose specimen. Review that concrete
-result before authorizing broad visual adoption. All milestone checklists remain unstarted
-until implementation is actually requested and performed.
+The owner authorized the entire M84–M90 sequence after reviewing the reference-based direction.
+Proceed through each implementation and verification gate on the existing branch. Keep specimens,
+mechanism decisions and remaining acceptance gaps reviewable in the
+[implementation record](2026-10-17-m84-m90-implementation-record.md). User acceptance of the final
+visual result remains distinct from source completion and automated checks.

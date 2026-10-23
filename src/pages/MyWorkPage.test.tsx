@@ -91,7 +91,7 @@ it('renders overdue count and a red deadline chip before database work (M61.3b)'
     const chips = screen.getAllByTestId('mywork-deadline');
     expect(chips[0].textContent).toBe('Jul 24');
     expect(chips[0].className).toContain('text-danger-600');
-    expect(chips[1].className).toContain('text-warn-600');
+    expect(chips[1].className).toContain('text-warn-700');
   } finally {
     cleanup();
     vi.useRealTimers();

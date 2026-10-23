@@ -3,20 +3,25 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Button } from '@/components/ui/Button';
 import { useFocusRestore } from '@/hooks/useFocusRestore';
 import { isTopLayer, ownsEscape, useLayer } from '@/components/ui/layers';
+import { useGhostOnUnmount } from '@/components/ui/motion';
 
 const css = `
-.cb-dlg-scrim{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:flex-start;justify-content:center;padding:64px 24px;z-index:1000;animation:cbFade var(--dur-med) var(--ease-out)}
-.cb-dlg{background:var(--n-0);border-radius:var(--r-xl);box-shadow:var(--shadow-lg);width:100%;display:flex;flex-direction:column;max-height:calc(100vh - 128px);animation:cbUp var(--dur-med) var(--ease-out)}
+.cb-dlg-scrim{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:flex-start;justify-content:center;--dialog-edge:clamp(16px,8vh,64px);padding:var(--dialog-edge) 24px;z-index:1000;animation:cbFade var(--motion-pop) backwards}
+.cb-dlg{background:var(--n-0);border-radius:var(--r-xl);box-shadow:var(--shadow-lg);width:100%;display:flex;flex-direction:column;max-height:calc(100dvh - 2 * var(--dialog-edge));animation:cbUp var(--motion-enter) backwards;transform-origin:50% 30%}
+.cb-dlg-scrim.cb-dlg-leave{animation:cbFadeOut var(--motion-exit) forwards}
+.cb-dlg-leave .cb-dlg{animation:cbDown var(--motion-exit) forwards}
 .cb-dlg:focus{outline:none}
 .cb-dlg-hd{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 0 24px}
 .cb-dlg-hd h2{margin:0;font-size:var(--fs-lg);line-height:var(--lh-lg);font-weight:600;letter-spacing:var(--track-tight);color:var(--n-900)}
-.cb-dlg-bd{padding:16px 24px;overflow:auto;font-size:var(--fs-sm);color:var(--n-800)}
+.cb-dlg-bd{padding:16px 24px;overflow:auto;font-size:var(--fs-ui);line-height:var(--lh-ui);color:var(--n-800)}
 .cb-dlg-ft{display:flex;align-items:center;gap:8px;padding:14px 24px;border-top:1px solid var(--n-100)}
 .cb-dlg-ft .cb-dlg-note{font-size:var(--fs-xs);color:var(--text-muted);margin-right:auto}
 @keyframes cbFade{from{opacity:0}to{opacity:1}}
-@keyframes cbUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes cbFadeOut{to{opacity:0}}
+@keyframes cbUp{from{opacity:0;translate:0 6px;scale:.98}}
+@keyframes cbDown{to{opacity:0;translate:0 6px;scale:.96}}
 .cb-dlg-scrim-full{padding:0}
-.cb-dlg-full{height:100vh;max-height:100vh;border-radius:0}
+.cb-dlg-full{height:100vh;max-height:100vh;border-radius:0;animation-name:cbFade}
 .cb-dlg-full>.cb-dlg-bd{display:flex;flex:1;min-height:0;padding:0;overflow:hidden}`;
 if (typeof document !== 'undefined' && !document.getElementById('cb-dlg-css')) {
   const t = document.createElement('style');
@@ -158,11 +163,34 @@ function DialogCard({
     };
   }, [onClose, layerId]);
 
+  // Whether the dialog was the top surface when a press on the scrim began.
+  // A press there while a list or menu is open over the dialog closes that
+  // surface — its own outside press — and must not close the dialog too,
+  // losing its draft. Read on window capture: the Popover dismisses on
+  // document capture, and by the scrim's own handlers that layer is gone.
+  const scrimRef = useRef<HTMLDivElement>(null);
+  const pressBeganOnTop = useRef<boolean | null>(null);
+  // Closed, a copy of it settles and fades where it was (owner, 2026-10-19,
+  // components/ui/motion.ts) while focus is already back. Not a fullscreen
+  // one: a page-sized copy would only cover the page it returns to.
+  useGhostOnUnmount(scrimRef, 'cb-dlg-leave', { when: !fullscreen });
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      if (e.target === scrimRef.current) pressBeganOnTop.current = isTopLayer(layerId);
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, [layerId]);
+
   return (
     <div
+      ref={scrimRef}
       className={`cb-dlg-scrim ${fullscreen ? 'cb-dlg-scrim-full' : ''}`}
       onMouseDown={(e: React.MouseEvent) => {
-        if (e.target === e.currentTarget && onClose) onClose();
+        if (e.target !== e.currentTarget || !onClose) return;
+        const onTop = pressBeganOnTop.current ?? isTopLayer(layerId);
+        pressBeganOnTop.current = null;
+        if (onTop) onClose();
       }}
     >
       <div

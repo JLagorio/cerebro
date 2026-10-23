@@ -466,3 +466,78 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
+
+## shadcn/ui (AI Elements and their base components)
+
+- Source: https://github.com/shadcn-ui/ui at commit
+  `25af02b1b467fcd53b63e0c6d6d324c57c16ef18`, read 2026-10-22: the
+  `base-rhea` registry style of Trace, Collapsible, Code Block (with its
+  `use-highlighted-code` hook), Badge, Item, Message Scroller, Attachment and
+  Questionnaire; the Base UI flavour of the 21 AI Elements patterns (Chain of
+  Thought, Chat, Checkpoint, Confirmation, Context, File Tree, Inline
+  Citation, Message, Model Selector, Plan, Prompt Input, Queue, Reasoning,
+  Sources, Stack Trace, Subagent, Suggestion, Task, Terminal, Test Results
+  and Tool), their docs and examples; the headless Message Scroller of
+  `@shadcn/react` 0.3.1 (`packages/react`); and the `shimmer` utility of
+  `packages/shadcn/src/tailwind.css`. Author: shadcn.
+- Licence: MIT.
+- Used by: `src/components/ai/` (M91.7–M91.9), each file headed with this
+  notice: `Attachment.tsx`, `Badge.tsx`, `ChainOfThought.tsx`, `Chat.tsx`,
+  `Checkpoint.tsx`, `CodeBlock.tsx`, `Collapsible.tsx`, `Confirmation.tsx`,
+  `Context.tsx`, `FileTree.tsx`, `InlineCitation.tsx`, `Item.tsx`,
+  `Message.tsx`, `MessageScroller.tsx`, `ModelSelector.tsx`, `Plan.tsx`,
+  `PromptInput.tsx`, `Questionnaire.tsx`, `Queue.tsx`, `Reasoning.tsx`,
+  `Sources.tsx`, `StackTrace.tsx`, `Subagent.tsx`, `Suggestion.tsx`,
+  `Task.tsx`, `Terminal.tsx`, `TestResults.tsx`, `Tool.tsx` and `Trace.tsx`,
+  with their stylesheets `foundation.css`, `trace.css`, `code-block.css`,
+  `conversation.css`, `trace-steps.css` and `trace-results.css`; and the
+  `cb-ai-shimmer` utility in `src/styles/index.css`. Export names, parts and
+  props follow shadcn's, so its docs apply, except where a file says it
+  deviates; the code is ported onto Cerebro primitives (Icon, IconButton,
+  Button, Avatar, FileThumb, Popover, HoverCard, `Presence`, the highlighter,
+  the DS tokens), with no code from Base UI, class-variance-authority, `cn`
+  or tw-animate-css.
+- Drawn by (M91.12–M91.14, M91.17): the assistant (`src/agent/`:
+  `AiPanel.tsx`, `ChatTurn.tsx`, `ChatInput.tsx`, `toolRenderers.tsx`,
+  `AiActionCard.tsx`, `MessageMarkdown.tsx`, `TurnChangeset.tsx`,
+  `TurnError.tsx`, `FailureNoticeCard.tsx`, `RunOptionsPicker.tsx`,
+  `UpNext.tsx`, `ReviewNotesDock.tsx`, `RunList.tsx`, the permission,
+  interaction, write-approval, question and filing cards, and the view
+  models in `src/agent/elements/`); runs and their transcripts
+  (`src/status/`: `RunTranscript.tsx`, `FleetSection.tsx`,
+  `AgentRunHistory.tsx`, `WakesSection.tsx`, `FollowupList.tsx`;
+  `src/detail/PageRunsTab.tsx`, `src/history/ActivityFeed.tsx` and
+  `PageHistory.tsx`, `src/pages/home/EventRow.tsx`); Review's decisions
+  (`src/status/PendingWriteCard.tsx`, `ProposalCard.tsx`); comments
+  (`src/detail/CommentThread.tsx`, `CommentComposer.tsx`); the editor's Ask
+  AI, AI block and citations (`src/editor/AskAiPopover.tsx`, `blocks.tsx`,
+  `chips.tsx`); `src/sheet/SheetAsk.tsx`; knowledge (`src/knowledge/`:
+  `ConceptBody.tsx`, `ConceptReviewBar.tsx`, `KnowledgePanel.tsx`,
+  `EntityDossier.tsx`, `KnowledgeCommit.tsx`, `RelatedKnowledge.tsx`); and
+  the labelled asks of `src/app/QuickOpen.tsx`, `src/pages/HomePage.tsx`
+  and `src/detail/InspectorParts.tsx`, which Inbox and a page's Knowledge
+  draw.
+
+```text
+MIT License
+
+Copyright (c) 2023 shadcn
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

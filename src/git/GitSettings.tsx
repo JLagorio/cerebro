@@ -80,7 +80,7 @@ export function GitSettings() {
       <h2 className="m-0 text-sm font-semibold text-n-900">History</h2>
 
       {provider !== null && !provider.native.available && (
-        <div className="flex items-start gap-2 rounded-lg border border-[var(--warn-300)] bg-warn-50 px-3 py-2.5 text-sm leading-[18px] text-n-700">
+        <div className="flex items-start gap-2 rounded-lg border border-[var(--warn-300)] bg-warn-50 px-3 py-2.5 text-ui text-n-700">
           <Icon name="triangle-alert" size={13} style={{ marginTop: 2 }} />
           <span>{provider.native.message}</span>
         </div>
@@ -88,7 +88,7 @@ export function GitSettings() {
 
       {!isRepo ? (
         <div className="flex flex-col items-start gap-2 rounded-lg border border-n-200 px-3 py-2.5">
-          <p className="m-0 text-sm leading-[18px] text-n-600">
+          <p className="m-0 text-ui text-n-600">
             This vault is not tracked. Turning on history keeps every version of every note — and
             makes the assistant's own edits reviewable, since it writes to{' '}
             <code className="[font-family:var(--font-mono)] text-xs">knowledge/</code> without
@@ -108,7 +108,7 @@ export function GitSettings() {
           <label className="flex items-center gap-3 rounded-lg border border-n-200 px-3 py-2.5">
             <span className="flex-1">
               <span className="block text-sm font-medium text-n-800">Automatic checkpoints</span>
-              <span className="block text-xs leading-[16px] text-n-500">
+              <span className="block text-ui text-(--text-meta)">
                 Commit when you stop working, and after the assistant writes. Never while a note has
                 unsaved edits.
               </span>
@@ -191,7 +191,7 @@ function RemoteRow({
           Connect
         </Button>
       </div>
-      <p className="m-0 mt-1.5 text-xs leading-[16px] text-n-500">
+      <p className="m-0 mt-1.5 text-ui text-(--text-meta)">
         Uses your own git credentials. Cerebro never asks for a password — if authentication fails,
         fix it in your credential helper or SSH agent.
       </p>

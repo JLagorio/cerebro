@@ -20,7 +20,7 @@
 //!
 //! A rename into the path is followed back to the old path's newest content
 //! row, at most [`RENAME_HOPS`] times, so a moved page keeps its last writer.
-//! A page's History tab (M64.2b) follows the same renames through
+//! A page's History panel (M64.2b) follows the same renames through
 //! [`rename_chain`], so the rows recorded under its earlier names stay its.
 //! A row whose actor is NULL reads as not recorded, never as "unattributed",
 //! which here means changed outside Cerebro (CV-05).

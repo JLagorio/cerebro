@@ -161,7 +161,7 @@ function ActivityBody({
           System
           {/* A sentence, as every blurb on the page (M52.5): "background
               work, budgets and deferral gates" was three nouns of jargon. */}
-          <span className="text-xs font-normal text-n-500">
+          <span className="text-xs font-normal text-(--text-meta)">
             What runs in the background, what it may spend, and what is held back.
           </span>
         </summary>
@@ -261,7 +261,7 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
         ? null
         : writes.kind === 'ready'
           ? writes.data.length
-          : 0;
+          : null;
 
   const openConcept = (path: string) => navigate({ kind: 'doc', path });
   const openFolder = (at: string) =>
@@ -302,7 +302,7 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
     body = (
       <div className={PADDED}>
         {subject === null ? (
-          <p className="text-sm text-n-500">Knowledge holds nothing about that subject.</p>
+          <p className="text-sm text-(--text-meta)">Knowledge holds nothing about that subject.</p>
         ) : (
           <ThreadView
             subject={subject}
@@ -361,11 +361,11 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
       icon: 'shield-check',
       // Review holds three queues — concepts to verify, the changes agents
       // proposed and the page writes they queued (M57.4c) — and its count is
-      // all three. The cards are left out only when they could not be read;
-      // writes that could not be read take the count away.
+      // all three. Withhold the total while either queue is unknown rather
+      // than make a partial total look complete.
       count:
-        bundleWide && writeCount !== null
-          ? queue.length + (proposalCount ?? 0) + writeCount
+        bundleWide && writeCount !== null && proposalCount !== null
+          ? queue.length + proposalCount + writeCount
           : undefined,
     },
     { tab: 'activity', label: 'Activity', icon: 'activity' },
@@ -379,16 +379,24 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
   const summary =
     all.length === 0
       ? null
-      : waiting.length === 0 && (proposalCount ?? 0) === 0 && writeCount === 0
+      : waiting.length === 0 && proposalCount === 0 && writeCount === 0
         ? 'nothing to review'
         : [
             waiting.length === 0 ? 'nothing to verify' : `${waiting.length} to verify`,
-            proposalCount === null || proposalCount === 0
-              ? null
-              : plural(proposalCount, 'proposal', 'proposals'),
-            writeCount === null || writeCount === 0
-              ? null
-              : plural(writeCount, 'page write', 'page writes'),
+            proposalCount === null
+              ? pending.kind === 'loading'
+                ? 'reading proposals…'
+                : 'proposals unavailable'
+              : proposalCount === 0
+                ? null
+                : plural(proposalCount, 'proposal', 'proposals'),
+            writeCount === null
+              ? writes.kind === 'loading'
+                ? 'reading page writes…'
+                : 'page writes unavailable'
+              : writeCount === 0
+                ? null
+                : plural(writeCount, 'page write', 'page writes'),
           ]
             .filter((part) => part !== null)
             .join(' · ');
@@ -406,7 +414,7 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
               <button
                 type="button"
                 onClick={() => navigate({ kind: 'knowledge', nav: { tab: 'all' } })}
-                className="text-n-500 hover:text-n-800"
+                className="text-(--text-meta) hover:text-n-800"
               >
                 Knowledge
               </button>
@@ -432,7 +440,7 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
                   type="button"
                   data-testid="knowledge-maintainer"
                   onClick={() => navigate({ kind: 'agents', actor: maintainer.actor })}
-                  className="inline-flex min-w-0 items-center gap-1.5 text-xs text-n-500 hover:text-n-800"
+                  className="inline-flex min-w-0 items-center gap-1.5 text-xs text-(--text-meta) hover:text-n-800"
                 >
                   <Icon name="bot" size={13} color="var(--text-ai)" className="flex-none" />
                   <span className="truncate">Maintained by {maintainer.title}</span>

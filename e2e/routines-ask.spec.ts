@@ -7,6 +7,7 @@ import {
   showDatabases,
   openAgents,
 } from './boot';
+import { chooseOption } from './select';
 
 const SCOUT = 'records/agents/release-scout.md';
 const RISK = 'records/risks/risk-scanner-delivery.md';
@@ -23,8 +24,8 @@ test('a no checks once, skips with its question and reason, and starts no full r
   await page.getByTestId('nav-agent').filter({ hasText: 'Release scout' }).click();
   await page.getByTestId('agent-add-trigger').click();
   const editor = page.getByTestId('agent-editor-trigger-new');
-  await editor.getByLabel('Trigger 1 event').selectOption('changed');
-  await editor.getByLabel('Trigger 1 field').selectOption('status');
+  await chooseOption(editor.getByLabel('Trigger 1 event'), 'changed');
+  await chooseOption(editor.getByLabel('Trigger 1 field'), 'status');
   await editor.getByLabel('Trigger 1 question').fill(QUESTION);
   await expect(editor.getByLabel('Trigger 1 question')).toHaveAttribute('maxlength', '500');
   expect(await readMockFile(page, SCOUT)).not.toContain(QUESTION);

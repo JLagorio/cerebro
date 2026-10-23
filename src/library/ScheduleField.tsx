@@ -149,7 +149,7 @@ function TimeRow({
           value={repeat}
           ariaLabel="Repeat"
           options={REPEATS}
-          onChange={(e) => emit({ repeat: e.target.value as Repeat })}
+          onChange={(next) => emit({ repeat: next as Repeat })}
         />
         {repeat === 'weekly' && (
           <Select
@@ -158,7 +158,7 @@ function TimeRow({
             value={String(day)}
             ariaLabel="Day"
             options={DAYS.map((label, i) => ({ value: String(i), label }))}
-            onChange={(e) => emit({ day: Number(e.target.value) })}
+            onChange={(next) => emit({ day: Number(next) })}
           />
         )}
         {repeat === 'monthly' && (
@@ -174,9 +174,7 @@ function TimeRow({
               })),
               { value: 'last', label: 'Last day' },
             ]}
-            onChange={(e) =>
-              emit({ monthDay: e.target.value === 'last' ? 'last' : Number(e.target.value) })
-            }
+            onChange={(next) => emit({ monthDay: next === 'last' ? 'last' : Number(next) })}
           />
         )}
         {repeat === 'once' && (

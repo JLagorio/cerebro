@@ -18,7 +18,7 @@ import { Icon } from '@/components/ui/Icon';
 /** `motion-hover`: a menu is read by sweeping down it, which is the fastest a
  * pointer ever crosses a stack of rows in this app. 20ms declared (M46.2). */
 const ITEM_BASE =
-  'motion-hover flex w-full items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-[5px] text-left text-sm';
+  'motion-hover flex w-full items-center gap-2 rounded-sm border-0 bg-transparent min-h-8 px-2 py-[5px] text-left text-ui';
 
 /** A disabled item is still in the DOM and still reads as a menuitem, but it
  * must not take an arrow-key stop — a keyboard user would land on something
@@ -50,6 +50,10 @@ export function MenuSurface({
   }, [autoFocus, items]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    // A control inside the menu that already answered the key keeps it: a
+    // Select's open list walks its rows on the arrows, and a menu that moved
+    // focus too took the list's keys away mid-pick (2026-10-18).
+    if (e.defaultPrevented) return;
     const list = items();
     // A text input owns its own arrow keys — moving the caret is what the
     // user means there, not moving down the menu.

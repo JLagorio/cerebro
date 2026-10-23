@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import type { CommitQuery, CommitRun, FileCommit } from '@/engine/git';
 import { CommitAuthor } from '@/git/CommitAuthor';
@@ -99,11 +99,13 @@ export function UncommittedRow({ path }: { path: string }) {
  * `CommitRow` per version. It stays silent until there is something to
  * show, since a heading over an empty list is chrome there, but says a read
  * that FAILED (M53.15): rendering nothing for it would claim the page has
- * no history when nobody could tell. The page's side panel tab merges these
+ * no history when nobody could tell. A page's History panel merges these
  * rows with its edits and Knowledge changes instead (`history/PageHistory`,
  * M64.2b), reusing `CommitRow` and `UncommittedRow`.
  */
-export function GitHistoryPanel({ path }: { path: string }) {
+export function GitHistoryPanel({ path, compact = false }: { path: string; compact?: boolean }) {
+  const [expandedPath, setExpandedPath] = useState<string | null>(null);
+  const expanded = expandedPath === path;
   const history = useFileHistory(path);
   const rows = history.kind === 'ready' ? history.data : NO_ROWS;
   const queries = useMemo(() => historyQueries(rows), [rows]);
@@ -120,7 +122,11 @@ export function GitHistoryPanel({ path }: { path: string }) {
 
   if (history.kind === 'unavailable') {
     return (
-      <div data-testid="git-history" data-variant="foot" className="mt-5">
+      <div
+        data-testid="git-history"
+        data-variant="foot"
+        className={compact ? 'cb-peek-history cb-peek-history-unavailable' : 'mt-5'}
+      >
         {heading}
         <p data-testid="section-unavailable" className="m-0 text-xs text-n-500">
           {HISTORY_UNREADABLE}
@@ -132,9 +138,29 @@ export function GitHistoryPanel({ path }: { path: string }) {
   if (rows.length === 0) return null;
 
   return (
-    <div data-testid="git-history" data-variant="foot" className="mt-5">
-      {heading}
-      <div className="flex flex-col gap-2">
+    <div
+      data-testid="git-history"
+      data-variant="foot"
+      className={compact ? 'cb-peek-history' : 'mt-5'}
+    >
+      {compact ? (
+        <button
+          type="button"
+          tabIndex={0}
+          className="cb-peek-section-toggle"
+          data-testid="peek-history-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpandedPath(expanded ? null : path)}
+        >
+          <Icon name="history" size={14} />
+          <span>History</span>
+          <span className="cb-peek-section-count">{rows.length}</span>
+          <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} />
+        </button>
+      ) : (
+        heading
+      )}
+      <div className="flex flex-col gap-2" hidden={compact && !expanded}>
         {rows.map((c) => (
           <CommitRow key={c.hash} commit={c} path={path} runs={runs} />
         ))}

@@ -463,7 +463,7 @@ describe('App boot flow', () => {
       expect(screen.getAllByTestId('ai-panel')).toHaveLength(1);
     });
 
-    it('expands the same conversation, hides page commands, and docks when navigation opens a page', async () => {
+    it('expands the same conversation, hides page commands, and floats when navigation opens a page', async () => {
       widthAtLeast(1440);
       await bothOpen();
       const assistant = screen.getByTestId('ai-panel');
@@ -476,8 +476,27 @@ describe('App boot flow', () => {
       expect(assistant.contains(document.activeElement)).toBe(true);
       act(() => useNavStore.getState().navigate({ kind: 'doc', path: ITEM }));
       expect(screen.getByTestId('ai-panel')).toBe(assistant);
-      expect(assistant.dataset.presentation).toBe('panel');
+      expect(assistant.dataset.presentation).toBe('floating');
       expect(page.hasAttribute('inert')).toBe(false);
+    });
+
+    it('keeps the floating assistant out of the page width and parking budget', async () => {
+      widthAtLeast(1000);
+      render(<App />);
+      await screen.findByRole('navigation', { name: 'Sidebar' });
+      const main = screen.getByTestId('main-column');
+      const floor = main.style.getPropertyValue('--shell-floor');
+      act(() => useUiStore.getState().openAssistantFloating());
+      const assistant = screen.getByTestId('ai-panel');
+      expect(main.style.getPropertyValue('--shell-floor')).toBe(floor);
+      expect(document.getElementById('main')!.hasAttribute('inert')).toBe(false);
+      expect(frame().dataset.parked).toBeUndefined();
+      expect(screen.queryByTestId('ai-parked-tab')).toBeNull();
+      act(() => useUiStore.getState().setAiPanelMinimized(true));
+      expect(screen.getByTestId('ai-panel')).toBe(assistant);
+      expect(main.style.getPropertyValue('--shell-floor')).toBe(floor);
+      act(() => useUiStore.getState().openAssistantFloating());
+      expect(screen.getByTestId('ai-panel')).toBe(assistant);
     });
 
     it('a vault switch remounts the assistant, so no turn outlives its vault (M53.10)', async () => {
@@ -539,7 +558,8 @@ describe('App boot flow', () => {
 
       act(() => useNavStore.getState().navigate({ kind: 'doc', path: ITEM }));
       await screen.findByTestId('doc-side-panel');
-      expect(floor()).toBe('min(672px, 100vw - 234px)');
+      // The canvas's 400 and the side panel's 300.
+      expect(floor()).toBe('min(700px, 100vw - 234px)');
 
       act(() => useUiStore.getState().setDocPanelOpen(false));
       expect(floor()).toBe('min(400px, 100vw - 234px)');

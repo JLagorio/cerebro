@@ -3,19 +3,19 @@ import { create } from 'zustand';
 import type { RunRecord } from '@/agent/runs';
 import type { OrganizeProposal } from '@/agent/types';
 import { scrubStdioApprovals } from '@/engine/connectors';
-import type { InboxPeriod } from '@/engine/inbox';
 import { getPanelAgent, setPanelAgent as writePanelAgent } from '@/lib/ipc';
 import { parseShellCeiling, type ShellCeiling } from '@/lib/policy/toolApproval';
 
-/** A page's side panel tabs (DocSidePanel). Comments (M70.2b) holds the
- *  page's threads; History (M58.4) its versions. */
-export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge' | 'comments' | 'history';
-/** The side panel on a concept page (M50.1): its provenance comes first. A
- *  concept has no Info (its frontmatter is provenance) and no Knowledge tab
- *  (its related knowledge is part of the details), and takes comments and
- *  shows its history like any page (M70.2b, M58.4). The review itself is the
- *  bar under the title since M51. */
-export type ConceptPanelTab = 'details' | 'outline' | 'links' | 'comments' | 'history';
+/**
+ * Which panel a page's right-hand slot shows (DocSidePanel), each opened by
+ * its own button in the page's toolbar, one at a time (owner, 2026-10-19 —
+ * Notion's properties, discussions and updates). Details holds what the page
+ * is and what it is connected to — its properties, links, knowledge and who
+ * can change it, each a section of its own; on a concept (M50.1) it leads
+ * with the concept's provenance. Comments (M70.2b) holds the page's threads;
+ * History (M58.4) its versions. The outline is on the page itself.
+ */
+export type PagePanel = 'details' | 'comments' | 'history';
 
 /**
  * What the person chose, NOT what is on screen (M16.36).
@@ -26,6 +26,8 @@ export type ConceptPanelTab = 'details' | 'outline' | 'links' | 'comments' | 'hi
  * appearance the OS happened to have the day the choice was made.
  */
 export type ThemeMode = 'light' | 'dark' | 'system';
+/** Alternate trees in the Pages sidebar; independent of Home's section folds. */
+export type PageTreeMode = 'collections' | 'folders';
 
 /**
  * Narrow anything to a ThemeMode, defaulting to 'system'.
@@ -187,21 +189,44 @@ interface UiState {
    * display order. Dirs without an entry sort folders-first alphabetical. */
   treeOrder: Record<string, string[]>;
   setTreeOrder(dir: string, order: string[]): void;
-  // A page's right-hand side panel (M2.x docs polish): one panel, its tabs
-  // named by DocPanelTab.
+  // A page's right-hand side panel (M2.x docs polish): whether it is open,
+  // and which panel it shows (PagePanel).
   docPanelOpen: boolean;
   setDocPanelOpen(v: boolean): void;
-  docPanelTab: DocPanelTab;
-  setDocPanelTab(tab: DocPanelTab): void;
+  docPanel: PagePanel;
+  setDocPanel(panel: PagePanel): void;
   // Its own slot, so opening a concept lands on its details rather than on
-  // whichever tab the last doc left open (M50.1). Session-only.
-  conceptPanelTab: ConceptPanelTab;
-  setConceptPanelTab(tab: ConceptPanelTab): void;
+  // whichever panel the last doc left open (M50.1). Session-only.
+  conceptPanel: PagePanel;
+  setConceptPanel(panel: PagePanel): void;
   // And its own open state (M51.3): a concept's review is the bar under its
   // title, so its panel starts CLOSED — a page, its review panel and the
   // assistant were four columns wide. Persisted like the doc panel's.
   conceptPanelOpen: boolean;
   setConceptPanelOpen(v: boolean): void;
+  /**
+   * The inspector's Details sections the person folded, by section id
+   * (`properties`, `links`, `knowledge`, …). Stored as the closed set, like
+   * `navClosed`, so a section nobody touched is open. Persisted, and shared
+   * by every page: a fold says what the person reads, not what one page holds.
+   */
+  inspectorCollapsed: string[];
+  /**
+   * The folded-by-default sections (Access) the person opened: the same
+   * choice, stored the other way round, so a section that starts folded
+   * stays open once someone opens it. Persisted and shared like the closed set.
+   */
+  inspectorExpanded: string[];
+  setInspectorSectionOpen(id: string, open: boolean): void;
+  /**
+   * The Details section something asked to be shown (the Knowledge strip's
+   * Knowledge), in the pane that asked, with a sequence that moves on every
+   * ask so asking twice scrolls twice. Memory only.
+   */
+  inspectorReveal: { id: string; seq: number; pane: PaneId | null } | null;
+  /** Open the page's inspector on Details with section `id` unfolded, and
+   * bring that section into view in `pane` (every pane when null). */
+  revealInspectorSection(id: string, pane?: PaneId | null): void;
   // Left-hand Pages panel on a page with sub-pages; collapsed state persists.
   docPagesOpen: boolean;
   setDocPagesOpen(v: boolean): void;
@@ -219,6 +244,9 @@ interface UiState {
    */
   navClosed: string[];
   setNavGroupOpen(key: string, open: boolean): void;
+  /** Persisted presentation choice; leaves section and folder expansions intact. */
+  pageTreeMode: PageTreeMode;
+  setPageTreeMode(mode: PageTreeMode): void;
 
   /**
    * Vault path → pinned paths (M43) — ordered, vault-relative. Workspace
@@ -290,9 +318,6 @@ interface UiState {
    * Intent only — the repo probe decides whether it can actually run. */
   autoCheckpoint: boolean;
   setAutoCheckpoint(v: boolean): void;
-  /** Selected Inbox period pill; persisted so the queue reopens as left. */
-  inboxPeriod: InboxPeriod;
-  setInboxPeriod(v: InboxPeriod): void;
   /**
    * Which capture the Inbox has open. In the store rather than inside the
    * page because the agent has to be able to point the queue at the capture
@@ -302,6 +327,13 @@ interface UiState {
    */
   inboxSelectedPath: string | null;
   setInboxSelectedPath(v: string | null): void;
+  /**
+   * Which panel the Inbox's side slot shows. Its own slot, like the concept
+   * panel's, so filing captures never moves the panel a page left open, and a
+   * capture opens on its Organize section. Session-only.
+   */
+  inboxPanel: PagePanel;
+  setInboxPanel(panel: PagePanel): void;
   /** Identity for OKF actor stamps (M5): written as `human:<id>` when you
    * verify a concept. Per device — it records who reviewed, not who owns. */
   actorId: string;
@@ -309,10 +341,36 @@ interface UiState {
   // --- Local agent (M6) ---
   aiPanelOpen: boolean;
   setAiPanelOpen(v: boolean): void;
-  /** M72: a layout choice, never a second conversation or run. Session-only. */
-  aiPanelPresentation: 'panel' | 'canvas';
+  /** A layout choice, never a second conversation or run. Session-only. */
+  aiPanelPresentation: 'floating' | 'panel' | 'canvas';
+  /** Only the floating conversation folds, onto one round button; its thread,
+   *  composer and live turn stay mounted. */
+  aiPanelMinimized: boolean;
+  setAiPanelMinimized(v: boolean): void;
+  openAssistantFloating(): void;
   openAssistantCanvas(): void;
-  setAiPanelPresentation(v: 'panel' | 'canvas'): void;
+  setAiPanelPresentation(v: 'floating' | 'panel' | 'canvas'): void;
+  /**
+   * Whether the canvas conversation's details rail docks beside its
+   * transcript where the canvas has room for it (M92.1). Persisted under
+   * `cerebro.chatRailOpen`; on unless stored otherwise. Where the rail does
+   * not fit, a person opens it as a drawer for the session (the panel's own
+   * state), and that never writes this.
+   */
+  chatRailOpen: boolean;
+  setChatRailOpen(v: boolean): void;
+  /**
+   * ⌥⌘R's ask, or floating's "Expand with conversation details" (M92.1),
+   * which the panel answers, since only it knows whether its rail fits:
+   * `open` when it came from outside the canvas, `toggle` within it. Memory
+   * only; the panel takes it once (`takeChatRailRequest`).
+   */
+  chatRailRequest: 'open' | 'toggle' | null;
+  /** Show or hide the conversation's details: from outside the canvas, the
+   *  conversation opens in the canvas with them shown. */
+  toggleChatRail(): void;
+  /** The ask, cleared as it is read; null when none. */
+  takeChatRailRequest(): 'open' | 'toggle' | null;
   /** The conversation the panel should show when it next looks (M57.6): the
    * run list names the thread a detached run belongs to. Memory only; the
    * panel takes it once (`takePanelConversation`). */
@@ -330,6 +388,11 @@ interface UiState {
    * `cerebro.agentWebAccess`. */
   agentWebAccess: boolean;
   setAgentWebAccess(v: boolean): void;
+  /** The Subagents switch (M91.2d), the delegate ceiling: may a conversation
+   * you are in hand reading to a researcher that reports back? On unless
+   * stored otherwise. Persisted under `cerebro.agentDelegate`. */
+  agentDelegate: boolean;
+  setAgentDelegate(v: boolean): void;
   /** Let the agent reach the user's own MCP servers (M8.2). Persisted. */
   agentConnectors: boolean;
   setAgentConnectors(v: boolean): void;
@@ -379,7 +442,8 @@ interface UiState {
    * first.
    *
    * M57.5: a list, so a second ask never overwrites the first. The panel
-   * takes each in turn into Up next, which holds it while a turn runs.
+   * sends each in a conversation of its own: the active one while nothing
+   * has happened in it, a new one otherwise.
    *
    * M17.6: each carries its SUBJECT. Six call sites used to hand over a prompt
    * string naming a record and drop the record itself on the floor — so the
@@ -396,7 +460,7 @@ interface UiState {
   handoffs: Handoff[];
   /** The panel attached this handoff's subject as a chip: it clears. */
   markHandoffAttached(id: string): void;
-  /** The panel took this handoff into Up next: it leaves the list. */
+  /** The panel sent this handoff: it leaves the list. */
   takeHandoff(id: string): void;
   /** Open the panel and hand it a prompt about `subject`, shown as `label`.
    * One action because the two halves were always done together, and doing
@@ -542,13 +606,16 @@ export interface ToastItem {
 
 const EXPANDED_KEY = 'cerebro.expandedFolders';
 const PANEL_OPEN_KEY = 'cerebro.docPanelOpen';
-const PANEL_TAB_KEY = 'cerebro.docPanelTab';
+const PANEL_KEY = 'cerebro.docPanelTab';
 const CONCEPT_PANEL_OPEN_KEY = 'cerebro.conceptPanelOpen';
+const INSPECTOR_COLLAPSED_KEY = 'cerebro.inspectorCollapsed';
+const INSPECTOR_EXPANDED_KEY = 'cerebro.inspectorExpanded';
 const PAGES_OPEN_KEY = 'cerebro.docPagesOpen';
 const TREE_ORDER_KEY = 'cerebro.treeOrder';
 const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
 const TYPES_OPEN_KEY = 'cerebro.typesOpen';
 const NAV_CLOSED_KEY = 'cerebro.navClosed';
+const PAGE_TREE_MODE_KEY = 'cerebro.pageTreeMode';
 const FAVORITES_KEY = 'cerebro.favorites';
 const FILE_ICONS_KEY = 'cerebro.workspaceFileIcons';
 const SHOW_IGNORED_KEY = 'cerebro.workspaceShowIgnored';
@@ -556,13 +623,16 @@ const LINE_NUMBERS_KEY = 'cerebro.workspaceLineNumbers';
 const WORD_WRAP_KEY = 'cerebro.workspaceWordWrap';
 const INBOX_ENABLED_KEY = 'cerebro.inboxEnabled';
 const INBOX_ADVANCE_KEY = 'cerebro.inboxAutoAdvance';
-const INBOX_PERIOD_KEY = 'cerebro.inboxPeriod';
+/** The retired Inbox period pills' stored choice, removed once on load. */
+const LEGACY_INBOX_PERIOD_KEY = 'cerebro.inboxPeriod';
 const ACTOR_ID_KEY = 'cerebro.actorId';
 const AI_PANEL_KEY = 'cerebro.aiPanelOpen';
+const CHAT_RAIL_KEY = 'cerebro.chatRailOpen';
 const AGENT_SHELL_KEY = 'cerebro.agentShell';
 /** The boolean M8.1 stored, read once to migrate (M57.2), then removed. */
 const LEGACY_SHELL_KEY = 'cerebro.agentShellAccess';
 const AGENT_WEB_KEY = 'cerebro.agentWebAccess';
+const AGENT_DELEGATE_KEY = 'cerebro.agentDelegate';
 const AGENT_CONNECTORS_KEY = 'cerebro.agentConnectors';
 const ISSUE_PREFIXES_KEY = 'cerebro.issuePrefixes';
 const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
@@ -642,8 +712,12 @@ export const AI_WIDTH_MAX = 720;
  * erro/r/rate") and its review bar, which needs 309px, lost Verify off its
  * right edge. The floors add to more than CANVAS_MIN_WIDTH on purpose — a
  * canvas that cannot hold them folds the panel instead.
+ *
+ * The side panel runs the page's full height, under the toolbar's actions
+ * (components/pageFrame.css), so it never draws narrower than they are: its
+ * floor is the wider of DOC_PANEL_MIN_WIDTH and what they need.
  */
-export const DOC_PANEL_WIDTH = 272;
+export const DOC_PANEL_WIDTH = 300;
 export const DOC_PANEL_MIN_WIDTH = 200;
 export const DOC_PAGES_WIDTH = 216;
 export const DOC_PAGES_MIN_WIDTH = 180;
@@ -653,6 +727,15 @@ function loadNumber(key: string, fallback: number, min: number, max: number): nu
   const raw = Number(loadString(key, String(fallback)));
   if (!Number.isFinite(raw)) return fallback;
   return Math.min(max, Math.max(min, Math.round(raw)));
+}
+
+function loadPageTreeMode(): PageTreeMode {
+  const saved = loadString(PAGE_TREE_MODE_KEY, '');
+  if (saved === 'collections' || saved === 'folders') return saved;
+  // The old sidebar could show both trees. Prefer Collections unless Folders
+  // was the only open tree, without rewriting the folds Home still uses.
+  const closed = loadStringList(NAV_CLOSED_KEY);
+  return closed.includes('collections') && !closed.includes('pages') ? 'folders' : 'collections';
 }
 
 function loadExpanded(): Record<string, boolean> {
@@ -824,17 +907,21 @@ function loadShellCeiling(): ShellCeiling {
   }
 }
 
-function loadPanelTab(): DocPanelTab {
-  const v = loadString(PANEL_TAB_KEY, 'outline');
-  return v === 'info' || v === 'links' || v === 'knowledge' || v === 'comments' || v === 'history'
-    ? v
-    : 'outline';
+/** The stored panel, under the key the inspector's tabs were stored by. The
+ * retired Info, Links and Knowledge tabs are sections of Details now, and the
+ * Outline is on the page, so their stored words read as Details — as does
+ * any word no build knows. */
+function loadPanel(): PagePanel {
+  const v = loadString(PANEL_KEY, 'details');
+  return v === 'comments' || v === 'history' ? v : 'details';
 }
 
-function loadInboxPeriod(): InboxPeriod {
-  const v = loadString(INBOX_PERIOD_KEY, 'all');
-  return v === 'week' || v === 'month' ? v : 'all';
-}
+/** Every reveal's number, so one never repeats in a session — handoffSeq's rule. */
+let revealSeq = 0;
+
+// Removed on load rather than on a write, as LEGACY_SHELL_KEY is: nothing
+// sets this key any more, so no setter would ever clear it.
+removeKey(LEGACY_INBOX_PERIOD_KEY);
 
 let nextToastId = 1;
 
@@ -850,7 +937,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     set((state) => ({
       detailPath: path,
       detailPane: owner,
-      aiPanelPresentation: 'panel',
+      aiPanelPresentation:
+        state.aiPanelPresentation === 'canvas' ? 'floating' : state.aiPanelPresentation,
       detailSiblings:
         state.siblingsByPane[owner ?? '*'] ??
         (owner === null ? state.detailSiblings : (state.siblingsByPane['*'] ?? [])),
@@ -924,7 +1012,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   setQuickOpen: (v) => set({ quickOpenVisible: v }),
 
   // Stored as the bare word, matching every other scalar preference here
-  // (docPanelTab, inboxPeriod) — the pre-paint script in index.html reads it
+  // (docPanel, pageTreeMode) — the pre-paint script in index.html reads it
   // with a plain getItem, so a JSON-quoted value would cost it a parse it has
   // no business doing. Anything unrecognised reads back as 'system'.
   themeMode: asThemeMode(loadString(THEME_MODE_KEY, 'system')),
@@ -990,22 +1078,55 @@ export const useUiStore = create<UiState>((set, get) => ({
       return { treeOrder: next };
     }),
 
-  docPanelOpen: loadString(PANEL_OPEN_KEY, 'true') === 'true',
+  docPanelOpen: loadString(PANEL_OPEN_KEY, 'false') === 'true',
   setDocPanelOpen: (v) => {
     storeString(PANEL_OPEN_KEY, String(v));
     set({ docPanelOpen: v });
   },
-  docPanelTab: loadPanelTab(),
-  setDocPanelTab: (tab) => {
-    storeString(PANEL_TAB_KEY, tab);
-    set({ docPanelTab: tab });
+  docPanel: loadPanel(),
+  setDocPanel: (panel) => {
+    storeString(PANEL_KEY, panel);
+    set({ docPanel: panel });
   },
-  conceptPanelTab: 'details',
-  setConceptPanelTab: (tab) => set({ conceptPanelTab: tab }),
+  conceptPanel: 'details',
+  setConceptPanel: (panel) => set({ conceptPanel: panel }),
   conceptPanelOpen: loadString(CONCEPT_PANEL_OPEN_KEY, 'false') === 'true',
   setConceptPanelOpen: (v) => {
     storeString(CONCEPT_PANEL_OPEN_KEY, String(v));
     set({ conceptPanelOpen: v });
+  },
+  inspectorCollapsed: loadStringList(INSPECTOR_COLLAPSED_KEY),
+  inspectorExpanded: loadStringList(INSPECTOR_EXPANDED_KEY),
+  setInspectorSectionOpen: (id, open) => {
+    const { inspectorCollapsed, inspectorExpanded } = get();
+    const collapsed = open
+      ? inspectorCollapsed.filter((k) => k !== id)
+      : [...new Set([...inspectorCollapsed, id])];
+    const expanded = open
+      ? [...new Set([...inspectorExpanded, id])]
+      : inspectorExpanded.filter((k) => k !== id);
+    storeString(INSPECTOR_COLLAPSED_KEY, JSON.stringify(collapsed));
+    storeString(INSPECTOR_EXPANDED_KEY, JSON.stringify(expanded));
+    set({ inspectorCollapsed: collapsed, inspectorExpanded: expanded });
+  },
+  inspectorReveal: null,
+  // Stored as setDocPanel and setDocPanelOpen store them: the panel an ask
+  // opened is the panel the next launch restores.
+  revealInspectorSection: (id, pane = null) => {
+    revealSeq += 1;
+    const collapsed = get().inspectorCollapsed.filter((k) => k !== id);
+    const expanded = [...new Set([...get().inspectorExpanded, id])];
+    storeString(PANEL_KEY, 'details');
+    storeString(PANEL_OPEN_KEY, 'true');
+    storeString(INSPECTOR_COLLAPSED_KEY, JSON.stringify(collapsed));
+    storeString(INSPECTOR_EXPANDED_KEY, JSON.stringify(expanded));
+    set({
+      docPanel: 'details',
+      docPanelOpen: true,
+      inspectorCollapsed: collapsed,
+      inspectorExpanded: expanded,
+      inspectorReveal: { id, seq: revealSeq, pane },
+    });
   },
   docPagesOpen: loadString(PAGES_OPEN_KEY, 'true') === 'true',
   setDocPagesOpen: (v) => {
@@ -1032,6 +1153,11 @@ export const useUiStore = create<UiState>((set, get) => ({
     const next = open ? closed.filter((k) => k !== key) : [...new Set([...closed, key])];
     storeString(NAV_CLOSED_KEY, JSON.stringify(next));
     set({ navClosed: next });
+  },
+  pageTreeMode: loadPageTreeMode(),
+  setPageTreeMode: (mode) => {
+    storeString(PAGE_TREE_MODE_KEY, mode);
+    set({ pageTreeMode: mode });
   },
 
   favorites: loadStringListMap(FAVORITES_KEY),
@@ -1100,13 +1226,10 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(INBOX_ADVANCE_KEY, String(v));
     set({ inboxAutoAdvance: v });
   },
-  inboxPeriod: loadInboxPeriod(),
-  setInboxPeriod: (v) => {
-    storeString(INBOX_PERIOD_KEY, v);
-    set({ inboxPeriod: v });
-  },
   inboxSelectedPath: null,
   setInboxSelectedPath: (v) => set({ inboxSelectedPath: v }),
+  inboxPanel: 'details',
+  setInboxPanel: (panel) => set({ inboxPanel: panel }),
 
   actorId: loadString(ACTOR_ID_KEY, 'me'),
   setActorId: (v) => {
@@ -1114,13 +1237,40 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ actorId: v });
   },
 
-  aiPanelOpen: loadString(AI_PANEL_KEY, 'false') === 'true',
-  aiPanelPresentation: 'panel',
+  aiPanelOpen: loadString(AI_PANEL_KEY, 'true') === 'true',
+  aiPanelPresentation: 'floating',
+  aiPanelMinimized: true,
+  setAiPanelMinimized: (v) => set({ aiPanelMinimized: v }),
+  openAssistantFloating: () => {
+    storeString(AI_PANEL_KEY, 'true');
+    set({ aiPanelOpen: true, aiPanelPresentation: 'floating', aiPanelMinimized: false });
+  },
   openAssistantCanvas: () => {
     storeString(AI_PANEL_KEY, 'true');
-    set({ aiPanelOpen: true, aiPanelPresentation: 'canvas' });
+    set({ aiPanelOpen: true, aiPanelPresentation: 'canvas', aiPanelMinimized: false });
   },
-  setAiPanelPresentation: (v) => set({ aiPanelPresentation: v }),
+  setAiPanelPresentation: (v) => set({ aiPanelPresentation: v, aiPanelMinimized: false }),
+  chatRailOpen: loadString(CHAT_RAIL_KEY, 'true') === 'true',
+  setChatRailOpen: (v) => {
+    storeString(CHAT_RAIL_KEY, String(v));
+    set({ chatRailOpen: v });
+  },
+  chatRailRequest: null,
+  toggleChatRail: () => {
+    storeString(AI_PANEL_KEY, 'true');
+    set((state) => ({
+      aiPanelOpen: true,
+      aiPanelPresentation: 'canvas',
+      aiPanelMinimized: false,
+      chatRailRequest:
+        state.aiPanelOpen && state.aiPanelPresentation === 'canvas' ? 'toggle' : 'open',
+    }));
+  },
+  takeChatRailRequest: () => {
+    const ask = get().chatRailRequest;
+    if (ask !== null) set({ chatRailRequest: null });
+    return ask;
+  },
   setAiPanelOpen: (v) => {
     storeString(AI_PANEL_KEY, String(v));
     // M17.2: the other half of the one-slot rule, and the other half of the
@@ -1130,13 +1280,14 @@ export const useUiStore = create<UiState>((set, get) => ({
     // so only whatever was baked into the prompt string survived.
     set((state) => ({
       aiPanelOpen: v,
-      aiPanelPresentation: v ? state.aiPanelPresentation : 'panel',
+      aiPanelPresentation: v ? state.aiPanelPresentation : 'floating',
+      aiPanelMinimized: !v,
     }));
   },
   panelConversation: null,
   showConversation: (id) => {
     storeString(AI_PANEL_KEY, 'true');
-    set({ aiPanelOpen: true, panelConversation: id });
+    set({ aiPanelOpen: true, aiPanelMinimized: false, panelConversation: id });
   },
   takePanelConversation: () => {
     const id = get().panelConversation;
@@ -1165,6 +1316,14 @@ export const useUiStore = create<UiState>((set, get) => ({
   setAgentConnectors: (v) => {
     storeString(AGENT_CONNECTORS_KEY, String(v));
     set({ agentConnectors: v });
+  },
+  // On unless stored (M91.2d), the default Rust gives a watched run: a
+  // researcher only reads, and only where a person watches. A stored value
+  // but 'true' reads off, so one this build does not know never widens.
+  agentDelegate: loadString(AGENT_DELEGATE_KEY, 'true') === 'true',
+  setAgentDelegate: (v) => {
+    storeString(AGENT_DELEGATE_KEY, String(v));
+    set({ agentDelegate: v });
   },
   panelAgents: {},
   panelAgentsUnreadable: {},
@@ -1226,7 +1385,11 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(AI_PANEL_KEY, 'true');
     handoffSeq += 1;
     const handoff: Handoff = { id: `handoff-${handoffSeq}`, text, subject, label };
-    set((s) => ({ aiPanelOpen: true, handoffs: [...s.handoffs, handoff] }));
+    set((s) => ({
+      aiPanelOpen: true,
+      aiPanelMinimized: false,
+      handoffs: [...s.handoffs, handoff],
+    }));
   },
   settingsFocus: null,
   setSettingsFocus: (v) => set({ settingsFocus: v }),

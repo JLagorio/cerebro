@@ -198,9 +198,10 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
                   testId="layout-preview-picker"
                   ariaLabel="Preview record"
                   size="sm"
+                  variant="ghost"
                   options={roster.map((e) => ({ value: e.path, label: e.title }))}
                   value={previewEntry.path}
-                  onChange={(e) => setPicked(e.target.value)}
+                  onChange={setPicked}
                 />
               </span>
             )}

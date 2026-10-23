@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PropertyRow, PROPERTY_LABEL_W } from '@/detail/PropertyRow';
+import { PropertyRow, PROPERTY_LABEL_W, PROPERTY_LABEL_WIDTH } from '@/detail/PropertyRow';
 import type { GripProps } from '@/hooks/useSortableList';
 import { kindMeta } from '@/engine/properties';
 import { FIELD_KINDS } from '@/engine/types';
@@ -70,7 +70,8 @@ describe('PropertyRow', () => {
       </PropertyRow>,
     );
     const cell = labelCell();
-    expect(cell.style.width).toBe(`${PROPERTY_LABEL_W}px`);
+    expect(cell.style.width).toBe(PROPERTY_LABEL_WIDTH);
+    expect(PROPERTY_LABEL_WIDTH).toBe(`var(--property-label-w, ${PROPERTY_LABEL_W}px)`);
     expect(cell.className).toContain('flex-none');
     const text = within(cell).getByText('An extremely long property name indeed');
     expect(text.className).toContain('truncate');
@@ -222,7 +223,7 @@ describe('PropertyRow', () => {
     // has made taller — it does not stretch and it does not centre against a
     // three-line block. `pt-[3px]` did this by hand before the cell had a
     // height of its own (M46.2 Task 7).
-    expect(labelCell().className).toContain('min-h-[34px]');
+    expect(labelCell().className).toContain('min-h-[var(--property-row-h,34px)]');
     expect(labelCell().className).toContain('items-center');
 
     rerender(
@@ -279,10 +280,10 @@ describe('PropertyRow', () => {
     );
     // 38px pitch = 34 + 4, and the 4 is the CONTAINER's gap — never padding
     // on the row, or the gap would be part of the hover target.
-    expect(row().className).toContain('min-h-[34px]');
+    expect(row().className).toContain('min-h-[var(--property-row-h,34px)]');
     expect(row().className).not.toContain('py-');
     expect(row().className).not.toContain('h-[38px]');
-    expect(labelCell().className).toContain('min-h-[34px]');
+    expect(labelCell().className).toContain('min-h-[var(--property-row-h,34px)]');
   });
 
   it('wears the measured label cell: 6px padding, 6px radius, no selecting (§A3)', () => {
@@ -323,8 +324,7 @@ describe('PropertyRow', () => {
       </PropertyRow>,
     );
     const name = screen.getByText('A');
-    expect(name.className).toContain('text-md');
-    expect(name.className).toContain('leading-md');
+    expect(name.className).toContain('text-ui');
     expect(name.className).not.toContain('font-medium');
     expect(name.className).toContain('truncate');
     // The gap belongs to the value column as a margin, not to the row as a

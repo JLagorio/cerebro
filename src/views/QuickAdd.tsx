@@ -1,5 +1,5 @@
 import type { TimeSlot } from '@/engine/timeGrid';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { useOpenPath } from '@/app/useOpenPath';
 import { createTarget, type FiledUnder } from '@/engine/createRecord';
@@ -111,13 +111,19 @@ export function QuickAddInline({
   ariaLabel,
   onCreate,
   compact = false,
+  initiallyEditing = false,
+  onClose,
 }: {
   label?: string;
   ariaLabel: string;
   onCreate: (title: string) => Promise<boolean>;
   compact?: boolean;
+  /** A group heading can open this draft directly instead of a second button. */
+  initiallyEditing?: boolean;
+  onClose?: (restoreFocus: boolean) => void;
 }) {
-  const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [editing, setEditing] = useState(initiallyEditing);
   const [title, setTitle] = useState('');
   // Double-Enter while the write is pending must not create two records.
   const [submitting, setSubmitting] = useState(false);
@@ -130,6 +136,7 @@ export function QuickAddInline({
     if (ok) {
       setTitle('');
       setEditing(false);
+      onClose?.(document.activeElement === inputRef.current);
     }
     // On failure the draft stays editable for retry.
   };
@@ -155,6 +162,7 @@ export function QuickAddInline({
     <div className={`flex ${height} items-center gap-2 border-b border-n-100 px-3`}>
       <Icon name="plus" size={13} color="var(--n-400)" />
       <input
+        ref={inputRef}
         autoFocus
         value={title}
         onChange={(e) => setTitle(e.target.value)}
@@ -163,6 +171,7 @@ export function QuickAddInline({
           if (e.key === 'Escape') {
             setTitle('');
             setEditing(false);
+            onClose?.(document.activeElement === inputRef.current);
           }
         }}
         placeholder="Title — Enter to create"

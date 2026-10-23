@@ -24,31 +24,36 @@
         {
           "kind": "Text",
           "message_id": "msg_000000000000000000000001",
-          "text": "Reading both notes."
+          "text": "Reading both notes.",
+          "at": "2026-07-28T12:00:05.000Z"
         },
         {
           "kind": "ToolStart",
           "tool_name": "Read",
           "tool_id": "toolu_000000000000000000000001",
-          "input": "{\"file_path\":\"/vault/a.md\"}"
+          "input": "{\"file_path\":\"/vault/a.md\"}",
+          "at": "2026-07-28T12:00:06.000Z"
         },
         {
           "kind": "ToolStart",
           "tool_name": "Read",
           "tool_id": "toolu_000000000000000000000002",
-          "input": "{\"file_path\":\"/vault/b.md\"}"
+          "input": "{\"file_path\":\"/vault/b.md\"}",
+          "at": "2026-07-28T12:00:07.000Z"
         },
         {
           "kind": "ToolDone",
           "tool_id": "toolu_000000000000000000000001",
           "output": "1\t# A\n2\talpha",
-          "is_error": false
+          "is_error": false,
+          "at": "2026-07-28T12:00:08.000Z"
         },
         {
           "kind": "ToolDone",
           "tool_id": "toolu_000000000000000000000002",
           "output": "1\t# B\n2\tbeta",
-          "is_error": false
+          "is_error": false,
+          "at": "2026-07-28T12:00:09.000Z"
         },
         {
           "kind": "TextDelta",
@@ -57,16 +62,19 @@
         {
           "kind": "Text",
           "message_id": "msg_000000000000000000000002",
-          "text": "done"
+          "text": "done",
+          "at": "2026-07-28T12:00:10.000Z"
         },
         {
           "kind": "Result",
           "text": "done",
-          "session_id": "00000000-0000-4000-8000-000000000001"
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "duration_ms": 2400
         },
         {
           "kind": "TurnEnded",
-          "stop_reason": "end_turn"
+          "stop_reason": "end_turn",
+          "last_uuid": "00000000-0000-4000-8000-000000000015"
         }
       ],
       "classes": {
@@ -105,16 +113,19 @@
         {
           "kind": "Text",
           "message_id": "msg_000000000000000000000003",
-          "text": "all done"
+          "text": "all done",
+          "at": "2026-07-28T12:00:15.000Z"
         },
         {
           "kind": "Result",
           "text": "all done",
-          "session_id": "00000000-0000-4000-8000-000000000001"
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "duration_ms": 2400
         },
         {
           "kind": "TurnEnded",
-          "stop_reason": "end_turn"
+          "stop_reason": "end_turn",
+          "last_uuid": "00000000-0000-4000-8000-000000000022"
         }
       ],
       "classes": {
@@ -136,7 +147,8 @@
     "events": [
       {
         "kind": "UserPrompt",
-        "text": "Read a.md and b.md with the Read tool, then answer with the single word done."
+        "text": "Read a.md and b.md with the Read tool, then answer with the single word done.",
+        "uuid": "00000000-0000-4000-8000-000000000001"
       },
       {
         "kind": "ModelChanged",
@@ -145,43 +157,51 @@
       {
         "kind": "Text",
         "message_id": "msg_000000000000000000000001",
-        "text": "Reading both notes."
+        "text": "Reading both notes.",
+        "at": "2026-07-28T12:00:05.000Z"
       },
       {
         "kind": "ToolStart",
         "tool_name": "Read",
         "tool_id": "toolu_000000000000000000000001",
-        "input": "{\"file_path\":\"/vault/a.md\"}"
+        "input": "{\"file_path\":\"/vault/a.md\"}",
+        "at": "2026-07-28T12:00:06.000Z"
       },
       {
         "kind": "ToolStart",
         "tool_name": "Read",
         "tool_id": "toolu_000000000000000000000002",
-        "input": "{\"file_path\":\"/vault/b.md\"}"
+        "input": "{\"file_path\":\"/vault/b.md\"}",
+        "at": "2026-07-28T12:00:07.000Z"
       },
       {
         "kind": "ToolDone",
         "tool_id": "toolu_000000000000000000000001",
         "output": "1\t# A\n2\talpha",
-        "is_error": false
+        "is_error": false,
+        "at": "2026-07-28T12:00:08.000Z"
       },
       {
         "kind": "ToolDone",
         "tool_id": "toolu_000000000000000000000002",
         "output": "1\t# B\n2\tbeta",
-        "is_error": false
+        "is_error": false,
+        "at": "2026-07-28T12:00:09.000Z"
       },
       {
         "kind": "Text",
         "message_id": "msg_000000000000000000000002",
-        "text": "done"
+        "text": "done",
+        "at": "2026-07-28T12:00:10.000Z"
       },
       {
-        "kind": "TurnEnded"
+        "kind": "TurnEnded",
+        "last_uuid": "00000000-0000-4000-8000-000000000015"
       },
       {
         "kind": "UserPrompt",
-        "text": "Now answer with the two words all done."
+        "text": "Now answer with the two words all done.",
+        "uuid": "00000000-0000-4000-8000-000000000020"
       },
       {
         "kind": "ModelChanged",
@@ -190,10 +210,12 @@
       {
         "kind": "Text",
         "message_id": "msg_000000000000000000000003",
-        "text": "all done"
+        "text": "all done",
+        "at": "2026-07-28T12:00:15.000Z"
       },
       {
-        "kind": "TurnEnded"
+        "kind": "TurnEnded",
+        "last_uuid": "00000000-0000-4000-8000-000000000022"
       }
     ],
     "classes": {
@@ -243,7 +265,8 @@
           "text": "done"
         },
         {
-          "kind": "TurnEnded"
+          "kind": "TurnEnded",
+          "last_uuid": "00000000-0000-4000-8000-000000000015"
         }
       ]
     },
@@ -255,7 +278,8 @@
           "text": "all done"
         },
         {
-          "kind": "TurnEnded"
+          "kind": "TurnEnded",
+          "last_uuid": "00000000-0000-4000-8000-000000000022"
         }
       ]
     }

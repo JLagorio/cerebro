@@ -1,0 +1,414 @@
+{
+  "case": "todos",
+  "cli_version": "2.1.250",
+  "streams": [
+    {
+      "file": "transcript-todos.stream.json",
+      "events": [
+        {
+          "kind": "Init",
+          "session_id": "00000000-0000-4000-8000-000000009200"
+        },
+        {
+          "kind": "ModelChanged",
+          "model": "claude-haiku-4-5-20251001"
+        },
+        {
+          "kind": "Thinking",
+          "message_id": "msg_000000000000000000009201",
+          "text": "",
+          "at": "2026-10-22T12:00:02.000Z"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "ToolSearch",
+          "tool_id": "toolu_000000000000000000009201",
+          "input": "{\"query\":\"select:TodoWrite\",\"max_results\":1}",
+          "at": "2026-10-22T12:00:02.200Z"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009201",
+          "output": null,
+          "is_error": false,
+          "at": "2026-10-22T12:00:02.300Z"
+        },
+        {
+          "kind": "Thinking",
+          "message_id": "msg_000000000000000000009202",
+          "text": "",
+          "at": "2026-10-22T12:00:03.000Z"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "TodoWrite",
+          "tool_id": "toolu_000000000000000000009202",
+          "input": "{\"todos\":[{\"content\":\"List the inbox\",\"status\":\"in_progress\",\"activeForm\":\"Listing the inbox\"},{\"content\":\"File each capture\",\"status\":\"pending\",\"activeForm\":\"Filing each capture\"}]}",
+          "at": "2026-10-22T12:00:03.400Z"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009202",
+          "output": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable",
+          "is_error": false,
+          "at": "2026-10-22T12:00:03.500Z"
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009202",
+          "data": {
+            "type": "todos",
+            "todos": [
+              {
+                "content": "List the inbox",
+                "status": "in_progress",
+                "active_form": "Listing the inbox"
+              },
+              {
+                "content": "File each capture",
+                "status": "pending",
+                "active_form": "Filing each capture"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__cerebro__list_inbox",
+          "tool_id": "toolu_000000000000000000009203",
+          "input": "{}",
+          "at": "2026-10-22T12:00:04.000Z"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009203",
+          "output": "Two captures: inbox/call-vendor.md and inbox/book-venue.md.",
+          "is_error": false,
+          "at": "2026-10-22T12:00:04.200Z"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "TodoWrite",
+          "tool_id": "toolu_000000000000000000009204",
+          "input": "{\"todos\":[{\"content\":\"List the inbox\",\"status\":\"completed\",\"activeForm\":\"Listing the inbox\"},{\"content\":\"File each capture\",\"status\":\"completed\",\"activeForm\":\"Filing each capture\"}]}",
+          "at": "2026-10-22T12:00:05.000Z"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009204",
+          "output": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable",
+          "is_error": false,
+          "at": "2026-10-22T12:00:05.100Z"
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009204",
+          "data": {
+            "type": "todos",
+            "todos": [
+              {
+                "content": "List the inbox",
+                "status": "completed",
+                "active_form": "Listing the inbox"
+              },
+              {
+                "content": "File each capture",
+                "status": "completed",
+                "active_form": "Filing each capture"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "TextDelta",
+          "text": "Both done: the inbox holds"
+        },
+        {
+          "kind": "TextDelta",
+          "text": " two captures, each filed."
+        },
+        {
+          "kind": "Text",
+          "message_id": "msg_000000000000000000009205",
+          "text": "Both done: the inbox holds two captures, each filed.",
+          "at": "2026-10-22T12:00:06.000Z"
+        },
+        {
+          "kind": "Result",
+          "text": "Both done: the inbox holds two captures, each filed.",
+          "session_id": "00000000-0000-4000-8000-000000009200",
+          "duration_ms": 9000
+        },
+        {
+          "kind": "TurnEnded",
+          "stop_reason": "end_turn",
+          "last_uuid": "00000000-0000-4000-8000-000009200111"
+        }
+      ],
+      "classes": {
+        "translated": 19,
+        "ignored": {
+          "a block closing, with nothing new in it": 7,
+          "a block opening; its content follows as deltas, or whole on the assistant line": 7,
+          "a progress word such as requesting; the panel shows its own": 5,
+          "a running estimate of the thinking tokens, sent beside each thinking delta; the result carries the usage": 4,
+          "a thinking block's signature, with nothing to show": 2,
+          "a tool call's input in pieces; the assistant line carries it whole": 4,
+          "the turn's end, with nothing new in it": 5,
+          "the turn's model and opening usage; the assistant line and the result carry both": 5,
+          "the turn's stop reason and running usage; the assistant line and the result carry both": 5
+        },
+        "unclassified": {}
+      }
+    }
+  ],
+  "session": {
+    "file": "transcript-todos.session.json",
+    "events": [
+      {
+        "kind": "UserPrompt",
+        "text": "Make a todo list for tidying the inbox, then work through it.",
+        "uuid": "00000000-0000-4000-8000-000009200002"
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "Thinking",
+        "message_id": "msg_000000000000000000009201",
+        "text": "",
+        "at": "2026-10-22T12:00:02.000Z"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "ToolSearch",
+        "tool_id": "toolu_000000000000000000009201",
+        "input": "{\"query\":\"select:TodoWrite\",\"max_results\":1}",
+        "at": "2026-10-22T12:00:02.200Z"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000009201",
+        "output": null,
+        "is_error": false,
+        "at": "2026-10-22T12:00:02.300Z"
+      },
+      {
+        "kind": "Thinking",
+        "message_id": "msg_000000000000000000009202",
+        "text": "",
+        "at": "2026-10-22T12:00:03.000Z"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "TodoWrite",
+        "tool_id": "toolu_000000000000000000009202",
+        "input": "{\"todos\":[{\"content\":\"List the inbox\",\"status\":\"in_progress\",\"activeForm\":\"Listing the inbox\"},{\"content\":\"File each capture\",\"status\":\"pending\",\"activeForm\":\"Filing each capture\"}]}",
+        "at": "2026-10-22T12:00:03.400Z"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000009202",
+        "output": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable",
+        "is_error": false,
+        "at": "2026-10-22T12:00:03.500Z"
+      },
+      {
+        "kind": "ToolResult",
+        "tool_id": "toolu_000000000000000000009202",
+        "data": {
+          "type": "todos",
+          "todos": [
+            {
+              "content": "List the inbox",
+              "status": "in_progress",
+              "active_form": "Listing the inbox"
+            },
+            {
+              "content": "File each capture",
+              "status": "pending",
+              "active_form": "Filing each capture"
+            }
+          ]
+        }
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "mcp__cerebro__list_inbox",
+        "tool_id": "toolu_000000000000000000009203",
+        "input": "{}",
+        "at": "2026-10-22T12:00:04.000Z"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000009203",
+        "output": "Two captures: inbox/call-vendor.md and inbox/book-venue.md.",
+        "is_error": false,
+        "at": "2026-10-22T12:00:04.200Z"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "TodoWrite",
+        "tool_id": "toolu_000000000000000000009204",
+        "input": "{\"todos\":[{\"content\":\"List the inbox\",\"status\":\"completed\",\"activeForm\":\"Listing the inbox\"},{\"content\":\"File each capture\",\"status\":\"completed\",\"activeForm\":\"Filing each capture\"}]}",
+        "at": "2026-10-22T12:00:05.000Z"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000009204",
+        "output": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable",
+        "is_error": false,
+        "at": "2026-10-22T12:00:05.100Z"
+      },
+      {
+        "kind": "ToolResult",
+        "tool_id": "toolu_000000000000000000009204",
+        "data": {
+          "type": "todos",
+          "todos": [
+            {
+              "content": "List the inbox",
+              "status": "completed",
+              "active_form": "Listing the inbox"
+            },
+            {
+              "content": "File each capture",
+              "status": "completed",
+              "active_form": "Filing each capture"
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000009205",
+        "text": "Both done: the inbox holds two captures, each filed.",
+        "at": "2026-10-22T12:00:06.000Z"
+      },
+      {
+        "kind": "TurnEnded",
+        "last_uuid": "00000000-0000-4000-8000-000009200111"
+      }
+    ],
+    "classes": {
+      "translated": 12,
+      "ignored": {
+        "a prompt entering or leaving the CLI's queue; the prompt line follows": 2,
+        "the last prompt again, for the CLI's own resume picker": 1
+      },
+      "unclassified": {}
+    }
+  },
+  "content": [
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "Thinking",
+          "text": "",
+          "redacted": false
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "ToolSearch",
+          "tool_id": "toolu_000000000000000000009201",
+          "input": "{\"query\":\"select:TodoWrite\",\"max_results\":1}"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009201",
+          "output": null,
+          "is_error": false
+        },
+        {
+          "kind": "Thinking",
+          "text": "",
+          "redacted": false
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "TodoWrite",
+          "tool_id": "toolu_000000000000000000009202",
+          "input": "{\"todos\":[{\"content\":\"List the inbox\",\"status\":\"in_progress\",\"activeForm\":\"Listing the inbox\"},{\"content\":\"File each capture\",\"status\":\"pending\",\"activeForm\":\"Filing each capture\"}]}"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009202",
+          "output": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable",
+          "is_error": false
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009202",
+          "data": {
+            "type": "todos",
+            "todos": [
+              {
+                "content": "List the inbox",
+                "status": "in_progress",
+                "active_form": "Listing the inbox"
+              },
+              {
+                "content": "File each capture",
+                "status": "pending",
+                "active_form": "Filing each capture"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__cerebro__list_inbox",
+          "tool_id": "toolu_000000000000000000009203",
+          "input": "{}"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009203",
+          "output": "Two captures: inbox/call-vendor.md and inbox/book-venue.md.",
+          "is_error": false
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "TodoWrite",
+          "tool_id": "toolu_000000000000000000009204",
+          "input": "{\"todos\":[{\"content\":\"List the inbox\",\"status\":\"completed\",\"activeForm\":\"Listing the inbox\"},{\"content\":\"File each capture\",\"status\":\"completed\",\"activeForm\":\"Filing each capture\"}]}"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009204",
+          "output": "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable",
+          "is_error": false
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009204",
+          "data": {
+            "type": "todos",
+            "todos": [
+              {
+                "content": "List the inbox",
+                "status": "completed",
+                "active_form": "Listing the inbox"
+              },
+              {
+                "content": "File each capture",
+                "status": "completed",
+                "active_form": "Filing each capture"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "Text",
+          "text": "Both done: the inbox holds two captures, each filed."
+        },
+        {
+          "kind": "TurnEnded",
+          "last_uuid": "00000000-0000-4000-8000-000009200111"
+        }
+      ]
+    }
+  ]
+}

@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
-import { Button } from '@/components/ui/Button';
+import { distillAsk, sendAsk } from '@/agent/elements/decisionsAsks';
+import { Suggestion, Suggestions } from '@/components/ai/Suggestion';
 import { Icon } from '@/components/ui/Icon';
 import { isBeingRead } from '@/agent/runs';
 import { commitOf, listConcepts, type CommitState } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { relativeDay } from '@/knowledge/KnowledgePanel';
 import { ingestItemState } from '@/lib/ipc';
-import { askedAbout, DISTILL_LABEL, distillPrompt } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -131,13 +131,7 @@ export function KnowledgeCommit({
       ? commit.concepts.filter((c) => !exclude.has(c.entry.path))
       : commit.concepts;
 
-  const distill = () => {
-    askAgent(
-      distillPrompt(entry.path, entry.title),
-      entry.path,
-      askedAbout(DISTILL_LABEL, entry.title),
-    );
-  };
+  const distill = distillAsk(entry);
 
   return (
     <section
@@ -164,8 +158,34 @@ export function KnowledgeCommit({
             Nothing has been distilled from this note yet.
           </p>
         )
+      ) : embedded ? (
+        // The inspector's rows (owner, 2026-10-18): one line each, the text
+        // on the section's edge, the hover washing past it, the concept's
+        // own summary its tooltip, as the dossier's rows beside it read.
+        <ul className="-mx-2 flex flex-col gap-px">
+          {rows.map((concept) => (
+            <li key={concept.entry.path}>
+              <button
+                type="button"
+                data-testid="committed-concept"
+                data-path={concept.entry.path}
+                title={concept.description ?? undefined}
+                onClick={() => navigate({ kind: 'doc', path: concept.entry.path })}
+                className="flex h-7 w-full min-w-0 items-center gap-2 rounded-md bg-transparent px-2 text-left hover:bg-n-50"
+              >
+                <Icon name="lightbulb" size={14} color="var(--n-400)" />
+                <span className="min-w-0 flex-1 truncate text-ui text-n-800">{concept.title}</span>
+                {concept.stale && (
+                  <span title="Due a recheck" className="flex flex-none">
+                    <Icon name="clock-alert" size={14} color="var(--warn-600)" />
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
       ) : (
-        <ul className={`m-0 flex list-none flex-col gap-px p-0 ${embedded ? '' : 'mt-2'}`}>
+        <ul className="m-0 mt-2 flex list-none flex-col gap-px p-0">
           {rows.map((concept) => (
             <li key={concept.entry.path}>
               <button
@@ -184,11 +204,18 @@ export function KnowledgeCommit({
         </ul>
       )}
 
-      {commit.state === 'behind' && (
-        <p className="m-0 mt-1.5 px-2 text-xs leading-[16px] text-n-500">
-          The bundle is still reading the version from {learned}.
-        </p>
-      )}
+      {commit.state === 'behind' &&
+        (embedded ? (
+          // No heading says it here, so the line does, in the heading's words.
+          <p className="mt-1.5 flex items-center gap-1.5 text-metadata text-n-500 first:mt-0">
+            <Icon name={heading.icon} size={14} color={heading.color} />
+            {learned === null ? heading.label : `${heading.label} ${learned}`}
+          </p>
+        ) : (
+          <p className="m-0 mt-1.5 px-2 text-xs leading-[16px] text-n-500">
+            The bundle is still reading the version from {learned}.
+          </p>
+        ))}
 
       {/* M8.6 — where "the base is working on it" is allowed to appear: on
           the note it concerns, while you are looking at it. Not a badge, not
@@ -196,28 +223,28 @@ export function KnowledgeCommit({
       {queued && (
         <p
           data-testid="learn-queued"
-          className="m-0 mt-1.5 flex items-center gap-1.5 px-2 text-xs text-cortex-600"
+          className={`mt-1.5 flex items-center gap-1.5 text-cortex-600 ${
+            embedded ? 'text-metadata first:mt-0' : 'm-0 px-2 text-xs'
+          }`}
         >
           {/* M15: it turns while a read is actually in flight. */}
           <span className={reading ? 'inline-flex animate-spin' : 'inline-flex'}>
-            <Icon name="loader" size={11} />
+            <Icon name="loader" size={embedded ? 14 : 11} />
           </span>
           {reading ? 'Reading this now' : 'Queued to be read'}
         </p>
       )}
 
       {!embedded && (
-        <div className="mt-2.5">
-          <Button
-            variant={commit.state === 'committed' ? 'ghost' : 'secondary'}
-            size="sm"
-            icon="brain"
+        <Suggestions aria-label="Ask Knowledge" className="mt-2.5">
+          <Suggestion
+            suggestion={distill.prompt}
             disabled={queued}
-            onClick={distill}
+            onClick={sendAsk(distill, askAgent)}
           >
-            {DISTILL_LABEL}
-          </Button>
-        </div>
+            {distill.label}
+          </Suggestion>
+        </Suggestions>
       )}
     </section>
   );

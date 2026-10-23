@@ -1,3 +1,4 @@
+import { runStatus } from '@/agent/elements/runs';
 import type { BandContext } from '@/engine/dateBuckets';
 import { runRows } from '@/engine/homeLanes';
 import { backSection, sectionize } from '@/engine/homeSections';
@@ -10,6 +11,11 @@ import { EventRow } from './EventRow';
 import { Lane } from './Lane';
 import { useHomeDone } from './useHomeDone';
 
+/**
+ * Home's Agents lane (M64.4): each agent's latest finished run since it was
+ * marked done, as a trace line in its outcome's state (M91.14), why it
+ * started under its name, and Done beside it.
+ */
 export function RunsLane({ now, ctx }: { now: Date; ctx: BandContext }) {
   const vault = useVaultStore((s) => s.vaultPath);
   const entries = useVaultStore((s) => s.entries);
@@ -57,6 +63,7 @@ export function RunsLane({ now, ctx }: { now: Date; ctx: BandContext }) {
             row={row}
             ready={done.ready}
             done={done.done}
+            line={run === undefined ? undefined : runStatus(run.outcome)}
             onOpen={() =>
               useNavStore
                 .getState()
@@ -67,7 +74,9 @@ export function RunsLane({ now, ctx }: { now: Date; ctx: BandContext }) {
                 )
             }
           >
-            <RunWhy cause={run?.cause} startedAt={run?.started_at ?? ''} />
+            <span className={run === undefined ? 'flex' : 'cb-run-extra flex'}>
+              <RunWhy cause={run?.cause} startedAt={run?.started_at ?? ''} />
+            </span>
           </EventRow>
         );
       }}

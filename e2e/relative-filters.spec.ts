@@ -26,13 +26,17 @@ test('relative due filters show the named days and save tokens as plain strings'
   await boot(page);
   await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
-  await page.getByTestId('view-control-filter').click();
-  await page.getByLabel('Filter by…').fill('Due');
+  await page.getByRole('button', { name: 'View options', exact: true }).click();
+  const settings = page.getByTestId('view-settings-panel');
+  await settings.getByRole('button', { name: 'Filter', exact: true }).click();
+  await settings.getByRole('button', { name: 'Add filter', exact: true }).click();
+  await settings.getByRole('button', { name: 'Filter property', exact: true }).click();
   await page
-    .locator('div', { has: page.getByLabel('Filter by…') })
-    .last()
-    .getByRole('button', { name: 'Due', exact: true })
+    .getByRole('listbox', { name: 'Filter property' })
+    .getByRole('option', { name: 'Due', exact: true })
     .click();
+  await settings.getByRole('button', { name: 'Close view settings', exact: true }).click();
+  await page.getByTestId('view-control-filter').click();
   await page.getByTestId('filter-chip-0').click();
   await operator(page, 'is on or before');
   await relative(page, 'today');

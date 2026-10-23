@@ -60,10 +60,14 @@ test('a lossy change converts into a new property and leaves the old one byte fo
     .getByRole('button', { name: 'Four weeks of one person, and the Q3 webinar slot' })
     .click();
   // The value's editor takes focus where it opens; replace what it holds.
-  const input = page.locator('input:focus, textarea:focus');
-  await expect(input).toHaveCount(1);
+  const input = stakeRow.getByRole('textbox', { name: 'Stake', exact: true });
+  await expect(input).toBeFocused();
   await input.fill('5');
-  await input.press('Enter');
+  await expect(input).toBeFocused();
+  // Committing removes this input. Send the focused key once instead of
+  // retrying a transient :focus locator after its successful detachment.
+  await page.keyboard.press('Enter');
+  await expect(input).toHaveCount(0);
   await expect
     .poll(async () => stakeLine(await readMockFile(page, BETS[0])))
     .toMatch(/^stake: ['"]?5['"]?$/);

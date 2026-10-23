@@ -55,8 +55,8 @@ const AGENT = makeEntry({
 
 // M53.15: a failed read used to come back as [] and the block rendered
 // nothing, which is exactly what a note with no history renders. M58.4: each
-// row names who made it from the commit record alone. M64.2b: the side
-// panel's tab is history/PageHistory, which reuses CommitRow; this is the
+// row names who made it from the commit record alone. M64.2b: the page's
+// History panel is history/PageHistory, which reuses CommitRow; this is the
 // record peek's foot list.
 describe('GitHistoryPanel', () => {
   beforeEach(() => {
@@ -88,6 +88,28 @@ describe('GitHistoryPanel', () => {
     await act(async () => read.resolve([]));
     expect(getFileHistory).toHaveBeenCalledWith('/demo-vault', 'notes/plan.md');
     expect(container.innerHTML).toBe('');
+  });
+
+  it('keeps compact versions behind a keyboard disclosure without losing the version action', async () => {
+    vi.mocked(getFileHistory).mockResolvedValueOnce([commit('a')]);
+    render(<GitHistoryPanel path="notes/plan.md" compact />);
+    const toggle = await screen.findByTestId('peek-history-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('button', { name: 'commit a' })).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'commit a' }));
+    expect(useUiStore.getState().diffView).toEqual({
+      path: 'notes/plan.md',
+      commit: 'a'.repeat(40),
+    });
+  });
+
+  it('keeps a compact history read failure visible without requiring expansion', async () => {
+    vi.mocked(getFileHistory).mockRejectedValueOnce(new Error('git log exited 128'));
+    render(<GitHistoryPanel path="notes/plan.md" compact />);
+    expect(await screen.findByTestId('section-unavailable')).toBeTruthy();
+    expect(screen.queryByTestId('peek-history-toggle')).toBeNull();
   });
 
   it('names a recorded run, says unattributed otherwise, and words each change', async () => {
@@ -155,7 +177,7 @@ describe('GitHistoryPanel', () => {
     });
   });
 
-  // M64.2b: the side panel's tab is PageHistory now; it reuses these rows.
+  // M64.2b: the page's History panel is PageHistory now; it reuses these rows.
   describe('the rows it exports', () => {
     it('renders a CommitRow alone, with its author, its change and the lens', () => {
       render(

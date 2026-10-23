@@ -1,7 +1,7 @@
 import { EntryIcon } from '@/components/PageIcon';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Icon } from '@/components/ui/Icon';
-import { rowClass } from '@/app/sidebarChrome';
+import { chevronClass, FOLD_IN, REVEAL, ROW_CONTROL, rowClass } from '@/app/sidebarChrome';
 import { nodeCount } from '@/engine/collections';
 import type { CollectionNode, Selection } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
@@ -130,9 +130,9 @@ function CollectionRow({
               e.stopPropagation();
               toggle(key);
             }}
-            className="flex h-4 w-4 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-700"
+            className={`${ROW_CONTROL} motion-hover flex h-4 w-4 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400`}
           >
-            <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} />
+            <Icon name="chevron-right" size={12} className={chevronClass(expanded)} />
           </button>
         ) : (
           <span className="h-4 w-4 flex-none" />
@@ -171,7 +171,7 @@ function CollectionRow({
               const box = e.currentTarget.getBoundingClientRect();
               onAdd(node, { x: box.left, y: box.bottom });
             }}
-            className="flex h-5 w-5 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 opacity-0 hover:bg-n-100 hover:text-n-700 focus-visible:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+            className={`${REVEAL} ${ROW_CONTROL} flex h-5 w-5 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 opacity-0 focus-visible:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100`}
           >
             <Icon name="plus" size={13} />
           </button>
@@ -182,22 +182,25 @@ function CollectionRow({
           </span>
         )}
       </div>
+      {/* What a container holds drops in under it as it opens. */}
       {expanded && node.children.length > 0 && (
-        <CollectionTree
-          nodes={node.children}
-          selection={selection}
-          onNavigate={onNavigate}
-          onOpenDoc={onOpenDoc}
-          menuFor={menuFor}
-          onAdd={onAdd}
-          depth={depth + 1}
-        />
+        <div className={FOLD_IN}>
+          <CollectionTree
+            nodes={node.children}
+            selection={selection}
+            onNavigate={onNavigate}
+            onOpenDoc={onOpenDoc}
+            menuFor={menuFor}
+            onAdd={onAdd}
+            depth={depth + 1}
+          />
+        </div>
       )}
       {/* An expanded container with nothing in it says so, rather than looking
           like it failed to load. */}
       {expanded && node.children.length === 0 && (
         <div
-          className="py-1 text-xs text-n-400"
+          className={`py-1 text-xs text-n-400 ${FOLD_IN}`}
           style={{ paddingLeft: 8 + (depth + 1) * INDENT + 20 }}
         >
           Empty

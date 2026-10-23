@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { boot, openAssistantPanel, openDestination } from './boot';
+import { boot, chooseSettingsSection, openAssistantPanel, openDestination } from './boot';
+import { chooseOption } from './select';
 
 /**
  * Who answers in the panel (M56.6): Settings binds this vault's panel to an
@@ -13,10 +14,11 @@ test('panel agent: binding Release scout names it in the header, and unbinding r
 }) => {
   await boot(page);
   await openDestination(page, 'Settings');
-  const select = page.getByRole('combobox', { name: 'Panel assistant' });
-  await expect(select).toHaveValue('');
-  await select.selectOption({ label: 'Release scout' });
-  await expect(select).toHaveValue('release-scout');
+  await chooseSettingsSection(page, 'Assistant');
+  const select = page.getByRole('button', { name: 'Panel assistant' });
+  await expect(select).toHaveAttribute('data-value', '');
+  await chooseOption(select, 'Release scout');
+  await expect(select).toHaveAttribute('data-value', 'release-scout');
 
   await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
@@ -33,7 +35,7 @@ test('panel agent: binding Release scout names it in the header, and unbinding r
   // A bound turn draws no per-bubble label: the header already says who.
   await expect(panel.getByTestId('turn-addressed')).toHaveCount(0);
 
-  await select.selectOption({ label: 'Claude Code (no agent)' });
-  await expect(select).toHaveValue('');
+  await chooseOption(select, 'Claude Code (no agent)');
+  await expect(select).toHaveAttribute('data-value', '');
   await expect(panel.getByTestId('panel-agent')).toHaveCount(0);
 });

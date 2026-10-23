@@ -47,18 +47,21 @@ test('a Last edited time filter returns the rows edited in the last week', async
   await panel.getByTestId('property-kind-last_edited_time').click();
   await expect.poll(async () => readMockFile(page, 'types/work-item.md')).toMatch(/^\s+edited:/m);
 
-  // -- A rule on Edited, seeded from the toolbar's Filter menu ------------
-  // The filter bar is closed on a view with no filters, so `filter-add` is
-  // not on screen yet; the Filter icon's menu seeds the first rule and opens
-  // the bar. `is not empty` already keeps every row, which it could not
+  // -- A rule on Edited, seeded through View options ---------------------
+  // The active Filter pill opens the chip bar after a rule exists.
+  // `is not empty` already keeps every row, which it could not
   // before M60.1: the property read empty frontmatter.
-  await page.getByTestId('view-control-filter').click();
-  await page.getByLabel('Filter by…').fill('Edited');
+  await page.getByRole('button', { name: 'View options', exact: true }).click();
+  const settings = page.getByTestId('view-settings-panel');
+  await settings.getByRole('button', { name: 'Filter', exact: true }).click();
+  await settings.getByRole('button', { name: 'Add filter', exact: true }).click();
+  await settings.getByRole('button', { name: 'Filter property', exact: true }).click();
   await page
-    .locator('div', { has: page.getByLabel('Filter by…') })
-    .last()
-    .getByRole('button', { name: 'Edited' })
+    .getByRole('listbox', { name: 'Filter property' })
+    .getByRole('option', { name: 'Edited', exact: true })
     .click();
+  await settings.getByRole('button', { name: 'Close view settings', exact: true }).click();
+  await page.getByTestId('view-control-filter').click();
   await expect(page.getByTestId('filter-add')).toBeVisible();
   await page.getByTestId('filter-chip-0').click();
   await expect(page.getByTestId('filter-rule')).toBeVisible();

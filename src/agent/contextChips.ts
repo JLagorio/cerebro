@@ -1,3 +1,4 @@
+import { kindFor, type FileKind } from '@/engine/fileKinds';
 import { placeKey, placeLabel, type Place } from '@/engine/place';
 import type { Entry } from '@/engine/types';
 
@@ -25,7 +26,11 @@ export type ContextChip =
    * Carries the view's rows and filters into the snapshot. */
   | { kind: 'place'; place: Place; label: string }
   /** One record, attached whole — its properties, its body, its links. */
-  | { kind: 'record'; path: string; label: string; type: string | null };
+  | { kind: 'record'; path: string; label: string; type: string | null }
+  /** A file the person attached (M91.17), by its path in the vault: a copy
+   * under attachments/, which the scan never lists, so it is no record. The
+   * run is told its path and kind, and what (if anything) opens it. */
+  | { kind: 'file'; path: string; label: string; fileKind: FileKind };
 
 /**
  * Stable identity for a chip.
@@ -36,7 +41,14 @@ export type ContextChip =
  * the two is DRAWN is `resolveChips`' call.
  */
 export function chipId(chip: ContextChip): string {
-  return chip.kind === 'place' ? `place:${placeKey(chip.place)}` : `record:${chip.path}`;
+  switch (chip.kind) {
+    case 'place':
+      return `place:${placeKey(chip.place)}`;
+    case 'record':
+      return `record:${chip.path}`;
+    case 'file':
+      return `file:${chip.path}`;
+  }
 }
 
 export function placeChip(place: Place, lookup?: Parameters<typeof placeLabel>[1]): ContextChip {
@@ -49,6 +61,18 @@ export function recordChip(path: string, entries: Entry[]): ContextChip | null {
   const entry = entries.find((e) => e.path === path);
   if (entry === undefined) return null;
   return { kind: 'record', path, label: entry.title, type: entry.type };
+}
+
+/** A file chip for a vault path: its name, and its kind by the file-kinds
+ * table. Only a path a vault door answered with, never one outside it — a
+ * file from elsewhere is copied in first (M91.17). */
+export function fileChip(path: string): ContextChip {
+  return {
+    kind: 'file',
+    path,
+    label: path.slice(path.lastIndexOf('/') + 1),
+    fileKind: kindFor(path).kind,
+  };
 }
 
 /**

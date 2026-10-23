@@ -245,6 +245,8 @@ export function resolveSurface(
       return { title: stem(sel.folder), entries: [], presentation: defaultPresentation() };
     case 'home':
       return emptySurface('home');
+    case 'pages':
+      return emptySurface('pages');
     case 'knowledge':
       // The bundle has its own read-only surface; it is deliberately not a
       // collection of records, so nothing else can list or filter it. M33a.2

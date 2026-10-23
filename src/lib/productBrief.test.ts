@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import RAW_BRIEF from '../../shared/prompt/product-brief.md?raw';
 import RETIRED from '../../shared/prompt/retired-terms.json';
 import SERVER_INSTRUCTIONS from '../../shared/prompt/server-instructions.md?raw';
+import SUBAGENT_LINE from '../../shared/prompt/subagent-line.md?raw';
+import RESEARCHER_PROMPT from '../../shared/prompt/subagents/researcher.md?raw';
 import RAW_TOOLS from '../../shared/policy/tools.v1.json?raw';
+import { SUBAGENTS } from './policy/subagents';
 import { PRODUCT_BRIEF } from './productBrief';
 import * as prompts from './prompts';
 import { templateFillPrompt } from './templates';
@@ -275,6 +278,25 @@ describe('no retired term reaches the model', () => {
     expect(retiredIn(PRODUCT_BRIEF)).toEqual([]);
     expect(retiredIn(SERVER_INSTRUCTIONS)).toEqual([]);
     expect(retiredIn(RAW_TOOLS)).toEqual([]);
+  });
+
+  it('in what a subagent hears (M91.2b): its composed brief, its line and every preset', () => {
+    // Rust composes `--append-subagent-system-prompt` from the brief, the
+    // server instructions and the subagent line, each trimmed, a blank line
+    // apart (src-tauri/src/agent/cli_agents.rs), so a term split across two
+    // of them is caught as well as one inside each.
+    const composed = [PRODUCT_BRIEF, SERVER_INSTRUCTIONS.trim(), SUBAGENT_LINE.trim()].join('\n\n');
+    expect(retiredIn(composed)).toEqual([]);
+    expect(retiredIn(SUBAGENT_LINE)).toEqual([]);
+    expect(retiredIn(RESEARCHER_PROMPT)).toEqual([]);
+    expect(SUBAGENTS.presets.length).toBeGreaterThan(0);
+    for (const preset of SUBAGENTS.presets) {
+      expect(retiredIn(preset.description), preset.name).toEqual([]);
+    }
+    // One newline after each file's text, as the brief keeps, so Rust's
+    // `str::trim` and TS `trim` hand a subagent the same bytes.
+    expect(SUBAGENT_LINE).toBe(`${SUBAGENT_LINE.trim()}\n`);
+    expect(RESEARCHER_PROMPT).toBe(`${RESEARCHER_PROMPT.trim()}\n`);
   });
 
   it('in any system prompt, on every branch', () => {

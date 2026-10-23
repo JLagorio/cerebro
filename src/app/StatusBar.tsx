@@ -1,35 +1,24 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { Popover } from '@/components/ui/Popover';
 import { RunList } from '@/agent/RunList';
-import { isFailure } from '@/engine/git';
+import { isFailure, type RemoteResult } from '@/engine/git';
 import { useGit } from '@/git/useGit';
 import { APP_VERSION } from '@/lib/appVersion';
 import * as git from '@/lib/gitIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import './statusBar.css';
 
-/**
- * The bottom status bar (M9.7), modelled on tolaria's.
- *
- * Everything ambient about the vault in one strip you never have to open:
- * which vault, which branch, whether there is a remote, what is uncommitted,
- * when it last synced, and whether the agent's MCP endpoint is up.
- *
- * Held to the no-idle-chrome rule by making every segment a control. The
- * changes count navigates to the diff and Sync pulls-then-pushes — none of it
- * is a readout you can only look at.
- *
- * M15: every segment is now also the ONLY door to where it goes. Duplicates of
- * destinations the nav already owns (History, Settings) were removed, and so
- * was "Commit", which navigated instead of committing.
- */
-
-function Segment({
+/** Quiet workspace identity and actions. Passive repository facts live in the
+ * identity disclosure; changes, failed syncs and running assistants stay visible. */
+function StatusAction({
   icon,
   label,
   title,
   tone = 'default',
+  disabled = false,
   onClick,
   testId,
 }: {
@@ -37,50 +26,30 @@ function Segment({
   label: string;
   title?: string;
   tone?: 'default' | 'accent' | 'warn' | 'danger';
-  onClick?: () => void;
-  testId?: string;
+  disabled?: boolean;
+  onClick: () => void;
+  testId: string;
 }) {
-  const color =
-    tone === 'accent'
-      ? 'var(--cortex-600)'
-      : tone === 'warn'
-        ? 'var(--warn-600)'
-        : tone === 'danger'
-          ? 'var(--danger-500)'
-          : 'var(--n-500)';
-  const className = [
-    'inline-flex h-6 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 text-xs',
-    onClick !== undefined ? 'hover:bg-n-100' : 'cursor-default',
-  ].join(' ');
-
-  const body = (
-    <>
-      <Icon name={icon} size={11} color={color} />
-      <span style={{ color: tone === 'default' ? 'var(--n-600)' : color }}>{label}</span>
-    </>
-  );
-
-  if (onClick === undefined) {
-    return (
-      <span data-testid={testId} title={title} className={className}>
-        {body}
-      </span>
-    );
-  }
   return (
     <button
       type="button"
+      tabIndex={0}
       data-testid={testId}
+      data-tone={tone}
       title={title}
+      disabled={disabled}
       onClick={onClick}
-      className={className}
+      className="cb-status-action"
     >
-      {body}
+      <Icon name={icon} size={12} />
+      <span>{label}</span>
     </button>
   );
 }
 
-const Divider = () => <span aria-hidden className="h-3 w-px flex-none bg-n-200" />;
+function syncRefused(result: RemoteResult): boolean {
+  return isFailure(result) || result.status === 'conflict' || result.status === 'no_remote';
+}
 
 export function StatusBar() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -88,147 +57,210 @@ export function StatusBar() {
   const toast = useUiStore((s) => s.toast);
   const navigate = useNavStore((s) => s.navigate);
   const { isRepo, ready, modified, conflicts, remote, refresh } = useGit();
-  // M15: `lastSync` is set ONLY by a completed sync (see `sync` below). An
-  // effect that stamped it the moment a repo was detected made the strip read
-  // "Synced" on every launch, before anything had been pulled or pushed — a
-  // false safety signal on the one control that exists to report sync state.
-  const [lastSync, setLastSync] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsRef = useRef<HTMLButtonElement>(null);
+  // A completed sync belongs to the vault it ran against. Switching vaults
+  // must never carry its success or failure into the new workspace.
+  const [syncResult, setSyncResult] = useState<{
+    vault: string;
+    at: number | null;
+    error: string | null;
+  } | null>(null);
+  const [busyVault, setBusyVault] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  useEffect(() => setDetailsOpen(false), [vaultPath]);
 
   if (vaultPath === null || !ready) return null;
-
   const vaultName = vaultPath.split('/').filter(Boolean).pop() ?? vaultPath;
   const pending = modified.length + conflicts.length;
+  const busy = busyVault === vaultPath;
+  const lastSync = syncResult?.vault === vaultPath ? syncResult.at : null;
+  const syncError = syncResult?.vault === vaultPath ? syncResult.error : null;
+  const changeLabel =
+    conflicts.length > 0
+      ? `${conflicts.length} conflicted`
+      : `${pending} change${pending === 1 ? '' : 's'}`;
 
   const sync = async () => {
-    if (vaultPath === null || remote === null) return;
-    setBusy(true);
+    if (remote === null || inFlight.current) return;
+    inFlight.current = true;
+    setBusyVault(vaultPath);
+    setSyncResult({ vault: vaultPath, at: null, error: null });
+    const refuse = (message: string) => {
+      setSyncResult({ vault: vaultPath, at: null, error: message });
+      toast(message);
+    };
     try {
-      // Pull before push: pushing into a remote you are behind is the
-      // rejection this ordering avoids.
       const pulled = await git.gitPull(vaultPath);
-      if (isFailure(pulled)) {
-        toast(pulled.message);
+      if (syncRefused(pulled)) {
+        refuse(pulled.message);
+        await refresh();
         return;
       }
       if (pulled.updatedFiles.length > 0) await rescan();
       const pushed = await git.gitPush(vaultPath);
-      toast(pushed.message);
-      setLastSync(Date.now());
+      if (syncRefused(pushed)) refuse(pushed.message);
+      else {
+        setSyncResult({ vault: vaultPath, at: Date.now(), error: null });
+        toast(pushed.message);
+      }
       await refresh();
+    } catch (error) {
+      refuse(error instanceof Error ? error.message : 'The workspace could not sync. Try again.');
     } finally {
-      setBusy(false);
+      inFlight.current = false;
+      setBusyVault(null);
     }
   };
 
+  const goTo = (kind: 'settings' | 'changes') => {
+    setDetailsOpen(false);
+    navigate({ kind });
+  };
+  const divergence =
+    remote !== null && (remote.ahead > 0 || remote.behind > 0)
+      ? [remote.ahead > 0 ? `↑${remote.ahead}` : '', remote.behind > 0 ? `↓${remote.behind}` : '']
+          .filter(Boolean)
+          .join(' ')
+      : '';
+  const syncLabel = busy
+    ? 'Syncing…'
+    : syncError !== null
+      ? 'Sync failed'
+      : divergence !== ''
+        ? `Sync ${divergence}`
+        : lastSync === null
+          ? 'Sync'
+          : 'Synced';
+
   return (
-    <footer
-      data-testid="status-bar"
-      // Neutral chrome (M65.1): a click here leaves the keymap's scope alone.
-      data-key-neutral
-      className="flex h-7 flex-none items-center gap-1 border-t border-n-200 bg-n-25 px-2"
-    >
-      <Segment
-        icon="folder"
-        label={vaultName}
-        title={vaultPath}
-        testId="status-vault"
-        onClick={() => navigate({ kind: 'settings' })}
-      />
-      <Divider />
-      <Segment icon="package" label={APP_VERSION} title="Cerebro version" />
-
-      {isRepo && (
-        <>
-          <Divider />
-          <Segment
-            icon="git-branch"
-            label={remote?.branch !== undefined && remote.branch !== '' ? remote.branch : 'main'}
-            testId="status-branch"
-          />
-          <Divider />
-          {remote === null ? (
-            <Segment
-              icon="cloud-off"
-              label="No remote"
-              title="Connect one in Settings"
-              testId="status-remote"
-              onClick={() => navigate({ kind: 'settings' })}
-            />
-          ) : (
-            <Segment
-              icon="cloud"
-              label={
-                remote.ahead === 0 && remote.behind === 0
-                  ? (remote.upstream ?? 'origin')
-                  : `↑${remote.ahead} ↓${remote.behind}`
-              }
-              tone={remote.ahead > 0 || remote.behind > 0 ? 'accent' : 'default'}
-              testId="status-remote"
-              onClick={() => void sync()}
-            />
+    <footer data-testid="status-bar" data-key-neutral className="cb-workspace-status">
+      <button
+        ref={detailsRef}
+        type="button"
+        tabIndex={0}
+        data-testid="status-vault"
+        aria-label={`Workspace status: ${vaultName}`}
+        aria-haspopup="dialog"
+        aria-expanded={detailsOpen}
+        onClick={(event) => {
+          // Safari does not focus every native button on pointer click. Capture
+          // this explicit opener before the disclosure records focus to restore.
+          event.currentTarget.focus();
+          setDetailsOpen(!detailsOpen);
+        }}
+        className="cb-status-action cb-status-workspace"
+      >
+        <Icon name="folder" size={12} />
+        <span>{vaultName}</span>
+        <Icon name="chevron-down" size={11} />
+      </button>
+      {detailsOpen && (
+        <Popover
+          anchorRef={detailsRef}
+          onClose={() => setDetailsOpen(false)}
+          role="dialog"
+          ariaLabel="Workspace status"
+          trapFocus
+          className="cb-status-details"
+        >
+          <h2>{vaultName}</h2>
+          <p className="cb-status-path">{vaultPath}</p>
+          <dl>
+            <div>
+              <dt>Version</dt>
+              <dd title="Cerebro version">{APP_VERSION}</dd>
+            </div>
+            <div>
+              <dt>History</dt>
+              <dd>{isRepo ? 'Tracked locally' : 'Not tracked'}</dd>
+            </div>
+            {isRepo && (
+              <>
+                <div>
+                  <dt>Branch</dt>
+                  <dd data-testid="status-branch">{remote?.branch || 'Not recorded'}</dd>
+                </div>
+                <div>
+                  <dt>Remote</dt>
+                  <dd data-testid="status-remote">
+                    {remote === null ? 'No remote' : remote.upstream || 'Connected'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Changes</dt>
+                  <dd>{pending === 0 ? 'No changes' : changeLabel}</dd>
+                </div>
+                {remote !== null && (
+                  <div>
+                    <dt>Remote changes</dt>
+                    <dd>
+                      {remote.ahead} to push · {remote.behind} to pull
+                    </dd>
+                  </div>
+                )}
+                {lastSync !== null && (
+                  <div>
+                    <dt>Last synced</dt>
+                    <dd>
+                      {new Date(lastSync).toLocaleTimeString([], {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </dd>
+                  </div>
+                )}
+              </>
+            )}
+          </dl>
+          {syncError !== null && (
+            <p role="alert" className="cb-status-error">
+              {syncError}
+            </p>
           )}
-          <Divider />
-          {conflicts.length > 0 ? (
-            <Segment
-              icon="triangle-alert"
-              label={`${conflicts.length} conflicted`}
-              tone="danger"
-              testId="status-changes"
-              onClick={() => navigate({ kind: 'changes' })}
+          <div className="cb-status-details-actions">
+            <StatusAction
+              icon="settings"
+              label="Workspace settings"
+              testId="workspace-settings"
+              onClick={() => goTo('settings')}
             />
-          ) : (
-            <Segment
-              icon="file-diff"
-              label={pending === 0 ? 'No changes' : `${pending} Changes`}
-              tone={pending > 0 ? 'warn' : 'default'}
-              testId="status-changes"
-              onClick={() => navigate({ kind: 'changes' })}
+            <StatusAction
+              icon={isRepo ? 'file-diff' : 'git-branch'}
+              label={isRepo ? 'View changes' : 'Start tracking history'}
+              testId={pending > 0 && isRepo ? 'workspace-changes' : 'status-changes'}
+              onClick={() => goTo('changes')}
             />
-          )}
-          {/* M15: the "Commit" segment is gone. It committed nothing — it
-              navigated to Changes, which the changes-count segment beside it
-              already does — so it was a button that lied about its own verb AND
-              the second of three doors to the same page. The commit itself
-              belongs where its message is typed. */}
-          {remote !== null && (
-            <Segment
-              icon="refresh-cw"
-              label={busy ? 'Syncing…' : lastSync === null ? 'Sync' : 'Synced'}
-              testId="status-sync"
-              onClick={() => void sync()}
-            />
-          )}
-          {/* M15: the duplicate "History" segment is gone — the nav owns that
-              destination, and two chromes offering the same door under
-              different chrome means neither reads as authoritative. */}
-        </>
+          </div>
+        </Popover>
       )}
-
-      {!isRepo && (
-        <>
-          <Divider />
-          <Segment
-            icon="git-branch"
-            label="Not tracked"
-            // The tooltip said Settings while the click opened Changes.
-            title="Start tracking this vault's history"
-            testId="status-changes"
-            onClick={() => navigate({ kind: 'changes' })}
-          />
-        </>
+      {isRepo && pending > 0 && (
+        <StatusAction
+          icon={conflicts.length > 0 ? 'triangle-alert' : 'file-diff'}
+          label={changeLabel}
+          tone={conflicts.length > 0 ? 'danger' : 'warn'}
+          testId="status-changes"
+          onClick={() => navigate({ kind: 'changes' })}
+        />
       )}
-
-      <span className="flex-1" />
-
-      {/* The assistant runs turns of its own in the background (M8.6); this
-          is the only place that says so without interrupting anything. M17.7
-          made it a LIST — a light with no switch behind it could not say what
-          was running, what it was about, or how to get back to it. */}
+      {isRepo && (remote !== null || syncError !== null) && (
+        <StatusAction
+          icon={syncError !== null ? 'triangle-alert' : 'refresh-cw'}
+          label={syncLabel}
+          title={
+            syncError ??
+            (divergence !== '' && remote !== null
+              ? `${remote.ahead} to push, ${remote.behind} to pull`
+              : undefined)
+          }
+          tone={syncError !== null ? 'danger' : divergence !== '' ? 'accent' : 'default'}
+          disabled={busy}
+          testId="status-sync"
+          onClick={() => (remote === null ? setDetailsOpen(true) : void sync())}
+        />
+      )}
+      <span className="cb-status-space" />
       <RunList />
-      {/* M15: no "Settings" segment either. The nav owns it, and the vault
-          name and "No remote" segments here are already settings shortcuts
-          that say what they will configure. */}
     </footer>
   );
 }

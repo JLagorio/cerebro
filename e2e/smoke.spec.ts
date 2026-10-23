@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { boot, readMockFile, showDatabases, showPages, openDestination } from './boot';
+import {
+  boot,
+  readMockFile,
+  showDatabases,
+  showPages,
+  showPageFolders,
+  openDestination,
+} from './boot';
 
 test('smoke: boot demo vault, list, board drag writes disk, rename, quick open', async ({
   page,
@@ -87,10 +94,10 @@ test('smoke: boot demo vault, list, board drag writes disk, rename, quick open',
     await movedCard.click();
     await expect(page.getByTestId('detail-panel')).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 10_000 });
-  const titleInput = page.getByTestId('detail-title');
+  const titleInput = page.getByTestId('detail-panel').locator('[data-page-title] h1');
   await expect(titleInput).toBeVisible();
   await titleInput.fill('Renamed by smoke');
-  await titleInput.press('Enter'); // commits the rename (Task 22 wiring)
+  await titleInput.press('Enter'); // enters the body; the title is already in the document
   await expect
     .poll(() => readMockFile(page, cardPath), { timeout: 5_000 })
     .toContain('# Renamed by smoke');
@@ -206,7 +213,7 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   await openDestination(page, 'Home');
   // The Notes folder was expanded during creation and expansion persists, so
   // the new page's row is already in the standing tree.
-  await showPages(page);
+  await showPageFolders(page);
   const recent = page
     .getByTestId('file-tree')
     .getByRole('button', { name: 'Smoke Notes', exact: true });

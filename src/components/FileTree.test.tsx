@@ -332,6 +332,61 @@ describe('FileTree', () => {
     expect(files).not.toContain('Team Notes');
   });
 
+  // A folder's and a page's one chevron turns with the state its control
+  // announces, never traded for another glyph, and what the row holds drops
+  // in under it (app/sidebarChrome.ts, app/shell.css).
+  it('turns one chevron on folder and page rows, and drops their contents in', async () => {
+    fs().set(`${ROOT}/notes/notes.md`, '# Team Notes\n');
+    fs().set(`${ROOT}/notes/extra.md`, '# Extra page\n');
+    await useVaultStore.getState().rescan();
+    renderTree();
+    const folder = screen.getByRole('button', { name: /^Meetings/ });
+    const caret = screen.getByRole('button', { name: 'Expand Team Notes' });
+    const turned = (control: HTMLElement) =>
+      control.querySelector('[data-icon="chevron-right"]')?.classList.contains('cb-chevron--open');
+    for (const control of [folder, caret]) {
+      expect(control.getAttribute('aria-expanded')).toBe('false');
+      expect(control.querySelectorAll('[data-icon^="chevron"]')).toHaveLength(1);
+      expect(turned(control)).toBe(false);
+    }
+    fireEvent.click(folder);
+    fireEvent.click(caret);
+    for (const control of [folder, caret]) {
+      expect(control.getAttribute('aria-expanded')).toBe('true');
+      expect(control.querySelector('[data-icon="chevron-down"]')).toBeNull();
+      expect(turned(control)).toBe(true);
+    }
+    const fold = screen.getByRole('button', { name: KICKOFF_TITLE }).closest('ul');
+    expect(fold?.classList.contains('cb-fold-in')).toBe(true);
+    expect(fold?.contains(folder)).toBe(false);
+    // The tree's own list arrives too, but never its root, where its dialogs
+    // and menus are drawn fixed: a moving ancestor would hold them in place.
+    const tree = screen.getByTestId('file-tree');
+    expect(tree.classList.contains('cb-fold-in')).toBe(false);
+    expect(tree.querySelector(':scope > ul')?.classList.contains('cb-fold-in')).toBe(true);
+  });
+
+  // The open page wears the nav's selection — a neutral fill and a medium
+  // label (sidebarChrome's rowClass) — like every other row in the sidebar.
+  it('marks the open page with the nav’s neutral selection', () => {
+    render(
+      <FileTree
+        root={ROOT}
+        hide={(p) => p === PROJECT}
+        activePath={`${ROOT}/meetings/kickoff.md`}
+        onOpen={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    const row = screen
+      .getByRole('button', { name: KICKOFF_TITLE })
+      .closest('[data-testid=tree-row]');
+    expect(row?.className).toContain('bg-n-200');
+    expect(row?.className).toContain('motion-hover');
+    expect(row?.className).not.toContain('cortex');
+    expect(screen.getByText(KICKOFF_TITLE).className).toContain('font-medium');
+  });
+
   // M55.11 — a page's own icon comes first on its row; without one, the row
   // keeps its type's glyph (a file) or the stack (a doc).
   it('file rows and doc rows draw page icons, and fall back to the type style', async () => {

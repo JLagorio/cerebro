@@ -87,6 +87,32 @@ const show = (database: string, view = '') =>
   render(<DatabaseBlockView database={database} view={view} schema={schema} entries={entries} />);
 
 describe('DatabaseBlockView', () => {
+  it('local search narrows an embedded view without changing its source or pointer', () => {
+    const onChange = vi.fn();
+    const originalPatch = useVaultStore.getState().patchFrontmatter;
+    const patchFrontmatter = vi.fn();
+    useVaultStore.setState({ patchFrontmatter });
+    render(
+      <DatabaseBlockView
+        database="Reading list"
+        view="shelf"
+        schema={schema}
+        entries={entries}
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByText('Shared view · edits apply everywhere')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Search this view' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search this view' }), {
+      target: { value: 'Dune' },
+    });
+    expect(screen.getAllByTestId('table-row')).toHaveLength(1);
+    expect(screen.getByTestId('table-row').textContent).toContain('Dune');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    useVaultStore.setState({ patchFrontmatter: originalPatch });
+  });
+
   it('names broken filters in the resolved fallback view above its canvas', () => {
     const broken = entries.map((entry) =>
       entry.type !== 'Type'

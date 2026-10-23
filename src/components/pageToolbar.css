@@ -1,0 +1,122 @@
+/* A page's action bar (PageToolbar): the breadcrumb track and what the page
+   says about where it stands at the start, the actions pill at the end.
+   Shared by DocPage and the Inbox, so both read as the same surface. In a
+   page frame (pageFrame.css) its two ends sit on the frame's two columns. */
+.cb-document-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 64px;
+  padding: 12px 20px;
+}
+
+.cb-document-start,
+.cb-document-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cb-document-end {
+  flex: none;
+  justify-content: flex-end;
+}
+
+.cb-document-start > :not(.cb-document-breadcrumbs) {
+  flex: none;
+}
+
+/* Squeezed, the save state gives with the crumbs rather than run under the
+   toolbar's end: its words are the one status that can be cut short. */
+.cb-document-start > [data-testid='doc-save-state'] {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Each word the save state says fades in over the last (SaveState), but
+   "Saving…", which works instead (`.cb-working-text`). */
+.cb-save-state:not(.cb-working-text) {
+  animation: cb-fade-in var(--motion-enter) backwards;
+}
+
+.cb-document-breadcrumbs,
+.cb-document-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  padding: 3px 6px;
+}
+
+.cb-document-breadcrumbs {
+  overflow: hidden;
+  border-color: transparent;
+  background: var(--surface-sunken);
+}
+
+.cb-document-actions {
+  flex: none;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--n-900) 3%, transparent);
+}
+
+/* The panels' buttons close the actions, a rule apart from the page's own. */
+.cb-panel-buttons {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.cb-panel-buttons-rule {
+  width: 1px;
+  height: 16px;
+  margin-inline: 4px;
+  background: var(--n-200);
+}
+
+/* Comments: IconButton's look at its small size, its open count on its
+   corner. Two classes, so it outranks `.cb-ibtn`'s own box wherever that
+   loads. */
+.cb-ibtn.cb-panel-button {
+  position: relative;
+  width: 24px;
+  height: 24px;
+}
+
+.cb-panel-button-count {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--surface-raised);
+  box-shadow: 0 0 0 1px var(--border-subtle);
+  color: var(--text-meta);
+  font: 600 10px/14px var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  pointer-events: none;
+  animation: cb-mark-in var(--motion-spring) backwards;
+}
+
+@container (max-width: 600px) {
+  .cb-document-toolbar {
+    gap: var(--sp-2);
+    padding-inline: 12px;
+  }
+
+  .cb-document-breadcrumbs {
+    padding-inline: 2px;
+  }
+}

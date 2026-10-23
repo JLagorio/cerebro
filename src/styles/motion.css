@@ -26,14 +26,17 @@
 }
 
 /* Something slid, appeared, or changed size. Collapses to 0s under
- * `prefers-reduced-motion: reduce` by way of `--dur-move`.
+ * `prefers-reduced-motion: reduce` by way of `--dur-move`. Tailwind v4's
+ * `rotate-*`, `translate-*` and `scale-*` set the individual properties, not
+ * `transform`, so the list names them too: a chevron that turns with
+ * `rotate-90` turned instantly while this said `transform` alone.
  *
  * No `background-color` here, deliberately. An element that both moves and
  * washes on hover — the property row's grip is one — needs the two at two
  * different speeds, and a single utility cannot say that. Appearance is
  * spelled with `opacity` so this list covers it. */
 @utility motion-move {
-  transition-property: transform, opacity, box-shadow;
+  transition-property: transform, translate, rotate, scale, opacity, box-shadow;
   transition-duration: var(--dur-move);
   transition-timing-function: var(--ease-move);
 }

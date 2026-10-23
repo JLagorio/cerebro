@@ -57,7 +57,10 @@ test('calendar drop previews times and people, imports once, and re-imports unch
   await drop(page);
   const dialog = page.getByTestId('ics-import-dialog');
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByLabel('Calendar database')).toHaveValue('Meeting');
+  await expect(dialog.getByRole('button', { name: 'Calendar database' })).toHaveAttribute(
+    'data-value',
+    'Meeting',
+  );
   await expect(dialog.getByLabel('Calendar preview')).toContainText('09:00:00+02:00');
   await expect(dialog.getByLabel('Calendar import report')).toContainText('People linked: 1');
   const imported = () =>
@@ -95,6 +98,8 @@ test('calendar drop previews times and people, imports once, and re-imports unch
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByTestId('quick-open-input').fill('Paris standup');
   await page.getByTestId('quick-open-result').filter({ hasText: 'Paris standup' }).first().click();
-  await expect(page.getByTestId('detail-title')).toHaveValue('Paris standup');
+  await expect(page.getByTestId('detail-panel').locator('[data-page-title] h1')).toHaveText(
+    'Paris standup',
+  );
   expect(await readMockFile(page, paris[0])).toBe(paris[1]);
 });

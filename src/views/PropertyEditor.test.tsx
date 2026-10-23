@@ -6,6 +6,7 @@ import { buildSchema } from '@/engine/schema';
 import type { ColumnSpec, Entry } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { chooseOption } from '@/test/chooseOption';
 import { makeEntry } from '@/test/factories';
 import { PropertyEditor } from '@/views/PropertyEditor';
 
@@ -87,7 +88,7 @@ describe('the type-level reminder setting', () => {
       expect(screen.getByTestId('property-remind').textContent).toContain(
         'Every Recipe with a Due reminds. Dates without a time remind at 9:00 AM.',
       );
-      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Remind' }), '1d');
+      chooseOption(screen.getByRole('button', { name: 'Remind' }), { value: '1d' });
       expect(patch).toHaveBeenCalledWith(doc.path, { fields: { due: { kind, remind: '1d' } } });
       const next = {
         ...doc,
@@ -102,7 +103,7 @@ describe('the type-level reminder setting', () => {
           schema={nextSchema}
         />,
       );
-      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Remind' }), 'none');
+      chooseOption(screen.getByRole('button', { name: 'Remind' }), 'None');
       expect(patch).toHaveBeenLastCalledWith(doc.path, { fields: { due: { kind } } });
     },
   );

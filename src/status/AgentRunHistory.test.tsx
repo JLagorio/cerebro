@@ -124,6 +124,72 @@ describe('AgentRunHistory', () => {
     expect(screen.queryByTestId('agent-run')).toBeNull();
   });
 
+  // --- Runs as trace lines (M91.14) -----------------------------------------
+
+  it("nests a hop's own hop under it, and counts every hop the chain bills", async () => {
+    __seedFleet([
+      run({ run_id: 'root-1', actor: 'process:release-scout' }),
+      run({ run_id: 'hop-1', actor: 'process:knowledge', parent_run_id: 'root-1' }),
+      run({ run_id: 'hop-2', actor: 'process:weekly-review', parent_run_id: 'hop-1' }),
+    ]);
+    render(<AgentRunHistory actor="process:release-scout" />);
+    await screen.findByTestId('agent-run');
+    const hops = screen.getAllByTestId('agent-run-hop');
+    expect(hops.map((hop) => hop.getAttribute('data-run'))).toEqual(['hop-1', 'hop-2']);
+    expect(hops[0].closest('[data-hops]')?.getAttribute('data-hops')).toBe('root-1');
+    expect(hops[1].closest('[data-hops]')?.getAttribute('data-hops')).toBe('hop-1');
+    expect(screen.getByText("2 hops, billed to this run's ceiling")).toBeTruthy();
+  });
+
+  it('a hop opens its own run under its row, and only that row says it is open', async () => {
+    const root = run({ run_id: 'root-1', actor: 'process:release-scout' });
+    const hop = run({ run_id: 'hop-1', actor: 'process:knowledge', parent_run_id: 'root-1' });
+    __seedFleet([root, hop], {
+      'hop-1': {
+        run: hop,
+        cost_components: null,
+        assembly: null,
+        model_id: null,
+        refusals: [],
+        refusals_total: 0,
+        wrote: { state: 'not_recorded' },
+      },
+    });
+    render(<AgentRunHistory actor="process:release-scout" />);
+    fireEvent.click(await screen.findByTestId('agent-run-hop'));
+    expect((await screen.findByTestId('run-detail')).getAttribute('data-run')).toBe('hop-1');
+    expect(screen.getByTestId('agent-run-hop').getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByTestId('agent-run').getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(screen.getByTestId('agent-run-hop'));
+    await waitFor(() => expect(screen.queryByTestId('run-detail')).toBeNull());
+  });
+
+  it('says how each run ended in a word before it, and how long only as recorded', async () => {
+    __seedFleet([
+      run({
+        run_id: 'failed',
+        actor: 'process:release-scout',
+        outcome: 'failed',
+        started_at: '2026-07-28T10:00:00Z',
+        ended_at: '2026-07-28T10:00:42Z',
+      }),
+      run({
+        run_id: 'live',
+        actor: 'process:release-scout',
+        outcome: 'running',
+        ended_at: null,
+      }),
+    ]);
+    render(<AgentRunHistory actor="process:release-scout" />);
+    await screen.findAllByTestId('agent-run');
+    const row = (id: string) => document.querySelector<HTMLElement>(`[data-run="${id}"]`)!;
+    expect(row('failed').textContent).toMatch(/^Failed: /);
+    expect(within(row('failed')).getByTestId('agent-run-took').textContent).toBe('42s');
+    expect(row('live').textContent).toMatch(/^Running: /);
+    expect(within(row('live')).queryByTestId('agent-run-took')).toBeNull();
+    expect(within(row('live')).getByTestId('agent-run-label').className).toContain('cb-ai-shimmer');
+  });
+
   it('a row opens its run where it is listed (M50.3)', async () => {
     // The corpus's own run, which carries a recorded detail.
     render(<AgentRunHistory actor="process:knowledge" />);

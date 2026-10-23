@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import YAML from 'yaml';
 import { boot, readMockFile } from './boot';
+import { chooseOption } from './select';
 
 const metadata = (content: string) => YAML.parse(/^---\n([\s\S]*?)\n---\n/.exec(content)![1]);
 async function composer(page: Page) {
@@ -10,7 +11,13 @@ async function composer(page: Page) {
     .getByRole('option', { name: 'Record', exact: true })
     .click();
   const dialog = page.getByRole('dialog', { name: 'New record', exact: true });
-  await dialog.getByTestId('composer-database').selectOption('Work item');
+  // The title takes focus as the composer opens. Asserted before the pick:
+  // a picked option leaves focus on the database trigger, as a clicked
+  // native select kept it.
+  await expect(dialog.getByTestId('composer-title')).toBeFocused();
+  const database = dialog.getByRole('button', { name: 'Database', exact: true });
+  await chooseOption(database, 'Work item');
+  await expect(database).toHaveAttribute('data-value', 'Work item');
   return dialog;
 }
 async function high(page: Page) {
@@ -29,7 +36,6 @@ test('heading fields and similar records precede a keyboard create that opens it
 }, testInfo) => {
   const dialog = await composer(page);
   const title = dialog.getByTestId('composer-title');
-  await expect(title).toBeFocused();
   await title.fill('Landing page');
   await expect(
     dialog.getByTestId('similar-record').filter({ hasText: 'Landing page refresh' }),

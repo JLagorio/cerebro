@@ -1,0 +1,211 @@
+[
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "synthetic": "hand-shaped from Claude Code 2.1.250's measured shapes (M91.3a), not recorded: synthetic ids, and M91.R's live recording replaces it; the stream alone says permission_denied",
+    "timestamp": "2026-10-22T12:00:00.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000009400",
+    "content": "How many notes mention the vendor?"
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-10-22T12:00:00.002Z",
+    "sessionId": "00000000-0000-4000-8000-000000009400"
+  },
+  {
+    "parentUuid": null,
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000009400003",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "How many notes mention the vendor?"
+    },
+    "permissionMode": "default",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000009400002",
+    "timestamp": "2026-10-22T12:00:00.005Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009400",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009400002",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009401",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009401",
+          "name": "Bash",
+          "input": {
+            "command": "grep -rl vendor notes | wc -l; grep -rl vendor archive | wc -l",
+            "description": "Count the notes that mention the vendor"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009401",
+    "uuid": "00000000-0000-4000-8000-000009400101",
+    "timestamp": "2026-10-22T12:00:02.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009400",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009400101",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009401",
+          "type": "tool_result",
+          "content": "This Bash command contains multiple operations. The following parts require approval: grep -rl vendor archive",
+          "is_error": true
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000009400102",
+    "timestamp": "2026-10-22T12:00:02.100Z",
+    "toolUseResult": "Error: This Bash command contains multiple operations. The following parts require approval: grep -rl vendor archive",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009400",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009400102",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009402",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "The archive part needs approval, so I will count the notes folder alone."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009402",
+    "uuid": "00000000-0000-4000-8000-000009400103",
+    "timestamp": "2026-10-22T12:00:03.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009400",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009400103",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009402",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009402",
+          "name": "Bash",
+          "input": {
+            "command": "grep -rl vendor notes | wc -l",
+            "description": "Count the notes that mention the vendor"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009402",
+    "uuid": "00000000-0000-4000-8000-000009400104",
+    "timestamp": "2026-10-22T12:00:03.300Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009400",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009400104",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009402",
+          "type": "tool_result",
+          "content": "3"
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000009400105",
+    "timestamp": "2026-10-22T12:00:03.600Z",
+    "toolUseResult": {
+      "stdout": "3",
+      "stderr": "",
+      "interrupted": false,
+      "isImage": false
+    },
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009400",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009400105",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009403",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Three notes in notes/ mention the vendor."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009403",
+    "uuid": "00000000-0000-4000-8000-000009400106",
+    "timestamp": "2026-10-22T12:00:04.200Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009400",
+    "version": "2.1.250"
+  },
+  {
+    "type": "last-prompt",
+    "lastPrompt": "How many notes mention the vendor?",
+    "leafUuid": "00000000-0000-4000-8000-000009400106",
+    "sessionId": "00000000-0000-4000-8000-000000009400"
+  }
+]

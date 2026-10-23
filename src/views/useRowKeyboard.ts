@@ -204,9 +204,8 @@ export function useRowKeyboard(options: {
    * Capture sees the key before the editor does. The recovery is DEFERRED,
    * because the teardown has not happened yet, and CONDITIONAL, because a
    * surface that legitimately claimed focus in the meantime must keep it.
-   * Fixing this at the source means an opt-in grid prop on `FieldEditor`,
-   * which is a change to the highest-blast-radius file in the app and does
-   * not belong in a table phase.
+   * Scalar editors also restore the grid on commit/cancel. This safety net
+   * still covers other cell controls that dismiss themselves on Escape.
    */
   const onKeyDownCapture = useCallback(
     (e: React.KeyboardEvent) => {

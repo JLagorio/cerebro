@@ -1,3 +1,4 @@
+import { noSourceText } from '@/agent/elements/writingCitations';
 import { linkLabel } from '@/engine/linkLabels';
 import type { Source } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
@@ -189,7 +190,7 @@ export function citationName(
     page?.title ??
     (target !== null && 'external' in target ? linkLabel(target.external)?.text : undefined) ??
     source?.resource ??
-    `No source "${id}"`
+    noSourceText(id)
   );
 }
 

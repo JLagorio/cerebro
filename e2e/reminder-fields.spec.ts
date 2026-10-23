@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { boot, readMockFile, seedFileBeforeBoot, showDatabases } from './boot';
+import { chooseOption } from './select';
 
 test('a date property reminds its unfinished records and stores the type setting', async ({
   page,
@@ -14,7 +15,7 @@ test('a date property reminds its unfinished records and stores the type setting
   await expect(setting).toContainText(
     'Every Work item with a Due reminds. Dates without a time remind at 9:00 AM.',
   );
-  await setting.getByRole('combobox', { name: 'Remind' }).selectOption('1d');
+  await chooseOption(setting.getByRole('button', { name: 'Remind' }), '1 day before');
   await expect
     .poll(() => readMockFile(page, 'types/work-item.md'))
     .toMatch(/due:\s*\n\s+kind: date\s*\n\s+remind: 1d/);
@@ -26,7 +27,7 @@ test('a date property reminds its unfinished records and stores the type setting
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(2000);
   await page.screenshot({ path: testInfo.outputPath('property-reminder.png') });
-  await setting.getByRole('combobox', { name: 'Remind' }).selectOption('none');
+  await chooseOption(setting.getByRole('button', { name: 'Remind' }), 'None');
   await expect.poll(() => readMockFile(page, 'types/work-item.md')).not.toMatch(/remind: 1d/);
 });
 

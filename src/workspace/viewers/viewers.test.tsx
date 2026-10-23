@@ -102,9 +102,8 @@ describe('images and media', () => {
   it('renders byte refusals as unavailable, not an empty player', async () => {
     ipc.fileUrl.mockResolvedValue(fileRefusal('outside'));
     render(<MediaViewer rootId="r" path="a.mp3" probe={{ ...probe, kind: 'audio' }} />);
-    expect((await screen.findByRole('status')).textContent).toContain(
-      fileRefusal('outside').message,
-    );
+    await screen.findByText(fileRefusal('outside').message);
+    expect(screen.getByRole('status').textContent).toContain(fileRefusal('outside').message);
   });
 });
 describe('read-only tables', () => {

@@ -34,8 +34,8 @@ describe('PRESETS', () => {
   });
 
   it('starts with the two everyone actually wants', () => {
-    // Only the first two ride on the bar; the rest are one click further. That
-    // order is the design, so it is asserted rather than left to a slice.
+    // The writing-actions menu retains its established order when the toolbar
+    // collapses its entry to one Ask AI action.
     expect(PRESETS.slice(0, 2).map((p) => p.label)).toEqual(['Improve writing', 'Make it shorter']);
   });
 
@@ -82,7 +82,13 @@ describe('formattingToolbarItems', () => {
 describe('blockMenuItems', () => {
   it('offers Delete, and no colours or table header toggles', () => {
     const items = blockMenuItems(en);
-    expect(items.map((item) => item.key)).toEqual(['removeBlockItem']);
+    expect(items.map((item) => item.key)).toEqual([
+      'turnIntoItem',
+      'duplicateBlockItem',
+      'moveBlockUpItem',
+      'moveBlockDownItem',
+      'removeBlockItem',
+    ]);
     for (const key of ['blockColorsItem', 'tableRowHeaderItem', 'tableColumnHeaderItem']) {
       expect(UNCARRIED_ACTIONS[key], key).toBeTruthy();
     }

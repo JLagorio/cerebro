@@ -1,3 +1,4 @@
+import { StateMessage } from '@/components/ui/StateMessage';
 import { useFollowupStore } from '@/stores/followupStore';
 import { waitingFollowup } from '@/engine/followups';
 import { useEffect, useMemo, useState } from 'react';
@@ -247,7 +248,7 @@ function Chip({ state }: { state: AgentState }) {
     <span
       data-testid="agent-state"
       data-state={state}
-      className="rounded-md px-1.5 py-0.5 text-2xs text-n-600"
+      className="rounded-md px-1.5 py-0.5 text-metadata text-n-600"
       style={{ border: '1px solid var(--n-200)' }}
     >
       {STATE_TEXT[state]}
@@ -405,35 +406,37 @@ export function AgentRoster({
 
   return (
     <div className="flex flex-col gap-1.5" data-testid="agent-roster">
-      {summaries.kind === 'loading' && <p className="text-xs text-n-400">Reading…</p>}
+      {summaries.kind === 'loading' && (
+        <StateMessage state="loading" title="Reading agent activity…" compact />
+      )}
 
       {/* Named reads, so two failures never read as one. Each is the
           `section-unavailable` the rest of the app uses, and each says which
           claim it is refusing to make. */}
       {summaries.kind === 'unavailable' && (
-        <p data-testid="section-unavailable" className="text-xs text-n-500">
+        <p data-testid="section-unavailable" className="text-metadata text-(--text-meta)">
           The run history could not be read, so no row here says when an agent last ran or what it
           has spent.
         </p>
       )}
       {queue.kind === 'unavailable' && (
-        <p data-testid="section-unavailable" className="text-xs text-n-500">
+        <p data-testid="section-unavailable" className="text-metadata text-(--text-meta)">
           The proposal queue could not be read, so no row here says what is waiting on you.
         </p>
       )}
       {background.kind === 'unavailable' && (
-        <p data-testid="section-unavailable" className="text-xs text-n-500">
+        <p data-testid="section-unavailable" className="text-metadata text-(--text-meta)">
           The background pause could not be read, so no row here says whether work is stopped.
         </p>
       )}
       {paused.kind === 'unavailable' && (
-        <p data-testid="section-unavailable" className="text-xs text-n-500">
+        <p data-testid="section-unavailable" className="text-metadata text-(--text-meta)">
           Which agents are paused could not be read, so no row here offers to pause or resume one.
         </p>
       )}
 
       {agents.length === 0 && summaries.kind !== 'loading' && (
-        <p data-testid="roster-empty" className="text-xs text-n-500">
+        <p data-testid="roster-empty" className="text-metadata text-(--text-meta)">
           No agent records in this vault. An agent is a record of{' '}
           <code className="text-n-600">type: Agent</code> whose body is its standing instructions.
         </p>
@@ -461,7 +464,7 @@ export function AgentRoster({
           // The row and its pause are SIBLINGS, not nested: the row is a
           // button (clicking it narrows the history below) and a button inside
           // a button is not a thing a browser will render.
-          <div key={ref.path} className="flex items-start gap-1.5">
+          <div key={ref.path} className="cb-agent-roster-row flex items-start gap-1.5">
             <button
               type="button"
               data-testid="agent-row"
@@ -486,17 +489,17 @@ export function AgentRoster({
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="flex flex-wrap items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-n-900">
+                  <span className="min-w-0 flex-1 truncate text-ui font-medium text-n-900">
                     {ref.title}
                   </span>
                   <Chip state={state} />
                 </span>
-                <span data-testid="agent-duty" className="text-2xs text-n-600">
+                <span data-testid="agent-duty" className="text-metadata text-n-600">
                   {later && !configured
                     ? 'A follow-up it booked waits for Learn on its own to be on'
                     : dutyText(duty.schedule, onDuty, now)}
                 </span>
-                <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-n-500">
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-metadata text-(--text-meta)">
                   <span
                     data-testid="agent-last-run"
                     // The exact stamp is one hover away, so nothing is rounded
@@ -537,7 +540,7 @@ export function AgentRoster({
       })}
 
       {unowned.length > 0 && (
-        <p data-testid="roster-unowned" className="text-2xs text-n-500">
+        <p data-testid="roster-unowned" className="text-metadata text-(--text-meta)">
           Also ran here, with no record in this vault:{' '}
           {unowned.map((actor, i) => (
             <span key={actor} title={actor}>

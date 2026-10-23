@@ -139,12 +139,14 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         message: prompt.to_string(),
         system_prompt: None,
         session_id: None,
+        fork: None,
         model: None,
         // No shell or web ceiling (M57.2, M57.7): an internal run's
         // tool-approval plan denies every CLI tool whatever the ceilings, so
         // none is sent.
         shell: None,
         web: None,
+        delegate: None,
         // Every one of these is an absence a MISSING field would grant.
         connectors: Some(false),
         connector_names: Some(vec![]),
@@ -193,7 +195,10 @@ mod tests {
         assert_eq!(request.web, None, "nor the web's");
         let plan = crate::policy::tool_approval::plan_for(&request, false);
         assert!(plan.allowed.is_empty(), "it writes no files");
-        assert_eq!(plan.disallowed, crate::policy::tools::cli_names(|_| true));
+        assert_eq!(
+            plan.disallowed,
+            crate::policy::tools::cli_names(|tool| tool.name != "ToolSearch")
+        );
         assert_eq!(request.connectors, Some(false), "and reaches no systems");
         assert_eq!(request.connector_names, Some(vec![]));
         assert_eq!(request.approved_stdio, Some(vec![]));

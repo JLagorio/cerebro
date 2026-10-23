@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { Button } from '@/components/ui/Button';
+import { useId } from 'react';
+import { proposalAnswers, proposalState } from '@/agent/elements/decisions';
+import { Confirmation } from '@/components/ai/Confirmation';
 import { Icon } from '@/components/ui/Icon';
-import { Input } from '@/components/ui/Input';
 import { actorLabel, isAssistantActor } from '@/engine/authors';
 import { parseActor } from '@/engine/okf';
 import { kindMeta } from '@/engine/properties';
@@ -25,13 +25,15 @@ import {
   riskTitle,
   targetName,
 } from './proposalText';
+import './review.css';
 
 /**
  * One proposal an agent queued for a person (M52.2), wherever it is shown:
- * Review's "Waiting on you" and the concept page it would change.
+ * Review's "Waiting on you" and the concept page it would change. It is a
+ * Confirmation (M91.14), the anatomy every card that asks shares.
  *
  * It reads top to bottom as the decision does — what would change, who asks,
- * why, why it waits for you, what moved underneath it, what it rests on —
+ * why, why it waits for you, what it rests on, what moved underneath it —
  * and then the two answers. What it is meant for and why now, and the
  * ledger's own record (op, codes, intended use, targets and versions), are
  * one click down under Details: the words above are this build's copy, and
@@ -39,16 +41,17 @@ import {
  *
  * Every testid is the one `NeedsYouSection` carried since M24.9, so
  * `review.spec.ts` still proves the moves dropped nothing. `card-op` shows
- * the headline now; the op itself is its `data-op`.
+ * the headline now; the op itself is its `data-op`, and the headline alone
+ * names the card.
  */
 
 const RISK_COLOR: Record<string, string> = {
-  LOW: 'var(--n-500)',
+  LOW: 'var(--text-meta)',
   // The chip named `--info-600`, a token the DS never defined, so MEDIUM
   // painted in whatever colour it inherited.
   MEDIUM: 'var(--cortex-600)',
-  HIGH: 'var(--warn-600)',
-  CRITICAL: 'var(--danger-500)',
+  HIGH: 'var(--warn-700)',
+  CRITICAL: 'var(--danger-700)',
 };
 
 /**
@@ -114,13 +117,15 @@ export function ProposalCard({
    * "this concept" rather than a link to where the reader already is, and
    * the card sits flush inside the page's review bar. */
   here?: string;
+  /** A decision on its way, or one made here that waits for the queue's
+   *  re-read (`useDecisions`, M52.4): the card offers nothing to press. */
   busy: boolean;
   onDecide: (card: ReviewCard, approve: boolean, reason: string | null) => void;
 }) {
   const entries = useVaultStore((s) => s.entries);
   const navigate = useNavStore((s) => s.navigate);
   const askAgent = useUiStore((s) => s.askAgent);
-  const [reason, setReason] = useState<string | null>(null);
+  const headlineId = useId();
   const titleOf = (path: string) => entries.find((e) => e.path === path)?.title ?? path;
 
   const { verb, known } = opVerb(card.op);
@@ -171,7 +176,7 @@ export function ProposalCard({
         {verb}
         {object !== null && (known ? ' ' : ' — ')}
         {object}
-        {more > 0 && <span className="font-normal text-n-500"> and {more} more</span>}
+        {more > 0 && <span className="font-normal text-(--text-meta)"> and {more} more</span>}
       </>
     );
 
@@ -193,57 +198,81 @@ export function ProposalCard({
       askedAbout(FRESH_PROPOSAL_LABEL, name),
     );
   };
+  const answers = proposalAnswers({
+    stale: stale.length > 0,
+    onApprove: () => onDecide(card, true, null),
+    onAskFresh: askFresh,
+    onReject: (reason) => onDecide(card, false, reason),
+  });
 
   const basis = basisText(card);
   return (
-    <article
+    <Confirmation
       data-testid="review-card"
       data-proposal={card.proposal_id}
       // In Review it is one cell of a grid of reading-width columns (M52.5),
-      // as tall as its row, with its answers at the foot so a row's line up.
-      className={
-        flush ? 'flex flex-col' : 'flex h-full flex-col rounded-lg border border-n-200 p-4'
-      }
-    >
-      <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <h3
-          data-testid="card-op"
-          data-op={card.op}
-          title={card.op}
-          className="m-0 text-sm font-semibold text-n-900"
-        >
-          {headline}
-        </h3>
-        <span
-          data-testid="card-risk"
-          data-risk={card.effective_risk}
-          title={riskTitle(card.effective_risk)}
-          className="whitespace-nowrap rounded-xs px-1.5 py-0.5 text-2xs font-medium"
-          style={{
-            color: RISK_COLOR[card.effective_risk] ?? 'var(--n-500)',
-            border: '1px solid currentColor',
-          }}
-        >
-          {riskLabel(card.effective_risk)}
-        </span>
-        {card.review === 'diff' ? (
-          // The CRITICAL rung's review mode (`risk_ladder.CRITICAL.review`).
-          <span
-            data-testid="card-diff"
-            title="Review mode: diff"
-            className="text-2xs font-medium text-danger-500"
+      // as tall as its row, with its answers at the foot so a row's line up
+      // (review.css); on its concept's page it sits flush in the review bar.
+      data-flush={flush ? '' : undefined}
+      aria-labelledby={headlineId}
+      variant="outline"
+      state={proposalState(busy)}
+      title={
+        <>
+          <h3
+            id={headlineId}
+            data-testid="card-op"
+            data-op={card.op}
+            title={card.op}
+            className="m-0 text-section-title font-semibold text-n-900"
           >
-            Read it closely
+            {headline}
+          </h3>
+          <span
+            data-testid="card-risk"
+            data-risk={card.effective_risk}
+            title={riskTitle(card.effective_risk)}
+            className="whitespace-nowrap rounded-xs px-1.5 py-0.5 text-metadata font-medium"
+            style={{
+              color: RISK_COLOR[card.effective_risk] ?? 'var(--text-meta)',
+              border: '1px solid currentColor',
+            }}
+          >
+            {riskLabel(card.effective_risk)}
           </span>
-        ) : null}
-        <span className="ml-auto inline-flex items-center gap-1 text-xs text-n-500">
+          {card.review === 'diff' ? (
+            // The CRITICAL rung's review mode (`risk_ladder.CRITICAL.review`).
+            <span
+              data-testid="card-diff"
+              title="Review mode: diff"
+              className="text-metadata font-medium text-danger-700"
+            >
+              Read it closely
+            </span>
+          ) : null}
+        </>
+      }
+      meta={
+        <>
           Proposed by <CardAuthor actor={card.actor} />
-        </span>
-      </header>
-
+        </>
+      }
+      // What happened underneath it, said before anyone presses Approve.
+      notice={
+        stale.length > 0 ? (
+          <span className="text-danger-600">
+            {stale.map((t) => movedText(t, targetName(t, titleOf, here))).join(' ')}
+          </span>
+        ) : null
+      }
+      testIds={{ notice: 'card-stale' }}
+      approve={answers.approve}
+      deny={answers.deny}
+      className="cb-review-card"
+    >
       {/* The proposer's own reason is the main sentence: it is what the
           decision is about. Display text — no rule reads it. */}
-      <p data-testid="card-reason" className="m-0 mt-1.5 text-sm text-n-700">
+      <p data-testid="card-reason" className="m-0 text-ui text-n-700">
         {reasonSentence(card.reason)}
       </p>
 
@@ -255,79 +284,28 @@ export function ProposalCard({
         <p
           data-testid="card-queued-for"
           data-codes={card.queued_for.join(',')}
-          className="m-0 mt-2 text-xs text-warn-700"
+          className="m-0 text-xs text-warn-700"
         >
           {card.queued_for.map((code) => heldForText(code, card)).join(' ')}
         </p>
       ) : null}
 
-      {stale.length > 0 ? (
-        <p data-testid="card-stale" className="m-0 mt-2 text-xs text-danger-600">
-          {stale.map((t) => movedText(t, targetName(t, titleOf, here))).join(' ')}
-        </p>
-      ) : null}
-
       {basis !== null && (
-        <p data-testid="card-basis" className="m-0 mt-2 text-xs text-n-500">
+        <p data-testid="card-basis" className="m-0 text-ui text-(--text-meta)">
           {basis}
         </p>
       )}
 
-      <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
-        {stale.length > 0 && (
-          <Button
-            variant="primary"
-            size={flush ? 'sm' : 'md'}
-            icon="sparkles"
-            testId="ask-fresh"
-            onClick={askFresh}
-          >
-            {FRESH_PROPOSAL_LABEL}
-          </Button>
-        )}
-        <Button
-          variant={stale.length > 0 ? 'secondary' : 'primary'}
-          size={flush ? 'sm' : 'md'}
-          disabled={busy || stale.length > 0}
-          testId="approve"
-          onClick={() => onDecide(card, true, reason)}
-        >
-          Approve
-        </Button>
-        {/* It gives way first, so a card a grid column wide keeps its
-            answers on one line (M52.5). */}
-        <Input
-          value={reason ?? ''}
-          placeholder="Why not?"
-          size={flush ? 'sm' : 'md'}
-          testId="reject-reason"
-          className="min-w-[96px] max-w-[280px] flex-[1_1_120px]"
-          onChange={(e) => setReason(e.target.value)}
-        />
-        <Button
-          size={flush ? 'sm' : 'md'}
-          disabled={busy || (reason ?? '').trim() === ''}
-          testId="reject"
-          onClick={() => onDecide(card, false, reason)}
-        >
-          Reject
-        </Button>
-      </div>
-
-      <details data-testid="card-details" className="group mt-2">
-        <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-2xs text-n-500 hover:text-n-800">
-          <Icon
-            name="chevron-right"
-            size={11}
-            className="transition-transform group-open:rotate-90"
-          />
+      <details data-testid="card-details" className="group">
+        <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-metadata text-(--text-meta) hover:text-n-800">
+          <Icon name="chevron-right" size={11} className="motion-move group-open:rotate-90" />
           Details
         </summary>
         {/* The why-now and the what-for in words, then the codes they read. */}
         <p data-testid="card-purpose" className="m-0 mt-1.5 text-xs text-n-600">
           {purposeText(card)}
         </p>
-        <dl className="m-0 mt-1.5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-2xs text-n-500 [font-family:var(--font-mono)]">
+        <dl className="m-0 mt-1.5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-metadata text-(--text-meta) [font-family:var(--font-mono)]">
           <dt>op</dt>
           <dd className="m-0 text-n-700">{card.op}</dd>
           <dt>risk</dt>
@@ -357,7 +335,7 @@ export function ProposalCard({
         </dl>
         <ul
           data-testid="card-targets"
-          className="m-0 mt-1.5 list-none space-y-0.5 p-0 text-2xs text-n-500 [font-family:var(--font-mono)]"
+          className="m-0 mt-1.5 list-none space-y-0.5 p-0 text-metadata text-(--text-meta) [font-family:var(--font-mono)]"
         >
           {card.targets.map((target) => (
             <li key={`${target.target_class}/${target.target_id}`}>
@@ -369,6 +347,6 @@ export function ProposalCard({
           ))}
         </ul>
       </details>
-    </article>
+    </Confirmation>
   );
 }

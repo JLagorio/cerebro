@@ -24,10 +24,10 @@ for (const theme of ['light', 'dark'] as const) {
       const lane = await work.boundingBox();
       const row = await work.getByTestId('home-row').first().boundingBox();
       expect(ask!.width).toBeGreaterThan(600);
-      expect(ask!.width).toBeLessThanOrEqual(840);
+      expect(ask!.width).toBeLessThanOrEqual(880);
       expect(Math.abs(ask!.x + ask!.width / 2 - (canvas.x + canvas.width / 2))).toBeLessThan(2);
       expect(lane!.y).toBeLessThan(500);
-      expect(row!.height).toBeGreaterThanOrEqual(44);
+      expect(row!.height).toBeGreaterThanOrEqual(48);
       await expect(home.getByRole('button', { name: 'New page', exact: true })).toBeVisible();
       await expect(home.getByRole('button', { name: 'New whiteboard', exact: true })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
@@ -82,7 +82,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(prose).toHaveCSS('line-height', '28px');
       await expect(
         editor.getByRole('heading', { name: 'A place to think', exact: true }),
-      ).toHaveCSS('font-size', '32px');
+      ).toHaveCSS('font-size', '40px');
       const code = editor.locator('[data-content-type="codeBlock"]');
       expect(
         await code.evaluate((node) => parseFloat(getComputedStyle(node).fontSize)),

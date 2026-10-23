@@ -101,10 +101,14 @@ test('⌘J toggles the assistant while typing in a page', async ({ page }) => {
   const paragraph = page.locator('.bn-editor [data-content-type="paragraph"]').first();
   await paragraph.click();
   await page.keyboard.type('still typing');
+  // The assistant rests as its round button; ⌘J opens the conversation and
+  // folds it back to the button, and never unmounts it.
+  const assistant = page.getByTestId('ai-panel');
+  await expect(assistant).toHaveAttribute('data-minimized', 'true');
   await page.keyboard.press('ControlOrMeta+j');
-  await expect(page.getByTestId('ai-panel-frame')).toBeVisible();
+  await expect(assistant).not.toHaveAttribute('data-minimized', 'true');
   await page.keyboard.press('ControlOrMeta+j');
-  await expect(page.getByTestId('ai-panel-frame')).toHaveCount(0);
+  await expect(assistant).toHaveAttribute('data-minimized', 'true');
 });
 
 test('⌘[ in a page body stays put, and from outside its text goes back', async ({ page }) => {
@@ -129,7 +133,9 @@ test('Inbox ⌘E files the open capture, and never while typing in its body', as
   const PATH = 'inbox/warehouse-cutover-thought.md';
   const row = page.getByTestId('inbox-row').filter({ hasText: 'Warehouse cutover' });
   await row.click();
-  await expect(page.getByLabel('Organize')).toBeVisible();
+  await expect(
+    page.getByTestId('doc-side-panel').locator('[data-section="organize"]'),
+  ).toBeVisible();
 
   // -- In the body, ⌘E is the editor's ----------------------------------
   await page

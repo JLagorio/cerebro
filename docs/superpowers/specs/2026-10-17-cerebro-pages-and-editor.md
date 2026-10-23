@@ -1,7 +1,8 @@
 # M85–M86 — Pages, records and authoring
 
-**Status: Draft for owner review, 2026-10-17.** Milestone allocation is proposed. This is a
-specification, not an implementation or a claim that the acceptance checks below have passed.
+**Status: Design specification, 2026-10-17; implementation subsequently authorized.**
+This contract is not a claim that every acceptance check has passed. Actual implementation and
+evidence are recorded in the [implementation record](../plans/2026-10-17-m84-m90-implementation-record.md).
 It follows the implemented [M71–M79 redesign](../plans/2026-10-16-m71-m74-visual-redesign.md)
 and [M80–M83 polish](../plans/2026-10-16-m80-m83-ui-polish.md).
 
@@ -198,10 +199,12 @@ configuration have distinct affordances. Reorder hints continue to disclose that
 order affects the Type. Undeclared frontmatter stays visible and removable, never coerced away.
 Agent grant rows never enter the generic autosaving field editor.
 
-The inspector keeps Outline, Info/Details, Links, Knowledge where applicable, Comments and
-History reachable. Replace wrapping rows of small navigation pills with a clear current section
-and compact section switcher at constrained widths. Preserve the stored selection, pane scope,
-drawer focus return and each section's own error state.
+The inspector keeps Details (Info, Links, Knowledge where applicable), Comments and History
+reachable. Since the owner's 2026-10-19 direction each is a panel of its own, opened by its own
+toolbar button, one at a time, in a slot the page's full height under the toolbar's actions, and
+the outline sits on the page as a floating table of contents rather than in the panel. At
+constrained widths the panel folds and its buttons open it as a drawer over the page. Preserve
+the stored selection, pane scope, drawer focus return and each section's own error state.
 
 For ordinary document details, keep the existing `cerebro.docPanelOpen` preference home. An
 absent value defaults closed; explicit true and false remain honored. Keep the separate concept

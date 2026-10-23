@@ -3,12 +3,14 @@ import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 
-// Import rails (M53.20). Each rail bans one kind of import: static imports,
+// Rails (M53.20). An import rail bans one kind of import: static imports,
 // re-exports and `import type` through no-restricted-imports, `import()`
-// through no-restricted-syntax. Flat config REPLACES a rule's options in each
-// matching object instead of merging them, so every file class at the bottom
-// of this file composes the full set of rails it keeps: a class that named
-// only its own exemption would silently drop every other rail.
+// through no-restricted-syntax. An element rail bans one native element
+// through no-restricted-syntax: `<img>` outside the image components (CV-61)
+// and `<select>` everywhere (CV-63). Flat config REPLACES a rule's options in
+// each matching object instead of merging them, so every file class at the
+// bottom of this file composes the full set of rails it keeps: a class that
+// named only its own exemption would silently drop every other rail.
 // scripts/lint-rails.test.ts proves each rail and each exemption.
 
 /** The only files that may load `@tauri-apps/*`. */
@@ -54,6 +56,18 @@ const RAILS = {
     selector: 'JSXOpeningElement[name.name="img"]',
     message:
       'Only FileImage, FileThumb, RemoteImage and Avatar draw <img>: use a reviewed image boundary.',
+  },
+  // CV-63, no exemption: the design system's Select is a listbox button.
+  // Third-party UI that builds a native one is wrapped where it is wired in,
+  // as BlockNote's code block is in src/editor/codeBlock.tsx.
+  select: {
+    selector: [
+      'JSXOpeningElement[name.name="select"]',
+      'CallExpression[callee.name="createElement"][arguments.0.value=/^select$/i]',
+      'CallExpression[callee.property.name="createElement"][arguments.0.value=/^select$/i]',
+    ].join(', '),
+    message:
+      "No native <select> draws anywhere (CV-63): use the design system's Select from '@/components/ui/Select', or Dropdown, which renders it.",
   },
   tauri: {
     pattern: /^@tauri-apps\//,
@@ -210,40 +224,50 @@ export default tseslint.config(
   // ones before it, and the specialized classes below never overlap.
   {
     files: ['src/**/*.{ts,tsx}'],
-    rules: rails('img', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
+    rules: rails('img', 'select', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
   },
   {
     files: ADAPTERS,
-    rules: rails('img', 'pdfjs', 'ironcalc', 'mermaid', 'mockParse', 'comments'),
+    rules: rails('img', 'select', 'pdfjs', 'ironcalc', 'mermaid', 'mockParse', 'comments'),
   },
   {
     files: ['src/mermaid/render.ts', 'src/**/*.mermaid.test.ts'],
-    rules: rails('img', 'pdfjs', 'ironcalc', 'tauri', 'mockParse', 'comments'),
+    rules: rails('img', 'select', 'pdfjs', 'ironcalc', 'tauri', 'mockParse', 'comments'),
   },
   {
     // The mock backend and the two tests that hold its parser to Rust.
     files: ['src/lib/mockIpc.ts', 'src/lib/mockParse.test.ts', 'src/lib/scanGolden.test.ts'],
-    rules: rails('img', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'comments'),
+    rules: rails('img', 'select', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'comments'),
   },
   {
     // Engine tests may import a fixture or a store; the engine itself may not.
     files: ['src/engine/**/*.{ts,tsx}'],
     ignores: ['src/engine/**/*.test.{ts,tsx}'],
-    rules: rails('img', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments', 'engine'),
+    rules: rails(
+      'img',
+      'select',
+      'pdfjs',
+      'ironcalc',
+      'tauri',
+      'mermaid',
+      'mockParse',
+      'comments',
+      'engine',
+    ),
   },
   {
     files: ['src/lib/mockSheet.ts', 'src/**/*.ironcalc.test.ts'],
-    rules: rails('img', 'pdfjs', 'tauri', 'mermaid', 'mockParse', 'comments'),
+    rules: rails('img', 'select', 'pdfjs', 'tauri', 'mermaid', 'mockParse', 'comments'),
   },
   {
     files: ['src/workspace/viewers/pdf/pdfjs.ts', 'src/**/*.pdf.test.ts'],
-    rules: rails('img', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
+    rules: rails('img', 'select', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
   },
   {
     // The M70.1 spike measures BlockNote's comments extension; nothing else
     // loads it.
     files: ['src/editor/commentSpike.test.ts'],
-    rules: rails('img', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse'),
+    rules: rails('img', 'select', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse'),
   },
   {
     files: [
@@ -252,6 +276,6 @@ export default tseslint.config(
       'src/components/RemoteImage.tsx',
       'src/components/ui/Avatar.tsx',
     ],
-    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
+    rules: rails('select', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
   },
 );

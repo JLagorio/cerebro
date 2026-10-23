@@ -61,7 +61,7 @@ test('renamed fields stay valid; hand-edited broken filters are named and marked
   };
   const edited = `---\n${YAML.stringify(doc)}---\n${raw.slice(match![0].length)}`;
   await page.evaluate(([path, text]) => window.__cerebroMockFs.set(path, text), [TYPE_DOC, edited]);
-  await page.getByTestId('quick-add').first().click();
+  await page.getByRole('button', { name: 'New record in Todo', exact: true }).click();
   const title = page.getByPlaceholder('Title — Enter to create');
   await title.fill('View check refresh');
   await title.press('Enter');

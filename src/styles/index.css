@@ -11,6 +11,7 @@
 
 /* Unlayered on purpose — see the file's own header. */
 @import './table-chrome.css';
+@import './surface-system.css';
 @import '../app/shell.css';
 
 @theme inline {
@@ -103,6 +104,17 @@
   --color-accent-hover: var(--accent-hover);
   --color-accent-press: var(--accent-press);
 
+  /* Paired filled-action roles also serve specialized controls that own their
+     keyboard model rather than rendering the shared Button. */
+  --color-action-primary: var(--action-primary);
+  --color-action-primary-hover: var(--action-primary-hover);
+  --color-action-primary-press: var(--action-primary-press);
+  --color-on-action-primary: var(--on-action-primary);
+  --color-action-danger: var(--action-danger);
+  --color-action-danger-hover: var(--action-danger-hover);
+  --color-action-danger-press: var(--action-danger-press);
+  --color-on-action-danger: var(--on-action-danger);
+
   /* user-assignable swatches */
   --color-swatch-amber: var(--swatch-amber);
   --color-swatch-blue: var(--swatch-blue);
@@ -121,6 +133,22 @@
    * Pairing them here would silently add a line-height to every one of them
    * and reflow the app. The pairs stay addressable — `text-sm leading-sm` —
    * so the intent survives as something a call site opts into. */
+  /* Role utilities opt into both dimensions; metadata avoids the --text-meta
+     semantic ink namespace. `text-base` is retained as a real 14px alias. */
+  --text-base: var(--fs-ui);
+  --text-base--line-height: var(--lh-ui);
+  --text-ui: var(--fs-ui);
+  --text-ui--line-height: var(--lh-ui);
+  --text-metadata: var(--fs-meta);
+  --text-metadata--line-height: var(--lh-meta);
+  --text-section-title: var(--fs-section-title);
+  --text-section-title--line-height: var(--lh-section-title);
+  --text-workspace-title: var(--fs-workspace-title);
+  --text-workspace-title--line-height: var(--lh-workspace-title);
+  --text-page-title: var(--fs-page-title);
+  --text-page-title--line-height: var(--lh-page-title);
+  --text-prose: var(--fs-prose);
+  --text-prose--line-height: var(--lh-prose);
   --text-2xs: var(--fs-2xs);
   --text-xs: var(--fs-xs);
   --text-sm: var(--fs-sm);
@@ -149,7 +177,11 @@
   --radius-full: var(--r-full);
 }
 
-/* Detail panel entrance (prototype cbPanelIn, DS motion) */
+/* Detail panel entrance (prototype cbPanelIn, DS motion), on the arrival
+   pair: a content swap keyed to remount plays it (ViewSettingsPanel's pages,
+   the record peek). Filled `backwards` and never `forwards`, so no transform
+   outlives the entrance — a lingering one would become the containing block
+   of every `fixed` popover inside. */
 @keyframes cb-panel-in {
   from {
     opacity: 0;
@@ -161,12 +193,14 @@
   }
 }
 .cb-panel-in {
-  animation: cb-panel-in 180ms cubic-bezier(0.2, 0.6, 0.2, 1);
+  animation: cb-panel-in var(--motion-enter) backwards;
 }
 
-/* Menu/popover entrance (M12.8): a short drop-and-fade. Translate only — no
-   scale, because FixedBelowAnchor measures its content to clamp it inside the
-   viewport and a scaling first frame would measure small. */
+/* Menu/popover entrance (M12.8): a short drop-and-fade, on the pop pair.
+   Translate only — no scale, because FixedBelowAnchor measures its content
+   to clamp it inside the viewport and a scaling first frame would measure
+   small. (Popover, and the chat's menus, scale from their placed side: see
+   `cb-pop-in`.) */
 @keyframes cb-menu-in {
   from {
     opacity: 0;
@@ -178,18 +212,207 @@
   }
 }
 .cb-menu-in {
-  animation: cb-menu-in 140ms cubic-bezier(0.2, 0.6, 0.2, 1);
+  animation: cb-menu-in var(--motion-pop) backwards;
+}
+
+/* Arriving and leaving, shared (owner, 2026-10-19 — the pairs are in
+   tokens/spacing.css, how a surface stays on screen to leave is in
+   components/ui/motion.ts). Each moves `opacity` and the individual
+   `translate` / `scale` properties only, so it composes with a surface's own
+   `transform` instead of replacing it, and each names its distance in a
+   custom property its surface may set. Entrances fill `backwards`, exits
+   `forwards`: nothing an animation set outlives it, except a leaving
+   surface's last frame, held until it unmounts. */
+@keyframes cb-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes cb-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+/* A block that arrives below where it rests: content swapped in place. */
+@keyframes cb-rise-in {
+  from {
+    opacity: 0;
+    translate: 0 var(--rise, 6px);
+  }
+}
+/* A surface that opens from an anchor: it grows from the anchor's side
+   (`transform-origin`, set by the surface) and drifts toward it. */
+@keyframes cb-pop-in {
+  from {
+    opacity: 0;
+    translate: 0 var(--pop-y, -2px);
+    scale: var(--pop-scale, 0.96);
+  }
+}
+@keyframes cb-pop-out {
+  to {
+    opacity: 0;
+    scale: var(--pop-scale, 0.98);
+  }
+}
+/* A mark that lands and should be noticed: a count, a check. */
+@keyframes cb-mark-in {
+  from {
+    opacity: 0;
+    scale: 0.6;
+  }
+}
+/* Text that is working — "Thinking…", "Reading the transcript…" — a light
+   passing through it (background-clip: text). */
+@keyframes cb-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* The surfaces that open over the page, on the shared pairs. Popover's
+   panel grows from the side of its anchor it opened on, a little smaller
+   and nearer (Radix's and Macro's menus); a tooltip drifts out of its
+   anchor; each leaves as a copy fading where it was (leaveGhost,
+   components/ui/motion.ts), quicker than it came. */
+.cb-popover-panel.cb-menu-in {
+  animation-name: cb-pop-in;
+  transform-origin: top left;
+}
+.cb-popover-panel.cb-menu-in[data-side='top'] {
+  --pop-y: 2px;
+  transform-origin: bottom left;
+}
+.cb-popover-leave {
+  animation: cb-pop-out var(--motion-exit) forwards;
+}
+.cb-tooltip {
+  --pop-y: -2px;
+  --pop-scale: 0.97;
+  transform-origin: top center;
+  animation: cb-pop-in var(--motion-pop) backwards;
+}
+.cb-tooltip[data-side='top'] {
+  --pop-y: 2px;
+  transform-origin: bottom center;
+}
+.cb-tooltip-leave {
+  animation: cb-fade-out var(--motion-exit) forwards;
+}
+/* A toast rises into its stack a little small, as thought-desk's do, and
+   fades where it was when it goes. */
+.cb-toast {
+  --pop-y: 10px;
+  --pop-scale: 0.96;
+  transform-origin: bottom center;
+  animation: cb-pop-in var(--motion-enter) backwards;
+}
+.cb-toast-leave {
+  animation: cb-pop-out var(--motion-exit) forwards;
+}
+.cb-hover-card {
+  --pop-y: -4px;
+  --pop-scale: 0.98;
+  transform-origin: top left;
+  animation: cb-pop-in var(--motion-pop) backwards;
+}
+.cb-hover-card[data-side='top'] {
+  --pop-y: 4px;
+  transform-origin: bottom left;
+}
+
+/* A card that lifts under the pointer (a board's, a gallery's): its border
+   on the hover guard, its shadow on the pop pair, as Morrow's cards do. No
+   translate: a board card is dragged, and its transform is the drag's. */
+.cb-card-lift {
+  transition:
+    border-color var(--motion-hover),
+    box-shadow var(--motion-pop);
+}
+
+/* Words that say something is under way — "Thinking…", "Saving…" — with a
+   light passing through them, as ChatGPT's and Macro's working lines do. The
+   words keep their own ink (`currentColor`; the fill is what goes
+   transparent, so the colour still resolves), and the band that passes is
+   the same ink, fainter. A surface may name either (`--working-ink`,
+   `--working-light`). */
+.cb-working-text {
+  background-image: linear-gradient(
+    90deg,
+    var(--working-ink, currentColor) 0%,
+    var(--working-ink, currentColor) 40%,
+    var(--working-light, color-mix(in srgb, currentColor 35%, transparent)) 50%,
+    var(--working-ink, currentColor) 60%,
+    var(--working-ink, currentColor) 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: cb-shimmer 1.8s linear infinite;
+}
+
+/* An AI step at work — a running tool call or subagent, reasoning as it
+   streams — with the same kind of light passing through its title (M91.7;
+   shadcn's `shimmer`, see THIRD_PARTY_NOTICES.md). The band is the title's
+   own ink, fainter; on a dark ground a fainter band reads as a shadow, so
+   there it brightens toward the lightest ink. A surface may name its own
+   (`--ai-shimmer-light`). Its period is movement's ten times over, so the
+   token that stills movement stills it too, and the block below takes the
+   band away. */
+@keyframes cb-ai-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+.cb-ai-shimmer {
+  --ai-shimmer-band: calc(3ch + 40px);
+  --ai-shimmer-glint: var(--ai-shimmer-light, color-mix(in srgb, currentColor 20%, transparent));
+  background-image: linear-gradient(
+    110deg,
+    currentColor calc(50% - var(--ai-shimmer-band)),
+    var(--ai-shimmer-glint) 50%,
+    currentColor calc(50% + var(--ai-shimmer-band))
+  );
+  background-repeat: no-repeat;
+  background-size: calc(200% + var(--ai-shimmer-band) * 2) 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: cb-ai-shimmer calc(var(--dur-move) * 10) linear infinite;
+}
+:root[data-theme='dark'] .cb-ai-shimmer {
+  --ai-shimmer-glint: var(--ai-shimmer-light, color-mix(in srgb, currentColor 40%, var(--n-900)));
 }
 
 /* Both entrances slide, so both stop sliding when a reader asks for that
-   (M46.2 Task 3). They are `animation`, not `transition`, so `--dur-move`
-   cannot reach them and they need naming here — which is the argument for
-   spending the token wherever a transition CAN do the job. The surface still
-   appears; it just appears where it belongs instead of travelling there. */
+   (M46.2 Task 3). They spend the arrival pairs now, which reduced motion
+   already collapses, and are named here as well: belt and braces for a
+   `transition` that cannot do their job. The surface still appears; it just
+   appears where it belongs instead of travelling there. What loops for as
+   long as work goes on — a spinner, the working light — stands still, and
+   the working words keep their ink. */
 @media (prefers-reduced-motion: reduce) {
   .cb-panel-in,
-  .cb-menu-in {
+  .cb-menu-in,
+  .animate-spin,
+  .cb-working-text,
+  .cb-ai-shimmer {
     animation: none;
+  }
+  .cb-working-text {
+    background-image: none;
+    -webkit-text-fill-color: var(--working-ink, currentColor);
+  }
+  .cb-ai-shimmer {
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
   }
 }
 

@@ -1,14 +1,25 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RENDERERS, TranscriptRows } from '@/agent/toolRenderers';
-import type { ToolCall } from '@/agent/types';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { latestTodo, turnItems } from '@/agent/elements/turn';
+import { revealStep, useStepRevealStore } from '@/agent/stepReveal';
+import { RENDERERS, StepItem, type RowContext } from '@/agent/toolRenderers';
+import { applyEvent } from '@/agent/transcript';
+import type { AgentStreamEvent, ChatMessage, ToolCall } from '@/agent/types';
+import {
+  MessageScroller,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from '@/components/ai/MessageScroller';
 import { TOOLS } from '@/lib/policy/tools';
 
 /**
  * Rows drawn by the manifest's renderer (M56.8). The renderer vocabulary is
  * the manifest's, so this holds RENDERERS to it, and every single row to the
- * action card's test ids.
+ * action card's test ids. Rows are drawn as a turn draws them (ChatTurn,
+ * RunTranscript): a reply's items, each through StepItem.
  */
 
 afterEach(cleanup);
@@ -27,8 +38,32 @@ function call(name: string, over: Partial<ToolCall> = {}): ToolCall {
   };
 }
 
+/** A reply's calls, each item through StepItem with the turn's context. */
+function Rows({
+  tools,
+  streaming,
+  waitingToolId = null,
+  ...context
+}: Omit<RowContext, 'streaming' | 'waitingToolId' | 'latestTodoId'> & {
+  tools: ToolCall[];
+  streaming: boolean;
+  waitingToolId?: string | null;
+}) {
+  const reply: ChatMessage = { id: 'reply', role: 'assistant', text: '', tools };
+  return turnItems(reply, { streaming, waitingToolId }).map((item) => (
+    <StepItem
+      key={item.key}
+      item={item}
+      {...context}
+      streaming={streaming}
+      waitingToolId={waitingToolId}
+      latestTodoId={latestTodo(tools)}
+    />
+  ));
+}
+
 function rows(tools: ToolCall[], streaming = false, onOpenPath = vi.fn()) {
-  render(<TranscriptRows tools={tools} streaming={streaming} onOpenPath={onOpenPath} />);
+  render(<Rows tools={tools} streaming={streaming} onOpenPath={onOpenPath} />);
   return onOpenPath;
 }
 
@@ -41,12 +76,12 @@ describe('RENDERERS', () => {
     ]);
     for (const renderer of used) expect(RENDERERS, renderer).toHaveProperty(renderer);
     expect(Object.keys(RENDERERS).sort()).toEqual(
-      ['change', 'commit', 'concept', 'handoff', 'step', 'view'].sort(),
+      ['change', 'commit', 'concept', 'handoff', 'step', 'view', 'subagent', 'todo'].sort(),
     );
   });
 });
 
-describe('TranscriptRows', () => {
+describe("a reply's rows", () => {
   it('folds five reads into a group that expands to their cards', () => {
     const tools = Array.from({ length: 5 }, (_, i) =>
       call('get_note', { input: JSON.stringify({ path: `notes/n-${i}.md` }) }),
@@ -58,19 +93,61 @@ describe('TranscriptRows', () => {
     const cards = within(group).getAllByTestId('action-card');
     expect(cards).toHaveLength(5);
     // Folded: mounted, but out of sight.
-    expect(cards[0].parentElement?.hidden).toBe(true);
+    expect(cards[0].closest('[hidden]')).not.toBeNull();
     fireEvent.click(within(group).getByTestId('action-group-toggle'));
-    expect(cards[0].parentElement?.hidden).toBe(false);
+    expect(cards[0].closest('[hidden]')).toBeNull();
     expect(cards.every((card) => card.getAttribute('data-tool') === 'mcp__cerebro__get_note')).toBe(
       true,
     );
   });
 
-  it('spins a group while a member runs', () => {
+  it('spins a group while a member runs, open and in its running words', () => {
     rows([call('get_note'), call('get_note', { done: false, output: null })], true);
     const group = screen.getByTestId('action-group');
     expect(group.getAttribute('data-status')).toBe('running');
     expect(group.querySelector('.animate-spin')).not.toBeNull();
+    const toggle = within(group).getByTestId('action-group-toggle');
+    expect(toggle.textContent).toBe('Reading 2 notes');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('keeps a command with no shell result the card, a refusal its error', () => {
+    rows([
+      call('Bash', {
+        input: JSON.stringify({ command: 'rm -rf build' }),
+        failed: true,
+        output: 'The person denied this.',
+      }),
+    ]);
+    const card = screen.getByTestId('action-card');
+    expect(card.getAttribute('data-status')).toBe('failed');
+    expect(card.getAttribute('data-slot')).toBe('trace-collapsible');
+    const toggle = within(card).getAllByRole('button')[0];
+    expect(toggle.textContent).toContain('Failed to run a command');
+    expect(toggle.textContent).toContain('rm -rf build');
+    fireEvent.click(toggle);
+    expect(screen.getByTestId('action-output').textContent).toBe('The person denied this.');
+  });
+
+  it('draws a command its shell answered as a Terminal, its output inside', () => {
+    rows([
+      call('Bash', {
+        input: JSON.stringify({ command: 'git status' }),
+        output: 'clean',
+        result: {
+          type: 'shell',
+          stdout: 'clean',
+          stderr: '',
+          interrupted: false,
+          truncated: false,
+        },
+      }),
+    ]);
+    const card = screen.getByTestId('action-card');
+    expect(card.getAttribute('data-slot')).toBe('terminal');
+    fireEvent.click(within(card).getAllByRole('button')[0]);
+    expect(card.querySelector('[data-slot="terminal-command"]')?.textContent).toBe('$ git status');
+    expect(card.querySelector('[data-slot="terminal-stdout"]')?.textContent).toBe('clean');
   });
 
   it('names the agent a handoff went to, and says when it could not go', () => {
@@ -89,6 +166,39 @@ describe('TranscriptRows', () => {
     expect(within(refused).getByTestId('action-handoff-refusal').textContent).toBe(
       'night-owl is paused, so it cannot be called.',
     );
+  });
+
+  it('says why Claude Code refused a handoff, never a bare Denied line', () => {
+    rows([
+      call('hand_to', {
+        input: JSON.stringify({ agent: 'night-owl', message: 'Go.' }),
+        failed: true,
+        output: 'denied',
+        denied: "Permission to use hand_to has been denied by permission rule 'hand_to'.",
+      }),
+    ]);
+    const card = screen.getByTestId('action-card');
+    expect(card.textContent).toContain('Denied the hand-off to night-owl');
+    expect(card.textContent).not.toContain('Handed to');
+    expect(within(card).getByTestId('action-handoff-refusal').textContent).toBe(
+      "Permission to use hand_to has been denied by permission rule 'hand_to'.",
+    );
+  });
+
+  it("clamps a handoff's refusal to its first lines, without its tool-error tags", () => {
+    rows([
+      call('hand_to', {
+        input: JSON.stringify({ agent: 'night-owl', message: 'Go.' }),
+        failed: true,
+        output: '<tool_use_error>night-owl is paused, so it cannot be called.</tool_use_error>',
+      }),
+    ]);
+    const refusal = screen.getByTestId('action-handoff-refusal');
+    expect(refusal.textContent).toBe('night-owl is paused, so it cannot be called.');
+    // The clamp is the inner line's, so the row's padding never shows a
+    // sliver of the fourth line.
+    expect(refusal.className).not.toContain('line-clamp-3');
+    expect(refusal.querySelector('span')?.className).toContain('line-clamp-3');
   });
 
   it('counts what a commit decided, and shows a refusal’s code', () => {
@@ -192,6 +302,32 @@ describe('TranscriptRows', () => {
       'interrupted',
     ]);
   });
+
+  it('names every row’s call by its id, which a rail row jumps to (M92.4)', () => {
+    const tools = [
+      call('edit_note'),
+      call('hand_to', { input: JSON.stringify({ agent: 'scout' }) }),
+      call('Agent', { input: JSON.stringify({ description: 'Read the risks' }) }),
+      call('TodoWrite', {
+        input: JSON.stringify({ todos: [{ content: 'Read', status: 'pending' }] }),
+      }),
+      call('Bash', { input: JSON.stringify({ command: 'ls' }), done: false, output: null }),
+    ];
+    rows(tools, true);
+    expect(screen.getAllByTestId('action-card').map((card) => card.dataset.toolId)).toEqual(
+      tools.map((tool) => tool.id),
+    );
+  });
+
+  it('says whether a card with detail is open, turning its one chevron', () => {
+    rows([call('edit_note', { input: JSON.stringify({ path: 'notes/a.md' }) })]);
+    const toggle = within(screen.getByTestId('action-card')).getAllByRole('button')[0];
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.querySelectorAll('.cb-ai-trace-chevron')).toHaveLength(1);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.querySelectorAll('.cb-ai-trace-chevron')).toHaveLength(1);
+  });
 });
 
 describe('a held call (M57.1)', () => {
@@ -215,7 +351,7 @@ describe('a held call (M57.1)', () => {
     ] as const;
     for (const [over, waitingToolId, status, words] of cases) {
       render(
-        <TranscriptRows
+        <Rows
           tools={[{ ...held, ...over }]}
           streaming={false}
           onOpenPath={vi.fn()}
@@ -233,7 +369,7 @@ describe('a held call (M57.1)', () => {
 
   it('draws a held handoff as the plain card, never as handed', () => {
     render(
-      <TranscriptRows
+      <Rows
         tools={[
           call('hand_to', {
             input: JSON.stringify({ agent: 'scout', task: 'x' }),
@@ -248,5 +384,176 @@ describe('a held call (M57.1)', () => {
     );
     expect(screen.getByTestId('action-card').textContent).not.toContain('Handed to');
     expect(screen.getByTestId('action-deferred')).toBeTruthy();
+  });
+});
+
+/**
+ * A rail row's jump (M92.4, stepReveal.ts): the subagent's line in the
+ * conversation's transcript opens, comes into view in one settling jump and
+ * takes focus; a line drawn where no transcript scrolls takes nothing.
+ * jsdom has no layout, so the subagent's line stands 600px down and the
+ * viewport records each scroll it is asked for.
+ */
+describe('a rail’s reveal (M92.4)', () => {
+  const AGENT = 'agent-1';
+  let scrolls: ScrollToOptions[] = [];
+
+  beforeEach(() => {
+    scrolls = [];
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      writable: true,
+      value(options: ScrollToOptions) {
+        scrolls.push(options);
+      },
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const top = this.dataset.toolId === AGENT ? 600 : 0;
+      return {
+        x: 0,
+        y: top,
+        top,
+        left: 0,
+        right: 320,
+        bottom: top + 40,
+        width: 320,
+        height: 40,
+        toJSON: () => ({}),
+      } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollTo;
+    vi.restoreAllMocks();
+    useStepRevealStore.setState({ asked: null });
+  });
+
+  /** A reply whose researcher reported, with its own steps, while the turn
+   *  streams on. */
+  function streamed(done = true): ChatMessage {
+    const events: AgentStreamEvent[] = [
+      {
+        kind: 'ToolStart',
+        tool_name: 'Agent',
+        tool_id: AGENT,
+        input: JSON.stringify({ description: 'Read the open risks', subagent_type: 'researcher' }),
+      },
+    ];
+    if (done) {
+      events.push(
+        {
+          kind: 'ToolStart',
+          tool_name: 'mcp__cerebro__search_notes',
+          tool_id: 'sub-1',
+          input: '{"query":"risk"}',
+          parent: AGENT,
+        },
+        { kind: 'ToolDone', tool_id: 'sub-1', output: 'Five risks.', parent: AGENT },
+        { kind: 'ToolDone', tool_id: AGENT, output: 'Scanner delivery.' },
+      );
+    }
+    let message: ChatMessage = {
+      id: 'reply',
+      role: 'assistant',
+      text: '',
+      tools: [],
+      streaming: true,
+    };
+    for (const event of events) message = applyEvent(message, event, 'live');
+    return message;
+  }
+
+  /** The reply as the conversation draws it: in its transcript's scroller. */
+  function Conversation({ message }: { message: ChatMessage }) {
+    return (
+      <MessageScrollerProvider autoScroll>
+        <MessageScroller>
+          <MessageScrollerViewport>
+            <MessageScrollerContent>
+              <MessageScrollerItem messageId={message.id}>
+                {turnItems(message, { streaming: true }).map((item) => (
+                  <StepItem key={item.key} item={item} onOpenPath={vi.fn()} streaming />
+                ))}
+              </MessageScrollerItem>
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+        </MessageScroller>
+      </MessageScrollerProvider>
+    );
+  }
+
+  const line = () => document.querySelector<HTMLElement>(`[data-tool-id="${AGENT}"]`);
+  const fold = () => within(line() as HTMLElement).getAllByRole('button')[0];
+
+  it('opens the line, brings it into view in one settling jump, and focuses it', () => {
+    let message = streamed();
+    const { rerender } = render(<Conversation message={message} />);
+    expect(fold().getAttribute('aria-expanded')).toBe('false');
+    expect(scrolls).toEqual([]);
+    act(() => revealStep(AGENT));
+    expect(fold().getAttribute('aria-expanded')).toBe('true');
+    expect(scrolls).toEqual([{ top: 600, behavior: 'auto' }]);
+    expect(document.activeElement).toBe(fold());
+    // Spent: the line took it once.
+    expect(useStepRevealStore.getState().asked).toBeNull();
+    // The turn streams on under it: fifty words move nothing and close
+    // nothing.
+    for (let at = 0; at < 50; at += 1) {
+      message = applyEvent(message, { kind: 'TextDelta', text: `word ${at} ` }, 'live');
+      rerender(<Conversation message={message} />);
+    }
+    expect(scrolls).toHaveLength(1);
+    expect(fold().getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(fold());
+    // The reader's own fold still closes it.
+    fireEvent.click(fold());
+    expect(fold().getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('shows it again when asked again', () => {
+    render(<Conversation message={streamed()} />);
+    act(() => revealStep(AGENT));
+    fireEvent.click(fold());
+    act(() => revealStep(AGENT));
+    expect(fold().getAttribute('aria-expanded')).toBe('true');
+    expect(scrolls).toHaveLength(2);
+  });
+
+  it('focuses a line with nothing to open for as long as it holds focus', () => {
+    render(<Conversation message={streamed(false)} />);
+    // Just started: no steps yet, nothing to open.
+    expect(within(line() as HTMLElement).queryByRole('button')).toBeNull();
+    act(() => revealStep(AGENT));
+    expect(document.activeElement).toBe(line());
+    expect(line()?.getAttribute('tabindex')).toBe('-1');
+    act(() => line()?.blur());
+    expect(line()?.hasAttribute('tabindex')).toBe(false);
+  });
+
+  it('leaves another call’s line alone', () => {
+    render(<Conversation message={streamed()} />);
+    act(() => revealStep('somewhere-else'));
+    expect(fold().getAttribute('aria-expanded')).toBe('false');
+    expect(scrolls).toEqual([]);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('is taken by no line drawn where no transcript scrolls, which never throws (RunTranscript)', () => {
+    // A run's detail draws the same steps with no scroller around them.
+    render(
+      <>
+        {turnItems(streamed(), { streaming: false }).map((item) => (
+          <StepItem key={item.key} item={item} onOpenPath={vi.fn()} />
+        ))}
+      </>,
+    );
+    expect(() => act(() => revealStep(AGENT))).not.toThrow();
+    expect(fold().getAttribute('aria-expanded')).toBe('false');
+    expect(scrolls).toEqual([]);
+    expect(document.activeElement).toBe(document.body);
+    expect(useStepRevealStore.getState().asked?.toolId).toBe(AGENT);
   });
 });

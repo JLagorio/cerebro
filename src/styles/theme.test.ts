@@ -25,7 +25,7 @@ const RADIUS =
   /(?<![\w-])rounded(?:-(t|b|l|r|s|e|tl|tr|bl|br|ss|se|es|ee))?(?:-([a-z0-9]+))?(?![\w[-])/g;
 
 const UTILITY =
-  /(?<![\w-])(?:bg|text|border(?:-[trblxy])?|ring|ring-offset|fill|stroke|outline|divide|decoration|accent|caret|placeholder)-([a-z]+(?:-[a-z]+)*-\d{2,3}|white|black)(?:\/\d+)?(?![\w-])/g;
+  /(?<![\w-])(?:bg|text|border(?:-[trblxy])?|ring|ring-offset|fill|stroke|outline|divide|decoration|accent|caret|placeholder)-([a-z]+(?:-[a-z]+)*-\d{2,3}|n-0|surface-[a-z-]+|on-action-[a-z-]+|action-[a-z-]+|white|black)(?:\/\d+)?(?![\w-])/g;
 
 function sources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
@@ -75,6 +75,23 @@ describe('DS colour utilities', () => {
     expect(unmapped).toEqual([]);
   });
 
+  it('every size utility names a mapped step or explicit product role', () => {
+    const sizes = new Set([...THEME.matchAll(/--text-([a-z0-9-]+):/g)].map((m) => m[1]));
+    const used =
+      /(?<![\w-])text-(base|(?:[2-9])?xl|2xs|xs|sm|md|lg|ui|metadata|page-title|workspace-title|section-title|prose)(?![\w-])/g;
+    const unmapped: string[] = [];
+    for (const file of sources(SRC)) {
+      const code = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+      for (const match of code.matchAll(used)) {
+        if (!sizes.has(match[1])) unmapped.push(`${file.slice(SRC.length + 1)}: ${match[0]}`);
+      }
+    }
+    expect(unmapped).toEqual([]);
+    expect(sizes.has('base')).toBe(true);
+  });
+
   it('the scan sees the classes it guards', () => {
     expect(MAPPED.has('warn-300')).toBe(true);
     expect('rounded rounded-t rounded-md rounded-tl-lg'.match(RADIUS)).toEqual([
@@ -84,6 +101,12 @@ describe('DS colour utilities', () => {
       'rounded-tl-lg',
     ]);
     expect(MAPPED.has('amber-50')).toBe(false);
+    expect(MAPPED.has('surface-base')).toBe(false);
+    expect('bg-surface-base text-on-action-primary'.match(UTILITY)).toEqual([
+      'bg-surface-base',
+      'text-on-action-primary',
+    ]);
+    expect('border-l-2 text-n-0'.match(UTILITY)).toEqual(['text-n-0']);
     expect('hover:bg-amber-100 border-n-200/40'.match(UTILITY)).toEqual([
       'bg-amber-100',
       'border-n-200/40',

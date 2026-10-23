@@ -54,7 +54,7 @@ export function MyWorkPage() {
         />
         <div className="cb-work-groups">
           {groups.length === 0 ? (
-            <p className="mt-3 text-sm text-n-500">
+            <p className="mt-3 text-sm text-(--text-meta)">
               Nothing is in progress — no record's status sits in an active group.
             </p>
           ) : (
@@ -76,7 +76,7 @@ export function MyWorkPage() {
                     }
                   />
                   {label}
-                  <span className="[font-family:var(--font-mono)] font-normal normal-case tracking-normal text-n-400">
+                  <span className="[font-family:var(--font-mono)] font-normal normal-case tracking-normal text-(--text-meta)">
                     {rows.length}
                   </span>
                 </div>
@@ -89,13 +89,13 @@ export function MyWorkPage() {
                     data-testid="mywork-row"
                     className="cb-work-row"
                   >
-                    <span className="cb-work-title min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                    <span className="cb-work-title min-w-0 line-clamp-2 break-words">
                       {entry.title}
                     </span>
                     {(deadline !== null || unreadable) && (
                       <span
                         data-testid="mywork-deadline"
-                        className={`cb-work-deadline rounded-sm px-1.5 py-px text-2xs ${bucket === 'overdue' ? 'bg-danger-50 text-danger-600' : bucket === 'today' ? 'bg-warn-50 text-warn-600' : 'bg-n-50 text-n-600'}`}
+                        className={`cb-work-deadline rounded-sm px-1.5 py-px text-metadata ${bucket === 'overdue' ? 'bg-danger-50 text-danger-600' : bucket === 'today' ? 'bg-warn-50 text-warn-700' : 'bg-n-50 text-n-600'}`}
                       >
                         {deadline === null
                           ? 'Not a date'

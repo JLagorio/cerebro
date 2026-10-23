@@ -1,0 +1,77 @@
+
+> cerebro@0.1.0 e2e /Users/joseflagorio/Development/cerebro
+> playwright test --workers=2 --grep 'suggested filing|same AI controls|missing title target|calendar drop|lossy change|OS paths|picked among pages|binding Release|optional pack|transcript files|filing a capture|on demand creates|live faces|missing-card movement|renaming a cited page|Library keeps|Studio previews a board|missing embed retains|legacy Mermaid|a chip adds' --output=/private/tmp/cerebro-m90/fresh-focused-22
+
+
+Running 23 tests using 2 workers
+
+(node:79397) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:79396) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   2 [chromium] › e2e/agent.spec.ts:227:1 › agent: a suggested filing is shown for approval, never applied (3.4s)
+  ✘   1 [chromium] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus (3.6s)
+(node:79431) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   3 [chromium] › e2e/agent.spec.ts:537:1 › editor: the same AI controls appear on a record, not only in Docs (2.2s)
+  ✓   4 [chromium] › e2e/ics-import.spec.ts:37:1 › calendar drop previews times and people, imports once, and re-imports unchanged (2.8s)
+  ✓   6 [chromium] › e2e/os-drop.spec.ts:13:1 › OS paths show hover, capture text, name skipped folders, and refuse unsupported targets (1.6s)
+  ✓   5 [chromium] › e2e/kind-change.spec.ts:44:1 › a lossy change converts into a new property and leaves the old one byte for byte (3.1s)
+  ✓   8 [chromium] › e2e/panel-agent.spec.ts:11:1 › panel agent: binding Release scout names it in the header, and unbinding removes it (1.8s)
+  ✓   7 [chromium] › e2e/page-cards.spec.ts:153:1 › a card picked among pages sharing a stem shows and opens the one picked (3.5s)
+  ✓   9 [chromium] › e2e/people-and-companies.spec.ts:13:1 › the optional pack adds declarations in one batch, shows company mail and undoes exact bytes (1.7s)
+  ✓  11 [chromium] › e2e/save-guard.spec.ts:39:1 › Library keeps an outside edit and offers to load its new version (1.6s)
+  ✓  10 [chromium] › e2e/pipeline.spec.ts:93:1 › meeting: a transcript files as a record with its matched speakers, only on Apply (2.2s)
+  ✓  12 [chromium] › e2e/unfiled-correspondents.spec.ts:7:1 › on demand creates pages, links a company, dismisses locally and restores (2.1s)
+  ✓  13 [chromium] › e2e/pipeline.spec.ts:266:1 › grow: filing a capture hands it to the base without anyone asking (2.0s)
+  ✓  14 [chromium] › e2e/visual-pages.spec.ts:190:1 › Library keeps a bounded shelf and usable controls from wide to compact windows (1.6s)
+  ✓  15 [chromium] › e2e/whiteboard-cards.spec.ts:161:1 › live faces, nested guards and record Open keep the board mounted and write nothing (2.1s)
+  ✓  16 [chromium] › e2e/whiteboard-readonly.spec.ts:19:1 › Studio previews a board fence and a canvas file; Open reaches its page without writing (1.8s)
+  ✓  18 [chromium] › e2e/whiteboard-readonly.spec.ts:95:1 › a missing embed retains its pointer and a changed file refreshes the read-only preview (1.6s)
+  ✓  17 [chromium] › e2e/whiteboard-cards.spec.ts:190:1 › missing-card movement preserves its pointer and Add card is one undo step (5.8s)
+  ✓  19 [chromium] › e2e/whiteboard.spec.ts:67:1 › whiteboard: a legacy Mermaid tab stays editable, takes a record, and opens it (5.4s)
+  ✓  20 [chromium] › e2e/whiteboard-cards.spec.ts:223:1 › renaming a cited page leaves the exact old whiteboard pointer visibly missing (2.9s)
+(node:79748) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+M29.53 chip — node text: "Rack layout sign-off" | chip text: "Done"
+  ✘  22 [webkit] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus (3.3s)
+M29.53 chip — node moved by 320 px | detail panel opened by the drag: 0
+  ✓  21 [chromium] › e2e/whiteboard.spec.ts:247:1 › whiteboard: a chip adds only what the node does not say, and drags it (5.4s)
+(node:79790) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  23 [webkit] › e2e/visual-pages.spec.ts:190:1 › Library keeps a bounded shelf and usable controls from wide to compact windows (1.9s)
+
+
+  1) [chromium] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus 
+
+    Error: page.evaluate: Error: Mounted vault store module was not loaded
+        at eval (eval at evaluate (:303:30), <anonymous>:9:41)
+        at UtilityScript.evaluate (<anonymous>:305:16)
+        at UtilityScript.<anonymous> (<anonymous>:1:44)
+        at eval (eval at evaluate (:303:30), <anonymous>:9:41)
+        at UtilityScript.evaluate (<anonymous>:305:16)
+        at UtilityScript.<anonymous> (<anonymous>:1:44)
+        at /Users/joseflagorio/Development/cerebro/e2e/data-display-polish.spec.ts:149:14
+
+    Error Context: ../../../../private/tmp/cerebro-m90/fresh-focused-22/data-display-polish-a-miss-b403f-ts-once-with-keyboard-focus-chromium/error-context.md
+
+  2) [webkit] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus 
+
+    Error: page.evaluate: Error: Mounted vault store module was not loaded
+
+      147 |   });
+      148 |   expect(await page.evaluate((path) => window.__cerebroMockFs.has(path), path)).toBe(false);
+    > 149 |   await page.evaluate(
+          |              ^
+      150 |     async ({ path, source }) => {
+      151 |       window.__cerebroMockFs.set(path, source!);
+      152 |       // Browser mocks have no disk watcher: deliver the restored-file scan.
+        at /Users/joseflagorio/Development/cerebro/e2e/data-display-polish.spec.ts:149:14
+
+    Error Context: ../../../../private/tmp/cerebro-m90/fresh-focused-22/data-display-polish-a-miss-b403f-ts-once-with-keyboard-focus-webkit/error-context.md
+
+  2 failed
+    [chromium] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus 
+    [webkit] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus 
+  21 passed (35.5s)
+ ELIFECYCLE  Command failed with exit code 1.

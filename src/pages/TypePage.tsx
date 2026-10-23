@@ -1,3 +1,4 @@
+import { DatabaseActions } from '@/views/DatabaseActions';
 import { PageHeader } from '@/components/PageHeader';
 import { UnfiledCorrespondents } from '@/views/UnfiledCorrespondents';
 import { Button } from '@/components/ui/Button';
@@ -249,7 +250,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1" data-testid="type-page">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="cb-data-page flex min-h-0 min-w-0 flex-1 flex-col">
         <PageHeader
           icon={
             <button
@@ -280,6 +281,16 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           metadata={<span data-testid="view-count">{sortedEntries.length}</span>}
           actions={
             <>
+              <DatabaseActions
+                kind="database"
+                onStyle={() => setDialog('style')}
+                onRename={listing.system ? undefined : () => setDialog('rename')}
+                onDelete={
+                  !listing.system && listing.docPath !== null
+                    ? () => setDialog('delete')
+                    : undefined
+                }
+              />
               {listing.system && (
                 <span className="inline-flex items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-2xs text-n-500">
                   <Icon name="lock" size={10} />
@@ -379,14 +390,6 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
                   onAddProperty={addProperty}
                   onClose={() => setSettingsOpen(false)}
                   onDeleteView={savedViews.length > 1 ? () => removeView(activeId) : undefined}
-                  onDeleteList={
-                    !listing.system && listing.docPath !== null
-                      ? () => {
-                          setSettingsOpen(false);
-                          setDialog('delete');
-                        }
-                      : undefined
-                  }
                   onChange={(next) => changeViews(next.views)}
                 />
               }

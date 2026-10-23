@@ -513,6 +513,121 @@ mod tests {
         assert_eq!(seqs(&answer), vec![1, 2]);
     }
 
+    /// A run's stream as 2.1.250 forwards foreground subagents (M91.3b):
+    /// `count` of them, one after another, each reading `reads` pages of
+    /// `page` bytes and reporting a sentence. Synthetic ids only.
+    fn subagent_stream(count: usize, reads: usize, page: usize) -> Vec<serde_json::Value> {
+        use serde_json::json;
+        let text = "A line of a page the subagent read. ".repeat(page / 36 + 1);
+        let mut lines = vec![json!({ "type": "system", "subtype": "init",
+            "session_id": "00000000-0000-4000-8000-000000009600", "model": "haiku" })];
+        for agent in 0..count {
+            let call = format!("toolu_{:024}", 9600 + agent);
+            let forwarded = |mut line: serde_json::Value| {
+                line["parent_tool_use_id"] = json!(call);
+                line
+            };
+            lines.push(
+                json!({ "type": "assistant", "parent_tool_use_id": null, "message": {
+                "id": format!("msg_{:024}", 9600 + agent), "model": "haiku", "content": [
+                { "type": "tool_use", "id": call, "name": "Agent", "input": {
+                    "description": format!("Read part {agent}"),
+                    "subagent_type": "cerebro-researcher",
+                    "prompt": format!("Read part {agent} and report.") } }] } }),
+            );
+            lines.push(json!({ "type": "system", "subtype": "task_started",
+                "task_id": format!("a{agent:016}"), "tool_use_id": call,
+                "description": format!("Read part {agent}"), "subagent_type": "cerebro-researcher",
+                "is_backgrounded": false, "spawn_depth": 1, "task_type": "local_agent" }));
+            lines.push(forwarded(json!({ "type": "user", "message": { "content": [
+                { "type": "text", "text": format!("Read part {agent} and report.") }] } })));
+            for read in 0..reads {
+                let id = format!("toolu_{:012}{:012}", 9700 + agent, read);
+                lines.push(forwarded(json!({ "type": "assistant", "message": {
+                    "id": format!("msg_{:012}{:012}", 9700 + agent, read), "model": "haiku",
+                    "content": [{ "type": "tool_use", "id": id, "name": "Read",
+                        "input": { "file_path": format!("notes/part-{agent}/page-{read}.md") } }] } })));
+                lines.push(forwarded(json!({ "type": "user", "message": { "content": [
+                    { "type": "tool_result", "tool_use_id": id, "content": &text[..page] }] } })));
+                lines.push(json!({ "type": "system", "subtype": "task_progress",
+                    "task_id": format!("a{agent:016}"), "tool_use_id": call,
+                    "description": format!("Reading page {read}"),
+                    "usage": { "total_tokens": 1000 * (read + 1), "tool_uses": read + 1,
+                        "duration_ms": 500 * (read + 1) },
+                    "last_tool_name": "Read" }));
+            }
+            lines.push(forwarded(json!({ "type": "assistant", "message": {
+                "id": format!("msg_{:024}", 9800 + agent), "model": "haiku",
+                "content": [{ "type": "text", "text": format!("Part {agent} says the launch holds.") }] } })));
+            lines.push(json!({ "type": "system", "subtype": "task_notification",
+                "task_id": format!("a{agent:016}"), "tool_use_id": call, "status": "completed",
+                "usage": { "total_tokens": 1000 * reads, "tool_uses": reads, "duration_ms": 500 * reads } }));
+            lines.push(json!({ "type": "user", "parent_tool_use_id": null, "message": { "content": [
+                { "type": "tool_result", "tool_use_id": call, "content": [
+                    { "type": "text", "text": format!("Part {agent} says the launch holds.") }] }] },
+                "tool_use_result": { "status": "completed", "agentId": format!("a{agent:016}"),
+                    "agentType": "cerebro-researcher", "totalToolUseCount": reads,
+                    "totalDurationMs": 500 * reads } }));
+        }
+        lines.push(
+            json!({ "type": "assistant", "parent_tool_use_id": null, "message": {
+            "id": "msg_000000000000000000009699", "model": "haiku", "stop_reason": "end_turn",
+            "content": [{ "type": "text", "text": "Every part says the launch holds." }] } }),
+        );
+        lines.push(
+            json!({ "type": "result", "subtype": "success", "is_error": false,
+            "result": "Every part says the launch holds.", "stop_reason": "end_turn",
+            "session_id": "00000000-0000-4000-8000-000000009600" }),
+        );
+        lines
+    }
+
+    /// M91.3b: a subagent's call crosses as its preview, never whole, so a
+    /// run that starts as many subagents as a session allows, each reading
+    /// far more than it reports, keeps all of it in one run's journal. The
+    /// same reading as whole payloads would not fit.
+    #[test]
+    fn a_run_of_subagents_fits_its_journal() {
+        let most: usize = crate::policy::subagents::env()
+            .find(|(name, _)| *name == "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION")
+            .and_then(|(_, value)| value.parse().ok())
+            .expect("the policy bounds a session's subagents");
+        let lines = subagent_stream(most, 12, 64 * 1024);
+        let read: usize = lines.iter().map(|line| line.to_string().len()).sum();
+        assert!(read > RUN_BYTES, "the reading alone would not fit: {read}");
+        let folded = super::super::fold::fold_lines(&lines);
+        assert!(
+            folded.classes.unclassified.is_empty(),
+            "{:?}",
+            folded.classes
+        );
+        let started = folded
+            .events
+            .iter()
+            .filter(|event| matches!(event, AgentEvent::SubagentStarted { .. }))
+            .count();
+        assert_eq!(started, most);
+        let now = Instant::now();
+        let journal = opened(3, "run-a", now);
+        let count = folded.events.len();
+        let mut bytes = 0;
+        for (at, event) in folded.events.into_iter().enumerate() {
+            let tagged = TaggedEvent {
+                run: 3,
+                seq: at as u64 + 1,
+                event,
+            };
+            bytes += serde_json::to_vec(&tagged).unwrap().len();
+            journal.append(3, &tagged);
+        }
+        assert!(count <= RUN_EVENTS, "{count}");
+        assert!(bytes * 4 < RUN_BYTES, "{bytes} of {RUN_BYTES}");
+        match journal.since(3, "run-a", 0, now, &none()) {
+            EventsSince::Held { events, .. } => assert_eq!(events.len(), count),
+            other => panic!("the journal dropped some: {other:?}"),
+        }
+    }
+
     #[test]
     fn the_answer_serializes_with_its_state() {
         let now = Instant::now();

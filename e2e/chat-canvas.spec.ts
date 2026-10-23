@@ -8,7 +8,12 @@ async function openCanvas(page: Page) {
     .click();
   const panel = page.getByTestId('ai-panel');
   if ((await panel.getAttribute('data-presentation')) !== 'canvas') {
-    await panel.getByRole('button', { name: 'Expand conversation' }).click();
+    if ((await panel.getAttribute('data-presentation')) === 'floating') {
+      await panel.getByRole('button', { name: 'Conversation options' }).click();
+      await page.getByRole('menuitem', { name: 'Expand conversation' }).click();
+    } else {
+      await panel.getByRole('button', { name: 'Expand conversation' }).click();
+    }
   }
   await expect(panel).toHaveAttribute('data-presentation', 'canvas');
   return panel;

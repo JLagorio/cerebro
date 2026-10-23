@@ -12,6 +12,7 @@ import { ProposalCard } from './ProposalCard';
  * A card a person can decide from (M52.2): the headline in the app's words,
  * the reason as the main sentence — and every code the ledger recorded still
  * on the card, because the words are this build's and the codes are history.
+ * It is a Confirmation (M91.14): one group, named by its headline.
  */
 
 const PATH = 'knowledge/systems/offline-guarantee.md';
@@ -202,12 +203,13 @@ describe('ProposalCard (M52.2)', () => {
     render(<ProposalCard card={current} busy={false} onDecide={onDecide} />);
     const reject = screen.getByTestId('reject') as HTMLButtonElement;
     expect(reject.disabled).toBe(true);
-    fireEvent.change(screen.getByTestId('reject-reason'), { target: { value: 'not yet' } });
+    fireEvent.change(screen.getByTestId('reject-reason'), { target: { value: '  not yet ' } });
     expect(reject.disabled).toBe(false);
     fireEvent.click(reject);
     expect(onDecide).toHaveBeenLastCalledWith(current, false, 'not yet');
+    // The reason is Reject's: an approval carries none (M91.14).
     fireEvent.click(screen.getByTestId('approve'));
-    expect(onDecide).toHaveBeenLastCalledWith(current, true, 'not yet');
+    expect(onDecide).toHaveBeenLastCalledWith(current, true, null);
     expect(screen.queryByTestId('ask-fresh')).toBeNull();
   });
 
@@ -296,19 +298,68 @@ describe('ProposalCard (M52.2)', () => {
     );
   });
 
-  // M52.5 — Review lays the cards in a grid of reading-width columns, so a
-  // card fills its cell to the row's height instead of capping itself; on
-  // its concept's page it sits flush inside the review bar.
-  it('fills its cell in Review, and sits flush in the page bar', () => {
-    const { container, rerender } = render(
+  // M52.5 — Review lays the cards in a grid of reading-width columns, and a
+  // card fills its cell (review.css lays out a card the grid holds); on its
+  // concept's page it sits flush inside the review bar.
+  it('is a hairline card in Review, and sits flush in the page bar', () => {
+    const { rerender } = render(
       <ProposalCard card={CARD} busy={false} onDecide={() => undefined} />,
     );
-    const card = () => container.querySelector('article')?.className ?? '';
-    expect(card()).toContain('h-full');
-    expect(card()).toContain('border');
-    expect(card()).not.toContain('max-w-');
+    const card = () => screen.getByTestId('review-card');
+    expect(card().className).toContain('cb-review-card');
+    expect(card().className).not.toContain('cb-ai-confirmation-ask');
+    expect(card().hasAttribute('data-flush')).toBe(false);
     rerender(<ProposalCard card={CARD} here={PATH} busy={false} onDecide={() => undefined} />);
-    expect(card()).not.toContain('max-w-');
-    expect(card()).not.toContain('border');
+    expect(card().hasAttribute('data-flush')).toBe(true);
+  });
+});
+
+describe('ProposalCard as a Confirmation (M91.14)', () => {
+  const current = {
+    ...CARD,
+    targets: [{ ...CARD.targets[0], current_version: 3, stale: false }],
+  };
+
+  it('is one group named by its headline alone, its proposer beside it', () => {
+    render(<ProposalCard card={current} busy={false} onDecide={() => undefined} />);
+    const group = screen.getByRole('group', { name: 'Revise The offline guarantee' });
+    expect(group).toBe(screen.getByTestId('review-card'));
+    expect(group.dataset.state).toBe('pending');
+    const meta = group.querySelector('[data-slot="confirmation-meta"]');
+    expect(meta?.textContent).toBe('Proposed by Release scout');
+    // The reason, why it waits and what it rests on are its body.
+    const body = group.querySelector('[data-slot="confirmation-body"]');
+    for (const id of ['card-reason', 'card-queued-for', 'card-basis', 'card-details']) {
+      expect(body?.contains(screen.getByTestId(id))).toBe(true);
+    }
+  });
+
+  it('offers nothing to press while a decision is on its way or waits for the re-read', () => {
+    render(<ProposalCard card={CARD} busy onDecide={() => undefined} />);
+    const group = screen.getByTestId('review-card');
+    expect(group.dataset.state).toBe('answering');
+    expect(group.getAttribute('aria-busy')).toBe('true');
+    for (const id of ['ask-fresh', 'approve', 'reject', 'reject-reason']) {
+      expect((screen.getByTestId(id) as HTMLButtonElement).disabled).toBe(true);
+    }
+  });
+
+  it('says what moved as its notice, and keeps Reject open on a stale card', () => {
+    render(<ProposalCard card={CARD} busy={false} onDecide={() => undefined} />);
+    const notice = screen.getByTestId('card-stale');
+    expect(notice.dataset.slot).toBe('confirmation-notice');
+    // The fresh proposal leads; the Approve the ledger would refuse waits.
+    const answers = screen
+      .getAllByRole('button')
+      .filter((b) => b.closest('[data-slot="confirmation-actions"]'));
+    expect(answers.map((b) => b.textContent)).toEqual([
+      'Ask for a fresh proposal',
+      'Approve',
+      'Reject',
+    ]);
+    expect(screen.getByTestId('ask-fresh').className).toContain('cb-btn-primary');
+    expect(screen.getByTestId('approve').className).toContain('cb-btn-secondary');
+    fireEvent.change(screen.getByTestId('reject-reason'), { target: { value: 'stale' } });
+    expect((screen.getByTestId('reject') as HTMLButtonElement).disabled).toBe(false);
   });
 });

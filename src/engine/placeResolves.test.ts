@@ -6,6 +6,7 @@ import { parseListYaml } from './views';
 import { placeResolves, readSelection, restorablePlace, type PlaceSnapshot } from './placeResolves';
 const ONE_OF_EACH = {
   home: { kind: 'home' },
+  pages: { kind: 'pages' },
   inbox: { kind: 'inbox' },
   mywork: { kind: 'mywork' },
   changes: { kind: 'changes' },
@@ -59,7 +60,7 @@ it('drops gone targets, respects loading roots, and keeps standing places and co
     folders: [],
     inboxEnabled: false,
   };
-  const standing = new Set(['home', 'mywork', 'changes', 'pulse', 'settings', 'file']);
+  const standing = new Set(['home', 'pages', 'mywork', 'changes', 'pulse', 'settings', 'file']);
   for (const place of Object.values(ONE_OF_EACH))
     expect(placeResolves(place, empty), place.kind).toBe(standing.has(place.kind));
   expect(placeResolves(ONE_OF_EACH.workspace, { ...empty, rootsLoaded: false })).toBe(true);

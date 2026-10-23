@@ -1,0 +1,110 @@
+{
+  "why": "The built-ins a run holds (M91.1): the subagent tool needs a gate, its alias answers with its row's decision, a tool that reaches another session is never held, and ToolSearch, which only loads other tools, stays with every run.",
+  "host_answers": [
+    {
+      "why": "Where a gate sits, the subagent tool is the CLI's to run: the host passes it.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "web": "off",
+        "delegate": "on",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Agent",
+      "tool_input": {
+        "description": "Read the release notes",
+        "subagent_type": "general-purpose",
+        "prompt": "Summarize them."
+      },
+      "answer": {
+        "kind": "pass"
+      }
+    },
+    {
+      "why": "Task, the name an init lists it by, answers with the same row's decision.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "web": "off",
+        "delegate": "on",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Task",
+      "tool_input": {
+        "description": "Read the release notes"
+      },
+      "answer": {
+        "kind": "pass"
+      }
+    },
+    {
+      "why": "Where no gate sits, the subagent tool is denied in Cerebro's words.",
+      "input": {
+        "kind": "unattended",
+        "shell": "off",
+        "web": "off",
+        "delegate": "off",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Agent",
+      "tool_input": {
+        "description": "Read the release notes"
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Cerebro's settings don't allow this tool in this run."
+      }
+    },
+    {
+      "why": "A watched run never reaches another session either.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "web": "off",
+        "delegate": "on",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "SendMessage",
+      "tool_input": {
+        "to": "another-session",
+        "message": "hello"
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Cerebro's settings don't allow this tool in this run."
+      }
+    },
+    {
+      "why": "ToolSearch passes on Cerebro's own constructs too, where every tool that acts is denied.",
+      "input": {
+        "kind": "internal",
+        "shell": "off",
+        "web": "off",
+        "delegate": "off",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "ToolSearch",
+      "tool_input": {
+        "query": "select:mcp__cerebro__write_concept"
+      },
+      "answer": {
+        "kind": "pass"
+      }
+    }
+  ]
+}

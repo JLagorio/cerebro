@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ListFile, TabDef } from '@/engine/types';
 import { RecordTabs } from '@/detail/RecordTabs';
 import { useVaultStore } from '@/stores/vaultStore';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { makeEntry } from '@/test/factories';
 
 const TABS: TabDef[] = [
@@ -248,7 +249,17 @@ function openViewForm() {
 }
 
 const pickSource = (value: string) =>
-  fireEvent.change(screen.getByTestId('view-tab-source'), { target: { value } });
+  chooseOption(screen.getByTestId('view-tab-source'), { value });
+
+/** The stored values a Select offers, read by opening it and closing it again. */
+function optionValues(trigger: HTMLElement): (string | null)[] {
+  fireEvent.click(trigger);
+  const values = within(screen.getByRole('listbox'))
+    .getAllByRole('option')
+    .map((row) => row.getAttribute('data-value'));
+  fireEvent.click(trigger);
+  return values;
+}
 
 describe('RecordTabs view tabs (M45.4)', () => {
   beforeEach(seedVault);
@@ -269,12 +280,13 @@ describe('RecordTabs view tabs (M45.4)', () => {
     // The drill-in belongs to the View tile alone.
     expect(screen.queryByTestId('view-tab-source')).toBeNull();
     fireEvent.click(screen.getByTestId('new-tab-kind-view'));
-    const select = screen.getByTestId('view-tab-source') as HTMLSelectElement;
+    const select = screen.getByTestId('view-tab-source');
+    // Nothing picked yet: the trigger asks, and the ask is not an option.
+    expect(select.textContent).toBe('Choose a database…');
     // Types first (listTypes' sorted catalog), then Lists labeled by their
     // definition name (the dashboard submenu's labeling) and VALUED by roster
     // index — UI-transient keys that never need parsing back apart.
-    expect([...select.options].map((o) => o.text)).toEqual([
-      'Choose a database…',
+    expect(optionLabels(select)).toEqual([
       'Note',
       'Project',
       'Task',
@@ -282,8 +294,7 @@ describe('RecordTabs view tabs (M45.4)', () => {
       'Reading list',
       'Clips',
     ]);
-    expect([...select.options].map((o) => o.value)).toEqual([
-      '',
+    expect(optionValues(select)).toEqual([
       'type:Note',
       'type:Project',
       'type:Task',
@@ -303,8 +314,7 @@ describe('RecordTabs view tabs (M45.4)', () => {
     pickSource('type:Note');
     expect(screen.queryByTestId('view-tab-view')).toBeNull();
     pickSource('type:Task');
-    const picker = screen.getByTestId('view-tab-view') as HTMLSelectElement;
-    expect([...picker.options].map((o) => o.text)).toEqual(['Everything', 'Open']);
+    expect(optionLabels(screen.getByTestId('view-tab-view'))).toEqual(['Everything', 'Open']);
   });
 
   it('offers the related toggle default-ON when the source stores a relation at the host type', () => {
@@ -339,7 +349,7 @@ describe('RecordTabs view tabs (M45.4)', () => {
     const props = setup({ hostType: 'Project' });
     openViewForm();
     pickSource('type:Task');
-    fireEvent.change(screen.getByTestId('view-tab-view'), { target: { value: 'open' } });
+    chooseOption(screen.getByTestId('view-tab-view'), { value: 'open' });
     fireEvent.click(screen.getByTestId('create-record-tab'));
     const next = props.onChange.mock.calls.at(-1)?.[0] as TabDef[];
     // The name comes from the SOURCE, the id from the name — exact shape,
@@ -419,8 +429,8 @@ describe('RecordTabs view tabs (M45.4)', () => {
     fireEvent.contextMenu(screen.getByTestId('record-tab-tasks'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Change source…' }));
     // Prefilled from the tab: source, saved view, scope.
-    expect((screen.getByTestId('view-tab-source') as HTMLSelectElement).value).toBe('type:Task');
-    expect((screen.getByTestId('view-tab-view') as HTMLSelectElement).value).toBe('open');
+    expect(screen.getByTestId('view-tab-source').getAttribute('data-value')).toBe('type:Task');
+    expect(screen.getByTestId('view-tab-view').getAttribute('data-value')).toBe('open');
     expect((screen.getByRole('switch') as HTMLInputElement).checked).toBe(true);
     pickSource('list:0');
     fireEvent.click(screen.getByTestId('change-source-save'));

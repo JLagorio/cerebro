@@ -1,0 +1,223 @@
+[
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "synthetic": "hand-shaped from Claude Code 2.1.250's measured shapes (M91.3b), not recorded: synthetic ids, and M91.R's live recording replaces it",
+    "timestamp": "2026-10-22T12:00:00.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000009500",
+    "content": "Have a researcher read the launch note and tell me its status."
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-10-22T12:00:00.002Z",
+    "sessionId": "00000000-0000-4000-8000-000000009500"
+  },
+  {
+    "parentUuid": null,
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000009500003",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "Have a researcher read the launch note and tell me its status."
+    },
+    "permissionMode": "default",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000009500002",
+    "timestamp": "2026-10-22T12:00:00.005Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009500",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009500002",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009501",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The person wants the launch note's status. A researcher can read the note and report back.",
+          "signature": "sig-9501"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009501",
+    "uuid": "00000000-0000-4000-8000-000009500101",
+    "timestamp": "2026-10-22T12:00:02.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009500",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009500101",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009501",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009501",
+          "name": "Agent",
+          "input": {
+            "description": "Read the launch note",
+            "subagent_type": "cerebro-researcher",
+            "prompt": "Read projects/launch.md and report its status in one sentence."
+          },
+          "caller": {
+            "type": "direct"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009501",
+    "uuid": "00000000-0000-4000-8000-000009500102",
+    "timestamp": "2026-10-22T12:00:02.400Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009500",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009500102",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009501",
+          "type": "tool_result",
+          "content": [
+            {
+              "type": "text",
+              "text": "The launch note is ready for review, but its press list is still open."
+            },
+            {
+              "type": "text",
+              "text": "agentId: a0000000000000001 (use SendMessage with to: 'a0000000000000001', summary: '<5-10 word recap>' to continue this agent)\n<usage>subagent_tokens: 3120\ntool_uses: 1\nduration_ms: 3800</usage>"
+            }
+          ]
+        }
+      ]
+    },
+    "sourceToolAssistantUUID": "00000000-0000-4000-8000-000009500102",
+    "uuid": "00000000-0000-4000-8000-000009500109",
+    "timestamp": "2026-10-22T12:00:06.300Z",
+    "toolUseResult": {
+      "status": "completed",
+      "prompt": "Read projects/launch.md and report its status in one sentence.",
+      "agentId": "a0000000000000001",
+      "agentType": "cerebro-researcher",
+      "content": [
+        {
+          "type": "text",
+          "text": "The launch note is ready for review, but its press list is still open."
+        }
+      ],
+      "resolvedModel": "claude-haiku-4-5-20251001",
+      "totalDurationMs": 3800,
+      "totalTokens": 3120,
+      "totalToolUseCount": 1,
+      "usage": {
+        "input_tokens": 2950,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 170
+      },
+      "toolStats": {
+        "readCount": 0,
+        "searchCount": 0,
+        "bashCount": 0,
+        "editFileCount": 0,
+        "linesAdded": 0,
+        "linesRemoved": 0,
+        "otherToolCount": 1
+      }
+    },
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009500",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009500109",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009502",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The researcher says the note is ready for review, but the press list is open.",
+          "signature": "sig-9502"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009502",
+    "uuid": "00000000-0000-4000-8000-000009500110",
+    "timestamp": "2026-10-22T12:00:08.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009500",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009500110",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009502",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Almost: the launch note is ready for review, but its press list is still open."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009502",
+    "uuid": "00000000-0000-4000-8000-000009500111",
+    "timestamp": "2026-10-22T12:00:08.400Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009500",
+    "version": "2.1.250"
+  },
+  {
+    "type": "last-prompt",
+    "lastPrompt": "Have a researcher read the launch note and tell me its status.",
+    "leafUuid": "00000000-0000-4000-8000-000009500111",
+    "sessionId": "00000000-0000-4000-8000-000000009500"
+  }
+]

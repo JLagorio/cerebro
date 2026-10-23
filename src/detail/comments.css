@@ -1,0 +1,153 @@
+/* The Comments panel's own parts (CommentsPanel, CommentThread, CommentComposer). */
+
+/* A group's label: the inspector section header's voice, one step inside. */
+.cb-comments-heading {
+  margin: 0;
+  color: var(--n-500);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.cb-comments-empty {
+  padding: 2px 0 4px;
+  color: var(--n-400);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.cb-comments-empty p {
+  margin: 0;
+}
+
+.cb-comments-empty .cb-comments-empty-title {
+  color: var(--n-600);
+  font-weight: 500;
+}
+
+/* One box: the text, then a bar inside it with the keys and the button. The
+   Prompt Input's anatomy (M91.14) at the panel's size: its pill, its row and
+   its round send button give way to the box, the bar and a labelled button.
+   Named with the element's own class beside ours, so the order the two
+   stylesheets load in never decides which wins. */
+.cb-composer.cb-ai-prompt-input {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  transition:
+    border-color var(--motion-hover),
+    box-shadow var(--motion-hover);
+}
+
+.cb-composer.cb-ai-prompt-input:hover {
+  border-color: var(--n-300);
+}
+
+.cb-composer.cb-ai-prompt-input:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+
+.cb-composer[data-busy] {
+  opacity: 0.6;
+}
+
+.cb-composer .cb-ai-prompt-input-body {
+  flex: none;
+}
+
+.cb-composer .cb-composer-input {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  max-height: none;
+  padding: 8px 10px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--n-800);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  outline: none;
+  resize: none;
+  field-sizing: content;
+}
+
+.cb-composer .cb-composer-input::placeholder {
+  color: var(--n-400);
+}
+
+.cb-composer .cb-composer-bar {
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: 0;
+  padding: 4px 6px 6px;
+}
+
+.cb-composer-keys {
+  display: inline-flex;
+  margin-right: auto;
+  padding-left: 4px;
+  opacity: 0;
+  transition: opacity var(--motion-hover);
+}
+
+.cb-composer:focus-within .cb-composer-keys {
+  opacity: 1;
+}
+
+/* The send button says what it does, at the DS small button's size. */
+.cb-composer .cb-composer-submit {
+  width: auto;
+  height: var(--control-h-sm);
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+  line-height: var(--lh-xs);
+  white-space: nowrap;
+}
+
+.cb-composer .cb-composer-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* A comment is a Message (M91.14), drawn at the panel's own size: its
+   header is the author's line, set close above the body. */
+.cb-comment > .cb-ai-message-content {
+  gap: 2px;
+}
+
+.cb-comment .cb-ai-message-header {
+  align-items: baseline;
+  gap: 6px;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+/* An agent's glyph has no baseline: it sits level with the author's name. */
+.cb-comment .cb-ai-message-header > svg {
+  align-self: center;
+}
+
+/* A thread or a comment that arrives while the panel is open — a new
+   discussion, a reply, an agent's answer replacing its placeholder — rises
+   in where it lands (owner, 2026-10-19: "add more animations"); what the
+   panel opened on is simply there. */
+[data-testid='comment-thread'][data-arrive],
+[data-testid='comment'][data-arrive],
+[data-testid='comment'] > .cb-ai-message-content > [data-arrive] {
+  --rise: 8px;
+  animation: cb-rise-in var(--motion-enter) backwards;
+}

@@ -1,7 +1,8 @@
+import type { SubagentSummary, ToolResultData } from '@/engine/ai/types';
 import type { RunChangeset } from '@/engine/changeset';
 import type { Place } from '@/engine/place';
 import type { QuestionAnswer, QuestionSet } from '@/engine/questionForm';
-import type { ShellCeiling } from '@/lib/policy/toolApproval';
+import type { Decision, ShellCeiling } from '@/lib/policy/toolApproval';
 
 /**
  * Local agent types (M6). The events are the ones src-tauri/src/agent/fold.rs
@@ -11,26 +12,80 @@ import type { ShellCeiling } from '@/lib/policy/toolApproval';
  * shape, and src/agent/transcript.ts is the one reducer from it to messages.
  */
 
+// The data shapes the AI elements draw (M91.10) live in the engine, so its
+// parsers can read them; the agent layer names them from here.
+export type {
+  AgentResultData,
+  ShellResultData,
+  SourceRef,
+  SourceVia,
+  StepInput,
+  StepKind,
+  StepStatus,
+  SubagentSummary,
+  TodoItem,
+  TodoStatus,
+  TodosResultData,
+  ToolResultData,
+  WebFetchResultData,
+  WebSearchResultData,
+  WireTodo,
+} from '@/engine/ai/types';
+
 /** One run's stream payload, before the run tag is attached (mockAgent
  * scripts emit this shape; the IPC layer tags it). Also what a session file
- * folds to, read back through `readCliTranscript`. */
+ * folds to, read back through `readCliTranscript`. M91.3a's fields are
+ * optional and absent when Rust has none: `at` is the CLI line's RFC 3339
+ * timestamp, and `parent` the Agent call whose subagent a line belongs to. */
 export type AgentStreamEvent =
   | { kind: 'Init'; session_id: string }
-  /** A prompt the person sent, as the session file holds it (M56.3). */
-  | { kind: 'UserPrompt'; text: string }
+  /** What the run reaches (M92.8), from the values its argv was built from:
+   * once, right after the first init Rust's init gate admits; never for an
+   * internal run or one its init refused. Live only, never from a session
+   * file. */
+  | { kind: 'Reach'; reach: RunReach }
+  /** A prompt the person sent, as the session file holds it (M56.3), with
+   * its line's uuid. */
+  | { kind: 'UserPrompt'; text: string; uuid?: string }
   /** The model answering this turn, as Claude Code reported it: once per
    * turn and again when it changes, never `<synthetic>`. */
   | { kind: 'ModelChanged'; model: string }
   /** One text block of an assistant message, whole. Live, the same words
    * arrived as TextDeltas first. */
-  | { kind: 'Text'; message_id: string; text: string }
+  | { kind: 'Text'; message_id: string; text: string; parent?: string; at?: string }
   | { kind: 'TextDelta'; text: string }
+  /** Reasoning as it streams: never empty, never a subagent's (M91.3a). */
   | { kind: 'ThinkingDelta'; text: string }
+  /** One reasoning block, whole (M91.3a), from the stream and the session
+   * file alike; live, its words came as ThinkingDeltas first. Its text may be
+   * empty, and a redacted block has none. */
+  | {
+      kind: 'Thinking';
+      message_id: string;
+      text: string;
+      redacted?: true;
+      parent?: string;
+      at?: string;
+    }
   /** A tool call, its input a preview: each long string cut. */
-  | { kind: 'ToolStart'; tool_name: string; tool_id: string; input?: string | null }
+  | {
+      kind: 'ToolStart';
+      tool_name: string;
+      tool_id: string;
+      input?: string | null;
+      parent?: string;
+      at?: string;
+    }
   // M9.5: a preview of the result travels with the completion, so an action
   // card has something to expand to; the whole rides ToolPayload (M56.8).
-  | { kind: 'ToolDone'; tool_id: string; output?: string | null; is_error?: boolean }
+  | {
+      kind: 'ToolDone';
+      tool_id: string;
+      output?: string | null;
+      is_error?: boolean;
+      parent?: string;
+      at?: string;
+    }
   /** The whole of a tool call's input or output, sent only when its preview
    * cut it (M56.8): at most 256 KiB of it, cut on a character boundary;
    * `bytes` is the whole size and `truncated` says whether the cap cut it. */
@@ -41,22 +96,76 @@ export type AgentStreamEvent =
       text: string;
       bytes: number;
       truncated: boolean;
+      parent?: string;
     }
-  | { kind: 'Result'; text: string; session_id?: string | null }
+  /** What a call's structured result says, for the tools whose result the
+   * panel draws (M91.3a): after its ToolDone, from both formats. */
+  | { kind: 'ToolResult'; tool_id: string; parent?: string; data: ToolResultData }
+  /** Claude Code refused a call by its own rules (M91.3a): its ToolDone
+   * follows as an error. Live only, never from a session file. */
+  | { kind: 'ToolDenied'; tool_id: string; tool_name: string; message: string }
+  /** Claude Code started a subagent for the Agent call `tool_id` (M91.3b):
+   * the agent id it runs as, its type and task, whether it runs in the
+   * background, and how deep it was spawned when the CLI said. Its type or
+   * task is empty when the CLI named none. Live only. */
+  | {
+      kind: 'SubagentStarted';
+      tool_id: string;
+      agent_id: string;
+      subagent_type: string;
+      description: string;
+      background: boolean;
+      depth?: number;
+    }
+  /** What a running subagent is doing (M91.3b): its latest step in Claude
+   * Code's words, its last tool, and its tool uses and time so far. Never its
+   * tokens. Live only. */
+  | {
+      kind: 'SubagentProgress';
+      tool_id: string;
+      description: string;
+      last_tool?: string;
+      tool_uses?: number;
+      duration_ms?: number;
+    }
+  /** A subagent ended (M91.3b), in Claude Code's word for how, with its
+   * totals; its report is its Agent call's ToolResult. Live only. */
+  | {
+      kind: 'SubagentDone';
+      tool_id: string;
+      status: string;
+      tool_uses?: number;
+      duration_ms?: number;
+    }
+  /** The turn's answer, live only: a session file holds no result line.
+   * `duration_ms` is how long Claude Code worked on the turn, as its result
+   * counted it (M92.2), a live ask's wait included; absent when it gave no
+   * count. */
+  | { kind: 'Result'; text: string; session_id?: string | null; duration_ms?: number }
   /** `code` is the typed cause the CLI named, when it named one: the API
    * error on its own reply, or the result's subtype. `notice` is what Rust's
    * classifier made of the failure (M56.4); absent when it could not type it. */
-  | { kind: 'Error'; message: string; code?: string | null; notice?: FailureNotice | null }
+  | {
+      kind: 'Error';
+      message: string;
+      code?: string | null;
+      notice?: FailureNotice | null;
+      parent?: string;
+    }
   /** A pull request the session opened (a `pr-link` record). */
   | { kind: 'PrLink'; number: number; url: string; repository: string }
-  /** The turn ended, once; the stop reason when one was recorded. */
-  | { kind: 'TurnEnded'; stop_reason?: string | null }
+  /** The turn ended, once; the stop reason when one was recorded, and the
+   * uuid of its last main-thread assistant line, where a branch can start
+   * (M91.3a). */
+  | { kind: 'TurnEnded'; stop_reason?: string | null; last_uuid?: string }
   /** The turn never ended: `stopped` by the person, or `cut_off`. */
   | { kind: 'TurnInterrupted'; reason: string }
   /** The turn is suspended on a call a PreToolUse hook deferred (M57.1):
    * Cerebro's gate waiting for the person, or a hook outside Cerebro. From
-   * the stream and the session file alike; no TurnEnded follows. */
-  | { kind: 'ToolDeferred'; tool_id: string; tool_name: string }
+   * the stream and the session file alike; no TurnEnded follows.
+   * `duration_ms` is how long the run worked before the hook held it, from
+   * the stream's result (M92.2); the session file's marker gives none. */
+  | { kind: 'ToolDeferred'; tool_id: string; tool_name: string; duration_ms?: number }
   /** A call waits for the person (M57.1): this run's own gate deferred it
    * and its stream confirmed it. Live only, just before its ToolDeferred. */
   | { kind: 'Interaction'; interaction: PendingInteraction }
@@ -176,6 +285,52 @@ export interface PrLink {
   repository: string;
 }
 
+/** One connector a run loads (M92.8), by its name in the vault's list, and
+ * its status in the run's first init as Claude Code spelled it: `absent`
+ * when that init left it out, `unreported` when it gave no status. */
+export interface ConnectorInit {
+  name: string;
+  status: string;
+}
+
+/** A connector a run's record named that the run does not get (M54.11), as
+ * its prompt names it: the name cut to 64 characters, and why in Rust's
+ * words. */
+export interface MissingConnector {
+  name: string;
+  reason: string;
+}
+
+/**
+ * What one run reaches (M92.8), as Rust's `agent::RunReach` says it: built
+ * from the connectors, the tool-approval plan and the pinning its argv was
+ * built from, so the rail and the run's prompt never tell two stories.
+ * Facts, never words: the rail words them. A thread saves its latest as its
+ * own fact (`conversations.threadReach`).
+ */
+export interface RunReach {
+  /** Each connector it loads, in the vault list's order. */
+  connectors: ConnectorInit[];
+  /** The connectors its record named that it does not get: exactly the ones
+   * its prompt names, at most eight. */
+  missing: MissingConnector[];
+  /** How many more its prompt counts without naming them. */
+  missing_more: number;
+  /** It also loads the MCP servers in the person's own Claude Code config
+   * (legacy open mode), which no vault list names, so `connectors` is not
+   * all it reaches. */
+  inherits: boolean;
+  /** The mode its `--permission-mode` started it in. */
+  permission_mode: string;
+  /** Its grant holds Cerebro's own tools, which read and change pages. */
+  cerebro: boolean;
+  /** How its plan decided each family of tools, by the tool-approval table's
+   * family id: each decision the family's tools got, once, in the manifest's
+   * order. The reach words read them: pages (`confirmable`), shell, web,
+   * subagents (`delegate`) and edit mode (`file_write`). */
+  families: Record<string, Decision[]>;
+}
+
 /**
  * Why a transcript could not be read back, as Rust types it
  * (`transcript::Unavailable`). A string the panel words, with a default
@@ -287,6 +442,65 @@ export interface ToolCall {
   /** Deferred by a hook outside Cerebro, which no card answers (M57.1).
    * Memory only. */
   paused?: boolean;
+  /** The Agent call whose subagent made this call (M91.4); absent on the
+   * main thread's own calls. */
+  parent?: string;
+  /** When the call started and returned, as Claude Code stamped its lines
+   * (M91.4): RFC 3339, each absent when nothing recorded it. A duration is
+   * their difference only (`durationBetween`), never a guess. */
+  startedAt?: string;
+  endedAt?: string;
+  /** What the call's structured result says (M91.3a), for the tools whose
+   * result the panel draws. Memory only: the session file holds it, and a
+   * reload heals it back while it exists. */
+  result?: ToolResultData;
+  /** Claude Code refused the call by its own rules (M91.3a), in its words.
+   * Live only, so a thread keeps it. */
+  denied?: string;
+  /** The subagent an Agent call started (M91.4), with its own steps. Saved
+   * as its summary only; its steps heal from the session file's
+   * `subagents/` while they exist. */
+  subagent?: SubagentRun;
+}
+
+/**
+ * One piece of a turn, in the order it came (M91.4): a reasoning block, a
+ * message's text, or a call, by id. A message's text parts hold every
+ * message's words in order, the last its answer; a reasoning block's
+ * `durationMs` is the time since the step before it, from two recorded `at`s
+ * only (CV-05).
+ */
+export type MessagePart =
+  | {
+      kind: 'reasoning';
+      id: string;
+      text: string;
+      /** Claude Code withheld the text (a `redacted_thinking` block). */
+      redacted?: true;
+      /** Its words are still arriving. Memory only. */
+      streaming?: true;
+      at?: string;
+      durationMs?: number;
+    }
+  | { kind: 'text'; id: string; text: string }
+  | { kind: 'tool'; toolId: string };
+
+/**
+ * A subagent an Agent call started (M91.4): what Claude Code reported of it,
+ * its own steps, and, live, what it is doing now. Its `type` and
+ * `description` read empty when nothing named them, and are never printed so.
+ */
+export interface SubagentRun extends SubagentSummary {
+  /** Live only: what `SubagentStarted` and `SubagentProgress` said. */
+  background?: boolean;
+  depth?: number;
+  progress?: string;
+  lastTool?: string;
+  /** Its own failure in Claude Code's words, when an API error ended it;
+   * never the turn's. Memory only. */
+  error?: string;
+  parts: MessagePart[];
+  tools: ToolCall[];
 }
 
 /** A tool call's whole input and output (M56.8), each set only when its
@@ -299,6 +513,17 @@ export interface ToolPayload {
   outputTruncated?: boolean;
   inputBytes?: number;
   outputBytes?: number;
+}
+
+/**
+ * Where a branch leaves its conversation (M91.6), as Rust's
+ * `transcript::ForkRequest` reads it: the Claude Code session it forks, and
+ * the anchor it forks at, the line one of that session's turns ended on
+ * (`ChatMessage.anchor`). Both are lowercase UUIDs.
+ */
+export interface ForkPoint {
+  from: string;
+  at: string;
 }
 
 /**
@@ -334,6 +559,15 @@ export interface Conversation {
   /** The turn this thread left running (M57.6), re-attached when it opens;
    * null or absent once its turn ended. Healed on load. */
   live?: LiveTurn | null;
+  /** A branch's source (M91.6): sent with every turn until the thread has a
+   * session of its own, which Rust mints and forks from it, then dropped.
+   * Absent on every other thread. Healed on load. */
+  fork?: ForkPoint | null;
+  /** What this thread's latest run said it reaches (M92.8), saved as the
+   * thread's own small fact: its replies keep theirs in memory only, so a
+   * reload, or a trimmed body, still knows it (`conversations.threadReach`).
+   * Absent until a run said one. Healed on load. */
+  reach?: RunReach | null;
   /** The model and effort this conversation's turns ask Claude Code for
    * (M56.5), picked in the composer. Null or absent is unset: an addressed
    * agent's record decides, else Claude Code's default. A stored value Rust
@@ -392,12 +626,48 @@ export interface ChatMessage {
    * run, upserted by run id: a turn resumed after a held call has two. Saved
    * with the thread; a thread rebuilt from the session file has none. */
   changesets?: RunChangeset[];
+  /** Assistant only: how long Claude Code worked on this reply (M92.2), the
+   * sum of each of its runs' own count (`duration_ms`), once per run: a
+   * resume after a held call is a run of its own, so it adds its own. Null
+   * when one run counted and another did not, so a partial sum is never kept
+   * (CV-05); absent while no run has counted. Live only: a reply rebuilt from
+   * the session file has none. Saved with the thread. */
+  workedMs?: number | null;
+  /** Assistant only: the count the run still writing this reply gave
+   * (M92.2), until the run's Changeset closes it: a later count of the same
+   * run replaces it in `workedMs`, never adds to it. Saved with the thread,
+   * so a re-attach still closes it. */
+  workedRun?: number;
+  /** Assistant only: what the run writing this reply said it reaches
+   * (M92.8): the latest run's, so a resume's stands in place of the held
+   * run's. Live only, and memory only here: the thread saves the latest as
+   * its own fact (`Conversation.reach`). */
+  reach?: RunReach;
+  /** Assistant only: the turn's pieces in order (M91.4), each main-thread
+   * call once, by id. Absent on a reply no piece reached, and on threads
+   * saved before M91.4. Reasoning is memory only. */
+  parts?: MessagePart[];
+  /** Assistant only: where a conversation can branch from this turn
+   * (M91.4): its session and the uuid of its last main-thread assistant
+   * line, as its TurnEnded named it. */
+  anchor?: { sessionId: string; uuid: string };
   /**
    * Assistant only, in memory only: what the reducer keeps while a turn is
    * live (`transcript.ts`) — the last message's text, every message's text,
-   * and whether the turn has ended. Never persisted.
+   * and whether the turn has ended; the text part the deltas stream into
+   * (M91.4); and, per thread (keyed by its Agent call, '' for the main one),
+   * the message its last text part holds and its last recorded time. Never
+   * persisted.
    */
-  live?: { messageId: string | null; finalText: string; allText: string; ended: boolean };
+  live?: {
+    messageId: string | null;
+    finalText: string;
+    allText: string;
+    ended: boolean;
+    openText?: string;
+    textOf?: Record<string, string>;
+    lastAt?: Record<string, string>;
+  };
   /**
    * User only: the `@handle` this turn was addressed to (M33b.6).
    *

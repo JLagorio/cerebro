@@ -124,7 +124,7 @@ export function actorLabel(raw: string | null, entries: Entry[]): ActorLabel {
       return { text: 'Assistant', raw };
     case 'human':
       // The page's title when one answers, else the id after `human:` — the
-      // same word the concept's Details tab shows for them.
+      // same word the concept's Details panel shows for them.
       return { text: author.label, raw };
     case 'other':
       return { text: raw, raw };

@@ -11,7 +11,7 @@ import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { ConceptHeading } from './ConceptHeading';
-import { ConceptDetailsTab } from './ConceptDetailsTab';
+import { ConceptDetails } from './ConceptDetails';
 import { ConceptReviewBar } from './ConceptReviewBar';
 
 vi.mock('@/lib/ipc', async (importOriginal) => {
@@ -203,9 +203,12 @@ describe('ConceptReviewBar (M51.3)', () => {
     });
     render(<ConceptReviewBar concept={conceptAt(OLD)} viewedBody="# Body" verifyBlocked={null} />);
     expect(screen.getByRole('button', { name: /^Verify$/ }).hasAttribute('disabled')).toBe(false);
-    expect(screen.getByTestId('recheck-concept')).toBeTruthy();
-    // M52.3 — the recheck leads; Verify alone leaves it due.
-    expect(screen.getByTestId('recheck-concept').className).toContain('cb-btn-primary');
+    const recheck = screen.getByTestId('recheck-concept');
+    expect(recheck.textContent).toBe('Ask for a recheck');
+    // M52.3 — the recheck leads; Verify alone leaves it due. M91.14 — the ask
+    // is a Suggestion, so it leads as one: `data-lead`, not a primary button.
+    expect(recheck.dataset.slot).toBe('suggestion');
+    expect(recheck.hasAttribute('data-lead')).toBe(true);
     expect(screen.getByRole('button', { name: /^Verify$/ }).className).toContain(
       'cb-btn-secondary',
     );
@@ -266,7 +269,12 @@ describe('ConceptReviewBar (M51.3)', () => {
     });
     render(<ConceptReviewBar concept={conceptAt(OLD)} viewedBody="# Body" verifyBlocked={null} />);
     expect(screen.getByRole('button', { name: /^Verify$/ }).className).toContain('cb-btn-primary');
-    fireEvent.click(screen.getByTestId('revise-concept'));
+    // Verify leads here; the ask is the aside. It shows its label and sends
+    // its prompt (M91.14).
+    const revise = screen.getByRole('button', { name: 'Ask to revise' });
+    expect(revise).toBe(screen.getByTestId('revise-concept'));
+    expect(revise.hasAttribute('data-lead')).toBe(false);
+    fireEvent.click(revise);
     const pending = useUiStore.getState().handoffs.at(-1);
     expect(pending?.label).toBe('Ask to revise · The offline window');
     expect(pending?.subject).toBe(OLD);
@@ -372,7 +380,7 @@ describe('ConceptReviewBar (M51.3)', () => {
 
 describe('the review bar and the details it opens (M51.3)', () => {
   beforeEach(() => {
-    useUiStore.setState({ conceptPanelOpen: false, conceptPanelTab: 'outline' });
+    useUiStore.setState({ conceptPanelOpen: false, conceptPanel: 'history' });
     useVaultStore.setState({
       vaultPath: '/vault',
       entries: [
@@ -393,7 +401,7 @@ describe('the review bar and the details it opens (M51.3)', () => {
     fireEvent.click(screen.getByTestId('review-bar-sources'));
     expect(screen.getByTestId('review-bar-sources').textContent).toBe('1 source');
     expect(useUiStore.getState().conceptPanelOpen).toBe(true);
-    expect(useUiStore.getState().conceptPanelTab).toBe('details');
+    expect(useUiStore.getState().conceptPanel).toBe('details');
   });
 
   it('says a concept citing nothing cites nothing — never "0 sources"', () => {
@@ -426,7 +434,7 @@ describe('the review bar and the details it opens (M51.3)', () => {
         concept({ path: OLD, title: 'The offline window', relationships: { about: ['mpm-410'] } }),
       ],
     });
-    render(<ConceptDetailsTab concept={conceptAt(OLD)} />);
+    render(<ConceptDetails concept={conceptAt(OLD)} />);
     fireEvent.click(screen.getByTestId('promote-subject'));
     // The New menu's own dialog, carrying the subject's name — a suggestion a
     // person edits, which is the whole of D1: the agent never gets here.
@@ -434,7 +442,7 @@ describe('the review bar and the details it opens (M51.3)', () => {
   });
 
   it('keeps the evidence in Details, without a second Verify', () => {
-    render(<ConceptDetailsTab concept={conceptAt(OLD)} />);
+    render(<ConceptDetails concept={conceptAt(OLD)} />);
     expect(screen.getByTestId('knowledge-panel')).toBeTruthy();
     expect(screen.getByTestId('concept-author').dataset.author).toBe('assistant');
     expect(screen.queryByRole('button', { name: /Verify/ })).toBeNull();

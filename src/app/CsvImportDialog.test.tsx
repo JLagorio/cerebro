@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useVaultStore } from '@/stores/vaultStore';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { CsvImportDialog } from './CsvImportDialog';
 
 vi.mock('./csvActions', async (original) => ({
@@ -32,18 +33,39 @@ describe('CSV import preview', () => {
     expect((screen.getByRole('textbox', { name: 'Database name' }) as HTMLInputElement).value).toBe(
       'Books',
     );
-    expect(
-      (screen.getByRole('combobox', { name: 'Kind for Pages' }) as HTMLSelectElement).value,
-    ).toBe('number');
+    const pages = screen.getByRole('button', { name: 'Kind for Pages' });
+    expect(pages.getAttribute('data-value')).toBe('number');
+    expect(optionLabels(pages)).toEqual(['Number', 'Text']);
+    chooseOption(pages, 'Text');
+    expect(pages.getAttribute('data-value')).toBe('text');
     expect(importCsv).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('csv-import-submit'));
     await waitFor(() => expect(importCsv).toHaveBeenCalledOnce());
+    expect(vi.mocked(importCsv).mock.calls[0][0]).toMatchObject({
+      titleColumn: 0,
+      columns: [{ kind: 'text' }, { kind: 'text' }, { kind: 'checkbox' }],
+    });
     expect(close).not.toHaveBeenCalled();
     await waitFor(() =>
       expect((screen.getByTestId('csv-import-submit') as HTMLButtonElement).disabled).toBe(false),
     );
     fireEvent.click(screen.getByTestId('csv-import-submit'));
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
+  it('the title column takes the Title cell from its kind picker', async () => {
+    render(<CsvImportDialog onClose={vi.fn()} />);
+    choose('Title,Pages,Read\nDune,412,true\nFoundation,255,false\nSolaris,204,true');
+    const title = await screen.findByRole('button', { name: 'Title column' });
+    expect(title.getAttribute('data-value')).toBe('0');
+    expect(optionLabels(title)).toEqual(['Title', 'Pages', 'Read']);
+    expect(screen.queryByRole('button', { name: 'Kind for Title' })).toBeNull();
+    chooseOption(title, 'Pages');
+    expect(title.getAttribute('data-value')).toBe('1');
+    expect(screen.queryByRole('button', { name: 'Kind for Pages' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Kind for Title' }).getAttribute('data-value')).toBe(
+      'text',
+    );
+    expect(importCsv).not.toHaveBeenCalled();
   });
   it('shows malformed rows and prevents any write', async () => {
     render(<CsvImportDialog onClose={vi.fn()} />);

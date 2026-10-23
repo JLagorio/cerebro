@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { boot, readMockFile, showDatabases } from './boot';
+import { chooseOption } from './select';
 
 const SERIES = 'records/standups/daily-standup.md';
 const ODD = 'records/standups/odd-sync.md';
@@ -77,7 +78,7 @@ test('Repeat reads in words, edits a preset, keeps unknown raw text and clears t
   );
   await page.getByRole('button', { name: 'Repeat', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Repeat', exact: true });
-  await dialog.getByTestId('repeat-pattern').selectOption('FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR');
+  await chooseOption(dialog.getByTestId('repeat-pattern'), 'Every weekday (Monday to Friday)');
   const box = await dialog.boundingBox();
   expect(box).not.toBeNull();
   expect(box!.y + box!.height).toBeLessThanOrEqual(1000);
@@ -100,7 +101,7 @@ test('Repeat reads in words, edits a preset, keeps unknown raw text and clears t
   await page.getByRole('button', { name: 'Repeat', exact: true }).click();
   await expect(dialog.getByTestId('repeat-raw')).toHaveText('FREQ=MONTHLY;BYDAY=WE;BYSETPOS=2');
   await expect(dialog.getByRole('button', { name: 'Done', exact: true })).toBeDisabled();
-  await dialog.getByTestId('repeat-pattern').selectOption('none');
+  await chooseOption(dialog.getByTestId('repeat-pattern'), 'Does not repeat');
   await dialog.getByRole('button', { name: 'Done', exact: true }).click();
   await expect.poll(() => readMockFile(page, ODD)).not.toMatch(/^repeat:/m);
 });

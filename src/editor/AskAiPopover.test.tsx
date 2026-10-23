@@ -1,5 +1,6 @@
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const handlers: Array<(event: unknown) => void> = [];
 vi.mock('@/agent/agentIpc', () => ({
@@ -35,10 +36,11 @@ afterEach(cleanup);
 const PASSAGE = 'The pricing is annual and the trial is short.';
 const REWRITE = 'The pricing is monthly and the trial is short.';
 
-const reply = (text: string) => {
-  for (const handler of [...handlers]) handler({ run: 1, kind: 'Result', text });
-  for (const handler of [...handlers]) handler({ run: 1, kind: 'Done' });
-};
+const reply = (text: string) =>
+  act(() => {
+    for (const handler of [...handlers]) handler({ run: 1, kind: 'Result', text });
+    for (const handler of [...handlers]) handler({ run: 1, kind: 'Done' });
+  });
 
 describe('AskAiPopover', () => {
   let onReplace: ReturnType<typeof vi.fn>;
@@ -166,5 +168,138 @@ describe('AskAiPopover', () => {
     await screen.findByTestId('ask-ai-hunks');
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(onReplace).toHaveBeenCalledWith(REWRITE);
+  });
+});
+
+/**
+ * Its elements (M91.14): the instruction is a Prompt Input, the writing
+ * actions are Suggestion rows, the working line carries the AI light only
+ * while the rewrite is written, and the decision is a Confirmation holding
+ * the hunks and its own answers — each with the ids, names and keyboard
+ * path the writing specs drive it by.
+ */
+describe('AskAiPopover elements', () => {
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault', entries: [] });
+  });
+
+  const open = () =>
+    render(
+      <AskAiPopover selection={PASSAGE} onReplace={() => undefined} onClose={() => undefined} />,
+    );
+  const field = () =>
+    screen.getByLabelText('What should the assistant do with this passage?') as HTMLTextAreaElement;
+  const askButton = () => screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement;
+
+  it('asks through a Prompt Input whose send waits for words', async () => {
+    open();
+    expect(field().dataset.slot).toBe('prompt-input-textarea');
+    expect(field().closest('[data-slot="prompt-input"]')).not.toBeNull();
+    expect(document.activeElement).toBe(field());
+    // Empty: nothing to send, so the send is out of the Tab order and an
+    // Enter asks nothing.
+    expect(askButton().disabled).toBe(true);
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    fireEvent.change(field(), { target: { value: 'make it monthly' } });
+    expect(askButton().disabled).toBe(false);
+    expect(askButton().tabIndex).toBe(0);
+    fireEvent.click(askButton());
+    await waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].message).toContain('make it monthly');
+  });
+
+  it('carries the AI light only while the rewrite is written', async () => {
+    open();
+    expect(screen.queryByTestId('ask-ai-working')).toBeNull();
+    fireEvent.change(field(), { target: { value: 'make it monthly' } });
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    const working = await screen.findByTestId('ask-ai-working');
+    expect(working.textContent).toBe('Rewriting the passage…');
+    expect(working.classList.contains('cb-ai-shimmer')).toBe(true);
+    expect(field().disabled).toBe(true);
+    reply(REWRITE);
+    await screen.findByTestId('ask-ai-hunks');
+    expect(screen.queryByTestId('ask-ai-working')).toBeNull();
+    expect(document.querySelector('.cb-ai-shimmer')).toBeNull();
+  });
+
+  it('offers the writing actions as Suggestion rows, each sent as its instruction', async () => {
+    open();
+    const toggle = screen.getByRole('button', { name: 'Writing actions' });
+    expect(toggle.tabIndex).toBe(0);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    const presets = screen.getAllByTestId('selection-preset');
+    expect(presets.map((p) => p.dataset.slot)).toEqual(presets.map(() => 'suggestion'));
+    expect(presets.every((p) => p.tabIndex === 0)).toBe(true);
+    expect(screen.getByRole('group', { name: 'Writing actions' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Improve writing' })).toBe(presets[0]);
+    const summarize = screen.getByRole('button', { name: 'Summarize' });
+    expect(summarize.getAttribute('title')).toBe(
+      'Replace the passage with a two-sentence summary of it.',
+    );
+    fireEvent.click(summarize);
+    await waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].message).toContain(
+      'Replace the passage with a two-sentence summary of it.',
+    );
+  });
+
+  it('decides in a Confirmation: its hunks, its count, and answers Tab can reach', async () => {
+    open();
+    fireEvent.change(field(), { target: { value: 'make it monthly' } });
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    await waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    reply('The pricing is monthly and the trial is generous.');
+    const card = await screen.findByTestId('ask-ai-decision');
+    expect(card.dataset.slot).toBe('confirmation');
+    expect(screen.getByRole('group', { name: 'Apply the rewrite?' })).toBe(card);
+    expect(card.textContent).toContain('2 of 2 changes · click one to toggle it');
+    const hunks = within(card).getAllByTestId('ask-ai-hunk');
+    expect(hunks.map((h) => h.getAttribute('aria-pressed'))).toEqual(['true', 'true']);
+    fireEvent.click(hunks[0]);
+    expect(card.textContent).toContain('1 of 2 changes · click one to toggle it');
+    const retry = within(card).getByRole('button', { name: 'Retry' });
+    const apply = within(card).getByRole('button', { name: 'Apply' });
+    expect([retry.tabIndex, apply.tabIndex]).toEqual([0, 0]);
+    fireEvent.click(retry);
+    expect(field().value).toBe('make it monthly');
+  });
+
+  /* React's development double mount (main.tsx's StrictMode) unmounts and
+     mounts again: the answer must still land, and a preset run only once. */
+  it('lands its answer, and asks a preset once, through a double mount', async () => {
+    const { unmount } = render(
+      <StrictMode>
+        <AskAiPopover
+          selection={PASSAGE}
+          preset="Make it monthly"
+          onReplace={() => undefined}
+          onClose={() => undefined}
+        />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
+    await waitFor(() => expect(handlers).toHaveLength(1));
+    reply(REWRITE);
+    expect(await screen.findByTestId('ask-ai-decision')).toBeTruthy();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce();
+    unmount();
+  });
+
+  it('adds no document keydown listener: its keys are its own elements’', async () => {
+    const listen = vi.spyOn(document, 'addEventListener');
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Writing actions' }));
+    fireEvent.change(field(), { target: { value: 'make it monthly' } });
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    await waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    reply(REWRITE);
+    await screen.findByTestId('ask-ai-decision');
+    expect(listen.mock.calls.filter(([kind]) => kind === 'keydown')).toEqual([]);
+    listen.mockRestore();
   });
 });

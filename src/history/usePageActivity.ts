@@ -48,7 +48,7 @@ function useKeyedRead<T>(key: string | null, read: () => Promise<T>): PageRead<T
 }
 
 /**
- * Everything one page's History tab reads (M64.2b): `page_activity`, its
+ * Everything one page's History panel reads (M64.2b): `page_activity`, its
  * versions (`useFileHistory`) and its last change (`page_attribution`). Each
  * read fails alone, so a failed one is said on its own line while the others
  * still render. The activity and the attribution read again when the page's

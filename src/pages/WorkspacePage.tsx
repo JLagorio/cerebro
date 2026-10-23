@@ -94,30 +94,35 @@ export function WorkspacePage({ selection }: { selection: Selection }) {
       aria-label="File explorer"
     >
       <div className="workspace-explorer-heading">
-        <span className="text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
-          Explorer
-        </span>
+        {navigationTarget === null && (
+          <span className="text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
+            Explorer
+          </span>
+        )}
         <button
           type="button"
-          data-testid="workspace-settings"
-          onClick={() => setSettingsOpen((v) => !v)}
-          aria-expanded={settingsOpen}
-          className="ml-auto border-0 bg-transparent p-0.5 text-n-500 hover:text-n-800"
-          aria-label="Explorer settings"
-        >
-          <Icon name="ellipsis" size={14} />
-        </button>
-        <button
-          type="button"
+          tabIndex={0}
           data-testid="mount-root"
           onClick={() => {
             navigation?.hide();
             setMounting(true);
           }}
-          className="border-0 bg-transparent p-0.5 text-n-500 hover:text-n-800"
+          className="workspace-mount-action ml-auto border-0 bg-transparent p-0.5 text-n-500 hover:text-n-800"
           aria-label="Mount a folder"
         >
           <Icon name="plus" size={14} />
+          {navigationTarget !== null && <span>Mount folder</span>}
+        </button>
+        <button
+          type="button"
+          tabIndex={0}
+          data-testid="workspace-settings"
+          onClick={() => setSettingsOpen((v) => !v)}
+          aria-expanded={settingsOpen}
+          className="border-0 bg-transparent p-0.5 text-n-500 hover:text-n-800"
+          aria-label="Explorer settings"
+        >
+          <Icon name="ellipsis" size={14} />
         </button>
       </div>
       {settingsOpen && (

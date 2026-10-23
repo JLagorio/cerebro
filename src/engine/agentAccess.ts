@@ -6,8 +6,10 @@ import { scheduleText } from './skills';
  * Every row is derived, never restated: what an agent may read or change on
  * a page comes from the tool manifest's rows (`tools.v1.json`), the
  * tool-approval table's plan for the run it would be (`plan`), and the
- * record's own axes. Nothing here types a tool list or a decision table, so a
- * new note writer or a new ceiling reaches this explanation with no edit.
+ * record's own axes, and so does whether, while you watch, it may hand
+ * reading to a researcher (M91.2d). Nothing here types a tool list or a
+ * decision table, so a new note writer or a new ceiling reaches this
+ * explanation with no edit.
  *
  * From Macro (behaviour only): an explanation lists every path that grants
  * access plus the strongest, and "none" is an answer. Cerebro differs on
@@ -31,6 +33,7 @@ import {
   effectiveCeiling,
   plan,
   TOOL_APPROVAL,
+  type DelegateCeiling,
   type RunApproval,
   type RunKind,
   type ShellCeiling,
@@ -168,6 +171,11 @@ export interface GrantAxes {
 /** Why the shell a record declares is withheld, in `plan()`'s order. */
 export type ShellWithheld = 'ceiling' | 'read-limit' | 'narrowing';
 
+/** Why a run you watch goes without subagents (M91.2d), in `plan()`'s
+ * order: the Settings switch, then a narrowing that leaves the subagent tool
+ * out. */
+export type DelegateWithheld = 'ceiling' | 'narrowing';
+
 /** A page a Knowledge door rewrites whatever the write scope says. */
 export type BundlePage = 'source' | 'log';
 
@@ -210,6 +218,11 @@ export interface AccessRow {
   tools: { attended: Reach; unattended: Reach };
   /** Reach through the CLI's file and shell tools, by run kind. */
   shell: { attended: Reach; unattended: Reach; withheld: ShellWithheld | null };
+  /** Whether a run of it you watch may start a researcher that reads for it
+   * (M91.2d), and why not. No other run can: the subagent tool needs a gate
+   * a person answers. A researcher reads under its run's own grant, so it
+   * adds no reach of its own. */
+  delegate: { attended: boolean; withheld: DelegateWithheld | null };
   /** The strongest reach, by run kind and overall. */
   attended: Reach;
   unattended: Reach;
@@ -234,6 +247,9 @@ export interface PageAccessInput {
   type: string | null;
   /** The Settings shell ceiling. */
   shell: ShellCeiling;
+  /** The Settings Subagents switch (M91.2d), which only a run you watch
+   * sends. */
+  delegate: DelegateCeiling;
   /** The handle the panel is bound to (M56.6), null when unbound. */
   panelAgent: string | null;
 }
@@ -250,14 +266,28 @@ function narrowingOf(allowed: readonly string[] | null): ((tool: string) => bool
   return allowed === null ? null : (tool) => allowed.some((entry) => namesTool(entry, tool));
 }
 
-function planFor(kind: RunKind, axes: GrantAxes, ceiling: ShellCeiling): RunApproval {
+/** `delegate` is the Subagents switch a run's request sends: a run you watch
+ * sends the Settings one, and every other sends none, which reads off. */
+function planFor(
+  kind: RunKind,
+  axes: GrantAxes,
+  ceiling: ShellCeiling,
+  delegate?: DelegateCeiling,
+): RunApproval {
   return plan({
     kind,
     shell: effectiveCeiling(ceiling, axes.shell),
+    delegate,
     askFirst: axes.askFirst,
     readScoped: axes.readScope !== null,
     narrowing: narrowingOf(axes.allowedTools),
   });
+}
+
+/** Can a plan's run start a researcher? `plan()` names the agent types a run
+ * may start only when it holds a tool the delegate ceiling reads (M91.2a). */
+function startsAgents(approval: RunApproval): boolean {
+  return approval.allowed_agent_types.length > 0;
 }
 
 /** What a plan lets the CLI's changing tools do: allowed, asked, or not. */
@@ -289,6 +319,19 @@ function withheldOf(axes: GrantAxes, ceiling: ShellCeiling, attended: Reach): Sh
   if (ceiling === 'off') return 'ceiling';
   if (axes.readScope !== null) return 'read-limit';
   return 'narrowing';
+}
+
+/** Why a run you watch starts no researcher: off in Settings, else a
+ * narrowing that leaves the subagent tool out (`narrowed_out`). A read limit
+ * leaves it alone; null when it starts one, or nothing here explains it. */
+function delegateWithheldOf(
+  axes: GrantAxes,
+  delegate: DelegateCeiling,
+  starts: boolean,
+): DelegateWithheld | null {
+  if (starts) return null;
+  if (delegate === 'off') return 'ceiling';
+  return axes.allowedTools !== null ? 'narrowing' : null;
 }
 
 interface RowSeed {
@@ -336,7 +379,12 @@ function deriveRow(seed: RowSeed, input: PageAccessInput, page: PageKind): Acces
   const shell = { attended: 'none' as Reach, unattended: 'none' as Reach };
   let attendedPlan: RunApproval | null = null;
   for (const kind of kinds) {
-    const approval = planFor(kind, axes, input.shell);
+    const approval = planFor(
+      kind,
+      axes,
+      input.shell,
+      kind === 'attended' ? input.delegate : undefined,
+    );
     if (kind === 'attended') attendedPlan = approval;
     const viaDoor = strongest(...doorWriters.map((row) => writerReach(approval, row)));
     let tools: Reach;
@@ -367,6 +415,7 @@ function deriveRow(seed: RowSeed, input: PageAccessInput, page: PageKind): Acces
     ) ?? false;
   const reads = readers || fileRead || shell.attended !== 'none';
   const read = (readers && readable) || fileRead || shell.attended !== 'none';
+  const delegates = attendedPlan !== null && startsAgents(attendedPlan);
 
   return {
     actor: seed.actor,
@@ -389,6 +438,10 @@ function deriveRow(seed: RowSeed, input: PageAccessInput, page: PageKind): Acces
     ownNotes,
     tools: reach,
     shell: { ...shell, withheld: withheldOf(axes, input.shell, shell.attended) },
+    delegate: {
+      attended: delegates,
+      withheld: delegateWithheldOf(axes, input.delegate, delegates),
+    },
     attended,
     unattended,
     write: strongest(attended, unattended),
@@ -507,9 +560,17 @@ export function summaryWords(access: PageAccess): string {
   return `${access.canChange} of ${access.agents} agents can change this page.`;
 }
 
+/** `summaryWords`, short enough to ride the Access section's header. */
+export function summaryShort(access: PageAccess): string {
+  if (access.agents === 0) return 'No agents yet';
+  if (access.canChange === 0) return 'No agent can change it';
+  return `${access.canChange} of ${access.agents} agents can change it`;
+}
+
 export interface AccessLines {
   status: string;
-  /** In fixed order: scope, tools, page kind, ask-first, shell, when, read. */
+  /** In fixed order: scope, tools, page kind, ask-first, shell, subagents,
+   * when, read. */
   reasons: string[];
 }
 
@@ -583,6 +644,14 @@ export function accessLines(row: AccessRow): AccessLines {
   if (row.shell.withheld === 'ceiling') reasons.push('Shell is Off in Settings.');
   if (row.shell.withheld === 'read-limit') reasons.push('A read limit withdraws its shell.');
   if (row.shell.withheld === 'narrowing') reasons.push('Its allowed tools leave out the shell.');
+  // Subagents.
+  if (row.delegate.attended) {
+    reasons.push(
+      'While you watch, it can hand reading to a researcher that reports back and changes nothing.',
+    );
+  }
+  if (row.delegate.withheld === 'ceiling') reasons.push('Subagents are Off in Settings.');
+  if (row.delegate.withheld === 'narrowing') reasons.push('Its allowed tools leave out subagents.');
   // When.
   if (row.panel) {
     reasons.push(row.boundTo === null ? 'Runs when you ask.' : `Answers as ${row.boundTo} here.`);

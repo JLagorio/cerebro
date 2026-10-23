@@ -1,0 +1,196 @@
+{
+  "case": "thinking-summarized",
+  "cli_version": "2.1.250",
+  "streams": [
+    {
+      "file": "transcript-thinking-summarized.stream.json",
+      "events": [
+        {
+          "kind": "Init",
+          "session_id": "00000000-0000-4000-8000-000000009100"
+        },
+        {
+          "kind": "ModelChanged",
+          "model": "claude-haiku-4-5-20251001"
+        },
+        {
+          "kind": "ThinkingDelta",
+          "text": "The person asks whether the launch note is rea"
+        },
+        {
+          "kind": "ThinkingDelta",
+          "text": "dy to share. I should read it before I answer."
+        },
+        {
+          "kind": "Thinking",
+          "message_id": "msg_000000000000000000009101",
+          "text": "The person asks whether the launch note is ready to share. I should read it before I answer.",
+          "at": "2026-10-22T12:00:02.000Z"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__cerebro__get_note",
+          "tool_id": "toolu_000000000000000000009101",
+          "input": "{\"path\":\"projects/launch.md\"}",
+          "at": "2026-10-22T12:00:02.400Z"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009101",
+          "output": "# Launch\n\nStatus: ready for review.\nPress list: still open.",
+          "is_error": false,
+          "at": "2026-10-22T12:00:03.000Z"
+        },
+        {
+          "kind": "ThinkingDelta",
+          "text": "It is ready for review, but the press list is"
+        },
+        {
+          "kind": "ThinkingDelta",
+          "text": " still open, so it is not ready to share yet."
+        },
+        {
+          "kind": "Thinking",
+          "message_id": "msg_000000000000000000009102",
+          "text": "It is ready for review, but the press list is still open, so it is not ready to share yet.",
+          "at": "2026-10-22T12:00:04.000Z"
+        },
+        {
+          "kind": "TextDelta",
+          "text": "Almost: the launch note is ready for re"
+        },
+        {
+          "kind": "TextDelta",
+          "text": "view, but its press list is still open."
+        },
+        {
+          "kind": "Text",
+          "message_id": "msg_000000000000000000009102",
+          "text": "Almost: the launch note is ready for review, but its press list is still open.",
+          "at": "2026-10-22T12:00:04.300Z"
+        },
+        {
+          "kind": "Result",
+          "text": "Almost: the launch note is ready for review, but its press list is still open.",
+          "session_id": "00000000-0000-4000-8000-000000009100",
+          "duration_ms": 9000
+        },
+        {
+          "kind": "TurnEnded",
+          "stop_reason": "end_turn",
+          "last_uuid": "00000000-0000-4000-8000-000009100105"
+        }
+      ],
+      "classes": {
+        "translated": 13,
+        "ignored": {
+          "a block closing, with nothing new in it": 4,
+          "a block opening; its content follows as deltas, or whole on the assistant line": 4,
+          "a progress word such as requesting; the panel shows its own": 2,
+          "a running estimate of the thinking tokens, sent beside each thinking delta; the result carries the usage": 4,
+          "a thinking block's signature, with nothing to show": 2,
+          "a tool call's input in pieces; the assistant line carries it whole": 1,
+          "the turn's end, with nothing new in it": 2,
+          "the turn's model and opening usage; the assistant line and the result carry both": 2,
+          "the turn's stop reason and running usage; the assistant line and the result carry both": 2
+        },
+        "unclassified": {}
+      }
+    }
+  ],
+  "session": {
+    "file": "transcript-thinking-summarized.session.json",
+    "events": [
+      {
+        "kind": "UserPrompt",
+        "text": "Is the launch note ready to share?",
+        "uuid": "00000000-0000-4000-8000-000009100002"
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "Thinking",
+        "message_id": "msg_000000000000000000009101",
+        "text": "The person asks whether the launch note is ready to share. I should read it before I answer.",
+        "at": "2026-10-22T12:00:02.000Z"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "mcp__cerebro__get_note",
+        "tool_id": "toolu_000000000000000000009101",
+        "input": "{\"path\":\"projects/launch.md\"}",
+        "at": "2026-10-22T12:00:02.400Z"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000009101",
+        "output": "# Launch\n\nStatus: ready for review.\nPress list: still open.",
+        "is_error": false,
+        "at": "2026-10-22T12:00:03.000Z"
+      },
+      {
+        "kind": "Thinking",
+        "message_id": "msg_000000000000000000009102",
+        "text": "It is ready for review, but the press list is still open, so it is not ready to share yet.",
+        "at": "2026-10-22T12:00:04.000Z"
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000009102",
+        "text": "Almost: the launch note is ready for review, but its press list is still open.",
+        "at": "2026-10-22T12:00:04.300Z"
+      },
+      {
+        "kind": "TurnEnded",
+        "last_uuid": "00000000-0000-4000-8000-000009100105"
+      }
+    ],
+    "classes": {
+      "translated": 6,
+      "ignored": {
+        "a prompt entering or leaving the CLI's queue; the prompt line follows": 2,
+        "the last prompt again, for the CLI's own resume picker": 1
+      },
+      "unclassified": {}
+    }
+  },
+  "content": [
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "Thinking",
+          "text": "The person asks whether the launch note is ready to share. I should read it before I answer.",
+          "redacted": false
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__cerebro__get_note",
+          "tool_id": "toolu_000000000000000000009101",
+          "input": "{\"path\":\"projects/launch.md\"}"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009101",
+          "output": "# Launch\n\nStatus: ready for review.\nPress list: still open.",
+          "is_error": false
+        },
+        {
+          "kind": "Thinking",
+          "text": "It is ready for review, but the press list is still open, so it is not ready to share yet.",
+          "redacted": false
+        },
+        {
+          "kind": "Text",
+          "text": "Almost: the launch note is ready for review, but its press list is still open."
+        },
+        {
+          "kind": "TurnEnded",
+          "last_uuid": "00000000-0000-4000-8000-000009100105"
+        }
+      ]
+    }
+  ]
+}

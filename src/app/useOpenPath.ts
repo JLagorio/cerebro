@@ -92,15 +92,15 @@ export function useOpenPath(
     }
     if (isWhiteboardPath(path)) return navigate({ kind: 'diagram', path });
     // M70.2b: a page's comment sidecar (`.comments/<page>.json`, which
-    // Changes' Open passes) opens its page, full, on the Comments tab:
+    // Changes' Open passes) opens its page, full, with its Comments panel:
     // comments live on the full page, never in the peek (Q6).
     const page = pageOfSidecar(path);
     if (page !== null) {
-      // Both tab slots, since a page under knowledge/ may or may not be a
+      // Both panel slots, since a page under knowledge/ may or may not be a
       // concept; the open flag is the one its panel keeps.
       const ui = useUiStore.getState();
-      ui.setDocPanelTab('comments');
-      ui.setConceptPanelTab('comments');
+      ui.setDocPanel('comments');
+      ui.setConceptPanel('comments');
       if (isKnowledgePath(page)) ui.setConceptPanelOpen(true);
       else ui.setDocPanelOpen(true);
       return navigate({ kind: 'doc', path: page });

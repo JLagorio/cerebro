@@ -1,11 +1,25 @@
 import { useContext, useRef, useState } from 'react';
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from '@/components/ai/PromptInput';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { Popover } from '@/components/ui/Popover';
 import { NotePathContext } from '@/editor/notePath';
 import { askedAbout, sheetAskPrompt, type SheetAskCell } from '@/lib/prompts';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import './sheetAsk.css';
+
+/**
+ * Ask about the selected cells: a question, written in a Prompt Input
+ * (M91.14), that hands off to the assistant with the range's cells and the
+ * page. It runs nothing itself, so it is the input's anatomy only — the
+ * field and its Ask — and the conversation shows the turn.
+ */
 export function SheetAsk({
   selection,
   readCells,
@@ -62,26 +76,27 @@ export function SheetAsk({
           className="w-80 rounded-lg border border-n-200 bg-n-0 p-3 shadow-[var(--shadow-lg)]"
         >
           <div className="mb-2 font-mono text-xs text-n-500">{selection}</div>
-          <Input
-            testId="sheet-ask-input"
-            ariaLabel="Question about these cells"
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                ask();
-              }
-            }}
-            autoFocus
-            placeholder="What would you like to know?"
-            width="100%"
-          />
-          <div className="mt-2 flex justify-end">
-            <Button size="sm" variant="ghost" disabled={!question.trim()} onClick={ask}>
-              Ask
-            </Button>
-          </div>
+          <PromptInput onSubmit={ask} className="cb-sheet-ask-field">
+            <PromptInputBody>
+              <PromptInputTextarea
+                data-testid="sheet-ask-input"
+                aria-label="Question about these cells"
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                autoFocus
+                placeholder="What would you like to know?"
+              />
+            </PromptInputBody>
+            <PromptInputFooter>
+              <PromptInputSubmit
+                aria-label="Ask"
+                disabled={!question.trim()}
+                className="cb-sheet-ask-submit"
+              >
+                Ask
+              </PromptInputSubmit>
+            </PromptInputFooter>
+          </PromptInput>
         </Popover>
       )}
     </div>

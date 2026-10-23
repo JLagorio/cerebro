@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { attributionLine, type PageAttribution } from '@/engine/attribution';
+import { attributionLine, attributionValue, type PageAttribution } from '@/engine/attribution';
 import type { Entry } from '@/engine/types';
 import { pageAttribution } from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -8,8 +8,9 @@ type Read =
   { kind: 'loading' } | { kind: 'read'; attribution: PageAttribution } | { kind: 'unavailable' };
 
 /**
- * Who last changed this page (M58.1b): one line at the top of the Info tab,
- * read from the operational write log through Rust's read-only
+ * Who last changed this page (M58.1b): the value of the "Changed by" row in
+ * the inspector's Info section — who and when, with the whole sentence in
+ * its tooltip — read from the operational write log through Rust's read-only
  * `page_attribution`.
  *
  * It reads again whenever the page's bytes change (`entry.hash`), so a save,
@@ -39,27 +40,34 @@ export function LastChange({ entry }: { entry: Entry }) {
   }, [vaultPath, path, hash]);
 
   if (vaultPath === null) return null;
+  const now = new Date();
   return (
-    <div data-testid="last-change" className="px-1.5 pb-1 pt-2 text-xs text-n-600">
-      {read.kind === 'loading' && <span className="text-n-400">Reading who changed it…</span>}
+    <span data-testid="last-change" className="min-w-0 truncate">
+      {read.kind === 'loading' && <span className="text-n-400">Reading…</span>}
       {read.kind === 'read' && (
         <span
           data-testid="last-change-line"
           data-state={read.attribution.state}
-          title={
+          data-actor={
             read.attribution.state === 'recorded' || read.attribution.state === 'unattributed'
               ? (read.attribution.actor ?? undefined)
               : undefined
           }
+          title={attributionLine(read.attribution, entries, now)}
+          className={read.attribution.state === 'recorded' ? undefined : 'text-n-400'}
         >
-          {attributionLine(read.attribution, entries, new Date())}
+          {attributionValue(read.attribution, entries, now)}
         </span>
       )}
       {read.kind === 'unavailable' && (
-        <span data-testid="section-unavailable" className="text-n-500">
-          Who last changed this page could not be read.
+        <span
+          data-testid="section-unavailable"
+          title="Who last changed this page could not be read."
+          className="text-n-400"
+        >
+          Couldn&rsquo;t read
         </span>
       )}
-    </div>
+    </span>
   );
 }

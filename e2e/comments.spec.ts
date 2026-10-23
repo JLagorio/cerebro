@@ -1,11 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile, openDestination } from './boot';
+import { boot, readMockFile, openDestination, showPagePanel } from './boot';
 
 /**
  * Page comments end to end (M70.2b), on the mock backend: a selection takes a
  * comment through the toolbar, the thread lives in the page's sidecar
  * (`.comments/<page>.json`), the page's bytes never change for it, and the
- * Comments tab walks a thread through reply, resolve, reopen and delete.
+ * Comments panel walks a thread through reply, resolve, reopen and delete.
  * Chromium only: the packaged WKWebView check is the owner's.
  */
 
@@ -69,12 +69,9 @@ async function homeAndBack(page: Page): Promise<void> {
   await expect(page.getByTestId('markdown-editor')).toBeVisible();
 }
 
-/** The side panel, on its Comments tab. */
+/** The side panel, showing Comments. */
 async function showComments(page: Page): Promise<void> {
-  if (!(await page.getByTestId('doc-side-panel').isVisible())) {
-    await page.getByRole('button', { name: 'Show panel' }).click();
-  }
-  await page.getByTestId('doc-panel-tab-comments').click();
+  await showPagePanel(page, 'Comments');
 }
 
 /** The paragraph holding `text`. */
@@ -220,12 +217,14 @@ test('a thread is replied to, resolved, reopened and deleted, and the sidecar ke
 
   // The root deleted: a tombstone, and the reply stays.
   const reopened = page.getByTestId('comments-on-page').getByTestId('comment-thread');
+  await reopened.getByTestId('comment').first().getByLabel('Comment actions').click();
   await reopened.getByTestId('comment').first().getByTestId('comment-delete').click();
   await reopened.getByTestId('comment-delete-confirm').click();
   await expect(reopened.getByTestId('comment-tombstone')).toHaveText('Comment deleted.');
   await expect(reopened.getByText('The release freeze.')).toBeVisible();
 
-  // The thread deleted: gone from the tab.
+  // The thread deleted: gone from the panel.
+  await reopened.getByLabel('Thread actions').click();
   await reopened.getByTestId('comment-thread-delete').click();
   await expect(reopened.getByText('Delete this thread and its 1 comment?')).toBeVisible();
   await reopened.getByTestId('comment-thread-delete-confirm').click();
@@ -272,13 +271,17 @@ test('a conflicted sidecar is unavailable, and a comment on it is refused withou
 test('a click on a highlight opens Comments on its thread', async ({ page }) => {
   await boot(page);
   await commentOnGuarantee(page);
-  // Back to a page with nothing in focus, its panel on another tab.
+  // Back to a page with nothing in focus, its panel showing another.
   await homeAndBack(page);
-  await page.getByTestId('doc-panel-tab-outline').click();
-  await expect(page.getByTestId('comments-tab')).toHaveCount(0);
+  await showPagePanel(page, 'History');
+  await expect(page.getByTestId('comments-panel')).toHaveCount(0);
 
   await highlight(page).click();
   const card = page.getByTestId('comments-on-page').getByTestId('comment-thread');
   await expect(card).toHaveAttribute('data-focused', 'true');
   await expect(highlight(page)).toHaveClass(/cb-comment-active/);
+  await expect(page.getByTestId('doc-side-panel')).toHaveAttribute('data-panel', 'comments');
+  await expect(
+    page.getByTestId('doc-page').getByRole('button', { name: 'Comments', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
 });

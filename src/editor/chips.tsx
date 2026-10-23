@@ -1,6 +1,8 @@
 import { useContext, useMemo, useRef, useState } from 'react';
 import type { BlockNoteEditor } from '@blocknote/core';
 import { createReactInlineContentSpec, useEditorState } from '@blocknote/react';
+import { citedSource } from '@/agent/elements/writingCitations';
+import { InlineCitation } from '@/components/ai/InlineCitation';
 import { PAGE_PREVIEW_GROUP, PagePreview } from '@/components/PagePreview';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { HoverCard } from '@/components/ui/HoverCard';
@@ -13,6 +15,7 @@ import {
   type DateChipProps,
   type DateValue,
 } from '@/engine/dates';
+import { httpUrl } from '@/engine/ai/sources';
 import { parseSources } from '@/engine/okf';
 import { dueBucket } from '@/engine/tasks';
 import { resolveTarget } from '@/engine/wikilink';
@@ -36,7 +39,9 @@ import { requestSection } from './sectionLinks';
  *   citation  `[^id]` / `[^id]:`                 — footnote reference / definition (M51.5)
  *
  * Hovering a wikilink or an assignee previews its page in a card (M59.7):
- * HoverCard + PagePreview, built from the scan, so a hover reads no file.
+ * HoverCard + PagePreview, built from the scan, so a hover reads no file. A
+ * citation's number is an Inline Citation's trigger (M91.14): hovering it
+ * shows the source it stands for.
  *
  * Each chip's plain-text form lives in markdown.ts, beside the parser that
  * reads it back: that module writes chips to disk as that text, and
@@ -337,6 +342,7 @@ function CitationRender({
         number: citationNumber(id, sources, index),
         defined: index.defined.includes(id),
         name: citationName(id, sources, index, entries),
+        says: index.definitions.get(id) ?? '',
       };
     },
   });
@@ -360,24 +366,31 @@ function CitationRender({
   // a rule nothing can test is a rule nothing stops from rotting.
   const pillClass = `${CITATION_PILL} ${tone}${definition ? ' cb-citation-def' : ''}`;
   const label = cite.number === null ? id : String(cite.number);
-  // A name read from the link (M69.2) stays one hover from the link it came
-  // from: an external source's URL is its own line whenever the name is not it.
   const external = target !== null && 'external' in target ? target.external : null;
-  const link = external !== null && external !== name ? `\n${external}` : '';
+  // Only an http(s) source is a link: the app's guard refuses every other
+  // scheme (CV-16), and its card shows that address as text.
+  const web = external === null ? null : httpUrl(external);
+  // A listed source opens its card, which names it, says what the page's
+  // definition says of it and where it is, with its link or its page. One the
+  // page does not list has no card, so its words stay in its tooltip: its
+  // name over the marker the number stands in for, which is still the file's.
+  const card =
+    source === null
+      ? []
+      : [citedSource({ resource: source.resource, name, definition: cite.says })];
   const common = {
-    // The marker the number stands in for, under the name: it is still in the
-    // file, and it is what anyone citing the same source again has to type.
-    title: `${name}${link}\n${citationText({ id, def: definition ? '1' : '' })}`,
+    title:
+      card.length > 0 ? undefined : `${name}\n${citationText({ id, def: definition ? '1' : '' })}`,
     'aria-label': `Source ${label}: ${name}`,
     'data-citation': definition ? 'def' : 'ref',
     'data-id': id,
   };
 
   const pill =
-    external !== null ? (
+    web !== null ? (
       <a
         {...common}
-        href={external}
+        href={web}
         target="_blank"
         rel="noreferrer noopener"
         tabIndex={-1}
@@ -400,13 +413,26 @@ function CitationRender({
         {label}
       </span>
     );
+  const cited =
+    card.length === 0 ? (
+      pill
+    ) : (
+      <InlineCitation
+        sources={card}
+        group={PAGE_PREVIEW_GROUP}
+        onOpenPath={(to) => open(to)}
+        isVaultPath={(to) => entries.some((e) => e.path === to)}
+      >
+        {pill}
+      </InlineCitation>
+    );
 
   // A reference rides above the line it cites from; a definition's badge
   // opens its own line, level with the words it introduces. Preflight already
   // takes a `<sup>` out of the line-height sum (`line-height: 0`, raised by
   // `top` rather than `vertical-align`), so a cited line is exactly as tall as
   // an uncited one — measured in the app, both paragraphs 48px.
-  return definition ? pill : <sup>{pill}</sup>;
+  return definition ? cited : <sup>{cited}</sup>;
 }
 
 /**

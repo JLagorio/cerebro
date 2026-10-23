@@ -1,0 +1,18 @@
+Accepted complete run. Exit code: 0
+Command: pnpm test:coverage --maxWorkers=4 --coverage.processingConcurrency=1 --coverage.reportOnFailure=true --coverage.reportsDirectory=/private/tmp/cerebro-m90/coverage-authoritative
+Original full log: /private/tmp/cerebro-m90/gate-coverage-authoritative.log
+Original full log SHA256: 2ec2df24a602fc7818c74fd7183914f9e587e5c4086656f25052091361fadfdf
+
+ Test Files  728 passed (728)
+      Tests  14264 passed | 15 skipped (14279)
+   Start at  11:51:57
+   Duration  266.14s (transform 12.62s, setup 121.28s, collect 160.71s, tests 318.94s, environment 159.14s, prepare 37.21s)
+
+ % Coverage report from v8
+
+=============================== Coverage summary ===============================
+Statements   : 91.96% ( 136064/147953 )
+Branches     : 89.42% ( 52138/58304 )
+Functions    : 87.92% ( 8363/9512 )
+Lines        : 91.96% ( 136064/147953 )
+================================================================================

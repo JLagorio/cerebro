@@ -307,15 +307,15 @@ describe('TypePage — Records tab', () => {
     expect(screen.getByTestId('type-title-edit').getAttribute('title')).toBe('Change display name');
     // Delete moved into the floating view-settings menu with the rest of the
     // configuration — no destructive affordance sits in the header.
-    fireEvent.click(screen.getByTestId('view-control-settings'));
-    expect(screen.getByRole('button', { name: 'Delete database' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Database actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Delete database' })).toBeTruthy();
   });
 
   it('offers rename and delete for custom types', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Person' }} />);
     expect(screen.getByTestId('type-title-edit').getAttribute('title')).toBe('Change display name');
-    fireEvent.click(screen.getByTestId('view-control-settings'));
-    expect(screen.getByRole('button', { name: 'Delete database' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Database actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Delete database' })).toBeTruthy();
   });
 
   /**
@@ -701,7 +701,9 @@ it('offers a calendar import on a database with a declared date', () => {
   render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
   fireEvent.click(screen.getByTestId('view-control-settings'));
   fireEvent.click(screen.getByRole('button', { name: 'Import calendar file…' }));
-  expect((screen.getByLabelText('Calendar database') as HTMLSelectElement).value).toBe('Work item');
+  expect(screen.getByRole('button', { name: 'Calendar database' }).getAttribute('data-value')).toBe(
+    'Work item',
+  );
   expect((screen.getByTestId('ics-import-submit') as HTMLButtonElement).disabled).toBe(true);
 });
 

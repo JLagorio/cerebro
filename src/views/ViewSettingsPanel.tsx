@@ -1,11 +1,11 @@
 import { isDateKind } from '@/engine/dateBuckets';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
-import { Select } from '@/components/ui/Select';
+import { Select, type SelectProps } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
@@ -171,8 +171,7 @@ export interface ViewSettingsPanelProps {
   onClose: () => void;
   fields: ColumnDef[];
   schema: Schema;
-  /** Deletes the whole List. */
-  onDeleteList?: () => void;
+  initialPage?: 'root' | 'list';
   /** Deletes just this tab; absent when it is the only one. */
   onDeleteView?: () => void;
   /** M9.2: create a property on the source type. M12.4: relations carry
@@ -204,13 +203,13 @@ export function ViewSettingsPanel({
   onClose,
   fields,
   schema,
-  onDeleteList,
+  initialPage = 'root',
   onDeleteView,
   onAddProperty,
   surface = 'list',
   onImportCalendar,
 }: ViewSettingsPanelProps) {
-  const [page, setPage] = useState<Page>('root');
+  const [page, setPage] = useState<Page>(initialPage);
   // The property the 'field' page is editing (M12.8).
   const [editingField, setEditingField] = useState<string | null>(null);
   const view = list.views.find((v) => v.id === viewId) ?? list.views[0];
@@ -261,7 +260,7 @@ export function ViewSettingsPanel({
           <IconButton icon="arrow-left" label="Back" size="sm" onClick={() => setPage('root')} />
         )}
         <span className="flex-1 truncate text-sm font-semibold text-n-900">
-          {page === 'root' ? view.name : titleFor(page)}
+          {page === 'root' ? 'Display this view' : titleFor(page)}
         </span>
         <IconButton icon="x" label="Close view settings" size="sm" onClick={onClose} />
       </header>
@@ -272,6 +271,9 @@ export function ViewSettingsPanel({
         {page === 'root' && (
           <>
             <div className="px-1 pb-2">
+              <p className="m-0 pb-2 text-metadata text-n-500">
+                {surface === 'type' ? 'Shared database view' : 'Saved list view'} · {view.name}
+              </p>
               {/* M11: this names the VIEW, not the List. Two tabs of one
                   database need two names, and the List's own name is edited
                   where the List is — one row down, under "This list". */}
@@ -308,7 +310,8 @@ export function ViewSettingsPanel({
             {!isCanvas(p.type) && (
               <Row
                 icon="eye"
-                label="Properties"
+                label="Manage properties"
+                testId="view-settings-properties"
                 value={String(visible)}
                 onClick={() => setPage('properties')}
               />
@@ -455,19 +458,6 @@ export function ViewSettingsPanel({
             )}
 
             <div className="mt-2 border-t border-n-100 pt-2">
-              {surface === 'list' && (
-                <>
-                  <div className="px-2 pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
-                    This list
-                  </div>
-                  <Row
-                    icon="database"
-                    label={list.source.type ?? 'Everything'}
-                    value={`${list.views.length} ${list.views.length === 1 ? 'view' : 'views'}`}
-                    onClick={() => setPage('list')}
-                  />
-                </>
-              )}
               {onImportCalendar && (
                 <Row
                   icon="calendar"
@@ -484,16 +474,6 @@ export function ViewSettingsPanel({
                 >
                   <Icon name="trash-2" size={13} />
                   Delete this view
-                </button>
-              )}
-              {onDeleteList !== undefined && (
-                <button
-                  type="button"
-                  onClick={onDeleteList}
-                  className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-danger-600 hover:bg-danger-50"
-                >
-                  <Icon name="trash-2" size={13} />
-                  {surface === 'type' ? 'Delete database' : 'Delete list'}
                 </button>
               )}
             </div>
@@ -720,12 +700,14 @@ function titleFor(page: Page): string {
 }
 
 function Row({
+  testId,
   icon,
   label,
   value,
   onClick,
   muted = false,
 }: {
+  testId?: string;
   icon: string;
   label: string;
   value: string;
@@ -746,12 +728,35 @@ function Row({
   return (
     <button
       type="button"
-      data-testid={`view-settings-${label.toLowerCase()}`}
+      data-testid={testId ?? `view-settings-${label.toLowerCase()}`}
       onClick={onClick}
       className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm hover:bg-n-50"
     >
       {content}
     </button>
+  );
+}
+
+/**
+ * A setting that is one choice: a caption over a full-width select. The
+ * caption is a `<label>` for the select, so the control is named for the
+ * setting ("Date property") rather than for whatever it currently holds.
+ * `children` follows the select — the setting's footnote, when it has one.
+ */
+function LabelledSelect({
+  label,
+  children,
+  ...select
+}: { label: string; children?: React.ReactNode } & Omit<SelectProps, 'id' | 'size' | 'width'>) {
+  const id = useId();
+  return (
+    <div>
+      <label htmlFor={id} className="mb-1 block text-xs font-medium text-n-600">
+        {label}
+      </label>
+      <Select {...select} id={id} size="sm" width="100%" />
+      {children}
+    </div>
   );
 }
 
@@ -940,64 +945,49 @@ function AxisPage({
 
   return (
     <div className="flex flex-col gap-2 px-1">
-      <div>
-        <span className="mb-1 block text-xs font-medium text-n-600">Date property</span>
-        <Select
-          size="sm"
-          value={presentation.dateField ?? AUTO}
-          options={[
-            { value: AUTO, label: 'Auto — first date property' },
-            ...dateFields.map((f) => ({ value: f.name, label: humanize(f.name) })),
-          ]}
-          onChange={(e) =>
-            onChange({
-              ...presentation,
-              dateField: e.target.value === AUTO ? undefined : e.target.value,
-            })
-          }
-          width="100%"
-        />
-      </div>
+      <LabelledSelect
+        label="Date property"
+        value={presentation.dateField ?? AUTO}
+        options={[
+          { value: AUTO, label: 'Auto — first date property' },
+          ...dateFields.map((f) => ({ value: f.name, label: humanize(f.name) })),
+        ]}
+        onChange={(dateField) =>
+          onChange({ ...presentation, dateField: dateField === AUTO ? undefined : dateField })
+        }
+      />
       {isDayGrid(presentation.type) && (
         <>
-          <div>
-            <span className="mb-1 block text-xs font-medium text-n-600">Show calendar as</span>
-            <Select
-              size="sm"
-              value={presentation.calendarSpan ?? 'month'}
-              testId="view-calendar-span"
-              options={[
-                { value: 'month', label: 'Month' },
-                { value: 'week', label: 'Week' },
-                { value: 'day', label: 'Day' },
-              ]}
-              onChange={(e) =>
-                onChange({
-                  ...presentation,
-                  calendarSpan: e.target.value as NonNullable<Presentation['calendarSpan']>,
-                })
-              }
-              width="100%"
-            />
-          </div>
-          <div>
-            <span className="mb-1 block text-xs font-medium text-n-600">Start week on</span>
-            <Select
-              size="sm"
-              value={presentation.weekStart ?? 'sunday'}
-              options={[
-                { value: 'sunday', label: 'Sunday' },
-                { value: 'monday', label: 'Monday' },
-              ]}
-              onChange={(e) =>
-                onChange({
-                  ...presentation,
-                  weekStart: e.target.value as NonNullable<Presentation['weekStart']>,
-                })
-              }
-              width="100%"
-            />
-          </div>
+          <LabelledSelect
+            label="Show calendar as"
+            value={presentation.calendarSpan ?? 'month'}
+            testId="view-calendar-span"
+            options={[
+              { value: 'month', label: 'Month' },
+              { value: 'week', label: 'Week' },
+              { value: 'day', label: 'Day' },
+            ]}
+            onChange={(span) =>
+              onChange({
+                ...presentation,
+                calendarSpan: span as NonNullable<Presentation['calendarSpan']>,
+              })
+            }
+          />
+          <LabelledSelect
+            label="Start week on"
+            value={presentation.weekStart ?? 'sunday'}
+            options={[
+              { value: 'sunday', label: 'Sunday' },
+              { value: 'monday', label: 'Monday' },
+            ]}
+            onChange={(weekStart) =>
+              onChange({
+                ...presentation,
+                weekStart: weekStart as NonNullable<Presentation['weekStart']>,
+              })
+            }
+          />
           <div className="pt-0.5">
             <Switch
               checked={presentation.showWeekends !== false}
@@ -1012,25 +1002,18 @@ function AxisPage({
       )}
       {isZoomable(presentation.type) && (
         <>
-          <div>
-            <span className="mb-1 block text-xs font-medium text-n-600">Zoom</span>
-            <Select
-              size="sm"
-              // DEFAULT_ZOOM, not a literal: this said 'week' while GanttView
-              // opened at 'month', so an unconfigured gantt showed a scale its
-              // own settings denied. The options come from the engine's list
-              // for the same reason — one place decides what the zooms are.
-              value={presentation.zoom ?? DEFAULT_ZOOM}
-              options={ZOOM_LABELS.map((z) => ({ value: z.value, label: z.label }))}
-              onChange={(e) =>
-                onChange({
-                  ...presentation,
-                  zoom: e.target.value as NonNullable<Presentation['zoom']>,
-                })
-              }
-              width="100%"
-            />
-          </div>
+          <LabelledSelect
+            label="Zoom"
+            // DEFAULT_ZOOM, not a literal: this said 'week' while GanttView
+            // opened at 'month', so an unconfigured gantt showed a scale its
+            // own settings denied. The options come from the engine's list
+            // for the same reason — one place decides what the zooms are.
+            value={presentation.zoom ?? DEFAULT_ZOOM}
+            options={ZOOM_LABELS.map((z) => ({ value: z.value, label: z.label }))}
+            onChange={(zoom) =>
+              onChange({ ...presentation, zoom: zoom as NonNullable<Presentation['zoom']> })
+            }
+          />
           <div className="pt-0.5">
             <Switch
               checked={presentation.showTable !== false}
@@ -1044,27 +1027,21 @@ function AxisPage({
         </>
       )}
       {hasDependencies(presentation.type) && (
-        <div>
-          <span className="mb-1 block text-xs font-medium text-n-600">Dependencies</span>
-          <Select
-            size="sm"
-            value={presentation.dependencyField ?? AUTO}
-            options={[
-              { value: AUTO, label: 'None' },
-              ...relations.map((f) => ({ value: f.name, label: humanize(f.name) })),
-            ]}
-            onChange={(e) =>
-              onChange({
-                ...presentation,
-                dependencyField: e.target.value === AUTO ? undefined : e.target.value,
-              })
-            }
-            width="100%"
-          />
+        <LabelledSelect
+          label="Dependencies"
+          value={presentation.dependencyField ?? AUTO}
+          options={[
+            { value: AUTO, label: 'None' },
+            ...relations.map((f) => ({ value: f.name, label: humanize(f.name) })),
+          ]}
+          onChange={(field) =>
+            onChange({ ...presentation, dependencyField: field === AUTO ? undefined : field })
+          }
+        >
           <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
             The relation naming what each record waits on — the arrows the gantt draws.
           </p>
-        </div>
+        </LabelledSelect>
       )}
     </div>
   );
@@ -1120,58 +1097,45 @@ function CardsPage({
 
   return (
     <div className="flex flex-col gap-2 px-1">
-      <div>
-        <span className="mb-1 block text-xs font-medium text-n-600">Card size</span>
-        <Select
-          size="sm"
-          value={p.cardSize ?? 'medium'}
-          options={CARD_SIZES.map((s) => ({ value: s, label: CARD_SIZE_LABEL[s] }))}
-          onChange={(e) => onChange({ ...p, cardSize: e.target.value as CardSize })}
-          width="100%"
-        />
-      </div>
+      <LabelledSelect
+        label="Card size"
+        value={p.cardSize ?? 'medium'}
+        options={CARD_SIZES.map((s) => ({ value: s, label: CARD_SIZE_LABEL[s] }))}
+        onChange={(size) => onChange({ ...p, cardSize: size as CardSize })}
+      />
 
       {showsPreview(p.type) && (
-        <div>
-          <span className="mb-1 block text-xs font-medium text-n-600">Card preview</span>
-          <Select
-            size="sm"
-            value={p.cardPreview ?? 'none'}
-            options={CARD_PREVIEWS.map((v) => ({ value: v, label: CARD_PREVIEW_LABEL[v] }))}
-            onChange={(e) => onChange({ ...p, cardPreview: e.target.value as CardPreview })}
-            width="100%"
-          />
+        <LabelledSelect
+          label="Card preview"
+          value={p.cardPreview ?? 'none'}
+          options={CARD_PREVIEWS.map((v) => ({ value: v, label: CARD_PREVIEW_LABEL[v] }))}
+          onChange={(preview) => onChange({ ...p, cardPreview: preview as CardPreview })}
+        >
           <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
             Page content shows the first line or two of the record&rsquo;s body.
           </p>
-        </div>
+        </LabelledSelect>
       )}
 
       {showsCovers(p.type) && (
         <>
-          <div>
-            <span className="mb-1 block text-xs font-medium text-n-600">Card cover</span>
-            <Select
-              size="sm"
-              value={gallery.cover ?? NONE}
-              options={[
-                { value: NONE, label: 'None' },
-                ...covers.map((f) => ({ value: f.name, label: humanize(f.name) })),
-              ]}
-              onChange={(e) =>
-                patchGallery({
-                  ...gallery,
-                  cover: e.target.value === NONE ? undefined : e.target.value,
-                })
-              }
-              width="100%"
-            />
+          <LabelledSelect
+            label="Card cover"
+            value={gallery.cover ?? NONE}
+            options={[
+              { value: NONE, label: 'None' },
+              ...covers.map((f) => ({ value: f.name, label: humanize(f.name) })),
+            ]}
+            onChange={(cover) =>
+              patchGallery({ ...gallery, cover: cover === NONE ? undefined : cover })
+            }
+          >
             <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
               {covers.length === 0
                 ? 'No files property on this type yet — add one and it becomes a cover.'
                 : 'The first file on each record. Images show as covers; other files show their name.'}
             </p>
-          </div>
+          </LabelledSelect>
           <div className="border-t border-n-100 pt-2">
             <Switch
               checked={gallery.fit === true}
@@ -1335,87 +1299,64 @@ function ChartPage({
 
   return (
     <div className="flex flex-col gap-2 px-1">
-      <div>
-        <span className="mb-1 block text-xs font-medium text-n-600">Chart type</span>
-        <Select
-          size="sm"
-          value={chart.kind ?? 'bar'}
-          options={CHART_KINDS.map((k) => ({ value: k, label: CHART_KIND_LABEL[k] }))}
-          onChange={(e) => patch({ ...chart, kind: e.target.value as ChartKind })}
-          width="100%"
-        />
-      </div>
+      <LabelledSelect
+        label="Chart type"
+        value={chart.kind ?? 'bar'}
+        options={CHART_KINDS.map((k) => ({ value: k, label: CHART_KIND_LABEL[k] }))}
+        onChange={(next) => patch({ ...chart, kind: next as ChartKind })}
+      />
       {/* The axis is the first question a chart answers, so its picker sits
           above the measure. The sentinel keeps the M16.27 default honest:
           "View grouping" IS where the axis comes from until xField says
           otherwise (M44.3). */}
       {axisKind && (
-        <div>
-          <span className="mb-1 block text-xs font-medium text-n-600">X axis</span>
-          <Select
-            size="sm"
-            value={chart.xField ?? NONE}
-            options={[
-              { value: NONE, label: 'View grouping' },
-              ...groupable.map((f) => ({ value: f.name, label: humanize(f.name) })),
-            ]}
-            onChange={(e) =>
-              patch({ ...chart, xField: e.target.value === NONE ? undefined : e.target.value })
-            }
-            width="100%"
-          />
-        </div>
+        <LabelledSelect
+          label="X axis"
+          value={chart.xField ?? NONE}
+          options={[
+            { value: NONE, label: 'View grouping' },
+            ...groupable.map((f) => ({ value: f.name, label: humanize(f.name) })),
+          ]}
+          onChange={(xField) => patch({ ...chart, xField: xField === NONE ? undefined : xField })}
+        />
       )}
       {/* Bar and line only: a donut ignores groupBy and a number chart reads
           no axis at all — a picker there would write a key nothing reads. */}
       {(kind === 'bar' || kind === 'line') && (
-        <div>
-          <span className="mb-1 block text-xs font-medium text-n-600">Group by</span>
-          <Select
-            size="sm"
-            value={chart.groupBy ?? NONE}
-            options={[
-              { value: NONE, label: 'None' },
-              ...groupable.map((f) => ({ value: f.name, label: humanize(f.name) })),
-            ]}
-            onChange={(e) =>
-              patch({ ...chart, groupBy: e.target.value === NONE ? undefined : e.target.value })
-            }
-            width="100%"
-          />
-        </div>
-      )}
-      <div>
-        <span className="mb-1 block text-xs font-medium text-n-600">Measure</span>
-        <Select
-          size="sm"
-          value={agg}
-          options={CHART_AGGS.map((a) => ({ value: a, label: CHART_AGG_LABEL[a] }))}
-          onChange={(e) => patch({ ...chart, agg: e.target.value as ChartAgg })}
-          width="100%"
+        <LabelledSelect
+          label="Group by"
+          value={chart.groupBy ?? NONE}
+          options={[
+            { value: NONE, label: 'None' },
+            ...groupable.map((f) => ({ value: f.name, label: humanize(f.name) })),
+          ]}
+          onChange={(groupBy) =>
+            patch({ ...chart, groupBy: groupBy === NONE ? undefined : groupBy })
+          }
         />
-      </div>
+      )}
+      <LabelledSelect
+        label="Measure"
+        value={agg}
+        options={CHART_AGGS.map((a) => ({ value: a, label: CHART_AGG_LABEL[a] }))}
+        onChange={(next) => patch({ ...chart, agg: next as ChartAgg })}
+      />
       {agg !== 'count' && (
-        <div>
-          <span className="mb-1 block text-xs font-medium text-n-600">Of property</span>
-          <Select
-            size="sm"
-            value={chart.value ?? NONE}
-            options={[
-              { value: NONE, label: 'Choose a number property…' },
-              ...numeric.map((f) => ({ value: f.name, label: humanize(f.name) })),
-            ]}
-            onChange={(e) =>
-              patch({ ...chart, value: e.target.value === NONE ? undefined : e.target.value })
-            }
-            width="100%"
-          />
+        // No sentinel row: until a property is picked the select asks for
+        // one, and the ask is not an option anyone can choose.
+        <LabelledSelect
+          label="Of property"
+          value={chart.value ?? ''}
+          placeholder="Choose a number property…"
+          options={numeric.map((f) => ({ value: f.name, label: humanize(f.name) }))}
+          onChange={(value) => patch({ ...chart, value })}
+        >
           {numeric.length === 0 && (
             <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
               This view has no number property to add up.
             </p>
           )}
-        </div>
+        </LabelledSelect>
       )}
       {axisKind && (
         <div className="border-t border-n-100 pt-2">
@@ -1438,24 +1379,17 @@ function ChartPage({
         </div>
       )}
       {axisKind && (
-        <div>
-          <span className="mb-1 block text-xs font-medium text-n-600">Sort</span>
-          <Select
-            size="sm"
-            value={chart.sort ?? NONE}
-            options={[
-              { value: NONE, label: 'Declared order' },
-              ...CHART_SORTS.map((s) => ({ value: s, label: CHART_SORT_LABEL[s] })),
-            ]}
-            onChange={(e) =>
-              patch({
-                ...chart,
-                sort: e.target.value === NONE ? undefined : (e.target.value as ChartSort),
-              })
-            }
-            width="100%"
-          />
-        </div>
+        <LabelledSelect
+          label="Sort"
+          value={chart.sort ?? NONE}
+          options={[
+            { value: NONE, label: 'Declared order' },
+            ...CHART_SORTS.map((s) => ({ value: s, label: CHART_SORT_LABEL[s] })),
+          ]}
+          onChange={(sort) =>
+            patch({ ...chart, sort: sort === NONE ? undefined : (sort as ChartSort) })
+          }
+        />
       )}
       {(kind === 'bar' || kind === 'line') && (
         <div>
@@ -1481,20 +1415,17 @@ function ChartPage({
         </div>
       )}
       {axisKind && (
-        <div>
-          <span className="mb-1 block text-xs font-medium text-n-600">Palette</span>
-          <Select
-            size="sm"
-            value={chart.palette ?? NONE}
-            options={[
-              { value: NONE, label: 'By option colour' },
-              ...PICKABLE_OPTION_COLORS.map((c) => ({ value: c, label: humanize(c) })),
-            ]}
-            onChange={(e) =>
-              patch({ ...chart, palette: e.target.value === NONE ? undefined : e.target.value })
-            }
-            width="100%"
-          />
+        <LabelledSelect
+          label="Palette"
+          value={chart.palette ?? NONE}
+          options={[
+            { value: NONE, label: 'By option colour' },
+            ...PICKABLE_OPTION_COLORS.map((c) => ({ value: c, label: humanize(c) })),
+          ]}
+          onChange={(palette) =>
+            patch({ ...chart, palette: palette === NONE ? undefined : palette })
+          }
+        >
           {chart.palette !== undefined && (
             <div className="pt-2">
               <Switch
@@ -1505,7 +1436,7 @@ function ChartPage({
               />
             </div>
           )}
-        </div>
+        </LabelledSelect>
       )}
       {/* The hide-flavoured specs invert at the control: the SWITCH says what
           the user sees ("Grid lines on"), the SPEC stores the deviation.
@@ -1646,8 +1577,6 @@ function BlocksPage({
   );
 }
 
-const ADD = '__add__';
-
 function SortPage({
   sort,
   fields,
@@ -1699,13 +1628,12 @@ function SortPage({
             </Tooltip>
             <Select
               size="sm"
+              ariaLabel={`Sort ${i + 1} property`}
               value={s.field}
               options={[{ value: s.field, label: labelFor(s.field) }, ...available].filter(
                 (o, j, all) => all.findIndex((x) => x.value === o.value) === j,
               )}
-              onChange={(e) =>
-                onChange(sort.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
-              }
+              onChange={(field) => onChange(sort.map((x, j) => (j === i ? { ...x, field } : x)))}
               width="100%"
             />
             <IconButton
@@ -1729,14 +1657,16 @@ function SortPage({
           </div>
         ))}
       </div>
+      {/* An empty value matches no option, so the trigger always reads as the
+          ask and every pick is a change. */}
       {available.length > 0 && !atCap && (
         <Select
           size="sm"
-          value={ADD}
-          options={[{ value: ADD, label: 'Add a sort…' }, ...available]}
-          onChange={(e) => {
-            if (e.target.value !== ADD) onChange([...sort, { field: e.target.value, dir: 'asc' }]);
-          }}
+          ariaLabel="Add a sort"
+          value=""
+          placeholder="Add a sort…"
+          options={available}
+          onChange={(field) => onChange([...sort, { field, dir: 'asc' }])}
           width="100%"
         />
       )}
@@ -1872,8 +1802,8 @@ function RowsPage({
  * The grouping chain (M9.7).
  *
  * One list. Each row is a property to band by or a relation to nest under,
- * and the picker shows both under headings so the difference is legible
- * without being two separate controls.
+ * and the picker shows both, each relation marked ↳, so the difference is
+ * legible without being two separate controls.
  */
 function GroupPage({
   group,
@@ -1935,12 +1865,13 @@ function GroupPage({
           <span className="w-8 flex-none text-2xs text-n-400">{i === 0 ? 'By' : 'then'}</span>
           <Select
             size="sm"
+            ariaLabel={`Group ${i + 1} property`}
             value={
               level.descend === undefined ? `property:${level.field}` : descentValue(level.descend)
             }
             options={optionsAt(i)}
-            onChange={(e) => {
-              const next = decode(e.target.value);
+            onChange={(value) => {
+              const next = decode(value);
               if (next === null) return;
               // Changing a relation level re-types everything below it, so
               // the tail's options no longer apply.
@@ -2001,14 +1932,14 @@ function GroupPage({
                     { value: 'relative', label: 'Relative' },
                     ...DATE_BUCKETINGS.map((value) => ({ value, label: humanize(value) })),
                   ]}
-                  onChange={(event) =>
+                  onChange={(bucket) =>
                     onChange(
                       group.map((g, j) => {
                         if (i !== j) return g;
                         const { dateBucket: _old, ...rest } = g;
-                        return event.target.value === 'relative'
+                        return bucket === 'relative'
                           ? rest
-                          : { ...rest, dateBucket: event.target.value as DateBucketing };
+                          : { ...rest, dateBucket: bucket as DateBucketing };
                       }),
                     )
                   }
@@ -2065,10 +1996,12 @@ function GroupPage({
           </span>
           <Select
             size="sm"
-            value={ADD}
-            options={[{ value: ADD, label: 'Add a level…' }, ...addOptions]}
-            onChange={(e) => {
-              const next = decode(e.target.value);
+            ariaLabel="Add a level"
+            value=""
+            placeholder="Add a level…"
+            options={addOptions}
+            onChange={(value) => {
+              const next = decode(value);
               if (next !== null) onChange([...group, next]);
             }}
             width="100%"

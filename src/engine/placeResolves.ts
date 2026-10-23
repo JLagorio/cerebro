@@ -36,6 +36,7 @@ export function readSelection(raw: unknown): Selection | null {
   const pick = (key: string) => (raw[key] === undefined ? {} : { [key]: raw[key] });
   switch (kind) {
     case 'home':
+    case 'pages':
     case 'inbox':
     case 'mywork':
     case 'changes':
@@ -112,6 +113,7 @@ export function placeResolves(selection: Selection, snapshot: PlaceSnapshot): bo
   const hasPath = (path: string) => snapshot.entries.some((entry) => entry.path === path);
   switch (selection.kind) {
     case 'home':
+    case 'pages':
     case 'mywork':
     case 'changes':
     case 'pulse':

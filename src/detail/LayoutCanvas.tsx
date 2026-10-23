@@ -509,7 +509,7 @@ export function LayoutCanvas({
                   aria-label="Add section"
                   data-testid="layout-add-section"
                   onClick={() => stageNewSection(draft, update, setEditing)}
-                  className="flex h-7 w-7 items-center justify-center rounded-full border-0 bg-accent p-0 text-inverse hover:bg-accent-hover focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+                  className="flex h-7 w-7 items-center justify-center rounded-full border-0 bg-action-primary p-0 text-on-action-primary hover:bg-action-primary-hover active:bg-action-primary-press focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
                 >
                   <Icon name="plus" size={16} />
                 </button>

@@ -1,0 +1,193 @@
+/* The page's outline (DocOutline), on the page as Notion draws its table of
+   contents (owner, 2026-10-19): at rest, a short stack of marks at the page's
+   right edge, one per heading; on hover or keyboard focus, the list of
+   headings, grown from the marks' corner. It sits at the top right of the
+   positioned element its host gives it and never scrolls with the page. */
+.cb-doc-outline {
+  position: absolute;
+  top: 112px;
+  right: 20px;
+  z-index: 5;
+}
+
+/* The marks: shorter by heading level, the current section's in ink. The
+   padding is the hover target, so the pointer need not find a 2px line. */
+.cb-doc-outline-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 32px;
+  padding: 8px;
+  transition: opacity var(--dur-move) var(--ease-out) 120ms;
+}
+
+.cb-doc-outline-bar {
+  flex: none;
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--n-300);
+  transform-origin: right center;
+  transition:
+    background-color var(--motion-turn),
+    scale var(--motion-turn);
+}
+
+.cb-doc-outline-bar[data-level='2'] {
+  width: 12px;
+}
+
+.cb-doc-outline-bar[data-level='3'] {
+  width: 8px;
+}
+
+/* The current section's mark is inked and a little longer, and the ink
+   travels down the rail as the page scrolls rather than jumping. */
+.cb-doc-outline-bar[data-active] {
+  background: var(--n-700);
+  scale: 1.25 1;
+}
+
+/* The list stays in the page, so Tab can reach it, and is invisible and
+   takes no pointer until it opens. Its top-right corner sits on the marks'.
+
+   Pointer-events, not visibility, is the gate: a hidden button cannot take
+   focus, and focus is how the keyboard opens the card. It flips after the
+   same waits as the fade (`allow-discrete`): opening waits a beat, so a
+   pointer passing over the marks opens nothing; closing waits longer, and the
+   card keeps the pointer until it has faded, so moving from the marks onto
+   the card, or slipping off its edge and back, never makes it blink. */
+.cb-doc-outline-card {
+  position: absolute;
+  top: 0;
+  right: 0;
+  box-sizing: border-box;
+  width: 240px;
+  max-width: calc(100vw - 48px);
+  max-height: min(60vh, 440px);
+  padding: 6px;
+  /* The headings arrive from a little to the right: never a sideways
+     scroll while they do. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--n-200);
+  border-radius: 12px;
+  background: var(--surface-raised, var(--n-0));
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  transform: translateX(4px) scale(0.97);
+  transform-origin: top right;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-exit) var(--ease-exit) 120ms,
+    transform var(--dur-exit) var(--ease-exit) 120ms,
+    pointer-events 0s linear calc(120ms + var(--dur-exit));
+  transition-behavior: allow-discrete;
+}
+
+/* Open, it grows from the marks' corner on the arrival pair, and leaves on
+   the quicker exit pair above (owner, 2026-10-19: "this cool animated on
+   hover thing"). */
+.cb-doc-outline:hover .cb-doc-outline-card,
+.cb-doc-outline:focus-within .cb-doc-outline-card {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition-duration: var(--dur-enter);
+  transition-timing-function: var(--ease-enter);
+  transition-delay: 60ms;
+}
+
+/* Its headings follow it in, one beat apart from the top, as the marks
+   become the list; leaving, they go with the card, after the same wait. */
+.cb-doc-outline-card li {
+  opacity: 0;
+  translate: 6px 0;
+  transition:
+    opacity var(--motion-exit) 120ms,
+    translate var(--motion-exit) 120ms;
+}
+
+.cb-doc-outline:hover .cb-doc-outline-card li,
+.cb-doc-outline:focus-within .cb-doc-outline-card li {
+  opacity: 1;
+  translate: none;
+  transition-duration: var(--dur-enter);
+  transition-timing-function: var(--ease-enter);
+  transition-delay: calc(60ms + var(--i, 0) * var(--dur-stagger) / 2);
+}
+
+.cb-doc-outline:hover .cb-doc-outline-rail,
+.cb-doc-outline:focus-within .cb-doc-outline-rail {
+  opacity: 0;
+  transition-delay: 60ms;
+}
+
+/* Put away with Escape (DocOutline): the marks again until the pointer
+   leaves. After the open rules, which it ties on specificity. */
+.cb-doc-outline[data-dismissed] .cb-doc-outline-card {
+  opacity: 0;
+  transform: translateX(4px) scale(0.97);
+  pointer-events: none;
+  transition-duration: var(--dur-exit);
+  transition-timing-function: var(--ease-exit);
+  transition-delay: 0s;
+}
+
+.cb-doc-outline[data-dismissed] .cb-doc-outline-card li {
+  opacity: 0;
+  transition-delay: 0s;
+}
+
+.cb-doc-outline[data-dismissed] .cb-doc-outline-rail {
+  opacity: 1;
+  transition-delay: 0s;
+}
+
+.cb-doc-outline-card ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One line each, indented by level (DocOutline sets the left padding). */
+.cb-doc-outline-item {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--n-600);
+  font: 13px/18px var(--font-ui);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover),
+    color var(--motion-hover);
+}
+
+/* A wash of the ink over the raised ground: --n-100 in light, and still a
+   step up in dark, where the card itself is --n-100. */
+.cb-doc-outline-item:hover {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--n-900);
+}
+
+/* The current section, in the accent, as Notion marks it. */
+.cb-doc-outline-item[aria-current='location'] {
+  color: var(--cortex-600);
+  font-weight: 500;
+}
+
+.cb-doc-outline-item:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}

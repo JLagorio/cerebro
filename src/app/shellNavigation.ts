@@ -11,7 +11,7 @@ export const NAV_AREAS: readonly {
   destination?: DestinationKind;
 }[] = [
   { id: 'home', label: 'Home', icon: destination('home').icon, destination: 'home' },
-  { id: 'pages', label: 'Pages', icon: 'files' },
+  { id: 'pages', label: 'Pages', icon: destination('pages').icon, destination: 'pages' },
   { id: 'databases', label: 'Databases', icon: 'database' },
   {
     id: 'knowledge',
@@ -26,6 +26,8 @@ export type NavArea = 'home' | 'pages' | 'databases' | 'knowledge' | 'agents' | 
 
 export function areaForSelection(selection: Selection, entries: readonly Entry[]): NavArea {
   switch (selection.kind) {
+    case 'pages':
+      return 'pages';
     case 'workspace':
       return 'work';
     case 'agents':

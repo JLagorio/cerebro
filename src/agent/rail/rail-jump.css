@@ -1,0 +1,15 @@
+/* A rail line whose press jumps to its place in the transcript (M92.4): the
+   Subagents card's lines and the Waiting card's. The whole line is the
+   button, across the card, with a row's quiet hover; its ring is the step
+   link's (trace-steps.css). Unlayered like the app's other surface
+   stylesheets; motion spends the tokens only. */
+
+.cb-ai-step-link.cb-rail-jump {
+  width: 100%;
+  padding: 2px var(--sp-1);
+  border-radius: var(--r-sm);
+  transition: background-color var(--motion-hover);
+}
+.cb-ai-step-link.cb-rail-jump:hover {
+  background: var(--surface-sunken);
+}

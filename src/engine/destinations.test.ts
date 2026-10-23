@@ -19,6 +19,7 @@ import type { Selection } from './types';
  * Selection fails here until this test says which side it is on. */
 const SIDE: { [K in Selection['kind']]: 'destination' | 'subject' } = {
   home: 'destination',
+  pages: 'destination',
   inbox: 'destination',
   mywork: 'destination',
   knowledge: 'destination',
@@ -42,6 +43,7 @@ describe('the destination table (M59.1)', () => {
     expect(DESTINATIONS.map((d) => [d.id, d.kind, d.label, d.icon, d.nav])).toEqual([
       ['inbox', 'inbox', 'Inbox', 'inbox', 'row'],
       ['home', 'home', 'Home', 'house', 'row'],
+      ['pages', 'pages', 'Pages', 'files', 'section'],
       ['my_work', 'mywork', 'My work', 'circle-check', 'row'],
       ['studio', 'studio', 'Studio', 'pencil-ruler', 'row'],
       ['history', 'pulse', 'History', 'activity', 'row'],
@@ -110,6 +112,7 @@ describe('visibleDestinations', () => {
     ]);
     expect(at('footer').map((d) => d.label)).toEqual(['Settings']);
     expect(at('section').map((d) => [d.label, d.door])).toEqual([
+      ['Pages', 'Browse all pages'],
       ['Work', 'Open all repositories'],
       ['Knowledge', 'Open Knowledge'],
       ['Agents', 'Open all agents'],
@@ -213,6 +216,7 @@ it('every destination has one unique go key, never the list leader', () => {
   expect(GO_KEYS).toEqual({
     inbox: 'g i',
     home: 'g h',
+    pages: 'g p',
     my_work: 'g m',
     studio: 'g s',
     history: 'g y',

@@ -1,0 +1,52 @@
+/* The review notes a conversation holds for its agent (M58.5, M91.14,
+   ReviewNotesDock): a Queue at the dock's own scale, as Up next is
+   (chat.css). A quiet box over the composer; its one line small, opening
+   onto the notes, which hang from a short rule in rows of 11px, each naming
+   the file it is on in the code face and its lines after it, its words in
+   an editor under it. */
+.cb-chat .cb-review-notes {
+  gap: var(--sp-1);
+  margin-bottom: 6px;
+  padding: 6px var(--sp-2);
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-lg);
+  background: var(--n-25);
+}
+.cb-review-notes .cb-ai-trace-line {
+  gap: 6px;
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-2xs);
+}
+.cb-review-notes .cb-ai-trace-trigger .cb-ai-trace-title {
+  font-weight: var(--w-medium);
+}
+.cb-review-notes .cb-ai-trace-icon {
+  width: 12px;
+  height: 12px;
+}
+.cb-review-notes .cb-ai-trace-icon svg {
+  width: 11px;
+  height: 11px;
+}
+.cb-review-notes .cb-ai-trace-content {
+  margin: var(--sp-1) 0 0 5px;
+  padding: 0 0 0 var(--sp-3);
+}
+.cb-review-notes .cb-ai-queue-list {
+  gap: 6px;
+}
+.cb-review-notes .cb-ai-queue-item .cb-ai-trace-line {
+  color: var(--n-700);
+}
+.cb-review-notes .cb-ai-queue-item .cb-ai-trace-icon {
+  color: var(--n-400);
+}
+.cb-review-notes .cb-ai-queue-item .cb-ai-trace-title {
+  font-family: var(--font-mono);
+}
+.cb-review-notes .cb-ai-queue-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding-inline-start: 18px;
+}

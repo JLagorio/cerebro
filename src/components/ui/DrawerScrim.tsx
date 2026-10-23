@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ownsEscape, useLayer } from '@/components/ui/layers';
+import { isTopLayer, ownsEscape, useLayer } from '@/components/ui/layers';
 
 /**
  * What marks a drawer: every panel drawn as one carries `data-overlay`
@@ -127,15 +127,32 @@ export function DrawerScrim({
     },
     [opener],
   );
+  // A press on the scrim while a menu or list is open over the drawer closes
+  // that surface and must not close the drawer as well. Read on window
+  // capture, ahead of the Popover's own dismiss (see Dialog's scrim).
+  const scrimRef = useRef<HTMLButtonElement>(null);
+  const pressBeganOnTop = useRef<boolean | null>(null);
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      if (e.target === scrimRef.current) pressBeganOnTop.current = isTopLayer(id);
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, [id]);
   return (
     <button
+      ref={scrimRef}
       type="button"
       // Out of the tab order: Escape is the keyboard's way out, and a second
       // stop that only closes the drawer would sit between it and the page.
       tabIndex={-1}
       aria-label={label}
       data-testid={testId}
-      onClick={onDismiss}
+      onClick={() => {
+        const onTop = pressBeganOnTop.current ?? isTopLayer(id);
+        pressBeganOnTop.current = null;
+        if (onTop) onDismiss();
+      }}
       className={`cursor-default border-0 bg-transparent p-0 ${className}`}
     />
   );

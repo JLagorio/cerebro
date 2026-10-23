@@ -9,9 +9,15 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
 import { EscapeToClose } from '@/detail/FieldPopover';
-import { GroupLabel } from '@/detail/GroupLabel';
+import { InspectorSubhead } from '@/detail/InspectorParts';
 import { PropertyMenu } from '@/detail/PropertyMenu';
-import { PropertyRow, PROPERTY_LABEL_W, ROW_ACTION } from '@/detail/PropertyRow';
+import { StructuredValue } from '@/detail/StructuredValue';
+import {
+  PropertyRow,
+  PROPERTY_GHOST_ICON,
+  PROPERTY_GHOST_ROW,
+  ROW_ACTION,
+} from '@/detail/PropertyRow';
 import {
   foldsWhenUnset,
   inferKindFromValue,
@@ -20,7 +26,6 @@ import {
   visibleProperties,
 } from '@/engine/properties';
 import type { BatchOp } from '@/engine/batch';
-import { localDateOf } from '@/engine/dates';
 import { resolveLayout, revealableFields } from '@/engine/layout';
 import { useSortableList } from '@/hooks/useSortableList';
 import { typeStyle } from '@/engine/typeCatalog';
@@ -30,6 +35,7 @@ import { convertedLabel } from '@/engine/undoPlan';
 import type { Entry, FieldDef, FieldKind, Schema } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { resolveOptionColor } from '@/lib/swatch';
 
 /** Undeclared scalar frontmatter: plain text editing. Numeric values stay
  * numeric when the draft still parses as a number.
@@ -69,12 +75,13 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
   const kind = inferKindFromValue(value);
 
   if (structured) {
+    const map = !Array.isArray(value);
     return (
-      <PropertyRow kind={kind} name={name} trailing={remove}>
+      <PropertyRow kind={kind} name={name} icon={map ? 'braces' : undefined} trailing={remove}>
         <Tooltip label="A list or map — edit it in the file, or declare it on a type">
-          <span className="block p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">
-            {Array.isArray(value) ? value.map(String).join(', ') : JSON.stringify(value)}
-          </span>
+          <div className="p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">
+            <StructuredValue value={value} />
+          </div>
         </Tooltip>
       </PropertyRow>
     );
@@ -82,6 +89,8 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
 
   return (
     <PropertyRow kind={kind} name={name} align="center" trailing={remove}>
+      {/* A ghost field (inspector.css): text like the values around it until
+          the pointer or the caret finds it. */}
       <Input
         ariaLabel={humanize(name)}
         value={draft}
@@ -90,17 +99,34 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
         onKeyDown={(e) => {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         }}
-        className="w-full min-w-0"
+        className="cb-inspector-input w-full min-w-0"
+        style={{ height: 'var(--control-h-sm)' }}
       />
     </PropertyRow>
   );
 }
 
+/** A record's type as a chip: its glyph and name on its own colour's tint. */
+function TypeChip({ type, schema }: { type: string; schema: Schema }) {
+  const style = typeStyle(type, schema);
+  const sw = resolveOptionColor(style.color);
+  return (
+    <span
+      data-testid="type-chip"
+      className="inline-flex h-[22px] min-w-0 max-w-full items-center gap-1.5 rounded-sm px-2 text-[12.5px] font-medium"
+      style={{ background: sw.tint, color: sw.ink }}
+    >
+      <Icon name={style.icon} size={13} color={style.color ?? 'var(--n-500)'} />
+      <span className="truncate">{type}</span>
+    </span>
+  );
+}
+
 /**
- * Info tab of the doc side panel (M2 Task 16, Tolaria Inspector pattern;
- * M2.x: embedded in the tabbed panel): assign a type, edit its declared
- * fields, manage loose frontmatter keys. Everything writes through
- * patchFrontmatter (optimistic, disk-first on rescan).
+ * The Properties section of the page inspector's Details (M2 Task 16, Tolaria
+ * Inspector pattern; M2.x: embedded in the tabbed panel): assign a type, edit
+ * its declared fields, manage loose frontmatter keys. Everything writes
+ * through patchFrontmatter (optimistic, disk-first on rescan).
  *
  * Like `RecordProperties`, it takes no tab (M46.1): a section belongs to the
  * record, so this panel and the page's own stack show the same containers and
@@ -160,7 +186,9 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   const openPath = useOpenPath();
 
   // M12.1: a doc's type is not a dropdown. Docs are docs — the only way out
-  // is the explicit Convert action, which says what it does to the note.
+  // is the explicit Convert action, which says what it does to the note. Its
+  // Type value is that action's trigger: it opens the dialog, never a list
+  // that would retype the page on a pick.
   //
   // M15: the type rows SELECT; the footer button commits: the note leaves
   // Docs, so a single stray click must not perform it. M60.7: one labelled
@@ -253,7 +281,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             )
       }
     >
-      <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
+      <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" chips="type-icon" />
     </PropertyRow>
   );
   const restRows = containerRows(layout.rest);
@@ -265,37 +293,32 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             is not in `fields:` — so it takes an explicit icon rather than a
             kind glyph that would claim otherwise. */}
         <PropertyRow kind="text" icon="shapes" name="Type" align="center">
-          <span className="inline-flex min-w-0 items-center gap-1.5 p-1.5 text-sm text-n-700">
-            <Icon
-              name={entry.type === null ? 'file-text' : typeStyle(entry.type, schema).icon}
-              size={13}
-              color={
-                entry.type === null
-                  ? 'var(--n-400)'
-                  : (typeStyle(entry.type, schema).color ?? 'var(--n-400)')
-              }
-            />
-            <span className="truncate">{entry.type ?? 'Doc'}</span>
-          </span>
+          {entry.type === null ? (
+            // The value is the trigger, drawn as a ghost select: "Doc" and a
+            // chevron, washed on approach. Its name starts with the word it
+            // shows (what the page is now) and says what pressing it does.
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={converting}
+              aria-label="Doc, convert to record…"
+              title="Convert to record…"
+              data-testid="doc-convert"
+              onClick={() => setConverting(true)}
+              className="ml-1.5 inline-flex h-[22px] min-w-0 max-w-full items-center gap-1.5 rounded-sm border-0 bg-n-50 px-2 text-left text-[12.5px] font-medium text-n-700 motion-hover hover:bg-n-100 hover:text-n-900 aria-expanded:bg-n-100"
+            >
+              <Icon name="file-text" size={13} color="var(--n-500)" />
+              <span className="truncate">Doc</span>
+              <Icon name="chevron-down" size={12} color="var(--n-400)" />
+            </button>
+          ) : (
+            // A record's type is a chip in its own colour, the way Tolaria
+            // draws it: read-only here, since retyping is the type screen's.
+            <span className="flex min-h-[var(--property-row-h,34px)] min-w-0 items-center px-1.5">
+              <TypeChip type={entry.type} schema={schema} />
+            </span>
+          )}
         </PropertyRow>
-        {entry.type === null && (
-          // Its own row: 96px label + icon + "Doc" + this button never fitted
-          // the 272px panel, so it wrapped to two lines and collided with the
-          // Type value. And it was painted in --n-400, the token the design
-          // system aliases as --text-disabled (2.19:1) — the most consequential
-          // control on a doc read as switched off. It is a real secondary
-          // button now: bordered, --n-600, one line.
-          <button
-            type="button"
-            onClick={() => setConverting(true)}
-            // Indented to the value column: it acts on the Type row above it,
-            // and hanging it under the label read as a third, unrelated row.
-            style={{ marginLeft: PROPERTY_LABEL_W + 4 }}
-            className="self-start whitespace-nowrap rounded-md border border-n-200 bg-transparent px-2 py-1 text-xs text-n-600 hover:bg-n-50 hover:text-n-900"
-          >
-            Convert to record…
-          </button>
-        )}
         {layout.flat ? (
           <div
             ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
@@ -325,7 +348,13 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
                       )
                 }
               >
-                <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
+                <FieldEditor
+                  entry={entry}
+                  def={f}
+                  schema={schema}
+                  chrome="panel"
+                  chips="type-icon"
+                />
               </PropertyRow>
             ))}
           </div>
@@ -343,9 +372,9 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
                   key={g.id}
                   data-testid="property-group"
                   data-group={g.id}
-                  className="flex flex-col gap-1"
+                  className="flex flex-col gap-1 pt-2"
                 >
-                  <GroupLabel name={g.name} />
+                  <InspectorSubhead label={g.name} />
                   {rows.map(groupedRow)}
                 </div>
               );
@@ -362,12 +391,16 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             data-testid="hidden-properties-toggle"
             aria-expanded={revealed}
             onClick={() => setRevealed((v) => !v)}
-            className="-mx-1 mt-0.5 flex items-center gap-1 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
+            className={PROPERTY_GHOST_ROW}
           >
-            <Icon name={revealed ? 'chevron-down' : 'chevron-right'} size={12} />
-            {revealed
-              ? `Hide ${hidden.length} ${hidden.length === 1 ? 'property' : 'properties'}`
-              : `${hidden.length} hidden ${hidden.length === 1 ? 'property' : 'properties'}`}
+            <span className={PROPERTY_GHOST_ICON}>
+              <Icon name={revealed ? 'chevron-down' : 'chevron-right'} size={14} />
+            </span>
+            <span className="truncate">
+              {revealed
+                ? `Hide ${hidden.length} ${hidden.length === 1 ? 'property' : 'properties'}`
+                : `${hidden.length} hidden ${hidden.length === 1 ? 'property' : 'properties'}`}
+            </span>
           </button>
         )}
         {undeclaredScalars.map((name) => (
@@ -389,9 +422,12 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
           aria-haspopup="dialog"
           aria-expanded={adding}
           onClick={() => setAdding((v) => !v)}
-          className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
+          className={PROPERTY_GHOST_ROW}
         >
-          + Add property
+          <span className={PROPERTY_GHOST_ICON}>
+            <Icon name="plus" size={14} />
+          </span>
+          <span className="truncate">Add property</span>
         </button>
         {adding && (
           <AddPropertyPanel
@@ -406,10 +442,6 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             onCancel={() => setAdding(false)}
           />
         )}
-      </div>
-      <div className="mt-4 border-t border-n-100 pt-2 text-2xs text-n-400 [font-family:var(--font-mono)]">
-        <div>Created {localDateOf(entry.createdAt).slice(0, 10)}</div>
-        <div>Modified {localDateOf(entry.modifiedAt).slice(0, 10)}</div>
       </div>
       {converting && (
         <>

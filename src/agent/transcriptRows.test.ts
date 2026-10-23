@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   groupLabel,
+  runningGroupLabel,
   toolStatus,
   transcriptRows,
   type ToolGroupRow,
@@ -141,6 +142,15 @@ describe('transcriptRows', () => {
     expect(group.label).toBe('Read 2 notes');
     expect(group.running).toBe(true);
     expect(group.members.map((m) => m.status)).toEqual(['done', 'running']);
+    // Its running words, from the manifest's `fold.running` (M91.13).
+    expect(group.runningLabel).toBe('Reading 2 notes');
+  });
+
+  it('words a mixed run as it runs, and gives no running words where a fold names none', () => {
+    const tools = [call('search_notes'), call('get_note'), call('get_note')];
+    expect(runningGroupLabel(tools)).toBe('Searching notes and reading 2 notes');
+    const facts = () => ({ fold: { one: 'opened a note', many: 'opened {n}' } });
+    expect(runningGroupLabel([call('open_note'), call('open_note')], facts)).toBeNull();
   });
 
   it('reads unfinished calls as interrupted once the turn stops', () => {

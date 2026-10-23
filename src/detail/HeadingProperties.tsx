@@ -45,6 +45,7 @@ export function HeadingProperties({
   fields,
   detailsShown,
   onToggleDetails,
+  toggleDisabled = false,
   showEmpty,
   onPatch,
 }: {
@@ -53,6 +54,7 @@ export function HeadingProperties({
   fields: FieldDef[];
   detailsShown?: boolean;
   onToggleDetails?: () => void;
+  toggleDisabled?: boolean;
   /** Overrides the live type's show-empty bit — the layout editor's preview
    * passes its draft's; hosts omit it (see stripCells). */
   showEmpty?: boolean;
@@ -63,46 +65,36 @@ export function HeadingProperties({
   if (shown.length === 0) return null;
 
   const expanded = detailsShown === true;
-  // gap-x-2 is 8px, the measured strip gap (§A.2). It reads as the 20px it
-  // always did, because each cell now carries its own 6px of padding.
   return (
-    <div data-testid="heading-strip" className="mb-3 flex flex-wrap items-start gap-x-2 gap-y-2">
+    <div data-testid="heading-strip" className="cb-heading-properties">
       {shown.map((f) => (
-        <div key={f.name} data-field={f.name} className="flex min-w-0 flex-col">
-          {/* The same label cell as the panel's, folded 90° — and the one
-              place the two are deliberately DIFFERENT: 13/500/18 here against
-              14/400/20 there (§A8). Smaller and heavier, because this label is
-              a column header rather than a row label. Ours had them identical,
-              which was the real defect; the sizes come from our own ramp.
-
-              The icon→text gap is 2px here and 6px in the panel (§A10), and
-              the glyph is 14px rather than 16 — the slot stays 18 x 24 so a
-              strip cell and a panel row start their text at the same offset. */}
-          <span className="flex h-6 items-center gap-0.5 rounded-sm px-1.5">
-            <span className="flex h-6 w-[18px] flex-none items-center justify-center">
-              <Icon name={kindMeta(f.kind).icon} size={14} color="var(--n-400)" />
-            </span>
-            <span className="truncate text-sm font-medium leading-[18px] text-n-500">
-              {humanize(f.name)}
-            </span>
+        <div key={f.name} data-field={f.name} className="cb-heading-property">
+          <span className="cb-heading-property-label">
+            <Icon name={kindMeta(f.kind).icon} size={13} />
+            <span className="truncate">{humanize(f.name)}</span>
           </span>
-          <FieldEditor
-            entry={entry}
-            def={f}
-            schema={schema}
-            compact
-            chrome="strip"
-            onPatch={onPatch === undefined ? undefined : (value) => onPatch({ [f.name]: value })}
-          />
+          <div className="cb-heading-property-value">
+            <FieldEditor
+              entry={entry}
+              def={f}
+              schema={schema}
+              compact
+              chrome="strip"
+              onPatch={onPatch === undefined ? undefined : (value) => onPatch({ [f.name]: value })}
+            />
+          </div>
         </div>
       ))}
       {onToggleDetails !== undefined && (
         <button
           type="button"
+          tabIndex={0}
           data-testid="view-details-toggle"
           aria-expanded={expanded}
           onClick={onToggleDetails}
-          className="mt-0.5 self-center rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
+          disabled={toggleDisabled}
+          title={toggleDisabled ? 'Finish editing before hiding properties' : undefined}
+          className="cb-heading-details rounded-md border-0 bg-transparent px-2 py-1 text-metadata text-n-500 hover:bg-n-50 hover:text-n-700"
         >
           {expanded ? 'Hide details' : 'View details'}
         </button>

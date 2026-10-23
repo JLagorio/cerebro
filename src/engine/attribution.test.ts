@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import RECEIPT_RS from '../../src-tauri/src/vault/receipt.rs?raw';
 import {
   attributionLine,
+  attributionValue,
   HUMAN_ACTOR,
   pagesWritten,
   pageWriteWords,
@@ -68,6 +69,33 @@ describe('writerWords (M58.1b)', () => {
 
   it("reads a NULL actor as not recorded, never actorLabel's unattributed", () => {
     expect(writerWords(null, entries)).toBe('not recorded');
+  });
+});
+
+describe('attributionValue (owner, 2026-10-18)', () => {
+  // The Info section's "Changed by" value: the same four facts, shorter.
+  it('says who and when, and that you allowed it', () => {
+    expect(attributionValue({ state: 'recorded', ...last() }, entries, NOW)).toBe(
+      'You · 2 hours ago',
+    );
+    expect(
+      attributionValue(
+        {
+          state: 'recorded',
+          ...last({ actor: 'process:release-scout', run_id: 'run-1', approved_by: HUMAN_ACTOR }),
+        },
+        entries,
+        NOW,
+      ),
+    ).toBe('Release scout · 2 hours ago · you allowed it');
+  });
+
+  it('keeps unattributed, not recorded and Knowledge apart', () => {
+    expect(
+      attributionValue({ state: 'unattributed', ...last({ actor: 'claude-code' }) }, entries, NOW),
+    ).toBe('Outside Cerebro · unattributed');
+    expect(attributionValue({ state: 'not_recorded' }, entries, NOW)).toBe('Not recorded');
+    expect(attributionValue({ state: 'knowledge' }, entries, NOW)).toBe('Knowledge');
   });
 });
 

@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { CreateMenu } from '@/app/CreateMenu';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { chooseOption } from '@/test/chooseOption';
 import { fixtureVault } from '@/test/factories';
 import { CreateLauncher } from './CreateLauncher';
 import { useLauncherStore } from '@/stores/launcherStore';
@@ -36,7 +37,7 @@ describe('CreateMenu', () => {
     await user.click(screen.getByRole('button', { name: 'New' }));
     await user.click(screen.getByRole('option', { name: 'Record' }));
     await user.type(screen.getByPlaceholderText('What is it called?'), 'Ship the fix');
-    await user.selectOptions(screen.getByRole('combobox'), 'Work item');
+    chooseOption(screen.getByRole('button', { name: 'Database' }), 'Work item');
     await user.click(screen.getByRole('button', { name: 'Create record' }));
     // No project context → the type's records folder; no key without a
     // container prefix (M12.2).

@@ -140,7 +140,7 @@ describe('the editable sheet grid', () => {
   it('point-selects a cell and extends its reference while keeping the formula draft', async () => {
     complete.mockImplementation((_names, _sheet, _row, _col, text: string) =>
       Promise.resolve({
-        expecting: text.endsWith('(') ? ['Range'] : ['Other'],
+        expecting: text.endsWith('(') ? ['Range', { Argument: ['SUM', 1] }] : ['Other'],
         replace_from: text.length - 1,
       }),
     );
@@ -151,7 +151,10 @@ describe('the editable sheet grid', () => {
     const input = screen.getByTestId('sheet-cell-editor') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: '=SUM(', selectionStart: 5 } });
     await waitFor(() => expect(complete).toHaveBeenCalledWith(['Budget'], 0, 2, 1, '=SUM(', 5));
-    await act(async () => {});
+    // The parser call starts alongside the lazy function catalog. Waiting for
+    // the call alone can click before Promise.all publishes the range context,
+    // especially under coverage. The argument hint proves both have settled.
+    await screen.findByTestId('sheet-arg-hint');
     pointerDown(container.querySelector('[data-cell=A1]')!, { button: 0 });
     pointerUp(window);
     expect(input.value).toBe('=SUM(A1');

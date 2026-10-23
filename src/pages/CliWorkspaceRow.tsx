@@ -73,8 +73,8 @@ export function CliWorkspaceRow() {
   return (
     <div className="flex items-start gap-3 py-2" data-testid="cli-workspace">
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-n-800">Stored outside this vault</div>
-        <div className="mt-0.5 text-xs leading-[16px] text-n-500">
+        <div className="text-ui font-medium text-n-800">Stored outside this vault</div>
+        <div className="mt-0.5 cb-setting-help text-ui text-(--text-meta)">
           Claude Code keeps its own copy of every conversation so a thread can be resumed —{' '}
           <span className="font-medium text-n-700" data-testid="cli-workspace-counts">
             {counts}

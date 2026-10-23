@@ -1,12 +1,48 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { csvProblemText, type CsvTable } from '@/engine/csv';
 import { inferKind, planCsvImport, viableKinds, type CsvKind } from '@/engine/csvImport';
 import { kindMeta } from '@/engine/properties';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { columnNames, importCsv, nameProblem, readCsvFile } from './csvActions';
+
+/** A column's kind, chosen among the kinds its values allow and drawn with the
+ *  icons the property-kind picker uses. A fixed width keeps the preview table
+ *  still while kinds change. */
+function KindSelect({
+  header,
+  kinds,
+  value,
+  disabled,
+  onChange,
+}: {
+  header: string;
+  kinds: readonly CsvKind[];
+  value: CsvKind;
+  disabled: boolean;
+  onChange: (kind: CsvKind) => void;
+}) {
+  return (
+    <Select
+      ariaLabel={`Kind for ${header}`}
+      width={136}
+      value={value}
+      disabled={disabled}
+      options={kinds.map((kind) => ({
+        value: kind,
+        label: kindMeta(kind).label,
+        icon: kindMeta(kind).icon,
+      }))}
+      onChange={(picked) => {
+        const kind = kinds.find((candidate) => candidate === picked);
+        if (kind !== undefined) onChange(kind);
+      }}
+    />
+  );
+}
 
 export function CsvImportDialog({ onClose }: { onClose: () => void }) {
   const entries = useVaultStore((state) => state.entries);
@@ -14,6 +50,7 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
   const initialVault = useRef(vault);
   const schema = useSchema();
   const fileInput = useRef<HTMLInputElement>(null);
+  const titleColumnId = useId();
   const readTicket = useRef(0);
   const [name, setName] = useState('');
   const [filename, setFilename] = useState('');
@@ -83,7 +120,6 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
     setWriting(false);
     if (imported !== null) onClose();
   };
-  const selectClass = 'rounded-md border border-n-300 bg-n-0 px-2 py-1.5 text-sm text-n-800';
   return (
     <div data-testid="csv-import-dialog">
       <Dialog
@@ -125,7 +161,7 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
             >
               Choose CSV
             </Button>
-            <span className="min-w-0 truncate text-xs text-n-500">
+            <span className="min-w-0 truncate text-xs text-(--text-meta)">
               {reading ? 'Reading…' : filename}
             </span>
           </div>
@@ -141,25 +177,24 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
                     width="100%"
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-n-600">
-                  Title column
-                  <select
-                    className={selectClass}
-                    value={titleColumn}
+                <div className="flex flex-col gap-1 text-xs text-n-600">
+                  <label htmlFor={titleColumnId}>Title column</label>
+                  <Select
+                    id={titleColumnId}
+                    width="100%"
+                    value={String(titleColumn)}
                     disabled={writing}
-                    onChange={(event) => setTitleColumn(Number(event.target.value))}
-                  >
-                    {table.headers.map((header, index) => (
-                      <option key={index} value={index}>
-                        {header}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    options={table.headers.map((header, index) => ({
+                      value: String(index),
+                      label: header,
+                    }))}
+                    onChange={(column) => setTitleColumn(Number(column))}
+                  />
+                </div>
               </div>
               <div className="max-h-[280px] overflow-auto rounded-lg border border-n-200">
                 <table className="w-full border-collapse text-left text-sm">
-                  <thead className="bg-n-25 text-xs text-n-500">
+                  <thead className="bg-n-25 text-xs text-(--text-meta)">
                     <tr>
                       <th className="px-3 py-2 font-medium">Column</th>
                       <th className="px-3 py-2 font-medium">Kind</th>
@@ -172,30 +207,22 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
                         <td className="px-3 py-2 text-n-800">{header}</td>
                         <td className="px-3 py-2">
                           {index === titleColumn ? (
-                            <span className="text-xs text-n-500">Title</span>
+                            <span className="text-xs text-(--text-meta)">Title</span>
                           ) : (
-                            <select
-                              aria-label={`Kind for ${header}`}
-                              className={selectClass}
+                            <KindSelect
+                              header={header}
+                              kinds={viableKinds(table.rows.map((row) => row[index]))}
                               value={kinds[index]}
                               disabled={writing}
-                              onChange={(event) =>
+                              onChange={(next) =>
                                 setKinds((current) =>
-                                  current.map((kind, col) =>
-                                    col === index ? (event.target.value as CsvKind) : kind,
-                                  ),
+                                  current.map((kind, col) => (col === index ? next : kind)),
                                 )
                               }
-                            >
-                              {viableKinds(table.rows.map((row) => row[index])).map((kind) => (
-                                <option key={kind} value={kind}>
-                                  {kindMeta(kind).label}
-                                </option>
-                              ))}
-                            </select>
+                            />
                           )}
                         </td>
-                        <td className="max-w-[240px] px-3 py-2 text-xs text-n-500">
+                        <td className="max-w-[240px] px-3 py-2 text-xs text-(--text-meta)">
                           <div className="line-clamp-3 whitespace-pre-wrap break-words">
                             {table.rows
                               .slice(0, 3)

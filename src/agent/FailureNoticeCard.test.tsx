@@ -94,6 +94,28 @@ describe('FailureNoticeCard (M56.4)', () => {
     expect(raw.textContent).toContain('Not logged in · Please run /login');
   });
 
+  it('shows what Claude Code said without its tool-error tags, scrolling when long', () => {
+    render(
+      <FailureNoticeCard
+        notice={NOT_SIGNED_IN}
+        raw="<tool_use_error>Not logged in · Please run /login</tool_use_error>"
+      />,
+    );
+    const said = screen.getByTestId('failure-notice-raw').querySelector('p')!;
+    expect(said.textContent).toBe('Not logged in · Please run /login');
+    expect(said.className).toContain('overflow-auto');
+  });
+
+  it('keeps its words, and adds the stack Claude Code printed as a Stack Trace', () => {
+    const raw = 'Error: boom\n    at load (notes/plan.md:3:1)\n    at node:internal/main:1:1';
+    render(<FailureNoticeCard notice={NOT_SIGNED_IN} raw={raw} onOpenPath={vi.fn()} />);
+    expect(card().textContent).toContain(NOT_SIGNED_IN.title);
+    expect(card().querySelector('[data-slot="stack-trace"]')).not.toBeNull();
+    cleanup();
+    render(<FailureNoticeCard notice={NOT_SIGNED_IN} raw="Not logged in · Please run /login" />);
+    expect(card().querySelector('[data-slot="stack-trace"]')).toBeNull();
+  });
+
   it('offers Retry as the red box did', () => {
     const onRetry = vi.fn();
     render(<FailureNoticeCard notice={USAGE_LIMIT} onRetry={onRetry} />);

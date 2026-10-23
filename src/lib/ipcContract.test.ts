@@ -28,6 +28,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { DELEGATE_CEILINGS } from '@/lib/policy/toolApproval';
 
 const REPO = join(__dirname, '../..');
 const RS = 'src-tauri/src/';
@@ -1279,6 +1280,88 @@ describe('the real tree', () => {
     const sent = [...(sites[0].nested.get('request') ?? [])].sort();
     expect(sent).toEqual(shape.fields.flatMap((field) => field.keys).sort());
     expect([...shape.skipped].sort()).toEqual(['internal', 'mcp_token', 'mcp_url']);
+  });
+
+  // M91.2d: the Subagents switch rides `request.delegate`. Serde drops a key
+  // AgentRequest does not declare, and Rust reads a request that names no
+  // switch as on wherever a person watches, so a misspelt key would leave
+  // Settings' Off doing nothing. Named here on both sides, with the words
+  // each side spells the switch in.
+  it("sends the Subagents switch as run_agent's request.delegate, in DelegateCeiling's words", () => {
+    const { rust, side } = real();
+    const command = rust.commands.get('run_agent');
+    const param = command?.params.find((p) => p.key === 'request');
+    const shape = command && param ? rust.shape(param.type, command.file) : null;
+    if (shape === null || typeof shape === 'string') throw new Error(`AgentRequest: ${shape}`);
+    expect(shape.fields).toContainEqual({ keys: ['delegate'], required: false });
+    const site = side.sites.find((s) => s.cmd === 'run_agent');
+    expect([...(site?.nested.get('request') ?? [])]).toContain('delegate');
+    // Rust reads the key as a DelegateCeiling, whose words are its variants
+    // in lowercase, and those are TS's.
+    const request = readFileSync(join(REPO, RS, 'agent/mod.rs'), 'utf8');
+    expect(request).toMatch(
+      /\bpub delegate: Option<(?:crate::policy::tool_approval::)?DelegateCeiling>,/,
+    );
+    const policy = readFileSync(join(REPO, RS, 'policy/tool_approval.rs'), 'utf8');
+    const ceiling =
+      /#\[serde\(rename_all = "lowercase"\)\]\s*pub enum DelegateCeiling \{([^}]*)\}/.exec(policy);
+    const variants = (ceiling?.[1] ?? '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /^[A-Z]\w*,?$/.test(line))
+      .map((line) => line.replace(/,$/, '').toLowerCase());
+    expect(variants).toEqual([...DELEGATE_CEILINGS]);
+    // The adapter sends RunOptions.delegate as it is, a DelegateCeiling or
+    // null, which leaves the default to Rust.
+    const file = 'src/agent/agentIpc.ts';
+    const sf = parse(file, readFileSync(join(REPO, file), 'utf8'));
+    const sends: string[] = [];
+    const typed: (string | undefined)[] = [];
+    walk(sf, (node) => {
+      if (ts.isPropertyAssignment(node) && keyOf(node) === 'delegate') {
+        const outer = node.parent.parent;
+        if (ts.isPropertyAssignment(outer) && keyOf(outer) === 'request') {
+          sends.push(node.initializer.getText(sf));
+        }
+      }
+      if (ts.isInterfaceDeclaration(node) && node.name.text === 'RunOptions') {
+        for (const member of node.members) {
+          if (ts.isPropertySignature(member) && member.name.getText(sf) === 'delegate') {
+            typed.push(member.type?.getText(sf));
+          }
+        }
+      }
+    });
+    expect(sends).toEqual(['options.delegate ?? null']);
+    expect(typed).toEqual(['DelegateCeiling']);
+  });
+
+  // M91.6: a branch's fork is a struct a level below the audit's reach, so
+  // its keys are read here: the object literal the adapter sends as
+  // `request.fork`, against the struct serde reads it into. Both keys are
+  // required, so a misspelt one refuses the whole request rather than
+  // running the branch as a thread of its own.
+  it("sends run_agent's request.fork as exactly ForkRequest's fields", () => {
+    const { rust } = real();
+    const shape = rust.shape('transcript::ForkRequest', 'agent/mod.rs');
+    if (shape === null || typeof shape === 'string') throw new Error(`ForkRequest: ${shape}`);
+    expect(shape.fields).toEqual([
+      { keys: ['from'], required: true },
+      { keys: ['at'], required: true },
+    ]);
+    const field = shape.fields.map((f) => f.keys[0]);
+    const file = 'src/agent/agentIpc.ts';
+    const sf = parse(file, readFileSync(join(REPO, file), 'utf8'));
+    const sent: (string | { problem: string })[][] = [];
+    walk(sf, (node) => {
+      if (!ts.isPropertyAssignment(node) || keyOf(node) !== 'fork') return;
+      const request = node.parent.parent;
+      if (!ts.isPropertyAssignment(request) || keyOf(request) !== 'request') return;
+      walk(node.initializer, (inner) => {
+        if (ts.isObjectLiteralExpression(inner)) sent.push(inner.properties.map(keyOf));
+      });
+    });
+    expect(sent).toEqual([field]);
   });
 });
 

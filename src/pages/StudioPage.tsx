@@ -4,6 +4,7 @@ import {
   usePageNavigationSlot,
   usePageNavigationControls,
 } from '@/app/PageNavigation';
+import { StateMessage } from '@/components/ui/StateMessage';
 import { PageHeader } from '@/components/PageHeader';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
@@ -65,12 +66,16 @@ function StudioPageBody({ path, modifiedAt }: { path: string; modifiedAt: string
 
   if (failed) {
     return (
-      <p data-testid="studio-preview-unavailable" className="m-0 text-sm text-n-500">
-        Couldn't read this page — the preview can't say what it holds.
-      </p>
+      <StateMessage
+        state="unavailable"
+        title="Couldn't read this page"
+        testId="studio-preview-unavailable"
+      >
+        The preview can't say what it holds.
+      </StateMessage>
     );
   }
-  if (body === null) return null;
+  if (body === null) return <StateMessage state="loading" title="Reading preview…" compact />;
   return <ConceptBody markdown={body} sources={[]} fromPath={path} />;
 }
 
@@ -116,7 +121,7 @@ export function NewPrototypeDialog({ onClose }: { onClose: () => void }) {
       }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
-      <p className="m-0 mb-2 text-sm text-n-500">
+      <p className="m-0 mb-2 text-sm text-(--text-meta)">
         A folder under {STUDIO_DIR}/ with an index page — yours and the assistant's to build in.
       </p>
       <Input
@@ -220,7 +225,7 @@ function ProjectView({ project }: { project: StudioProject }) {
         )}
         {shown === null ? (
           // Absent, not empty: the folder exists with no main page yet.
-          <p className="m-0 text-sm text-n-500">
+          <p className="m-0 text-sm text-(--text-meta)">
             No pages yet — the prototype's index.md has not been written.
           </p>
         ) : (
@@ -255,7 +260,7 @@ export function StudioPage({ selection }: { selection: StudioSelection }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="studio-page">
       <PageHeader
-        className={open === null ? '' : 'cb-page-header--compact'}
+        variant={open === null ? 'workspace' : 'compact'}
         title={open === null ? 'Studio' : open.title}
         icon={
           open === null ? (
@@ -324,10 +329,10 @@ export function StudioPage({ selection }: { selection: StudioSelection }) {
                   className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-1.5 text-left hover:bg-n-50"
                 >
                   <Icon name="pencil-ruler" size={14} color="var(--n-500)" />
-                  <span className="min-w-0 flex-1 truncate text-sm text-n-800">
+                  <span className="min-w-0 flex-1 truncate text-ui text-n-800">
                     {project.title}
                   </span>
-                  <span className="flex-none text-2xs text-n-400 [font-family:var(--font-mono)]">
+                  <span className="flex-none text-metadata text-(--text-meta) [font-family:var(--font-mono)]">
                     {project.pages.length} {project.pages.length === 1 ? 'page' : 'pages'}
                   </span>
                 </button>

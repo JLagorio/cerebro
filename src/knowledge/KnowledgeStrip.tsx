@@ -4,7 +4,7 @@ import { knowledgeOf, type Concept } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { useReviewStart } from '@/knowledge/ReviewQueue';
 import { useConcepts } from '@/knowledge/useConcepts';
-import { useNavStore } from '@/stores/navStore';
+import { useNavStore, usePaneId } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -14,9 +14,9 @@ const SHOWN = 3;
 /**
  * What Knowledge holds about this page, said where the page is read (M50.2).
  *
- * The knowledge was always there — a collapsed section on a record, the
- * fourth tab of a doc's side panel — and never where anyone was looking: a
- * page the agents had learned from, or learned about, gave no sign of it.
+ * The knowledge was always there — a collapsed section on a record, a tab of
+ * a doc's side panel — and never where anyone was looking: a page the agents
+ * had learned from, or learned about, gave no sign of it.
  * This is one quiet line under the page header, and it is SILENT when there
  * is nothing: the rule that nothing speaks first (M8) is about the chrome
  * volunteering, not about a page saying what is attached to it.
@@ -24,14 +24,14 @@ const SHOWN = 3;
  * Both directions count: concepts ABOUT this page (it is their subject) and
  * concepts learned FROM it (it is their source) — `knowledgeOf`, the read
  * the AI panel's snapshot makes too (M52.3); the two used to count different
- * things on the same page. Each opens as its page; the rest open the side
- * panel's Knowledge tab.
+ * things on the same page. Each opens as its page; the rest open the
+ * inspector's Knowledge section, in view.
  */
 export function KnowledgeStrip({ entry }: { entry: Entry }) {
   const entries = useVaultStore((s) => s.entries);
   const navigate = useNavStore((s) => s.navigate);
-  const setDocPanelOpen = useUiStore((s) => s.setDocPanelOpen);
-  const setDocPanelTab = useUiStore((s) => s.setDocPanelTab);
+  const pane = usePaneId();
+  const revealInspectorSection = useUiStore((s) => s.revealInspectorSection);
   const all = useConcepts();
   const related: Concept[] = useMemo(() => {
     const { about, from } = knowledgeOf(entry.path, all, entries);
@@ -47,15 +47,13 @@ export function KnowledgeStrip({ entry }: { entry: Entry }) {
   });
 
   if (related.length === 0) return null;
-  const openPanel = () => {
-    setDocPanelTab('knowledge');
-    setDocPanelOpen(true);
-  };
+  // Revealed in this page's pane: another pane's inspector keeps its place.
+  const openPanel = () => revealInspectorSection('knowledge', pane);
 
   return (
     <div
       data-testid="knowledge-strip"
-      className="mb-3 ml-[54px] flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-n-500"
+      className="cb-page-knowledge-links flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-n-500"
     >
       <button
         type="button"

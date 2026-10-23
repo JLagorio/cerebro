@@ -3,26 +3,29 @@ import { Icon } from '@/components/ui/Icon';
 
 /* Hover and press both spend `--motion-hover` (M46.2) — the wash and the
  * border are one state change and a button that fills 120ms after the press
- * reads as a laggy button, not a smooth one. */
+ * reads as a laggy button, not a smooth one. Pressed, it also gives a little
+ * under the pointer (thought-desk's `scale(.98)`) and springs back on the pop
+ * pair, which reduced motion stills. */
 const css = `
-.cb-btn{font-family:var(--font-ui);font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--r-md);border:1px solid transparent;cursor:pointer;white-space:nowrap;transition:background var(--motion-hover),border-color var(--motion-hover);outline:none}
+.cb-btn{font-family:var(--font-ui);font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--r-md);border:1px solid transparent;cursor:pointer;white-space:nowrap;transition:background var(--motion-hover),border-color var(--motion-hover),scale var(--motion-pop);outline:none}
+.cb-btn:active:not([disabled]){scale:.98}
 .cb-btn:focus-visible{border-color:var(--border-focus);box-shadow:var(--ring)}
 .cb-btn[disabled]{cursor:not-allowed;opacity:.45}
-.cb-btn-md{height:var(--control-h);padding:0 12px;font-size:var(--fs-sm)}
+.cb-btn-md{height:var(--control-h);padding:0 12px;font-size:var(--fs-ui);line-height:var(--lh-ui)}
 .cb-btn-sm{height:var(--control-h-sm);padding:0 10px;font-size:var(--fs-xs)}
 .cb-btn-lg{height:var(--control-h-lg);padding:0 16px;font-size:var(--fs-md)}
-.cb-btn-primary{background:var(--accent);color:#fff}
-.cb-btn-primary:hover:not([disabled]){background:var(--accent-hover)}
-.cb-btn-primary:active:not([disabled]){background:var(--accent-press)}
+.cb-btn-primary{background:var(--action-primary);color:var(--on-action-primary)}
+.cb-btn-primary:hover:not([disabled]){background:var(--action-primary-hover)}
+.cb-btn-primary:active:not([disabled]){background:var(--action-primary-press)}
 .cb-btn-secondary{background:var(--n-0);color:var(--n-800);border-color:var(--n-300)}
 .cb-btn-secondary:hover:not([disabled]){background:var(--n-50)}
 .cb-btn-secondary:active:not([disabled]){background:var(--n-100)}
 .cb-btn-ghost{background:transparent;color:var(--n-600)}
 .cb-btn-ghost:hover:not([disabled]){background:var(--n-50);color:var(--n-800)}
 .cb-btn-ghost:active:not([disabled]){background:var(--n-100)}
-.cb-btn-danger{background:var(--danger-500);color:#fff}
-.cb-btn-danger:hover:not([disabled]){background:var(--danger-600)}
-.cb-btn-danger:active:not([disabled]){background:var(--danger-700)}`;
+.cb-btn-danger{background:var(--action-danger);color:var(--on-action-danger)}
+.cb-btn-danger:hover:not([disabled]){background:var(--action-danger-hover)}
+.cb-btn-danger:active:not([disabled]){background:var(--action-danger-press)}`;
 if (typeof document !== 'undefined' && !document.getElementById('cb-btn-css')) {
   const t = document.createElement('style');
   t.id = 'cb-btn-css';
@@ -34,13 +37,15 @@ if (typeof document !== 'undefined' && !document.getElementById('cb-btn-css')) {
 export interface ButtonProps {
   /** "primary" | "secondary" (default) | "ghost" | "danger" */
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
-  /** "sm" 28px | "md" 32px (default) | "lg" 38px */
+  /** "sm" 28px | "md" 32px (default) | "lg" 36px */
   size?: 'sm' | 'md' | 'lg';
   /** optional leading lucide icon name */
   icon?: string;
   children?: React.ReactNode;
   fullWidth?: boolean;
   disabled?: boolean;
+  /** Explicit keyboard participation for native macOS/WebKit focus settings. */
+  tabIndex?: number;
   'aria-pressed'?: React.AriaAttributes['aria-pressed'];
   title?: string;
   onClick?: React.MouseEventHandler<HTMLButtonElement>;
@@ -64,6 +69,7 @@ export function Button({
   children,
   fullWidth,
   disabled,
+  tabIndex,
   'aria-pressed': pressed,
   title,
   onClick,
@@ -77,6 +83,7 @@ export function Button({
     <button
       type={type}
       disabled={disabled}
+      tabIndex={tabIndex}
       aria-pressed={pressed}
       title={title}
       onClick={onClick}

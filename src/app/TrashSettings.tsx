@@ -67,13 +67,13 @@ export function TrashSettings() {
   return (
     <section className="mb-6 rounded-xl border border-n-200 p-5" data-testid="settings-trash">
       <h2 className="mb-1 text-md font-semibold text-n-900">{TRASH_WORDS.section}</h2>
-      <p className="mb-4 text-sm leading-[18px] text-n-500">{TRASH_WORDS.hint}</p>
+      <p className="mb-4 text-ui text-(--text-meta)">{TRASH_WORDS.hint}</p>
       {read === null ? null : read.kind === 'unavailable' ? (
-        <p className="m-0 text-sm text-warn-600" data-testid="section-unavailable">
+        <p className="m-0 text-sm text-warn-700" data-testid="section-unavailable">
           {unavailableWords(read.reason)}
         </p>
       ) : read.items.length === 0 ? (
-        <p className="m-0 text-sm text-n-500" data-testid="trash-empty">
+        <p className="m-0 text-ui text-(--text-meta)" data-testid="trash-empty">
           {TRASH_WORDS.empty}
         </p>
       ) : (
@@ -89,7 +89,7 @@ export function TrashSettings() {
                 <div className="truncate text-sm font-medium text-n-800">
                   {item.kind === 'unreadable' ? "Can't be read" : item.title || item.path}
                 </div>
-                <div className="mt-0.5 truncate text-xs text-n-500">
+                <div className="mt-0.5 truncate text-xs text-(--text-meta)">
                   <span className="[font-family:var(--font-mono)]">{item.path}</span>
                   {' · '}
                   {detail(item)}

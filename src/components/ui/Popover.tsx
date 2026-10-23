@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { useFocusRestore } from '@/hooks/useFocusRestore';
 import type { LayerOptions } from '@/components/ui/layers';
 import { isInsideLayerAbove, isTopLayer, ownsEscape, useLayer } from '@/components/ui/layers';
+import { arrivingScale, useGhostOnUnmount } from './motion';
+import { readPortalViewport, toPortalRect } from './portalGeometry';
 
 /**
  * The one anchored-surface primitive (M16.1).
@@ -191,6 +193,14 @@ export interface PopoverProps {
   className?: string;
   role?: 'menu' | 'listbox' | 'dialog' | 'group';
   ariaLabel?: string;
+  /** Names the panel by another element — a select named by its label. */
+  ariaLabelledBy?: string;
+  /**
+   * The keys the panel keeps from the app's keymap while it has focus
+   * (src/lib/keys/claims.ts). A listbox that takes focus keeps its letters
+   * and arrows, as the trigger it opened from does.
+   */
+  keyClaim?: 'typing' | 'editor';
   /**
    * The panel's DOM id, for a trigger that has to name it — `aria-controls`
    * on a listbox button. Portalling put the panel outside the trigger's
@@ -209,6 +219,10 @@ interface Placement {
   left: number;
   top: number;
   width?: number;
+  availableWidth: number;
+  availableHeight: number;
+  /** Which side of its anchor it opened on: the side it grows from. */
+  side: 'top' | 'bottom';
 }
 
 export function Popover({
@@ -222,6 +236,8 @@ export function Popover({
   className,
   role = 'group',
   ariaLabel,
+  ariaLabelledBy,
+  keyClaim,
   id,
   activeDescendant,
 }: PopoverProps) {
@@ -229,7 +245,14 @@ export function Popover({
 
   const markerRef = useRef<HTMLSpanElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const [place, setPlace] = useState<Placement | null>(null);
+  // Closed, a copy of it fades where it was (components/ui/motion.ts): the
+  // real one, its layer and its Escape go now, and focus returns now.
+  useGhostOnUnmount(frameRef, 'cb-popover-leave', {
+    animated: '.cb-popover-panel',
+    strip: ['cb-menu-in'],
+  });
 
   // Latest-ref so the document listeners below can stay mounted once.
   const latestClose = useRef(onClose);
@@ -246,23 +269,29 @@ export function Popover({
     const anchor = anchorEl();
     const panel = panelRef.current;
     if (anchor === null || panel === null) return;
-    const a = anchor.getBoundingClientRect();
-    const p = panel.getBoundingClientRect();
+    const viewport = readPortalViewport();
+    const a = toPortalRect(anchor.getBoundingClientRect(), viewport.zoom);
+    const drawn = toPortalRect(panel.getBoundingClientRect(), viewport.zoom);
+    const grown = arrivingScale(panel);
+    const p = { width: drawn.width / grown, height: drawn.height / grown };
 
     const below = a.bottom + GAP;
     const above = a.top - GAP - p.height;
     // Flip up only when there is genuinely more room up there, so a popover
     // taller than the viewport still opens downward and scrolls rather than
     // opening upward off the top edge.
-    const overflowsDown = below + p.height > window.innerHeight - EDGE;
+    const overflowsDown = below + p.height > viewport.height - EDGE;
     const fitsUp = above >= EDGE;
-    const top =
-      overflowsDown && fitsUp ? above : Math.min(below, window.innerHeight - p.height - EDGE);
+    const up = overflowsDown && fitsUp;
+    const top = up ? above : Math.min(below, viewport.height - p.height - EDGE);
 
     setPlace({
-      left: Math.max(EDGE, Math.min(a.left, window.innerWidth - p.width - EDGE)),
+      left: Math.max(EDGE, Math.min(a.left, viewport.width - p.width - EDGE)),
       top: Math.max(EDGE, top),
       width: matchAnchorWidth ? a.width : undefined,
+      availableWidth: Math.max(0, viewport.width - 2 * EDGE),
+      availableHeight: Math.max(0, viewport.height - 2 * EDGE),
+      side: up ? 'top' : 'bottom',
     });
   }, [anchorEl, matchAnchorWidth]);
 
@@ -368,7 +397,7 @@ export function Popover({
     const panel = panelRef.current;
     if (!trapFocus || !placed || panel === null) return;
     if (panel.contains(document.activeElement)) return;
-    const first = panel.querySelector<HTMLElement>(FOCUSABLE);
+    const [first] = tabStops(panel);
     (first ?? panel).focus();
   }, [trapFocus, placed]);
 
@@ -378,7 +407,7 @@ export function Popover({
       if (e.key !== 'Tab' || !isTopLayer(layerId)) return;
       const panel = panelRef.current;
       if (panel === null) return;
-      const items = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      const items = tabStops(panel);
       if (items.length === 0) {
         e.preventDefault();
         panel.focus();
@@ -402,6 +431,7 @@ export function Popover({
 
   const panel = (
     <div
+      ref={frameRef}
       // z-[1050] sits ABOVE the DS Dialog scrim (z-index 1000) and below the
       // tooltip/toast band (z-[1100]) — the same ordering popovers already
       // have on ordinary surfaces, now preserved inside a dialog too. At
@@ -419,17 +449,29 @@ export function Popover({
           : { left: place.left, top: place.top, width: place.width }
       }
     >
-      {/* Animated on an inner wrapper so the entrance transform never skews
-          the measurement above (M12.8). */}
+      {/* Animated on the labelled panel, and only once it is placed: it
+          grows from the side of its anchor it opened on (`data-side`,
+          index.css), and its measurement reads the size it lands at. */}
       <div
         ref={panelRef}
         id={id}
         role={role}
         aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
         aria-activedescendant={activeDescendant}
+        data-key-claim={keyClaim}
+        data-side={place?.side}
         tabIndex={-1}
-        className={`cb-menu-in ${className ?? ''}`}
-        style={place?.width !== undefined ? { width: place.width } : undefined}
+        className={`cb-popover-panel ${place === null ? '' : 'cb-menu-in'} ${className ?? ''}`}
+        style={
+          place === null
+            ? undefined
+            : ({
+                width: place.width,
+                '--popover-available-width': `${place.availableWidth}px`,
+                '--popover-available-height': `${place.availableHeight}px`,
+              } as React.CSSProperties)
+        }
       >
         {children}
       </div>
@@ -446,3 +488,25 @@ export function Popover({
 
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/**
+ * The panel's Tab stops in order, one per radio group (M91.8): a browser
+ * gives a group one stop, its checked radio, or its first when none is
+ * checked. Counting every radio put first focus on an unchecked choice,
+ * where an arrow key changed the pick, and let Tab from a checked radio
+ * that was not the last in the DOM leave the trapped panel.
+ */
+function tabStops(panel: HTMLElement): HTMLElement[] {
+  const all = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)];
+  const radios = (name: string) =>
+    all.filter(
+      (el): el is HTMLInputElement =>
+        el instanceof HTMLInputElement && el.type === 'radio' && el.name === name,
+    );
+  return all.filter((el) => {
+    if (!(el instanceof HTMLInputElement) || el.type !== 'radio' || el.name === '') return true;
+    const group = radios(el.name);
+    const stop = group.find((radio) => radio.checked) ?? group[0];
+    return el === stop;
+  });
+}

@@ -12,19 +12,25 @@
  *
  * Cerebro's own tools are reckoned by name. The CLI's are reckoned by the
  * tool-approval table (M57.2, `cliGrant`): `PromptGrant.shell` says whether
- * the run can change files itself, pre-approved or by asking the person, and
- * `PromptGrant.web` whether it holds WebFetch (M57.7). A
- * run the app's TS starts never holds a window or an answer tool, which
- * belong to Rust's own runs, and TS cannot read the proposal switch, so the
- * generated proposal tools count as not held and no prompt names them (fail
- * closed).
+ * the run can change files itself, pre-approved or by asking the person,
+ * `PromptGrant.web` whether it holds WebFetch (M57.7), and `PromptGrant.read`
+ * whether it holds Read (M91.17). A run the app's TS starts never holds a
+ * window or an answer tool, which belong to Rust's own runs, and TS cannot
+ * read the proposal switch, so the generated proposal tools count as not
+ * held and no prompt names them (fail closed).
  *
  * Pure: engine/ reads it, and tsconfig.engine.json typechecks it without the
  * DOM.
  */
 
 import { TOOLS, toolFacts } from '@/lib/policy/tools';
-import { plan, TOOL_APPROVAL, type ShellCeiling, type WebCeiling } from '@/lib/policy/toolApproval';
+import {
+  plan,
+  TOOL_APPROVAL,
+  type RunApproval,
+  type ShellCeiling,
+  type WebCeiling,
+} from '@/lib/policy/toolApproval';
 import { ALL_TOOLS, TOOLSETS } from './tools';
 
 /** What a prompt is composed against. */
@@ -40,6 +46,11 @@ export interface PromptGrant {
    * tool-approval table plans it (`holdsWeb`), less what its record leaves
    * out. Absent reads as no web, so no prompt names the web tools. */
   web?: boolean;
+  /** Whether it holds Claude Code's own Read (M91.17), which opens text,
+   * pictures and PDFs in the vault: in its `--tools` as the tool-approval
+   * table plans them (`holdsRead`), so never on a read-scoped run (M53.5).
+   * Absent reads as not held, so no prompt names it. */
+  read?: boolean;
   /** Whether a person is watching it: a panel turn, never a background job. */
   attended: boolean;
 }
@@ -117,12 +128,10 @@ export interface CliGrantInput {
   narrowing: readonly string[] | null;
 }
 
-/** The CLI's own tools a run holds (`cli`, pre-approved) and may ask the
- * person for (`asks`), as the tool-approval table plans them, in manifest
- * order. Held to Rust by tool-grants.json's `cli_cases`. */
-export function cliGrant(input: CliGrantInput): { cli: string[]; asks: string[] } {
+/** The tool-approval table's plan for a run the app's TS starts. */
+function approvalOf(input: CliGrantInput): RunApproval {
   const narrowing = input.narrowing;
-  const approval = plan({
+  return plan({
     kind: input.attended ? 'attended' : 'unattended',
     shell: input.shell,
     web: input.web ?? 'off',
@@ -130,7 +139,21 @@ export function cliGrant(input: CliGrantInput): { cli: string[]; asks: string[] 
     narrowing:
       narrowing === null ? null : (tool) => narrowing.some((entry) => namesTool(entry, tool)),
   });
+}
+
+/** The CLI's own tools a run holds (`cli`, pre-approved) and may ask the
+ * person for (`asks`), as the tool-approval table plans them, in manifest
+ * order. Held to Rust by tool-grants.json's `cli_cases`. */
+export function cliGrant(input: CliGrantInput): { cli: string[]; asks: string[] } {
+  const approval = approvalOf(input);
   return { cli: approval.allowed, asks: approval.asks };
+}
+
+/** Does the run hold Claude Code's own Read (M91.17)? In its `--tools`,
+ * pre-approved or left to the CLI, which opens a file in the vault without
+ * asking; a read limit withdraws it (M53.5). */
+export function holdsRead(input: CliGrantInput): boolean {
+  return approvalOf(input).tools.includes('Read');
 }
 
 /** The families whose tools change things (`needs_default_mode`: the ones

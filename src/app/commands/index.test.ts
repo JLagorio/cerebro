@@ -2,8 +2,10 @@ import { DESTINATIONS } from '@/engine/destinations';
 import { CREATE_ROWS } from '../createCatalog';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { claimsKey, claimsOf } from '@/lib/keys/claims';
 import { parseKeys } from '@/lib/keys/combo';
+import { APP_SCOPE, bind } from '@/lib/keys/registry';
 import {
   catalog,
   checkCatalog,
@@ -168,6 +170,57 @@ it('chord leaders are plain letters and never single bindings in their scope or 
   ).toThrow(/bound twice/);
   for (const def of catalog()) expect(def.keys).not.toEqual(expect.arrayContaining(['g']));
   expect(catalog().flatMap((def) => def.keys)).not.toContain('c');
+});
+
+/**
+ * M92.1: ⌥⌘R shows or hides the canvas conversation's details, and it has
+ * to work from the composer, where the person is typing. ⌥⌘B would not: the
+ * composer keeps ⌘B as bold whatever ⌥ says.
+ */
+describe('the conversation details row (M92.1)', () => {
+  const rail = commandDef('assistant.rail');
+
+  it('is a General row on ⌥⌘R, and binds no Escape', () => {
+    expect(rail).toMatchObject({ keys: ['alt+mod+r'], scope: 'app', group: 'General' });
+    expect(rail.keys.flatMap((spec) => parseKeys(spec)).map((c) => c.key)).not.toContain('escape');
+    expect(keyedCommands()).toContain(rail);
+  });
+
+  it('names conversation details, under a label no other row has', () => {
+    expect(rail.label.toLowerCase()).toContain('conversation details');
+    expect(catalog().filter((def) => def.label === rail.label)).toEqual([rail]);
+  });
+
+  it('fires from the composer, which keeps ⌥⌘B as bold', () => {
+    const composer = document.createElement('textarea');
+    composer.setAttribute('aria-label', 'Message the assistant');
+    document.body.append(composer);
+    const run = vi.fn();
+    const unbind = bind(APP_SCOPE, 'assistant.rail', { run });
+    try {
+      composer.focus();
+      // On a Mac, ⌥ composes the letter, and the key is read from its code.
+      const press = (key: string, code: string) => {
+        const event = new KeyboardEvent('keydown', {
+          key,
+          code,
+          altKey: true,
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        });
+        composer.dispatchEvent(event);
+        return event;
+      };
+      expect(press('®', 'KeyR').defaultPrevented).toBe(true);
+      expect(run).toHaveBeenCalledOnce();
+      const bold = { key: '∫', code: 'KeyB', altKey: true, metaKey: true, ctrlKey: false };
+      expect(claimsKey(claimsOf(composer), { ...bold, shiftKey: false })).toBe(true);
+    } finally {
+      unbind();
+      composer.remove();
+    }
+  });
 });
 
 it('a modified shortcut can also have a chord, which keeps letter stand-down', () => {

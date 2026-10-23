@@ -1,3 +1,7 @@
+.canvas-page {
+  container-type: inline-size;
+}
+
 .canvas-page-heading {
   display: flex;
   flex: none;
@@ -24,13 +28,15 @@
 
 .canvas-page-title {
   min-width: 0;
-  max-width: 50%;
+  flex: 1;
+  max-width: 100%;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-lg);
-  font-weight: 550;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-section-title);
+  line-height: var(--lh-section-title);
+  font-weight: var(--w-semibold);
   letter-spacing: -0.02em;
   color: var(--text-primary);
 }
@@ -39,7 +45,7 @@
 .canvas-page-summary,
 .canvas-page-save {
   font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-meta);
   color: var(--text-meta);
 }
 
@@ -84,7 +90,7 @@
 .wb-inspector-heading {
   margin: 0 0 var(--sp-3);
   font-size: var(--fs-sm);
-  font-weight: 550;
+  font-weight: var(--w-semibold);
   color: var(--text-primary);
 }
 
@@ -101,7 +107,7 @@
   color: var(--text-meta);
 }
 
-@media (width < 600px) {
+@container (width < 600px) {
   .canvas-page-heading {
     gap: var(--sp-2);
     padding-right: var(--sp-3);

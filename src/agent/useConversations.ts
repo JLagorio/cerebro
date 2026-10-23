@@ -8,6 +8,7 @@ import {
   retitle,
   saveActiveId,
   saveConversations,
+  withSession,
 } from '@/agent/conversations';
 import {
   cancelInteraction,
@@ -18,7 +19,7 @@ import {
 import { healFromTranscript, replayTranscript } from '@/agent/transcript';
 import { placeLabel, samePlace, type Place } from '@/engine/place';
 import type { AgentChat } from '@/agent/useAgentChat';
-import type { Conversation } from '@/agent/types';
+import type { ChatMessage, Conversation } from '@/agent/types';
 import type { RunChoice } from '@/engine/runOptions';
 import { useReviewNotesStore } from '@/stores/reviewNotesStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -65,14 +66,47 @@ export interface ConversationState {
   /** Set a conversation's model and effort (M56.5). They persist with it
    * and ride every turn sent in it; null is Claude Code's default. */
   setRunOptions(id: string, choice: RunChoice): void;
+  /** Branch the conversation `threadId` from its reply `messageId` (M91.6):
+   * a new thread holding its messages up to and including that reply, named
+   * as its source is, and opened. Its first turn forks the session the
+   * reply's anchor names at that anchor; the vault's files stay as they are
+   * (Q8). The new thread's id, or null with a toast (CV-03) when the reply
+   * has no anchor to branch from. */
+  branchFrom(threadId: string, messageId: string): string | null;
   /** What reading the active thread's transcript found (M56.3). */
   transcript: TranscriptStatus;
   /** Why the active thread cannot continue, or null when it can. */
   blocked: ThreadBlock;
+  /** The stored active thread has been handed to the chat hook. Before its
+   * first restore the hook holds an empty start, not that thread, and a new
+   * conversation started then would save the thread it leaves as empty. */
+  ready: boolean;
 }
 
 /** What `placeLabel` resolves names against — the vault, when the caller has it. */
 export type PlaceLookup = Parameters<typeof placeLabel>[1];
+
+/** What a branch says when the reply it was asked from is not in its
+ * thread (M91.6). */
+export const NO_SUCH_REPLY =
+  'That reply is no longer in the conversation, so nothing was branched.';
+
+/** What a branch says when the reply's turn never named the line it ended
+ * on, so there is nowhere to fork it (M91.6). */
+export const NO_BRANCH_POINT =
+  "Claude Code didn't say where that turn ended, so the conversation can't branch from it.";
+
+/** A message as a branch copies it (M91.6): what it said and did, without
+ * the live turn it may have been part of. */
+function copied({
+  streaming: _streaming,
+  live: _live,
+  seq: _seq,
+  gap: _gap,
+  ...message
+}: ChatMessage): ChatMessage {
+  return message;
+}
 
 /**
  * Many named conversations instead of one ephemeral thread (M9.5).
@@ -86,15 +120,21 @@ export type PlaceLookup = Parameters<typeof placeLabel>[1];
  * Code's session file (M56.3). Opening a thread restores the copy at once,
  * then reads the file: a thread with no copy is rebuilt from it, a copy is
  * healed from it (Q6: unfinished tool rows and, M56.8, the whole payloads
- * the copy never keeps; the wording kept), and a
+ * the copy never keeps, and, M91.4, its reasoning, its calls' structured
+ * results and its subagents' steps at any depth; the wording kept), and a
  * file Claude Code no longer has blocks the thread rather than letting a send
- * fail with the CLI's own error (Q7).
+ * fail with the CLI's own error (Q7). A thread a full store trimmed to no
+ * copy (M91.4) is rebuilt the same way.
  *
  * A turn outlives its panel (M57.6). Switching threads, starting a new one
  * and closing the panel detach a running turn, and every save of the active
  * thread carries the turn's `live` with its messages (`saveActive`), so the
  * thread re-attaches when it opens again. Deleting a thread is the one way
  * this list ends a turn: its run is stopped and its card cancelled.
+ *
+ * A branch (M91.6) is a thread of its own, holding a reply and the turns
+ * before it, whose sends fork the reply's session at its anchor until the
+ * thread has a session of its own (`branchFrom`, `withSession`).
  */
 export function useConversations(
   chat: AgentChat,
@@ -144,7 +184,7 @@ export function useConversations(
     (c: Conversation) => {
       restoreEpoch.current += 1;
       const epoch = restoreEpoch.current;
-      restore(c.messages, c.sessionId, undefined, c.live ?? null);
+      restore(c.messages, c.sessionId, undefined, c.live ?? null, c.fork ?? null);
       setReadBlock(null);
       const session = c.sessionId;
       // A thread with a turn still running re-attaches to it (M57.6), and
@@ -186,13 +226,16 @@ export function useConversations(
   );
 
   // First render restores the stored thread into the chat hook once, and
-  // reads its transcript.
+  // reads its transcript. `ready` turns true in the same update as the
+  // restore, so a render that reads it true holds the thread.
   const hydrated = useRef(false);
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     if (hydrated.current) return;
     hydrated.current = true;
     const first = conversations.find((c) => c.id === activeId);
     if (first !== undefined) restoreThread(first);
+    setReady(true);
   }, [activeId, conversations, restoreThread]);
 
   const messages = chat.messages;
@@ -215,7 +258,7 @@ export function useConversations(
     setConversations((prev) => {
       const next = prev.map((c) =>
         c.id === id
-          ? retitle({ ...c, messages: held, sessionId: session, live: turn, ...extra })
+          ? retitle({ ...withSession(c, session), messages: held, live: turn, ...extra })
           : c,
       );
       saveConversations(next);
@@ -241,13 +284,13 @@ export function useConversations(
 
   // …except the session id, which is stored the moment the run names it,
   // streaming or not (M56.3): a reload mid-turn must still know which session
-  // file the thread rebuilds from.
+  // file the thread rebuilds from. A branch's fork goes with it (M91.6).
   useEffect(() => {
     if (!hydrated.current || sessionId === null) return;
     setConversations((prev) => {
       const current = prev.find((c) => c.id === activeId);
       if (current === undefined || current.sessionId === sessionId) return prev;
-      const next = prev.map((c) => (c.id === activeId ? { ...c, sessionId } : c));
+      const next = prev.map((c) => (c.id === activeId ? withSession(c, sessionId) : c));
       saveConversations(next);
       return next;
     });
@@ -273,7 +316,7 @@ export function useConversations(
       saveConversations(
         s.conversations.map((c) =>
           c.id === s.activeId
-            ? retitle({ ...c, messages: kept, sessionId: s.sessionId, live: s.live })
+            ? retitle({ ...withSession(c, s.sessionId), messages: kept, live: s.live })
             : c,
         ),
       );
@@ -365,6 +408,48 @@ export function useConversations(
     });
   }, []);
 
+  // M91.6: the anchor a reply's turn ended on names the session that line
+  // was written in, which a copied reply keeps, so a branch of a branch
+  // forks the session that holds its line. The open thread's messages are
+  // the chat hook's, which hold what the stored copy never keeps (M91.4):
+  // reasoning, structured results and subagents' steps.
+  const branchFrom = useCallback(
+    (threadId: string, messageId: string): string | null => {
+      const source = conversations.find((c) => c.id === threadId);
+      const held = threadId === activeId ? chatRef.current.messages : (source?.messages ?? []);
+      const at = held.findIndex((m) => m.id === messageId);
+      const anchor = held[at]?.role === 'assistant' ? held[at].anchor : undefined;
+      if (source === undefined || at === -1) {
+        useUiStore.getState().toast(NO_SUCH_REPLY);
+        return null;
+      }
+      if (anchor === undefined || anchor.sessionId === '' || anchor.uuid === '') {
+        useUiStore.getState().toast(NO_BRANCH_POINT);
+        return null;
+      }
+      const branch: Conversation = {
+        ...newConversation(),
+        title: source.title,
+        usesDefaultTitle: source.usesDefaultTitle,
+        messages: held.slice(0, at + 1).map(copied),
+        place: source.place ?? null,
+        ...(source.placeLabel === undefined ? {} : { placeLabel: source.placeLabel }),
+        ...(source.vault === undefined ? {} : { vault: source.vault }),
+        model: source.model ?? null,
+        effort: source.effort ?? null,
+        fork: { from: anchor.sessionId, at: anchor.uuid },
+      };
+      // The thread being left keeps its turn running and its card waiting
+      // (M57.6): saved with it.
+      setConversations((prev) => [branch, ...prev]);
+      saveActive(activeId);
+      setActiveId(branch.id);
+      restoreThread(branch);
+      return branch.id;
+    },
+    [activeId, conversations, restoreThread, saveActive],
+  );
+
   const remove = useCallback(
     (id: string) => {
       // Deleting a thread ends its turn (M57.6), active or not: its run is
@@ -419,6 +504,7 @@ export function useConversations(
     rename,
     remove,
     setRunOptions,
+    branchFrom,
     transcript,
     // Another vault's thread keys its session under that vault, so it
     // cannot resume here, whatever the file says.
@@ -426,5 +512,6 @@ export function useConversations(
       active?.vault !== undefined && vault !== null && active.vault !== vault
         ? 'elsewhere'
         : readBlock,
+    ready,
   };
 }

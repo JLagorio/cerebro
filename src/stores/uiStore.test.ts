@@ -8,7 +8,8 @@ function reset() {
   useUiStore.setState({
     detailPath: null,
     aiPanelOpen: false,
-    aiPanelPresentation: 'panel',
+    aiPanelPresentation: 'floating',
+    aiPanelMinimized: true,
     quickOpenVisible: false,
     toasts: [],
   });
@@ -17,6 +18,101 @@ function reset() {
 describe('uiStore', () => {
   beforeEach(reset);
 
+  it('starts document details closed and persists either explicit choice independently of concepts', () => {
+    expect(useUiStore.getInitialState().docPanelOpen).toBe(false);
+    const conceptChoice = useUiStore.getState().conceptPanelOpen;
+    for (const open of [true, false]) {
+      useUiStore.getState().setDocPanelOpen(open);
+      expect(useUiStore.getState().docPanelOpen).toBe(open);
+      expect(localStorage.getItem('cerebro.docPanelOpen')).toBe(String(open));
+      expect(useUiStore.getState().conceptPanelOpen).toBe(conceptChoice);
+    }
+  });
+
+  describe('Pages tree presentation', () => {
+    const fresh = async () => {
+      vi.resetModules();
+      return (await import('./uiStore')).useUiStore;
+    };
+
+    beforeEach(() => {
+      window.localStorage.removeItem('cerebro.pageTreeMode');
+      window.localStorage.removeItem('cerebro.navClosed');
+      window.localStorage.removeItem('cerebro.expandedFolders');
+    });
+
+    it.each([
+      [[], 'collections'],
+      [['collections'], 'folders'],
+      [['pages'], 'collections'],
+      [['collections', 'pages'], 'collections'],
+    ] as const)('derives the first mode from legacy closed sections %j', async (closed, mode) => {
+      const storedClosed = JSON.stringify([...closed, 'agents']);
+      const storedFolders = JSON.stringify({ delivery: true, 'collection:strategy': false });
+      window.localStorage.setItem('cerebro.navClosed', storedClosed);
+      window.localStorage.setItem('cerebro.expandedFolders', storedFolders);
+      const ui = (await fresh()).getState();
+      expect(ui.pageTreeMode).toBe(mode);
+      expect(ui.navClosed).toEqual([...closed, 'agents']);
+      expect(ui.expandedFolders).toEqual(JSON.parse(storedFolders));
+      expect(window.localStorage.getItem('cerebro.navClosed')).toBe(storedClosed);
+      expect(window.localStorage.getItem('cerebro.expandedFolders')).toBe(storedFolders);
+      expect(window.localStorage.getItem('cerebro.pageTreeMode')).toBeNull();
+    });
+
+    it('defaults to Collections without a saved mode or legacy folds', async () => {
+      expect((await fresh()).getState().pageTreeMode).toBe('collections');
+    });
+
+    it.each(['collections', 'folders'] as const)(
+      'restores explicit %s mode ahead of the legacy folds',
+      async (mode) => {
+        window.localStorage.setItem('cerebro.pageTreeMode', mode);
+        window.localStorage.setItem(
+          'cerebro.navClosed',
+          JSON.stringify(mode === 'collections' ? ['collections'] : ['pages']),
+        );
+        expect((await fresh()).getState().pageTreeMode).toBe(mode);
+      },
+    );
+
+    it.each(['', 'Folders', 'true', '{"mode":"folders"}'])(
+      'ignores invalid saved mode %j and uses the legacy choice',
+      async (saved) => {
+        window.localStorage.setItem('cerebro.pageTreeMode', saved);
+        window.localStorage.setItem('cerebro.navClosed', JSON.stringify(['collections']));
+        expect((await fresh()).getState().pageTreeMode).toBe('folders');
+      },
+    );
+
+    it('persists mode changes without changing Home folds or expanded paths', async () => {
+      window.localStorage.setItem('cerebro.navClosed', JSON.stringify(['collections', 'agents']));
+      window.localStorage.setItem('cerebro.expandedFolders', JSON.stringify({ delivery: true }));
+      const store = await fresh();
+      const { navClosed, expandedFolders } = store.getState();
+      const savedValues = () =>
+        Object.fromEntries(
+          Array.from({ length: window.localStorage.length }, (_, index) => {
+            const key = window.localStorage.key(index)!;
+            return [key, window.localStorage.getItem(key)];
+          }),
+        );
+      const before = savedValues();
+      for (const mode of ['collections', 'folders'] as const) {
+        store.getState().setPageTreeMode(mode);
+        expect(store.getState().pageTreeMode).toBe(mode);
+        expect(store.getState().navClosed).toBe(navClosed);
+        expect(store.getState().expandedFolders).toBe(expandedFolders);
+        expect(window.localStorage.getItem('cerebro.pageTreeMode')).toBe(mode);
+        expect(savedValues()).toEqual({
+          ...before,
+          'cerebro.pageTreeMode': mode,
+        });
+        expect((await fresh()).getState().pageTreeMode).toBe(mode);
+      }
+    });
+  });
+
   it('openDetail and closeDetail set detailPath', () => {
     useUiStore.getState().openDetail('items/fld-7.md');
     expect(useUiStore.getState().detailPath).toBe('items/fld-7.md');
@@ -24,7 +120,7 @@ describe('uiStore', () => {
     expect(useUiStore.getState().detailPath).toBeNull();
   });
 
-  it('expands and docks the same assistant without losing the page or conversation request', () => {
+  it('expands, floats and docks the same assistant without losing the page or conversation request', () => {
     const ui = useUiStore.getState();
     ui.openDetail('notes/context.md');
     ui.showConversation('existing-thread');
@@ -32,6 +128,7 @@ describe('uiStore', () => {
     expect(useUiStore.getState()).toMatchObject({
       aiPanelOpen: true,
       aiPanelPresentation: 'canvas',
+      aiPanelMinimized: false,
       detailPath: 'notes/context.md',
       panelConversation: 'existing-thread',
     });
@@ -45,13 +142,44 @@ describe('uiStore', () => {
     ui.openDetail('notes/referenced.md');
     expect(useUiStore.getState()).toMatchObject({
       aiPanelOpen: true,
-      aiPanelPresentation: 'panel',
+      aiPanelPresentation: 'floating',
       detailPath: 'notes/referenced.md',
     });
     ui.openAssistantCanvas();
     ui.setAiPanelOpen(false);
     ui.setAiPanelOpen(true);
-    expect(useUiStore.getState().aiPanelPresentation).toBe('panel');
+    expect(useUiStore.getState().aiPanelPresentation).toBe('floating');
+  });
+
+  it('minimizes without closing or changing the pending conversation and opens explicit requests expanded', () => {
+    const ui = useUiStore.getState();
+    expect(useUiStore.getInitialState().aiPanelPresentation).toBe('floating');
+    expect(useUiStore.getInitialState().aiPanelMinimized).toBe(true);
+    ui.openDetail('notes/context.md');
+    ui.showConversation('held-thread');
+    ui.setAiPanelMinimized(true);
+    expect(useUiStore.getState()).toMatchObject({
+      aiPanelOpen: true,
+      aiPanelMinimized: true,
+      panelConversation: 'held-thread',
+      detailPath: 'notes/context.md',
+    });
+    ui.openAssistantFloating();
+    expect(useUiStore.getState()).toMatchObject({
+      aiPanelOpen: true,
+      aiPanelPresentation: 'floating',
+      aiPanelMinimized: false,
+      panelConversation: 'held-thread',
+    });
+    ui.setAiPanelMinimized(true);
+    ui.askAgent('Review this', 'notes/context.md');
+    expect(useUiStore.getState().aiPanelMinimized).toBe(false);
+    ui.setAiPanelMinimized(true);
+    ui.showConversation('other-thread');
+    expect(useUiStore.getState()).toMatchObject({
+      aiPanelMinimized: false,
+      panelConversation: 'other-thread',
+    });
   });
 
   // M15: one right-hand slot. As independent flags they stacked, and two
@@ -312,6 +440,101 @@ describe('uiStore', () => {
   });
 
   /**
+   * M91.2d. The Subagents switch is the delegate ceiling, two states, stored
+   * under `cerebro.agentDelegate`. It starts on, Rust's default for a watched
+   * run, and a stored value but 'true' reads off.
+   */
+  describe('subagents switch', () => {
+    const fresh = async () => {
+      vi.resetModules();
+      return (await import('./uiStore')).useUiStore.getState();
+    };
+
+    beforeEach(() => {
+      window.localStorage.removeItem('cerebro.agentDelegate');
+    });
+
+    it('defaults to on, and reads any stored value but true as off', async () => {
+      expect((await fresh()).agentDelegate).toBe(true);
+      for (const garbage of ['TRUE', 'on', '1', '', 'false']) {
+        window.localStorage.setItem('cerebro.agentDelegate', garbage);
+        expect((await fresh()).agentDelegate, garbage).toBe(false);
+      }
+    });
+
+    it('persists across a reload', async () => {
+      (await fresh()).setAgentDelegate(false);
+      expect(window.localStorage.getItem('cerebro.agentDelegate')).toBe('false');
+      expect((await fresh()).agentDelegate).toBe(false);
+      (await fresh()).setAgentDelegate(true);
+      expect(window.localStorage.getItem('cerebro.agentDelegate')).toBe('true');
+      expect((await fresh()).agentDelegate).toBe(true);
+    });
+  });
+
+  /**
+   * M92.1. Whether the canvas conversation's details rail docks where it
+   * fits, stored under `cerebro.chatRailOpen`; it starts on. ⌥⌘R asks the
+   * panel, which alone knows whether the rail fits, so the ask is memory and
+   * writes no preference of its own.
+   */
+  describe('conversation details rail', () => {
+    const fresh = async () => {
+      vi.resetModules();
+      return (await import('./uiStore')).useUiStore.getState();
+    };
+
+    beforeEach(() => {
+      window.localStorage.removeItem('cerebro.chatRailOpen');
+      useUiStore.setState({ chatRailRequest: null });
+    });
+
+    it('defaults to on, and reads any stored value but true as off', async () => {
+      expect((await fresh()).chatRailOpen).toBe(true);
+      for (const garbage of ['TRUE', 'on', '1', '', 'false']) {
+        window.localStorage.setItem('cerebro.chatRailOpen', garbage);
+        expect((await fresh()).chatRailOpen, garbage).toBe(false);
+      }
+    });
+
+    it('persists across a reload', async () => {
+      (await fresh()).setChatRailOpen(false);
+      expect(window.localStorage.getItem('cerebro.chatRailOpen')).toBe('false');
+      expect((await fresh()).chatRailOpen).toBe(false);
+      (await fresh()).setChatRailOpen(true);
+      expect(window.localStorage.getItem('cerebro.chatRailOpen')).toBe('true');
+      expect((await fresh()).chatRailOpen).toBe(true);
+    });
+
+    it('opens the canvas with the rail asked for, and toggles it once there', () => {
+      const ui = useUiStore.getState();
+      ui.setAiPanelMinimized(true);
+      ui.toggleChatRail();
+      expect(useUiStore.getState()).toMatchObject({
+        aiPanelOpen: true,
+        aiPanelPresentation: 'canvas',
+        aiPanelMinimized: false,
+        chatRailRequest: 'open',
+      });
+      expect(window.localStorage.getItem('cerebro.aiPanelOpen')).toBe('true');
+      expect(ui.takeChatRailRequest()).toBe('open');
+      expect(useUiStore.getState().chatRailRequest).toBeNull();
+      expect(ui.takeChatRailRequest()).toBeNull();
+      ui.toggleChatRail();
+      expect(useUiStore.getState().chatRailRequest).toBe('toggle');
+      // From the docked panel, the canvas opens with the rail shown.
+      ui.setAiPanelPresentation('panel');
+      ui.toggleChatRail();
+      expect(useUiStore.getState()).toMatchObject({
+        aiPanelPresentation: 'canvas',
+        chatRailRequest: 'open',
+      });
+      // The ask is the panel's to answer: nothing here writes the preference.
+      expect(window.localStorage.getItem('cerebro.chatRailOpen')).toBeNull();
+    });
+  });
+
+  /**
    * M16.36. The store holds the CHOICE — light/dark/system — and never the
    * resolved theme: persisting "dark" because the OS was dark the day the
    * choice was made would freeze it there forever. Resolution lives in
@@ -379,49 +602,115 @@ describe('uiStore', () => {
     });
   });
 
-  // M70.2b — Comments is a panel tab like the rest: chosen, stored as the
-  // bare word, and back on the next launch. A word no build knows reads as
-  // Outline.
-  describe('the side panel tab', () => {
+  // Which panel the side slot shows (owner, 2026-10-19): Details, Comments or
+  // History, each opened by its own button, stored as the bare word under the
+  // key the inspector's tabs were stored by, and back on the next launch. A
+  // word no build knows reads as Details — the retired tabs' among them.
+  describe('the side panel', () => {
     beforeEach(() => window.localStorage.removeItem('cerebro.docPanelTab'));
 
-    it('stores comments and restores it on the next launch', async () => {
-      useUiStore.getState().setDocPanelTab('comments');
-      expect(window.localStorage.getItem('cerebro.docPanelTab')).toBe('comments');
+    it('opens on Details when nothing is stored', async () => {
       vi.resetModules();
       const fresh = (await import('./uiStore')).useUiStore;
-      expect(fresh.getState().docPanelTab).toBe('comments');
+      expect(fresh.getState().docPanel).toBe('details');
+      expect(fresh.getState().conceptPanel).toBe('details');
+      expect(fresh.getState().inboxPanel).toBe('details');
     });
 
-    it('reads an unknown value as outline', async () => {
+    it.each(['comments', 'history'] as const)(
+      'stores %s and restores it on the next launch',
+      async (panel) => {
+        useUiStore.getState().setDocPanel(panel);
+        expect(window.localStorage.getItem('cerebro.docPanelTab')).toBe(panel);
+        vi.resetModules();
+        expect((await import('./uiStore')).useUiStore.getState().docPanel).toBe(panel);
+      },
+    );
+
+    it('reads an unknown value as details', async () => {
       window.localStorage.setItem('cerebro.docPanelTab', 'threads');
       vi.resetModules();
       const fresh = (await import('./uiStore')).useUiStore;
-      expect(fresh.getState().docPanelTab).toBe('outline');
+      expect(fresh.getState().docPanel).toBe('details');
     });
 
-    it("a concept's panel takes comments too", () => {
-      useUiStore.getState().setConceptPanelTab('comments');
-      expect(useUiStore.getState().conceptPanelTab).toBe('comments');
-      useUiStore.getState().setConceptPanelTab('details');
+    // The retired Info, Links and Knowledge tabs are sections of Details,
+    // the Outline is on the page, and Versions became History.
+    it.each(['info', 'links', 'knowledge', 'outline', 'versions'])(
+      'reads the retired %s tab as details',
+      async (old) => {
+        window.localStorage.setItem('cerebro.docPanelTab', old);
+        vi.resetModules();
+        expect((await import('./uiStore')).useUiStore.getState().docPanel).toBe('details');
+      },
+    );
+
+    it("keeps a concept's panel and the Inbox's apart from the doc's, unstored", () => {
+      useUiStore.getState().setDocPanel('details');
+      useUiStore.getState().setConceptPanel('comments');
+      useUiStore.getState().setInboxPanel('history');
+      expect(useUiStore.getState().docPanel).toBe('details');
+      expect(useUiStore.getState().conceptPanel).toBe('comments');
+      expect(useUiStore.getState().inboxPanel).toBe('history');
+      expect(window.localStorage.getItem('cerebro.docPanelTab')).toBe('details');
+      useUiStore.getState().setConceptPanel('details');
+      useUiStore.getState().setInboxPanel('details');
+    });
+  });
+
+  // The inspector's Details sections fold, and the fold is the person's:
+  // stored as the closed set, shared by every page, back on the next launch.
+  describe('the inspector sections', () => {
+    beforeEach(() => {
+      window.localStorage.removeItem('cerebro.inspectorCollapsed');
+      window.localStorage.removeItem('cerebro.docPanelTab');
+      window.localStorage.removeItem('cerebro.docPanelOpen');
+      useUiStore.setState({
+        inspectorCollapsed: [],
+        inspectorReveal: null,
+        docPanelOpen: false,
+        docPanel: 'history',
+      });
     });
 
-    // M58.4 (D18): History is a side panel tab on every page.
-    it('stores history and restores it on the next launch', async () => {
-      useUiStore.getState().setDocPanelTab('history');
-      expect(window.localStorage.getItem('cerebro.docPanelTab')).toBe('history');
+    it('stores a fold as the closed set, once, and forgets it on unfolding', async () => {
+      const { setInspectorSectionOpen } = useUiStore.getState();
+      setInspectorSectionOpen('links', false);
+      setInspectorSectionOpen('links', false);
+      setInspectorSectionOpen('access', false);
+      expect(useUiStore.getState().inspectorCollapsed).toEqual(['links', 'access']);
+      expect(window.localStorage.getItem('cerebro.inspectorCollapsed')).toBe('["links","access"]');
       vi.resetModules();
-      const fresh = (await import('./uiStore')).useUiStore;
-      expect(fresh.getState().docPanelTab).toBe('history');
-      window.localStorage.setItem('cerebro.docPanelTab', 'versions');
-      vi.resetModules();
-      expect((await import('./uiStore')).useUiStore.getState().docPanelTab).toBe('outline');
+      expect((await import('./uiStore')).useUiStore.getState().inspectorCollapsed).toEqual([
+        'links',
+        'access',
+      ]);
+      useUiStore.getState().setInspectorSectionOpen('links', true);
+      expect(useUiStore.getState().inspectorCollapsed).toEqual(['access']);
     });
 
-    it("a concept's panel shows its history too", () => {
-      useUiStore.getState().setConceptPanelTab('history');
-      expect(useUiStore.getState().conceptPanelTab).toBe('history');
-      useUiStore.getState().setConceptPanelTab('details');
+    it('reads a stored fold that does not parse as nothing folded', async () => {
+      window.localStorage.setItem('cerebro.inspectorCollapsed', '{not json');
+      vi.resetModules();
+      expect((await import('./uiStore')).useUiStore.getState().inspectorCollapsed).toEqual([]);
+    });
+
+    it('a reveal opens Details on the section, unfolded, and says so anew each time', () => {
+      useUiStore.getState().setInspectorSectionOpen('knowledge', false);
+      useUiStore.getState().revealInspectorSection('knowledge');
+      const first = useUiStore.getState();
+      expect(first.docPanelOpen).toBe(true);
+      expect(first.docPanel).toBe('details');
+      expect(first.inspectorCollapsed).toEqual([]);
+      expect(first.inspectorReveal?.id).toBe('knowledge');
+      // Kept as the panel's own setters keep them.
+      expect(window.localStorage.getItem('cerebro.docPanelTab')).toBe('details');
+      expect(window.localStorage.getItem('cerebro.docPanelOpen')).toBe('true');
+      expect(window.localStorage.getItem('cerebro.inspectorCollapsed')).toBe('[]');
+      useUiStore.getState().revealInspectorSection('knowledge');
+      expect(useUiStore.getState().inspectorReveal?.seq).toBeGreaterThan(
+        first.inspectorReveal?.seq ?? Infinity,
+      );
     });
   });
 

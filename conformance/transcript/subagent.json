@@ -1,0 +1,371 @@
+{
+  "case": "subagent",
+  "cli_version": "2.1.250",
+  "streams": [
+    {
+      "file": "transcript-subagent.stream.json",
+      "events": [
+        {
+          "kind": "Init",
+          "session_id": "00000000-0000-4000-8000-000000009500"
+        },
+        {
+          "kind": "ModelChanged",
+          "model": "claude-haiku-4-5-20251001"
+        },
+        {
+          "kind": "ThinkingDelta",
+          "text": "The person wants the launch note's status. A "
+        },
+        {
+          "kind": "ThinkingDelta",
+          "text": "researcher can read the note and report back."
+        },
+        {
+          "kind": "Thinking",
+          "message_id": "msg_000000000000000000009501",
+          "text": "The person wants the launch note's status. A researcher can read the note and report back.",
+          "at": "2026-10-22T12:00:02.000Z"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "Agent",
+          "tool_id": "toolu_000000000000000000009501",
+          "input": "{\"description\":\"Read the launch note\",\"subagent_type\":\"cerebro-researcher\",\"prompt\":\"Read projects/launch.md and report its status in one sentence.\"}",
+          "at": "2026-10-22T12:00:02.400Z"
+        },
+        {
+          "kind": "SubagentStarted",
+          "tool_id": "toolu_000000000000000000009501",
+          "agent_id": "a0000000000000001",
+          "subagent_type": "cerebro-researcher",
+          "description": "Read the launch note",
+          "background": false,
+          "depth": 1
+        },
+        {
+          "kind": "Thinking",
+          "message_id": "msg_000000000000000000009511",
+          "text": "I need to read projects/launch.md before I can report its status.",
+          "parent": "toolu_000000000000000000009501",
+          "at": "2026-10-22T12:00:04.000Z"
+        },
+        {
+          "kind": "SubagentProgress",
+          "tool_id": "toolu_000000000000000000009501",
+          "description": "Reading projects/launch.md",
+          "last_tool": "mcp__cerebro__get_note",
+          "tool_uses": 1,
+          "duration_ms": 1600
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__cerebro__get_note",
+          "tool_id": "toolu_000000000000000000009511",
+          "input": "{\"path\":\"projects/launch.md\"}",
+          "parent": "toolu_000000000000000000009501",
+          "at": "2026-10-22T12:00:04.300Z"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009511",
+          "output": "# Launch\n\nStatus: ready for review.\nPress list: still open.\n\n- Review note 1: the copy reads well, and the dates hold.\n- Review note 2: the copy reads well, and the dates hold.\n- Review note 3: the copy reads well, and the dates hold.\n- Review note 4: the copy reads well, and the dates hold.\n- Review note 5: the copy reads well, and the dates hold.\n- Review note 6: the copy reads well, and the dates hold.\n- Review note 7: the copy reads well, and the dates hold.\n- Review note 8: the copy reads well, and the dates hold.\n- Review note 9: the copy reads well, and the dates hold.\n- Review note 10: the copy reads well, and the dates hold.\n- Review note 11: the copy reads well, and the dates hold.\n- Review note 12: the copy reads well, and the dates hold.\n- Review note 13: the copy reads well, and the dates hold.\n- Review note 14: the copy reads well, and the dates hold.\n- Review note 15: the copy reads well, and the dates hold.\n- Review note 16: the copy reads well, and the dates hold.\n- Review note 17: the copy reads well, and the dates hold.\n- Review note 18: the copy reads well, and the dates hold.\n- Review note 19: the copy reads well, and the dates hold.\n- Review note 20: the copy reads well, and the dates hold.\n- Review note 21: the copy reads well, and the dates hold.\n- Review note 22: the copy reads well, and the dates hold.\n- Review note 23: the copy reads well, and the dates hold.\n- Review note 24: the copy reads well, and the dates hold.\n- Review note 25: the copy reads well, and the dates hold.\n- Review note 26: the copy reads well, and the dates hold.\n- Review note 27: the copy reads well, and the dates hold.\n- Review note 28: the copy reads well, and the dates hold.\n- Review note 29: the copy reads well, and the dates hold.\n- Review note 30: the copy reads well, and the dates hold.\n- Review note 31: the copy reads well, and the dates hold.\n- Review note 32: the copy reads well, and the dates hold.\n- Review note 33: the copy reads well, and the dates hold.\n-…",
+          "is_error": false,
+          "parent": "toolu_000000000000000000009501",
+          "at": "2026-10-22T12:00:04.500Z"
+        },
+        {
+          "kind": "Thinking",
+          "message_id": "msg_000000000000000000009512",
+          "text": "It says ready for review, with the press list still open.",
+          "parent": "toolu_000000000000000000009501",
+          "at": "2026-10-22T12:00:06.000Z"
+        },
+        {
+          "kind": "Text",
+          "message_id": "msg_000000000000000000009512",
+          "text": "The launch note is ready for review, but its press list is still open.",
+          "parent": "toolu_000000000000000000009501",
+          "at": "2026-10-22T12:00:06.200Z"
+        },
+        {
+          "kind": "SubagentDone",
+          "tool_id": "toolu_000000000000000000009501",
+          "status": "completed",
+          "tool_uses": 1,
+          "duration_ms": 3800
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009501",
+          "output": "The launch note is ready for review, but its press list is still open.",
+          "is_error": false,
+          "at": "2026-10-22T12:00:06.300Z"
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009501",
+          "data": {
+            "type": "agent",
+            "agent_id": "a0000000000000001",
+            "agent_type": "cerebro-researcher",
+            "status": "completed",
+            "tool_uses": 1,
+            "duration_ms": 3800,
+            "model": "claude-haiku-4-5-20251001",
+            "summary": "The launch note is ready for review, but its press list is still open."
+          }
+        },
+        {
+          "kind": "ThinkingDelta",
+          "text": "The researcher says the note is ready "
+        },
+        {
+          "kind": "ThinkingDelta",
+          "text": "for review, but the press list is open."
+        },
+        {
+          "kind": "Thinking",
+          "message_id": "msg_000000000000000000009502",
+          "text": "The researcher says the note is ready for review, but the press list is open.",
+          "at": "2026-10-22T12:00:08.000Z"
+        },
+        {
+          "kind": "TextDelta",
+          "text": "Almost: the launch note is ready for re"
+        },
+        {
+          "kind": "TextDelta",
+          "text": "view, but its press list is still open."
+        },
+        {
+          "kind": "Text",
+          "message_id": "msg_000000000000000000009502",
+          "text": "Almost: the launch note is ready for review, but its press list is still open.",
+          "at": "2026-10-22T12:00:08.400Z"
+        },
+        {
+          "kind": "Result",
+          "text": "Almost: the launch note is ready for review, but its press list is still open.",
+          "session_id": "00000000-0000-4000-8000-000000009500",
+          "duration_ms": 9000
+        },
+        {
+          "kind": "TurnEnded",
+          "stop_reason": "end_turn",
+          "last_uuid": "00000000-0000-4000-8000-000009500111"
+        }
+      ],
+      "classes": {
+        "translated": 21,
+        "ignored": {
+          "a background task's status changing; its notification carries how it ended": 1,
+          "a block closing, with nothing new in it": 4,
+          "a block opening; its content follows as deltas, or whole on the assistant line": 4,
+          "a progress word such as requesting; the panel shows its own": 2,
+          "a running estimate of the thinking tokens, sent beside each thinking delta; the result carries the usage": 4,
+          "a thinking block's signature, with nothing to show": 2,
+          "a tool call's input in pieces; the assistant line carries it whole": 1,
+          "the turn's end, with nothing new in it": 2,
+          "the turn's model and opening usage; the assistant line and the result carry both": 2,
+          "the turn's stop reason and running usage; the assistant line and the result carry both": 2,
+          "words sent to a subagent, such as its prompt, which its Agent call's input already holds": 1
+        },
+        "unclassified": {}
+      }
+    }
+  ],
+  "session": {
+    "file": "transcript-subagent.session.json",
+    "agents": "transcript-subagent.agents",
+    "events": [
+      {
+        "kind": "UserPrompt",
+        "text": "Have a researcher read the launch note and tell me its status.",
+        "uuid": "00000000-0000-4000-8000-000009500002"
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "Thinking",
+        "message_id": "msg_000000000000000000009501",
+        "text": "The person wants the launch note's status. A researcher can read the note and report back.",
+        "at": "2026-10-22T12:00:02.000Z"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "Agent",
+        "tool_id": "toolu_000000000000000000009501",
+        "input": "{\"description\":\"Read the launch note\",\"subagent_type\":\"cerebro-researcher\",\"prompt\":\"Read projects/launch.md and report its status in one sentence.\"}",
+        "at": "2026-10-22T12:00:02.400Z"
+      },
+      {
+        "kind": "Thinking",
+        "message_id": "msg_000000000000000000009511",
+        "text": "I need to read projects/launch.md before I can report its status.",
+        "parent": "toolu_000000000000000000009501",
+        "at": "2026-10-22T12:00:04.000Z"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "mcp__cerebro__get_note",
+        "tool_id": "toolu_000000000000000000009511",
+        "input": "{\"path\":\"projects/launch.md\"}",
+        "parent": "toolu_000000000000000000009501",
+        "at": "2026-10-22T12:00:04.300Z"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000009511",
+        "output": "# Launch\n\nStatus: ready for review.\nPress list: still open.\n\n- Review note 1: the copy reads well, and the dates hold.\n- Review note 2: the copy reads well, and the dates hold.\n- Review note 3: the copy reads well, and the dates hold.\n- Review note 4: the copy reads well, and the dates hold.\n- Review note 5: the copy reads well, and the dates hold.\n- Review note 6: the copy reads well, and the dates hold.\n- Review note 7: the copy reads well, and the dates hold.\n- Review note 8: the copy reads well, and the dates hold.\n- Review note 9: the copy reads well, and the dates hold.\n- Review note 10: the copy reads well, and the dates hold.\n- Review note 11: the copy reads well, and the dates hold.\n- Review note 12: the copy reads well, and the dates hold.\n- Review note 13: the copy reads well, and the dates hold.\n- Review note 14: the copy reads well, and the dates hold.\n- Review note 15: the copy reads well, and the dates hold.\n- Review note 16: the copy reads well, and the dates hold.\n- Review note 17: the copy reads well, and the dates hold.\n- Review note 18: the copy reads well, and the dates hold.\n- Review note 19: the copy reads well, and the dates hold.\n- Review note 20: the copy reads well, and the dates hold.\n- Review note 21: the copy reads well, and the dates hold.\n- Review note 22: the copy reads well, and the dates hold.\n- Review note 23: the copy reads well, and the dates hold.\n- Review note 24: the copy reads well, and the dates hold.\n- Review note 25: the copy reads well, and the dates hold.\n- Review note 26: the copy reads well, and the dates hold.\n- Review note 27: the copy reads well, and the dates hold.\n- Review note 28: the copy reads well, and the dates hold.\n- Review note 29: the copy reads well, and the dates hold.\n- Review note 30: the copy reads well, and the dates hold.\n- Review note 31: the copy reads well, and the dates hold.\n- Review note 32: the copy reads well, and the dates hold.\n- Review note 33: the copy reads well, and the dates hold.\n-…",
+        "is_error": false,
+        "parent": "toolu_000000000000000000009501",
+        "at": "2026-10-22T12:00:04.500Z"
+      },
+      {
+        "kind": "Thinking",
+        "message_id": "msg_000000000000000000009512",
+        "text": "It says ready for review, with the press list still open.",
+        "parent": "toolu_000000000000000000009501",
+        "at": "2026-10-22T12:00:06.000Z"
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000009512",
+        "text": "The launch note is ready for review, but its press list is still open.",
+        "parent": "toolu_000000000000000000009501",
+        "at": "2026-10-22T12:00:06.200Z"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000009501",
+        "output": "The launch note is ready for review, but its press list is still open.",
+        "is_error": false,
+        "at": "2026-10-22T12:00:06.300Z"
+      },
+      {
+        "kind": "ToolResult",
+        "tool_id": "toolu_000000000000000000009501",
+        "data": {
+          "type": "agent",
+          "agent_id": "a0000000000000001",
+          "agent_type": "cerebro-researcher",
+          "status": "completed",
+          "tool_uses": 1,
+          "duration_ms": 3800,
+          "model": "claude-haiku-4-5-20251001",
+          "summary": "The launch note is ready for review, but its press list is still open."
+        }
+      },
+      {
+        "kind": "Thinking",
+        "message_id": "msg_000000000000000000009502",
+        "text": "The researcher says the note is ready for review, but the press list is open.",
+        "at": "2026-10-22T12:00:08.000Z"
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000009502",
+        "text": "Almost: the launch note is ready for review, but its press list is still open.",
+        "at": "2026-10-22T12:00:08.400Z"
+      },
+      {
+        "kind": "TurnEnded",
+        "last_uuid": "00000000-0000-4000-8000-000009500111"
+      }
+    ],
+    "classes": {
+      "translated": 11,
+      "ignored": {
+        "a prompt entering or leaving the CLI's queue; the prompt line follows": 2,
+        "the last prompt again, for the CLI's own resume picker": 1,
+        "words sent to a subagent, such as its prompt, which its Agent call's input already holds": 1
+      },
+      "unclassified": {}
+    }
+  },
+  "content": [
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "Thinking",
+          "text": "The person wants the launch note's status. A researcher can read the note and report back.",
+          "redacted": false
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "Agent",
+          "tool_id": "toolu_000000000000000000009501",
+          "input": "{\"description\":\"Read the launch note\",\"subagent_type\":\"cerebro-researcher\",\"prompt\":\"Read projects/launch.md and report its status in one sentence.\"}"
+        },
+        {
+          "kind": "Thinking",
+          "text": "I need to read projects/launch.md before I can report its status.",
+          "redacted": false,
+          "parent": "toolu_000000000000000000009501"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__cerebro__get_note",
+          "tool_id": "toolu_000000000000000000009511",
+          "input": "{\"path\":\"projects/launch.md\"}",
+          "parent": "toolu_000000000000000000009501"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009511",
+          "output": "# Launch\n\nStatus: ready for review.\nPress list: still open.\n\n- Review note 1: the copy reads well, and the dates hold.\n- Review note 2: the copy reads well, and the dates hold.\n- Review note 3: the copy reads well, and the dates hold.\n- Review note 4: the copy reads well, and the dates hold.\n- Review note 5: the copy reads well, and the dates hold.\n- Review note 6: the copy reads well, and the dates hold.\n- Review note 7: the copy reads well, and the dates hold.\n- Review note 8: the copy reads well, and the dates hold.\n- Review note 9: the copy reads well, and the dates hold.\n- Review note 10: the copy reads well, and the dates hold.\n- Review note 11: the copy reads well, and the dates hold.\n- Review note 12: the copy reads well, and the dates hold.\n- Review note 13: the copy reads well, and the dates hold.\n- Review note 14: the copy reads well, and the dates hold.\n- Review note 15: the copy reads well, and the dates hold.\n- Review note 16: the copy reads well, and the dates hold.\n- Review note 17: the copy reads well, and the dates hold.\n- Review note 18: the copy reads well, and the dates hold.\n- Review note 19: the copy reads well, and the dates hold.\n- Review note 20: the copy reads well, and the dates hold.\n- Review note 21: the copy reads well, and the dates hold.\n- Review note 22: the copy reads well, and the dates hold.\n- Review note 23: the copy reads well, and the dates hold.\n- Review note 24: the copy reads well, and the dates hold.\n- Review note 25: the copy reads well, and the dates hold.\n- Review note 26: the copy reads well, and the dates hold.\n- Review note 27: the copy reads well, and the dates hold.\n- Review note 28: the copy reads well, and the dates hold.\n- Review note 29: the copy reads well, and the dates hold.\n- Review note 30: the copy reads well, and the dates hold.\n- Review note 31: the copy reads well, and the dates hold.\n- Review note 32: the copy reads well, and the dates hold.\n- Review note 33: the copy reads well, and the dates hold.\n-…",
+          "is_error": false,
+          "parent": "toolu_000000000000000000009501"
+        },
+        {
+          "kind": "Thinking",
+          "text": "It says ready for review, with the press list still open.",
+          "redacted": false,
+          "parent": "toolu_000000000000000000009501"
+        },
+        {
+          "kind": "Text",
+          "text": "The launch note is ready for review, but its press list is still open.",
+          "parent": "toolu_000000000000000000009501"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009501",
+          "output": "The launch note is ready for review, but its press list is still open.",
+          "is_error": false
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009501",
+          "data": {
+            "type": "agent",
+            "agent_id": "a0000000000000001",
+            "agent_type": "cerebro-researcher",
+            "status": "completed",
+            "tool_uses": 1,
+            "duration_ms": 3800,
+            "model": "claude-haiku-4-5-20251001",
+            "summary": "The launch note is ready for review, but its press list is still open."
+          }
+        },
+        {
+          "kind": "Thinking",
+          "text": "The researcher says the note is ready for review, but the press list is open.",
+          "redacted": false
+        },
+        {
+          "kind": "Text",
+          "text": "Almost: the launch note is ready for review, but its press list is still open."
+        },
+        {
+          "kind": "TurnEnded",
+          "last_uuid": "00000000-0000-4000-8000-000009500111"
+        }
+      ]
+    }
+  ]
+}

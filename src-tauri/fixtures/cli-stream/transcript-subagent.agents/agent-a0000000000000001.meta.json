@@ -1,0 +1,7 @@
+{
+  "synthetic": "hand-shaped from Claude Code 2.1.250's measured shapes (M91.3b), not recorded: synthetic ids, and M91.R's live recording replaces it",
+  "agentType": "cerebro-researcher",
+  "description": "Read the launch note",
+  "toolUseId": "toolu_000000000000000000009501",
+  "spawnDepth": 1
+}

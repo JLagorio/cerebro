@@ -1,0 +1,4 @@
+
+> cerebro@0.1.0 lint /Users/joseflagorio/Development/cerebro
+> eslint . --max-warnings=0
+

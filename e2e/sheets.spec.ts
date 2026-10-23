@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { boot, readMockFile, seedFileBeforeBoot, openDestination, showPages } from './boot';
+import { boot, readMockFile, seedFileBeforeBoot, openDestination, showPageFolders } from './boot';
 
 const path = 'studio/budget/index.md';
 const source =
@@ -36,7 +36,7 @@ test('page sheets retain their exact fences through typing and an unmount flush,
   const seeded = `${source}\n\`\`\`cerebro-sheet\n${wide}\n\`\`\`\n\nClosing notes.\n`;
   await seedFileBeforeBoot(page, pagePath, seeded);
   await boot(page);
-  await showPages(page);
+  await showPageFolders(page);
   const tree = page.getByTestId('file-tree');
   const folder = tree.getByTestId('tree-folder').filter({ hasText: 'Strategy' });
   if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click();

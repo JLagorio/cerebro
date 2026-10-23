@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { StateMessage } from '@/components/ui/StateMessage';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { runDuration, runForest, runStatus, type RunNode } from '@/agent/elements/runs';
+import { StepIcon } from '@/components/ai/StepLine';
+import { TraceDescription, TraceLine, TraceTitle } from '@/components/ai/Trace';
 import { Select } from '@/components/ui/Select';
 import { actorLabel, CONSTRUCT_ACTORS } from '@/engine/authors';
+import type { Entry } from '@/engine/types';
 import { relativeWhen } from '@/engine/whenText';
 import * as ipc from '@/lib/ipc';
 import type { FleetFilter, FleetRun, FleetRunDetail } from '@/lib/ipc';
@@ -8,6 +13,7 @@ import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { RunDetailPanel } from './RunDetailPanel';
 import { RunWhy } from './RunWhy';
+import './runs.css';
 
 /**
  * The run history — one level under the roster (M33.5, re-homed in M33b.3).
@@ -46,6 +52,13 @@ import { RunWhy } from './RunWhy';
  *
  * The read is SELECT-only and recomputed on every filter change. Nothing is
  * cached, so this list cannot drift from what the database holds.
+ *
+ * **A run is a trace line (M91.14).** Its state is its icon, its ink and,
+ * for a screen reader, a word before it; a running run's name carries the
+ * working light; how long it took shows only when both its ends were
+ * recorded (an abandoned run's end is the sweep's, so it shows none). A hop stands under the run that caused it (`parent_run_id`), on
+ * the trace's rule, rather than where its own start would put it; a hop whose
+ * parent the filters left out is a row of its own.
  */
 
 const MODES = ['attended', 'ambient'].map((mode) => ({ value: mode, label: mode }));
@@ -71,17 +84,20 @@ function Chip({
   options: Option[];
   onChange: (next: string) => void;
 }) {
+  // Generated, not `fleet-filter-<id>`: two panes can each hold this section.
+  const control = useId();
   return (
-    <label className="flex items-center gap-1 text-2xs text-n-500">
-      {label}
+    <span className="flex items-center gap-1 text-metadata text-(--text-meta)">
+      <label htmlFor={control}>{label}</label>
       <Select
+        id={control}
         testId={`fleet-filter-${id}`}
         size="sm"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
         options={[{ value: '', label: 'any' }, ...options]}
       />
-    </label>
+    </span>
   );
 }
 
@@ -144,22 +160,26 @@ export function FleetSection({
   // Every actor the page can currently offer: the constructs, which exist
   // whether or not they have run — so "has ingest run at all?" is answered
   // with a no rather than by a missing option — plus whatever else this page
-  // is holding. Labelled in words, valued raw: the query matches the stamp.
+  // is holding, the chosen one included: an agent the roster picked before
+  // it ever ran still names itself on the chip. Labelled in words, valued
+  // raw: the query matches the stamp.
   const actorOptions = useMemo(() => {
     const seen = new Set(CONSTRUCT_ACTORS.map((c) => c.actor));
     if (state.kind === 'ready') {
       for (const run of state.runs) if (run.actor !== null) seen.add(run.actor);
     }
+    if (actor !== '') seen.add(actor);
     return [...seen]
       .map((raw) => ({ value: raw, label: actorLabel(raw, entries).text }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [state, entries]);
+  }, [state, entries, actor]);
 
   const laneOptions = useMemo(() => {
     const seen = new Set<string>();
     if (state.kind === 'ready') for (const run of state.runs) seen.add(run.lane);
-    return [...seen].sort().map((lane) => ({ value: lane, label: lane }));
-  }, [state]);
+    if (lane !== '') seen.add(lane);
+    return [...seen].sort().map((value) => ({ value, label: value }));
+  }, [state, lane]);
 
   const openRun = useCallback(async (runId: string) => {
     try {
@@ -186,92 +206,157 @@ export function FleetSection({
         <Chip id="actor" label="actor" value={actor} options={actorOptions} onChange={setActor} />
       </div>
 
-      {state.kind === 'loading' && <p className="text-xs text-n-400">Reading…</p>}
+      {state.kind === 'loading' && (
+        <StateMessage state="loading" title="Reading recent runs…" compact />
+      )}
 
       {state.kind === 'unavailable' && (
-        <p data-testid="section-unavailable" className="text-xs text-n-500">
+        <p data-testid="section-unavailable" className="text-metadata text-(--text-meta)">
           The run history could not be read, so nothing here is a statement about what has run.
         </p>
       )}
 
       {state.kind === 'ready' && state.runs.length === 0 && (
-        <p data-testid="section-empty" className="text-xs text-n-500">
+        <p data-testid="section-empty" className="text-metadata text-(--text-meta)">
           Nothing has run under these filters.
         </p>
       )}
 
       {state.kind === 'ready' &&
-        state.runs.map((run) => {
-          const who = actorLabel(run.actor, entries);
-          return (
-            <button
-              key={run.run_id}
-              type="button"
-              data-testid="fleet-row"
-              data-run={run.run_id}
-              data-outcome={run.outcome}
-              // A table row, not a card (M42.4): hairline below, wash on hover,
-              // and the border box gone with it.
-              className="flex w-full items-center gap-2 rounded-md border-0 border-b border-n-100 px-2.5 py-1.5 text-left last:border-b-0 hover:bg-n-50"
-              onClick={() => void openRun(run.run_id)}
-            >
-              {/* NULL is a category, not a blank; the stamp is a hover away. */}
-              <span
-                data-testid="fleet-actor"
-                title={who.raw ?? undefined}
-                className="min-w-0 flex-1 truncate text-xs text-n-800"
-              >
-                {who.text}
-              </span>
-              {/* WHEN. Carried from M33.1–.10: these rows said who, what lane,
-                what outcome and what it cost, and never once said when — so a
-                run from this morning and one from March read identically, and
-                "newest first" was an ordering nobody could verify. The exact
-                stamp stays in the title; the visible text is the one a reader
-                can act on. */}
-              <span
-                data-testid="fleet-when"
-                title={run.started_at}
-                className="whitespace-nowrap text-2xs text-n-500"
-              >
-                {relativeWhen(run.started_at, now)}
-              </span>
-              {/* WHY it started (M56.7), in Rust's words, and how late a
-                schedule's fire ran. A row from before reads "why not
-                recorded". */}
-              <RunWhy cause={run.cause} startedAt={run.started_at} />
-              <span className="text-2xs text-n-500">{run.lane}</span>
-              {/* Sentence case: the DS reserves capitals for eyebrows, and an
-                outcome is a fact, not a headline (M42.4). */}
-              <span
-                className="rounded-md px-1.5 py-0.5 text-2xs text-n-600"
-                style={{ border: '1px solid var(--n-200)' }}
-                data-testid="fleet-outcome"
-              >
-                {run.outcome.replace(/_/g, ' ')}
-              </span>
-              <span className="tabular-nums text-2xs text-n-600">
-                {run.usage_state === 'exact' ? (
-                  `${(run.input_tokens + run.output_tokens).toLocaleString()} tokens`
-                ) : (
-                  // The zeros in the columns are not a measurement.
-                  <span data-testid="usage-unknown">unknown</span>
-                )}
-              </span>
-              <span className="tabular-nums text-2xs text-n-500">
-                {run.applied === null || run.rejected === null ? (
-                  // Nothing booked these before M49.9; the zeros the row was
-                  // inserted with are not a measurement.
-                  <span data-testid="proposals-unrecorded">proposals not recorded</span>
-                ) : (
-                  `${run.applied} applied · ${run.rejected} rejected`
-                )}
-              </span>
-            </button>
-          );
-        })}
+        runForest(state.runs).map((node) => (
+          // A table row, not a card (M42.4): a hairline under each chain,
+          // wash on hover, and the border box gone with it.
+          <div
+            key={node.run.run_id}
+            className="cb-fleet-chain border-b border-n-100 last:border-b-0"
+          >
+            <FleetChain node={node} entries={entries} now={now} onOpen={openRun} />
+          </div>
+        ))}
 
       {open !== null && <RunDetailPanel detail={open} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+/** A run's row, then the hops it caused, each a row of its own on the rule. */
+function FleetChain({
+  node,
+  entries,
+  now,
+  onOpen,
+}: {
+  node: RunNode<FleetRun>;
+  entries: Entry[];
+  now: Date;
+  onOpen: (runId: string) => Promise<void>;
+}) {
+  return (
+    <>
+      <FleetRow run={node.run} entries={entries} now={now} onOpen={onOpen} />
+      {node.hops.length > 0 && (
+        <div className="cb-run-hops" data-hops={node.run.run_id}>
+          {node.hops.map((hop) => (
+            <FleetChain
+              key={hop.run.run_id}
+              node={hop}
+              entries={entries}
+              now={now}
+              onOpen={onOpen}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function FleetRow({
+  run,
+  entries,
+  now,
+  onOpen,
+}: {
+  run: FleetRun;
+  entries: Entry[];
+  now: Date;
+  onOpen: (runId: string) => Promise<void>;
+}) {
+  const who = actorLabel(run.actor, entries);
+  const status = runStatus(run.outcome);
+  const took = runDuration(run);
+  return (
+    <button
+      type="button"
+      data-testid="fleet-row"
+      data-run={run.run_id}
+      data-outcome={run.outcome}
+      className="flex w-full rounded-md border-0 bg-transparent px-2.5 py-1.5 text-left hover:bg-n-50"
+      onClick={() => void onOpen(run.run_id)}
+    >
+      <TraceLine status={status.trace} statusText={status.statusText} className="cb-run-line">
+        <StepIcon state={status.state} icon={status.icon} />
+        {/* NULL is a category, not a blank; the stamp is a hover away. */}
+        <TraceTitle
+          data-testid="fleet-actor"
+          title={who.raw ?? undefined}
+          className="flex-1 text-ui text-n-800"
+        >
+          {who.text}
+        </TraceTitle>
+        {/* WHEN. Carried from M33.1–.10: these rows said who, what lane,
+          what outcome and what it cost, and never once said when — so a run
+          from this morning and one from March read identically, and "newest
+          first" was an ordering nobody could verify. The exact stamp stays in
+          the title; the visible text is the one a reader can act on. */}
+        <span
+          data-testid="fleet-when"
+          title={run.started_at}
+          className="whitespace-nowrap text-metadata text-(--text-meta)"
+        >
+          {relativeWhen(run.started_at, now)}
+        </span>
+        {/* WHY it started (M56.7), in Rust's words, and how late a schedule's
+          fire ran. A row from before reads "why not recorded". */}
+        <RunWhy cause={run.cause} startedAt={run.started_at} />
+        <span className="text-metadata text-(--text-meta)">{run.lane}</span>
+        {/* Sentence case: the DS reserves capitals for eyebrows, and an
+          outcome is a fact, not a headline (M42.4). */}
+        <span
+          className="rounded-md px-1.5 py-0.5 text-metadata text-n-600"
+          style={{ border: '1px solid var(--n-200)' }}
+          data-testid="fleet-outcome"
+        >
+          {status.words}
+        </span>
+        {/* How long it took, only when both its ends were recorded. */}
+        {took !== undefined && (
+          <TraceDescription
+            data-testid="fleet-took"
+            title={`${run.started_at} → ${run.ended_at ?? ''}`}
+            className="text-metadata"
+          >
+            {took}
+          </TraceDescription>
+        )}
+        <span className="tabular-nums text-metadata text-n-600">
+          {run.usage_state === 'exact' ? (
+            `${(run.input_tokens + run.output_tokens).toLocaleString()} tokens`
+          ) : (
+            // The zeros in the columns are not a measurement.
+            <span data-testid="usage-unknown">unknown</span>
+          )}
+        </span>
+        <span className="tabular-nums text-metadata text-(--text-meta)">
+          {run.applied === null || run.rejected === null ? (
+            // Nothing booked these before M49.9; the zeros the row was
+            // inserted with are not a measurement.
+            <span data-testid="proposals-unrecorded">proposals not recorded</span>
+          ) : (
+            `${run.applied} applied · ${run.rejected} rejected`
+          )}
+        </span>
+      </TraceLine>
+    </button>
   );
 }

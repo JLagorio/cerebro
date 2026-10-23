@@ -1,0 +1,627 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "synthetic": "hand-shaped from Claude Code 2.1.250's measured shapes (M91.3a), not recorded: synthetic ids, and M91.R's live recording replaces it",
+    "cwd": "/vault",
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "tools": ["Read", "ToolSearch", "WebFetch", "WebSearch"],
+    "mcp_servers": [
+      {
+        "name": "cerebro",
+        "status": "connected"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "permissionMode": "default",
+    "apiKeySource": "none",
+    "claude_code_version": "2.1.250",
+    "uuid": "00000000-0000-4000-8000-000009300001"
+  },
+  {
+    "type": "system",
+    "subtype": "status",
+    "status": "requesting",
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300501"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_start",
+      "message": {
+        "model": "claude-haiku-4-5-20251001",
+        "id": "msg_000000000000000000009301",
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "stop_reason": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300502"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": {
+        "type": "thinking",
+        "thinking": "",
+        "signature": ""
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300503"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 6,
+    "estimated_tokens_delta": 6,
+    "uuid": "00000000-0000-4000-8000-000009300504",
+    "session_id": "00000000-0000-4000-8000-000000009300"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "thinking_delta",
+        "thinking": "",
+        "estimated_tokens": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300505"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 12,
+    "estimated_tokens_delta": 6,
+    "uuid": "00000000-0000-4000-8000-000009300506",
+    "session_id": "00000000-0000-4000-8000-000000009300"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "thinking_delta",
+        "thinking": "",
+        "estimated_tokens": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300507"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "signature_delta",
+        "signature": "sig-9301"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300508"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009301",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "signature": "sig-9301"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300101",
+    "timestamp": "2026-10-22T12:00:02.000Z",
+    "request_id": "req_000000000000000000009301"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 0
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300509"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 1,
+      "content_block": {
+        "type": "tool_use",
+        "id": "toolu_000000000000000000009301",
+        "name": "WebSearch",
+        "input": {}
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300510"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": {
+        "type": "input_json_delta",
+        "partial_json": "{\"query\":\"example docs trace component\"}"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300511"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009301",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009301",
+          "name": "WebSearch",
+          "input": {
+            "query": "example docs trace component"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300102",
+    "timestamp": "2026-10-22T12:00:02.200Z",
+    "request_id": "req_000000000000000000009301"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 1
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300512"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 2,
+      "content_block": {
+        "type": "tool_use",
+        "id": "toolu_000000000000000000009302",
+        "name": "WebFetch",
+        "input": {}
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300513"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 2,
+      "delta": {
+        "type": "input_json_delta",
+        "partial_json": "{\"url\":\"https://example.com/docs/components/trace\",\"prompt\":\"What is the Trace component? Describe it in one sentence.\"}"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300514"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009301",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009302",
+          "name": "WebFetch",
+          "input": {
+            "url": "https://example.com/docs/components/trace",
+            "prompt": "What is the Trace component? Describe it in one sentence."
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300103",
+    "timestamp": "2026-10-22T12:00:02.600Z",
+    "request_id": "req_000000000000000000009301"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 2
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300515"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_delta",
+      "delta": {
+        "stop_reason": "tool_use",
+        "stop_sequence": null
+      },
+      "usage": {
+        "output_tokens": 40
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300516"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_stop"
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300517"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009302",
+          "type": "tool_result",
+          "content": "The Trace component is a list of lines, each with an icon, a title and an optional description."
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300104",
+    "timestamp": "2026-10-22T12:00:05.800Z",
+    "tool_use_result": {
+      "bytes": 55102,
+      "code": 200,
+      "codeText": "OK",
+      "result": "The Trace component is a list of lines, each with an icon, a title and an optional description.",
+      "durationMs": 3151,
+      "url": "https://example.com/docs/components/trace"
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009301",
+          "type": "tool_result",
+          "content": "Web search results for query: \"example docs trace component\"\n\nLinks: [{\"title\":\"Trace - Example Docs\",\"url\":\"https://example.com/docs/components/trace\"},{\"title\":\"Changelog - Example Docs\",\"url\":\"https://example.com/docs/changelog\"}]\n\nBased on the search results, the Trace component draws a list of lines."
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300105",
+    "timestamp": "2026-10-22T12:00:08.500Z",
+    "tool_use_result": {
+      "query": "example docs trace component",
+      "results": [
+        {
+          "tool_use_id": "srvtoolu_000000000000000000009301",
+          "content": [
+            {
+              "title": "Trace - Example Docs",
+              "url": "https://example.com/docs/components/trace"
+            },
+            {
+              "title": "Changelog - Example Docs",
+              "url": "https://example.com/docs/changelog"
+            }
+          ]
+        },
+        "Based on the search results, the Trace component draws a list of lines."
+      ],
+      "durationSeconds": 6.2,
+      "searchCount": 1
+    }
+  },
+  {
+    "type": "system",
+    "subtype": "status",
+    "status": "requesting",
+    "uuid": "00000000-0000-4000-8000-000009300518",
+    "session_id": "00000000-0000-4000-8000-000000009300"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_start",
+      "message": {
+        "model": "claude-haiku-4-5-20251001",
+        "id": "msg_000000000000000000009302",
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "stop_reason": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300519"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": {
+        "type": "thinking",
+        "thinking": "",
+        "signature": ""
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300520"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 6,
+    "estimated_tokens_delta": 6,
+    "uuid": "00000000-0000-4000-8000-000009300521",
+    "session_id": "00000000-0000-4000-8000-000000009300"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "thinking_delta",
+        "thinking": "",
+        "estimated_tokens": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300522"
+  },
+  {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "estimated_tokens": 12,
+    "estimated_tokens_delta": 6,
+    "uuid": "00000000-0000-4000-8000-000009300523",
+    "session_id": "00000000-0000-4000-8000-000000009300"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "thinking_delta",
+        "thinking": "",
+        "estimated_tokens": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300524"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "signature_delta",
+        "signature": "sig-9302"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300525"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009302",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "signature": "sig-9302"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300106",
+    "timestamp": "2026-10-22T12:00:10.000Z",
+    "request_id": "req_000000000000000000009302"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 0
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300526"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 1,
+      "content_block": {
+        "type": "text",
+        "text": ""
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300527"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": {
+        "type": "text_delta",
+        "text": "The Trace component is a list of lines, each wi"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300528"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": {
+        "type": "text_delta",
+        "text": "th an icon, a title and an optional description."
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300529"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009302",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "The Trace component is a list of lines, each with an icon, a title and an optional description."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300107",
+    "timestamp": "2026-10-22T12:00:10.400Z",
+    "request_id": "req_000000000000000000009302"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 1
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300530"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_delta",
+      "delta": {
+        "stop_reason": "end_turn",
+        "stop_sequence": null
+      },
+      "usage": {
+        "output_tokens": 40
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300531"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_stop"
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300532"
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "duration_ms": 9000,
+    "duration_api_ms": 7000,
+    "num_turns": 2,
+    "result": "The Trace component is a list of lines, each with an icon, a title and an optional description.",
+    "stop_reason": "end_turn",
+    "total_cost_usd": 0.004,
+    "usage": {
+      "input_tokens": 12,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 6100,
+      "output_tokens": 160
+    },
+    "modelUsage": {},
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "session_id": "00000000-0000-4000-8000-000000009300",
+    "uuid": "00000000-0000-4000-8000-000009300999"
+  }
+]

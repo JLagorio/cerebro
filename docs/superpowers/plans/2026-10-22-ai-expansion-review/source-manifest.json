@@ -1,0 +1,650 @@
+{
+  "review_date": "2026-10-22",
+  "captured_at_utc": "2026-10-22T21:13:40.706152+00:00",
+  "cerebro_head": "23479518c2827d361c9c970abfac8245f9d84600",
+  "scope": "Linked local evidence and explicitly named integration seams; final hashes are not an atomic snapshot of individual reviewer checkpoints. Unpacked reference upstream commits are unverified.",
+  "application_code_changed_by_review": false,
+  "tests_or_reference_apps_executed": false,
+  "preexisting_paths_checked": 3109,
+  "preexisting_paths_changed": [],
+  "markdown_documents": 11,
+  "local_links_checked": 254,
+  "missing_local_links": [],
+  "external_links": [
+    "https://blog.modelcontextprotocol.io/posts/2026-07-28/",
+    "https://github.com/toml-lang/toml.io/blob/main/specs/en/v1.0.0.md",
+    "https://modelcontextprotocol.io/extensions/apps/overview",
+    "https://modelcontextprotocol.io/extensions/tasks/overview",
+    "https://modelcontextprotocol.io/specification/2026-07-28",
+    "https://modelcontextprotocol.io/specification/2026-07-28/changelog",
+    "https://tauri.app/concept/inter-process-communication/",
+    "https://v2.tauri.app/start/",
+    "https://www.sqlite.org/backup.html"
+  ],
+  "sources": {
+    "AGENTS.md": {
+      "sha256": "a0a67cb2394cb8143150e262b10dff400a224c38b94d5e6c03fe0a9ef4a62b01",
+      "bytes": 69750
+    },
+    "docs/examples/AppFlowy-main/LICENSE": {
+      "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+      "bytes": 34523
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/integration_test/desktop/chat/chat_page_test.dart": {
+      "sha256": "8c7ee0e1eac49ff0eb9078d5ea2fe38cf64f00da5857018bf8a0ff3bec554e30",
+      "bytes": 9285
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/lib/ai/widgets/prompt_input/select_sources_menu.dart": {
+      "sha256": "6a5332ca212e99ba30882241a301e2ecb70bb41bda9aaeb07124b57a5a28f974",
+      "bytes": 18104
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/lib/plugins/ai_chat/application/chat_edit_document_service.dart": {
+      "sha256": "c13587d9de9eeb23eb8c9a1aea910bc5d748747855e73a12061ad4a090dc0c89",
+      "bytes": 3464
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/lib/plugins/ai_chat/application/chat_input_file_bloc.dart": {
+      "sha256": "78730ebcddc633293ba7bc1aeaa0654e01c7e6f7648f16416cc47dc7a14db493",
+      "bytes": 1276
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/lib/plugins/ai_chat/application/chat_settings_manager.dart": {
+      "sha256": "015cd17952c85cdb8479dc07655d4e3dbafb73efc563ba58dbea4fad17cdf6e7",
+      "bytes": 1447
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/lib/plugins/ai_chat/presentation/message/ai_message_action_bar.dart": {
+      "sha256": "df5f5d8a8b056cb2a2079f2c72dd5b668abb56c37f5e161ac180cdf1de0c5443",
+      "bytes": 24727
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/lib/plugins/ai_chat/presentation/message/ai_metadata.dart": {
+      "sha256": "7229334821cb8a3b46c92ab06102aeb217683afdfe488f5859697c33866d70cd",
+      "bytes": 5462
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/lib/workspace/application/export/document_exporter.dart": {
+      "sha256": "4c346506fc1f9f41fbca8646bdc878765bc9b8a3f2b6594512ea340806dbd892",
+      "bytes": 2074
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/pubspec.yaml": {
+      "sha256": "e5f327b14395e8e1c1657d4097e6615d822609cb4aebf46bb59876bc279618f0",
+      "bytes": 8276
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/test/bloc_test/chat_test/chat_load_message_test.dart": {
+      "sha256": "433b5c1ad54fbf47218926dc3bec69aeae08ed8cca6dca69db968d201fe08cbf",
+      "bytes": 337
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/Cargo.toml": {
+      "sha256": "4cc217eeb51f8f7d537201774a54de5c185e7afb0193a7ec6c1cbd3b88b68edf",
+      "bytes": 5426
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/collab-integrate/src/collab_builder.rs": {
+      "sha256": "fa7b55dd6edf73c93aa8311f70ec599b498eac1e1366fb37633c79a996239d4d",
+      "bytes": 15381
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai-pub/src/persistence/chat_message_sql.rs": {
+      "sha256": "6a5db9ab834af45ed1593bc429ffa8b0fe6348a9065345127a1d8d76e84555a7",
+      "bytes": 7431
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai/src/chat.rs": {
+      "sha256": "c731ab999b959f597eb342c0ae25fb77b95efe4ae5f33ac47baa0b1d6b5d7de3",
+      "bytes": 20948
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai/src/embeddings/document_indexer.rs": {
+      "sha256": "03214ded8ea170efc3f8ca7c6e8cee09e442e73f8dc45f828c10a4cec1c86b14",
+      "bytes": 5749
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai/src/lib.rs": {
+      "sha256": "f0abd1ab4ad00050dbea05789f1efce9c61a2b29def943bd43e4750adad65755",
+      "bytes": 482
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai/src/local_ai/controller.rs": {
+      "sha256": "387829bae0234b2f30d800458738ac89d565c494a214f56200a48bb9cd643c4b",
+      "bytes": 16390
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai/src/mcp/manager.rs": {
+      "sha256": "7cea0ea801681493615dcfafcbead711b968b42d703c9a5c082a7c39236712c7",
+      "bytes": 1135
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai/src/middleware/chat_service_mw.rs": {
+      "sha256": "122d45c3cbce7b302fdc101b17d83844d2c4cf11be45a5575ebf53a9b6c5352e",
+      "bytes": 7686
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai/src/model_select.rs": {
+      "sha256": "156cc7527e17dae300a0828dee1a526eb7f0ce45a239fc40f96b811f78aec7a1",
+      "bytes": 13581
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai/src/model_select_test.rs": {
+      "sha256": "4ab91190347b2b38b8693dfa3f4ea1cfbc2b023a7929a09862783ca12b923a43",
+      "bytes": 13270
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai/src/offline/offline_message_sync.rs": {
+      "sha256": "a93f15b3ef627d0eeb52bed0f016b3f7c9f31a9203a925c7a243b7f8f706874b",
+      "bytes": 6750
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-document/src/document.rs": {
+      "sha256": "6a3c42ab6a36f7da678839c24e7d9a508d385a6756c162d9b66e6308bc0aa1ab",
+      "bytes": 2581
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-document/src/event_map.rs": {
+      "sha256": "cca3fc80edaf3eaed7b5aa8a89c54ff35bc0b42355007611e2de6699402e2a1b",
+      "bytes": 4091
+    },
+    "docs/examples/n8n-master/LICENSE.md": {
+      "sha256": "d2f621f59aa4c10eab79b6333e59d9d3d5b53307dcfd16dbd75e40e679e84965",
+      "bytes": 4445
+    },
+    "docs/examples/n8n-master/packages/@n8n/agents/src/runtime/__tests__/agent-runtime.test.ts": {
+      "sha256": "bf922ba5461a7a19f16e68aa0c45f7967d4858b5cd25d416461f98f5edb2ad9d",
+      "bytes": 403186
+    },
+    "docs/examples/n8n-master/packages/@n8n/agents/src/runtime/tools/delegate-sub-agent-tool.ts": {
+      "sha256": "fe4e8d03c8ff6b2d36f309494fb2fe2626010e2002fffc498d86b6ec17651ffc",
+      "bytes": 15948
+    },
+    "docs/examples/n8n-master/packages/@n8n/agents/src/runtime/tools/sub-agent-task-path.ts": {
+      "sha256": "3531c096370c0b8ce074d43984e1d55e9c10aea803c23f94448470558bfdd0bb",
+      "bytes": 4264
+    },
+    "docs/examples/n8n-master/packages/@n8n/db/src/entities/workflow-entity.ts": {
+      "sha256": "96f170f96aa0515bcc2579aba84b99ef1ff506e478f9dabdc953ace62348affe",
+      "bytes": 3632
+    },
+    "docs/examples/n8n-master/packages/@n8n/db/src/entities/workflow-history.ts": {
+      "sha256": "4d7e83046ee4b9d475608d5cb2f2a3071a6115c0880235d9a9afe15b6f9c7f53",
+      "bytes": 1094
+    },
+    "docs/examples/n8n-master/packages/@n8n/nodes-langchain/nodes/agents/Agent/agents/ToolsAgent/V3/helpers/resolveSubAgentRequest.ts": {
+      "sha256": "cb4f64292cfbaccf6487fbac09772a3609e1430ffd509cac92320871a41daf9f",
+      "bytes": 2172
+    },
+    "docs/examples/n8n-master/packages/@n8n/nodes-langchain/nodes/mcp/shared/runtime.test.ts": {
+      "sha256": "d2453b7062cbc887dd1baa5e241b18da8c5679676be5f2b5c1b445f6e106ff9f",
+      "bytes": 24507
+    },
+    "docs/examples/n8n-master/packages/@n8n/nodes-langchain/nodes/mcp/shared/runtime.ts": {
+      "sha256": "f1de871261efb00538d3f353659cb6bdc981c7ea67b65947a21d3d47514dc2cf",
+      "bytes": 13295
+    },
+    "docs/examples/n8n-master/packages/cli/src/__tests__/wait-tracker.test.ts": {
+      "sha256": "0be06ac3bce6028d622287d8b93fbf0a008625b757e88fe4b432ff8a94e8072b",
+      "bytes": 44769
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/agents/agent-knowledge-retrieval.ts": {
+      "sha256": "ec4e65a6f27a4a2cf1a2026e95837063af0ba143950c016ae523da6f6f5571b6",
+      "bytes": 10130
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/agents/agents-config.controller.ts": {
+      "sha256": "e51b1bdf475bc0e6a18d07d6d8ba0833dfada54c2cb7257f14631dd72f60f918",
+      "bytes": 4704
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/agents/integrations/n8n-checkpoint-storage.ts": {
+      "sha256": "a5a6fa698ea0ad4d717910a74b5b7da12839f695f5e3eb7f33cfbea9bf05f255",
+      "bytes": 13136
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/agents/json-config/agent-document.ts": {
+      "sha256": "908aba789a3002d317db33332b25be560f4a9a653bf818b1d58e134d72280e89",
+      "bytes": 1389
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/agents/json-config/from-json-config.ts": {
+      "sha256": "1f20a3c308f4625802100e81372dacbb088d7166f5db0e1251d71c093b3a4a29",
+      "bytes": 23822
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/agents/json-config/mcp-client-factory.ts": {
+      "sha256": "137243774cff9b39887d0886fc3be7aaa7c6b5a09fe0097e783945cff740f0d3",
+      "bytes": 10926
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/agents/runtime/agent-secure-runtime.ts": {
+      "sha256": "d711f9e59e52a6f829a236979d9ff0e062b64027f829699838b795bdfb9fe6fb",
+      "bytes": 14190
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/chat-hub/__tests__/chat-stream-state.service.test.ts": {
+      "sha256": "defedee7fe40103c2ea3650e9ec528a335da9ca1a4b49e9658681e9ea2ba3fe0",
+      "bytes": 19779
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/chat-hub/chat-hub-agent.service.ts": {
+      "sha256": "55828a283333a2376e292dd52de38cd2857d7d1c815ee465a27f3d811b914389",
+      "bytes": 16344
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/chat-hub/chat-hub-message.entity.ts": {
+      "sha256": "8dc46615116df2ef47b033c287409ef013c623f7734297406579e1f5cbb5289b",
+      "bytes": 4007
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/chat-hub/chat-hub-tool.service.ts": {
+      "sha256": "3659665c593a88b9bf2a2daa7ae35414c723559881637f8c0f36200c9bb189cf",
+      "bytes": 6478
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/chat-hub/chat-stream-state.service.ts": {
+      "sha256": "a2e0850bf409a4dc5b09a2c785e788bc6d655a99eadaaad2a9342e8dfff95c66",
+      "bytes": 10510
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/knowledge/knowledge-retriever.ts": {
+      "sha256": "f98f81d22ed351aef60ccf1c381665ffc3ae7d9ea815e9a73c8af2e095984c26",
+      "bytes": 1376
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/mcp/mcp.service.ts": {
+      "sha256": "6d03510b2f01e2cdb28d756af2dcd077ba28420663773211b6987e14ec39a9f4",
+      "bytes": 45240
+    },
+    "docs/examples/n8n-master/packages/cli/src/modules/mcp/tools/execute-workflow.tool.ts": {
+      "sha256": "39f64a5503e6e4a4d6537b89b976a453e67a9d90f23cd430636d05bfb38d5dd0",
+      "bytes": 18437
+    },
+    "docs/examples/n8n-master/packages/cli/src/scaling/job-processor.ts": {
+      "sha256": "f6472dca05ee4137547a5acc13873e032325b579268ba59cc4c59fdf635cc352",
+      "bytes": 27754
+    },
+    "docs/examples/n8n-master/packages/cli/src/services/credentials-tester.service.ts": {
+      "sha256": "8bf608a413f5ebbb65715d42e53494566c38eee8f0ac629699e6efb34277c3ae",
+      "bytes": 20170
+    },
+    "docs/examples/n8n-master/packages/cli/src/wait-tracker.ts": {
+      "sha256": "2d5699f9284d8b385edeb1ee4981ba3baba12a749c7e97bf4923e7d0499a9b37",
+      "bytes": 15053
+    },
+    "docs/examples/n8n-master/packages/core/src/credentials.ts": {
+      "sha256": "a854eabc382d2ae95d640b28e15f0b0998e31bc89933f7621cd5825c4bee8dd7",
+      "bytes": 2243
+    },
+    "docs/examples/n8n-master/packages/core/src/execution-engine/workflow-execute.ts": {
+      "sha256": "06d764e309347ad5ec9fc931f26dd3dff62c34d3e3b6d8c6531a87dd455d0d73",
+      "bytes": 105659
+    },
+    "docs/examples/n8n-master/packages/frontend/editor-ui/src/features/ai/chatHub/components/ChatArtifactViewer.vue": {
+      "sha256": "c668b5d32e6472d1de2f99a6ca8a9dd2f9b929bffa4690ca6a48890d9c844dd3",
+      "bytes": 4116
+    },
+    "docs/examples/n8n-master/packages/frontend/editor-ui/src/features/ai/chatHub/components/ChatPrompt.vue": {
+      "sha256": "b4551baa695e9fe8f4ab69438c9fc1eca577bc3d33d647870ee2abbebcb14450",
+      "bytes": 8633
+    },
+    "docs/examples/n8n-master/packages/workflow/src/interfaces.ts": {
+      "sha256": "f10ef13cc37d61d465bc2cda5103c5db65de5d85d7a9b2d69b5f427a8bd9962b",
+      "bytes": 152290
+    },
+    "docs/examples/plane-preview/COPYRIGHT.txt": {
+      "sha256": "ad1bf05b64103bacbc72763e6e24b4a9e0f80fbaad12630935a67783258c8a0e",
+      "bytes": 137
+    },
+    "docs/examples/plane-preview/LICENSE.txt": {
+      "sha256": "0a4acb10f33c93841a8eedac172152096383ceaf7eb5a0aa7e303951cf204c7e",
+      "bytes": 34516
+    },
+    "docs/examples/plane-preview/apps/api/plane/api/views/issue.py": {
+      "sha256": "db34d59bb4ab00b12e26106a2cd3ef7571645b94c047fe560fb601c28456a7d8",
+      "bytes": 112406
+    },
+    "docs/examples/plane-preview/apps/api/plane/app/views/external/base.py": {
+      "sha256": "e1d24a2da7d608c0770e227ec7b86da7a94e64ba23e67cd861a42ed9cb261da7",
+      "bytes": 7903
+    },
+    "docs/examples/plane-preview/apps/api/plane/app/views/page/version.py": {
+      "sha256": "7545fdf9e8f044fea92b61ed0b81621557e4580859c3036a4cda6b9a834a3bf0",
+      "bytes": 2288
+    },
+    "docs/examples/plane-preview/apps/api/plane/bgtasks/webhook_task.py": {
+      "sha256": "96f328e5b6116b24d300456e0828b4c94d1fc4ff5b0e244d2ca151e27a502f09",
+      "bytes": 16974
+    },
+    "docs/examples/plane-preview/apps/api/plane/db/models/base.py": {
+      "sha256": "dd89491868f7d5a5f816ecc82273f35aa3409699bf7f0a094a1b795a92d4ed45",
+      "bytes": 1496
+    },
+    "docs/examples/plane-preview/apps/api/plane/db/models/intake.py": {
+      "sha256": "c412b828bb835e3701c2b120bd47bb9bcd673e2d9f8b70a2638d46386861f120",
+      "bytes": 3907
+    },
+    "docs/examples/plane-preview/apps/api/plane/db/models/integration/base.py": {
+      "sha256": "02d42b0bc59db66681191eed6a906f3ab4d1c652035849813de88ce7d5560eb1",
+      "bytes": 2325
+    },
+    "docs/examples/plane-preview/apps/api/plane/db/models/issue.py": {
+      "sha256": "ae65e270f1e7e1edd51869d077fad82be04839b449b2a63e9afbf7b5b057542f",
+      "bytes": 30185
+    },
+    "docs/examples/plane-preview/apps/api/plane/db/models/page.py": {
+      "sha256": "53cf3566f26b749114b7400eab854d2e2deb6751493816d112625d6cfae9d08b",
+      "bytes": 7266
+    },
+    "docs/examples/plane-preview/apps/api/plane/db/models/view.py": {
+      "sha256": "5c9ff9084762ee8a60de94ec5f3dcebd4f6b4192e867aec00530b250d057c70c",
+      "bytes": 3249
+    },
+    "docs/examples/plane-preview/apps/api/plane/db/models/webhook.py": {
+      "sha256": "55fc67b2607a1acd5a6ea02db9254de859d27f90ddad73c9dd5c71aad84c6b74",
+      "bytes": 3812
+    },
+    "docs/examples/plane-preview/apps/web/components/issues/issue-modal/draft-issue-layout.tsx": {
+      "sha256": "32abfc857f5016deccd5474a70b1ad231c67b701611dd23313a7bae5d2fc86ca",
+      "bytes": 4672
+    },
+    "docs/examples/plane-preview/apps/web/components/pages/editor/ai/ask-pi-menu.tsx": {
+      "sha256": "c1b70ae1bc49a09dab84d428fecb47b6ccb07b74c5a857e6ddc5b8b210ab230e",
+      "bytes": 4322
+    },
+    "docs/examples/plane-preview/apps/web/components/pages/editor/ai/menu.tsx": {
+      "sha256": "acfdd61e6f04159c17f994a3db4d2c0256e05823321237b133c257a23ad85d87",
+      "bytes": 10824
+    },
+    "docs/examples/plane-preview/apps/web/components/power-k/core/registry.ts": {
+      "sha256": "2bec67a7726af320a6718787f629b748b39e366ff87c7c611f20d42bc65780f1",
+      "bytes": 6405
+    },
+    "docs/examples/plane-preview/apps/web/components/power-k/core/types.ts": {
+      "sha256": "706407869937cc56a2351292e19e889e4edc2bd9b6ec0c2ed0d3e4421886a09f",
+      "bytes": 3786
+    },
+    "docs/examples/plane-preview/apps/web/services/ai.service.ts": {
+      "sha256": "0489a618fe5163a90599216201892952641896fd40b9d3d9553566fe82b89984",
+      "bytes": 1244
+    },
+    "docs/examples/plane-preview/apps/web/services/integrations/integration.service.ts": {
+      "sha256": "462618c3c672462b9d02b2ec5aa4c80684bde7910977aa5ea1c7a9a3fb051fe9",
+      "bytes": 2325
+    },
+    "docs/superpowers/plans/2026-10-22-m91-ai-elements-and-subagents.md": {
+      "sha256": "656175f604d3a2fce05c825776fd88eb6a7f9ad9b08d1388a16084075edfd838",
+      "bytes": 36857
+    },
+    "docs/superpowers/plans/2026-10-22-reference-review/README.md": {
+      "sha256": "df45f13df3e1aae2e87185930c652d02cb5cff2c883589861376ed5ca6f527c2",
+      "bytes": 17607
+    },
+    "docs/superpowers/plans/2026-10-22-reference-strengthening-plan.md": {
+      "sha256": "94ba101d4b1b3f775993c52b736ea52211a45fd0880981f51da0c085b6eebd67",
+      "bytes": 56347
+    },
+    "package.json": {
+      "sha256": "e23f243c4c9b8b79223fdaef2c10596e700da4b7120b5a48939320ca6c8a9c52",
+      "bytes": 2502
+    },
+    "shared/policy/subagents.v1.json": {
+      "sha256": "071375b0c8c84432dad12667c132025e8ea8a48ec07c0009d5e866051eceb721",
+      "bytes": 258
+    },
+    "shared/policy/tool-approval.v1.json": {
+      "sha256": "ea47d962c0d9fbb9df993b342eba6469279552ad35302a2c86163003fecf3aa4",
+      "bytes": 12063
+    },
+    "shared/policy/tools.v1.json": {
+      "sha256": "8efdc20ca18e5f529181d0142ff7043059dfe679d8d2062c5a40550a4c6b46c6",
+      "bytes": 108258
+    },
+    "shared/schema/views.v1.json": {
+      "sha256": "938750d317ae6316c7166bfaa2f5a48a0ba2ac63690cd5e88af1ea368002b765",
+      "bytes": 3090
+    },
+    "src-tauri/Cargo.toml": {
+      "sha256": "e4b104211b2b25e2ed5c21ebf43966e8c48d7ce51a072400d3efaefce5e4be2e",
+      "bytes": 5361
+    },
+    "src-tauri/src/agent/cli_writes.rs": {
+      "sha256": "e1b014b866a6da1fb1c5fa65ba0397def72016b3e7d480e4ef85db4dd55a8b43",
+      "bytes": 18442
+    },
+    "src-tauri/src/agent/fold.rs": {
+      "sha256": "34d297f4190ff9b86fe93dc519cbf14924bdf415516618dbf7658afc60d4884b",
+      "bytes": 181070
+    },
+    "src-tauri/src/agent/interaction.rs": {
+      "sha256": "a4bcc3bad4af8e930690b96a8688e56b13a0da9bfbd8b6c56d5c4eb49dfa3e26",
+      "bytes": 131379
+    },
+    "src-tauri/src/agent/journal.rs": {
+      "sha256": "45a8b3c2c79e001b128e2883377f026380d891a20b883bfc8a54d5ba50c9ae31",
+      "bytes": 25306
+    },
+    "src-tauri/src/agent/meter.rs": {
+      "sha256": "023d5daf57a5283aaf7a3e6eed3504f1752003aec30584ec9ed86f6accbdd958",
+      "bytes": 84579
+    },
+    "src-tauri/src/agent/mod.rs": {
+      "sha256": "0e2f247fd1219060649172d186a0ff84f59bf0379558d297cb02f29402f15163",
+      "bytes": 363971
+    },
+    "src-tauri/src/agent/transcript.rs": {
+      "sha256": "cc0be6efac5e70bbc46cfb7ab1a3c7893ff7dc7139e5a1504d22c97633b0ba8f",
+      "bytes": 53475
+    },
+    "src-tauri/src/agent/usage.rs": {
+      "sha256": "773d5f5d477bd6c3cf3cca210d6dda0d5e6122fe2a0fc27331855ee6bfd01823",
+      "bytes": 26730
+    },
+    "src-tauri/src/client_access.rs": {
+      "sha256": "4ae7d23a967264eaef77dcca624a064fd3666e542bac19cfdd9c25e4ab9430f2",
+      "bytes": 2579
+    },
+    "src-tauri/src/connectors.rs": {
+      "sha256": "e75c93a218cdcb05bad3876b19578b593cc1568f4a647f7966af151c490cfbc9",
+      "bytes": 92827
+    },
+    "src-tauri/src/knowledge.rs": {
+      "sha256": "446de3b31e9d3f84039afcaf77f4b19059f140b15d5a6f1a90a3dec380ebc3d1",
+      "bytes": 103896
+    },
+    "src-tauri/src/ledger/index.rs": {
+      "sha256": "d306b7fae062078fc61b0188d27ef47fb46f6a17b07b11769dea72570c203f34",
+      "bytes": 50982
+    },
+    "src-tauri/src/mcp.rs": {
+      "sha256": "ce8ecc5d7d3cb8a4c8227631229378eae795e37fffc04276e47273fb54deb97b",
+      "bytes": 855854
+    },
+    "src-tauri/src/policy/tool_approval.rs": {
+      "sha256": "c0cbcf4ecc7c295541aaad37b31131bcf750fdd48c5d0ffbbb19c70c1faa0be2",
+      "bytes": 115540
+    },
+    "src-tauri/src/runtime/batch_journal.rs": {
+      "sha256": "c450ff5d222ed5137d26963849c6ff50f7ad640c516452ff1691ccbadf00c55c",
+      "bytes": 10158
+    },
+    "src-tauri/src/runtime/dispatch.rs": {
+      "sha256": "7a4b0187d0ca2ef3b5138ee7664e30406513e0d1efda35f9a466d6c5ae4d34d6",
+      "bytes": 189174
+    },
+    "src-tauri/src/runtime/followups.rs": {
+      "sha256": "712c81cc7ce95f318ce0aec75eacde283e906758c12bac79cd19ea36c81f5db9",
+      "bytes": 26956
+    },
+    "src-tauri/src/runtime/mod.rs": {
+      "sha256": "faf67c241c71fce435515f3b526fa269bdf6812b4fff35830a976a117d1a01b9",
+      "bytes": 122444
+    },
+    "src-tauri/src/runtime/scope.rs": {
+      "sha256": "1f674239564bfed3057361143bdf375567c510b8e4e5f1fd466cb3f81ed00c86",
+      "bytes": 7652
+    },
+    "src-tauri/src/runtime/wakes.rs": {
+      "sha256": "238b8efd5291413bb1876d05159025773e570839d58a9d05b11e98fe342e9270",
+      "bytes": 72995
+    },
+    "src-tauri/src/sheet/fence.rs": {
+      "sha256": "68c414d32b7273ae27aed3ea672a95191ea1825bbc1c83dd3862b1ba17e5ebdc",
+      "bytes": 12622
+    },
+    "src-tauri/src/vault/batch.rs": {
+      "sha256": "b6b09bee9d076a4568ff1aeec59a3474264d36039a94e6ab1390113d47544ed8",
+      "bytes": 127074
+    },
+    "src-tauri/src/vault/entry.rs": {
+      "sha256": "3c17323188647c37a9d647d441b2d507910448de77b35a17c5056e1690b8e430",
+      "bytes": 15207
+    },
+    "src-tauri/src/vault/parse.rs": {
+      "sha256": "aacc41994b69386af7110f59e738aa53f980e1621d71a50fc6cb0cae0326edd8",
+      "bytes": 18024
+    },
+    "src-tauri/src/vault/receipt.rs": {
+      "sha256": "d57d08a63be27bab756350acbc6300c89664bbadb4befc888225cfaa190ad4d2",
+      "bytes": 17204
+    },
+    "src-tauri/src/vault/write.rs": {
+      "sha256": "5cbd0e287f25182bcb00165a70fb163e7ac6a5e193933f93ecd852f9ea37c698",
+      "bytes": 313483
+    },
+    "src/agent/AiPanel.tsx": {
+      "sha256": "2193d049e3a4e6f9db100e737da7e70447525c7cd8402e0e6fe6e2f2624517e0",
+      "bytes": 78739
+    },
+    "src/agent/ChatInput.tsx": {
+      "sha256": "03cf2258b25fd66e084a52657c8c7775c2284811374b85ee2b3ae2b616539e0a",
+      "bytes": 21856
+    },
+    "src/agent/ConversationSwitcher.tsx": {
+      "sha256": "fdcd65002c0d0c2588217b9572fd63fd003a5d3a64b98d3ed0080651bd1b0ae0",
+      "bytes": 10501
+    },
+    "src/agent/PermissionCard.tsx": {
+      "sha256": "9c56e28f2e429276ab7cb64dca87380158a7316bf1362b0e4a7308275f252d24",
+      "bytes": 4470
+    },
+    "src/agent/RunOptionsPicker.tsx": {
+      "sha256": "8ef37b444d9b66f87c4737c9aaa5b24efa5a2a7aad675845750ae4581b1b75af",
+      "bytes": 6233
+    },
+    "src/agent/TurnChangeset.tsx": {
+      "sha256": "b6c5ed280986bac0386116098ac9865027eb391b4feac3650c99fe136d2b46cf",
+      "bytes": 8031
+    },
+    "src/agent/context.ts": {
+      "sha256": "e2d3ba41e9fc51750b2bd91440d33ea9dd7e8468106e88fa7b625aae42785bad",
+      "bytes": 15297
+    },
+    "src/agent/contextChips.ts": {
+      "sha256": "5b62b791bcc63085addf7c481a0a274cdc51ed6bf6d8123d4071a756177dae68",
+      "bytes": 3851
+    },
+    "src/agent/conversations.ts": {
+      "sha256": "1a905972e7548fcdb6759a2f9554c4a14ff81f3495b0b4fb68c3fef6ab5a980f",
+      "bytes": 15248
+    },
+    "src/agent/toolRenderers.tsx": {
+      "sha256": "33f05c144b7126b4769a6337958dfda4ebd8c62c811dc84d606c977770473fd6",
+      "bytes": 10877
+    },
+    "src/agent/transcript.ts": {
+      "sha256": "f1b8bef86568e7eff068d94f41ae2af6cc55296bac199a76d1f1ad098f73288a",
+      "bytes": 13111
+    },
+    "src/agent/types.ts": {
+      "sha256": "7e64095cec79438c7a5b9e8216ea2f88c6f2ce362559d485f601128fa23b645d",
+      "bytes": 23489
+    },
+    "src/agent/useConversations.ts": {
+      "sha256": "ed1f5880732eee758e550d689fbfb9b8f366c6f8170220582b9d66a7a7d7bfe7",
+      "bytes": 18268
+    },
+    "src/app/ConnectorSettings.tsx": {
+      "sha256": "5b30e194dcce847f74e9d643a7278062e8be934e105aa8ad7898fd4a0f861390",
+      "bytes": 23747
+    },
+    "src/app/RecordComposer.tsx": {
+      "sha256": "115fc019f17ae904d79ce464ed3bbe1ab6ba6e8ef16ed17a5083222f0e317ff8",
+      "bytes": 9276
+    },
+    "src/app/commands/create.commands.ts": {
+      "sha256": "21de02176e2638920ddfc80656ef2bf5e336f92133156bf092688e5bd2b73171",
+      "bytes": 482
+    },
+    "src/components/ai/MessageScroller.tsx": {
+      "sha256": "13d94b62928ba29cd344d08ae36d7c852a9c3b25ca917ca6e40dd15baab998fc",
+      "bytes": 37998
+    },
+    "src/components/ai/PromptInput.tsx": {
+      "sha256": "f873a48de5f38a68acb9541b06379ea3e66a9efabeaf7e2575af45baf61e7921",
+      "bytes": 8798
+    },
+    "src/components/ai/Subagent.tsx": {
+      "sha256": "4e0a0de03585c7e13ec7e710e623720d4f7ab2bbba3d43214b238fb3fbaffca8",
+      "bytes": 9114
+    },
+    "src/editor/NoteBodyEditor.tsx": {
+      "sha256": "b675d2cf5b5394eabdcb178de672c3b4600fa94061317c508c68a03756927bc2",
+      "bytes": 26404
+    },
+    "src/editor/pageTitleProjection.ts": {
+      "sha256": "5364b05761839eb184d065133666bec21025fe514b27512f3ba67286e92cbd7a",
+      "bytes": 6106
+    },
+    "src/engine/ai/sources.ts": {
+      "sha256": "9624ebdf048c86c41baf3726fbd50e82851097db8aa56df3d681129e0fe87a2c",
+      "bytes": 7205
+    },
+    "src/engine/ai/types.ts": {
+      "sha256": "cdf9b858188e9f783261917e660048c3f7525b58c4de5b879662e347f820c8f3",
+      "bytes": 4886
+    },
+    "src/engine/frontmatter.ts": {
+      "sha256": "d37e30fb954f7e23eb2a69ccd82caf7d39c55ae09da2720b28a4397482ef1dbb",
+      "bytes": 4212
+    },
+    "src/engine/identity.ts": {
+      "sha256": "fdf11092d21bde9e1c28e4eb3272e06ca670e892b647d84eb4c28412c11a67df",
+      "bytes": 1814
+    },
+    "src/engine/importSources.ts": {
+      "sha256": "33bfdd3391828d5d8c4ce7678f6a69bea2ed7580164debbf10e66e99fa04ecc4",
+      "bytes": 18730
+    },
+    "src/engine/libraryDraft.ts": {
+      "sha256": "ce27ff9d62d0640fdb546b35021194e1b79f0e41ad8b0a4e0e6e784e15cc2c0d",
+      "bytes": 12622
+    },
+    "src/engine/recordDraft.ts": {
+      "sha256": "34ac76177c0432c5454b01f96ae6343d4a4b0ae50db7790bc158d87fa83fd64f",
+      "bytes": 3809
+    },
+    "src/engine/relations.ts": {
+      "sha256": "cbd508deb5b1281581e79d81a0920527c5e7ff3c28049d586e4a3ec297e1e7c0",
+      "bytes": 4066
+    },
+    "src/engine/schema.ts": {
+      "sha256": "bca9d19219e367ea21c37f4e5a9069421ec9745a91600f7a5668f528da3caa05",
+      "bytes": 26344
+    },
+    "src/engine/sheet/fence.ts": {
+      "sha256": "1e0e7a79ecee5763d0975a9ee428e64b094e25c914d572263c50139059066b3e",
+      "bytes": 7859
+    },
+    "src/engine/types.ts": {
+      "sha256": "1514ad476061c600e4b25accb502f7f9b0e29c74249c32ee89137b180c53517c",
+      "bytes": 45386
+    },
+    "src/engine/viewFilters.ts": {
+      "sha256": "ed760c1d504ead171f584fbf71762651c7320f115404fd251cfabb9f7320c98f",
+      "bytes": 22922
+    },
+    "src/history/PageHistory.tsx": {
+      "sha256": "f02a56d8b804c4c50e370aadcdb6f8830bba0435449e1a333e61d7c539036508",
+      "bytes": 9976
+    },
+    "src/lib/ipc.ts": {
+      "sha256": "c1f04c77b32219d984876aa75d9c3a1624050ab5b4a29641e12150541329cbe2",
+      "bytes": 64600
+    },
+    "src/lib/ipcContract.test.ts": {
+      "sha256": "1faab1c642d6313e45f0c3e874e28647ee4bf6baff480b3f271e11e7d4db00f9",
+      "bytes": 71411
+    },
+    "src/lib/keys/registry.ts": {
+      "sha256": "e2b8943fcf3d507e21518a4d88e989d0225dfc0f559b1f577a6ced575271dc51",
+      "bytes": 4763
+    },
+    "src/library/AgentProperties.tsx": {
+      "sha256": "f1b269b57f8e6359c9c371604d4eba2797d8bf31ec78c094e30e2103412ca4c3",
+      "bytes": 53621
+    },
+    "src/pages/InboxPage.tsx": {
+      "sha256": "3c0d97fe49189210cda3e5c3fbeb5411ce75c5341a87e3970c4a09bb926baa43",
+      "bytes": 57054
+    },
+    "src/status/AgentRunHistory.tsx": {
+      "sha256": "ebc9c8510ab43aa1efb5d47dffee759474dcbe14f60c801baa510aff66eec3fb",
+      "bytes": 6247
+    },
+    "src/status/RunDetailPanel.tsx": {
+      "sha256": "f5653137491dec013cef57015a3fd1bd14ffce35bf1023c2593d257cbb582fd7",
+      "bytes": 19720
+    },
+    "tsconfig.engine.json": {
+      "sha256": "b2b44990d413c6b51776dd4e0abb3d2e72564d0600092d114540667962cc3c6d",
+      "bytes": 485
+    }
+  }
+}

@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test';
 import DIGESTS from '../src-tauri/fixtures/thread-digests.json' with { type: 'json' };
-import { boot, seedFileBeforeBoot, readMockFile, showDatabases, openDestination } from './boot';
+import {
+  boot,
+  chooseSettingsSection,
+  seedFileBeforeBoot,
+  readMockFile,
+  showDatabases,
+  openDestination,
+} from './boot';
 const person =
   '---\ntype: Type\nfolder: people\nfields:\n  role: text\n  phone: phone\nviews:\n  - id: mine\n    name: My people\n    presentation:\n      type: table\n---\n# Person\n\nKeep this exact body.\n';
 test('the optional pack adds declarations in one batch, shows company mail and undoes exact bytes', async ({
@@ -25,6 +32,7 @@ test('the optional pack adds declarations in one batch, shows company mail and u
   await seedFileBeforeBoot(page, 'sources/mail/people-pack.md', digest);
   await boot(page);
   await openDestination(page, 'Settings');
+  await chooseSettingsSection(page, 'Mail');
   const pack = page.getByTestId('pack-people');
   await expect(pack).toContainText('Creates types/company.md.');
   await expect(pack).toContainText('Adds email, company and last interaction to Person.');

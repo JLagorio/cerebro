@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { VAULT_TODAY } from '../src/lib/vaultToday';
 
 /**
@@ -109,10 +109,29 @@ export async function openKnowledgeSystem(page: Page) {
   if ((await system.getAttribute('open')) === null) await system.locator('summary').click();
 }
 
-/** A concept page's Details — its side panel, closed until asked (M51.3). */
+/** A page's side panel, showing `panel` (owner, 2026-10-19): Details,
+ * Comments and History each have their own button in the page's toolbar, and
+ * the slot shows one at a time. Presses that panel's button unless it is the
+ * one already on screen, and returns the panel. `scope` narrows the buttons
+ * to one page when several panes each draw a toolbar. */
+export async function showPagePanel(
+  page: Page,
+  panel: 'Details' | 'Comments' | 'History',
+  scope: Page | Locator = page,
+): Promise<Locator> {
+  const button = scope.getByRole('button', { name: panel, exact: true });
+  if ((await button.getAttribute('aria-pressed')) !== 'true') await button.click();
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  const aside = page.locator(`[data-testid="doc-side-panel"][data-panel="${panel.toLowerCase()}"]`);
+  await expect(aside).toBeVisible();
+  return aside;
+}
+
+/** A concept page's Details — its side panel, closed until asked (M51.3),
+ * showing Details. */
 export async function showConceptDetails(page: Page) {
   const panel = page.getByTestId('knowledge-panel');
-  if ((await panel.count()) === 0) await page.getByRole('button', { name: 'Show panel' }).click();
+  if ((await panel.count()) === 0) await showPagePanel(page, 'Details');
   await expect(panel).toBeVisible();
   return panel;
 }
@@ -122,16 +141,94 @@ export async function openAgents(page: Page) {
   await page.getByTestId('app-rail').getByRole('button', { name: 'Agents', exact: true }).click();
 }
 
-/** The rail's Assistant is a destination. Existing side-by-side workflows use
- * the docked assistant shortcut, without replacing the current page. */
+/** Existing side-by-side workflows explicitly choose the docked presentation;
+ * the rail and shortcut now open the floating conversation. */
 export async function openAssistantPanel(page: Page): Promise<void> {
   const panel = page.getByTestId('ai-panel');
-  if (!(await panel.isVisible())) await page.keyboard.press('ControlOrMeta+j');
-  if ((await panel.getAttribute('data-presentation')) === 'canvas') {
-    await panel.getByRole('button', { name: 'Dock conversation', exact: true }).click();
+  if (!(await panel.isVisible()) || (await panel.getAttribute('data-minimized')) === 'true') {
+    await page.keyboard.press('ControlOrMeta+j');
+  }
+  if ((await panel.getAttribute('data-presentation')) !== 'panel') {
+    if ((await panel.getAttribute('data-presentation')) === 'floating') {
+      await panel.getByRole('button', { name: 'Conversation options', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Dock conversation', exact: true }).click();
+    } else {
+      await panel.getByRole('button', { name: 'Dock conversation', exact: true }).click();
+    }
   }
   await expect(panel).toBeVisible();
   await expect(panel).toHaveAttribute('data-presentation', 'panel');
+}
+
+/** Send `text` from the open assistant's composer, as a person does: typed,
+ * then Enter (M91.15). */
+export async function askAssistant(page: Page, text: string): Promise<void> {
+  const composer = page.getByTestId('ai-panel').getByLabel('Message the assistant');
+  await composer.fill(text);
+  await composer.press('Enter');
+}
+
+/** What the docked composer's footer says while no turn is in flight. */
+const COMPOSER_IDLE = 'Enter to send · [[ to reference a note';
+
+/** The docked assistant's turns have ended: `replies` replies drawn, and the
+ * footer idle. A reply is drawn in the render that puts its turn in flight,
+ * so a count that has reached `replies` never meets the idle footer before
+ * the turn it counts. */
+async function settled(page: Page, replies: number): Promise<boolean> {
+  const panel = page.getByTestId('ai-panel');
+  const drawn = panel.locator('[data-testid="chat-message"][data-role="assistant"]');
+  return (
+    (await drawn.count()) === replies &&
+    (await panel.getByTestId('composer-status').textContent()) === COMPOSER_IDLE
+  );
+}
+
+/** Wait until the docked assistant has drawn `replies` replies and its turn
+ * has ended (M91.15). */
+export async function assistantSettled(page: Page, replies: number): Promise<void> {
+  await expect.poll(() => settled(page, replies), { timeout: 15_000 }).toBe(true);
+}
+
+/**
+ * Hold the page's clock (M91.15): from here on no timer fires and no time
+ * passes until `stepUntil` lets it, so a spec can stop a mock turn between two
+ * of its steps — a subagent at work, a plan half done — however busy the
+ * machine is. Call it after `boot` (CV-15); the clock stays on the vault day.
+ */
+export async function holdClock(page: Page): Promise<void> {
+  const today = new Date(VAULT_TODAY);
+  await page.clock.install({ time: today });
+  // An installed clock runs on until paused, and pausing in its past throws:
+  // pause a minute on, still the vault day, however slow the machine.
+  await page.clock.pauseAt(new Date(today.getTime() + 60_000));
+}
+
+/** The pause between two steps of a mock turn (`runMockAgent`'s delay). */
+const MOCK_STEP_MS = 12;
+
+/**
+ * Let a held clock run one mock step at a time until `reached` holds, and
+ * stop there, so a state that lasts a single step of a turn is never stepped
+ * over. `what` names the state the failure waited for.
+ */
+export async function stepUntil(
+  page: Page,
+  reached: () => Promise<boolean>,
+  what: string,
+  steps = 2_000,
+): Promise<void> {
+  for (let step = 0; step < steps; step += 1) {
+    if (await reached()) return;
+    await page.clock.runFor(MOCK_STEP_MS);
+  }
+  throw new Error(`${what} never came in ${steps} steps of the held clock`);
+}
+
+/** `assistantSettled` on a held clock: step until `replies` replies are
+ * drawn and their turn has ended. */
+export async function stepUntilSettled(page: Page, replies: number): Promise<void> {
+  await stepUntil(page, () => settled(page, replies), `the end of reply ${replies}`);
 }
 
 /** Reveal the database list through the real contextual rail. */
@@ -162,6 +259,16 @@ export async function showPages(page: Page): Promise<void> {
     return;
   await button.click();
   await expect(page.getByTestId('sidebar')).toBeVisible();
+}
+
+/** Reveal the physical page tree without changing the default Collections
+ * view used by callers that only need the Pages area. */
+export async function showPageFolders(page: Page): Promise<void> {
+  await showPages(page);
+  const sidebar = page.getByTestId('sidebar');
+  const folders = sidebar.getByRole('button', { name: 'Folders', exact: true });
+  if ((await folders.getAttribute('aria-expanded')) !== 'true') await folders.click();
+  await expect(sidebar.getByTestId('file-tree')).toBeVisible();
 }
 
 /** Standalone destinations remain real buttons; secondary destinations are

@@ -152,12 +152,14 @@ fn request(session: &Session, url: &str) -> AgentRequest {
         message: session.prompt.clone(),
         system_prompt: None,
         session_id: None,
+        fork: None,
         model: None,
         // No shell or web ceiling (M57.2, M57.7): an internal run's
         // tool-approval plan denies every CLI tool whatever the ceilings, so
         // none is sent.
         shell: None,
         web: None,
+        delegate: None,
         // Every one of these is an absence a missing field would GRANT. See
         // the module note; none of them is a default worth inheriting.
         connectors: Some(false),
@@ -217,7 +219,10 @@ mod tests {
         assert_eq!(request.web, None, "nor the web's");
         let plan = crate::policy::tool_approval::plan_for(&request, false);
         assert!(plan.allowed.is_empty(), "it does not write files");
-        assert_eq!(plan.disallowed, crate::policy::tools::cli_names(|_| true));
+        assert_eq!(
+            plan.disallowed,
+            crate::policy::tools::cli_names(|tool| tool.name != "ToolSearch")
+        );
         assert_eq!(request.attended, Some(false), "nobody is watching");
         assert_eq!(
             request.connectors,

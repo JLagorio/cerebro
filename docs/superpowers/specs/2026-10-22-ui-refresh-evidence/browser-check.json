@@ -1,0 +1,35 @@
+{
+  "started_at_utc": "2026-10-22T23:28:19.273Z",
+  "finished_at_utc": "2026-10-22T23:28:30.680Z",
+  "url": "http://127.0.0.1:5317/",
+  "browser": "149.0.7827.55",
+  "node": "v24.14.0",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "timezone": "UTC",
+  "fixture_clock": "2026-07-28T12:00:00Z",
+  "theme": "light",
+  "reduced_motion": true,
+  "boot_helper": "e2e/boot.ts",
+  "auto_learn": false,
+  "mock_vault": true,
+  "application_source_modified": false,
+  "native_test": false,
+  "boot_passed": false,
+  "boot_failure": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByRole('button', { name: 'Open demo vault' }).or(getByTestId('app-rail').first())\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"to.be.visible\" with timeout 10000ms\n  - waiting for getByRole('button', { name: 'Open demo vault' }).or(getByTestId('app-rail').first())\n",
+  "page_errors": ["shared/policy/tool-approval.v1.json: unknown field `agent_types`"],
+  "body_text": "",
+  "capture": "startup-policy-error-final.png",
+  "sources_after_observation": {
+    "shared/policy/tool-approval.v1.json": "ea299aa69fa0451ab5546e3fb4128eba03e4d2c8f51128146940e348426ff066",
+    "src/lib/policy/toolApproval.ts": "603b37c7be9ad05ea397db3e0cc2ca99f1bd7dd3e7902d1537cf2868afdc6ccd",
+    "shared/policy/subagents.v1.json": "a2c731302ce8f45add865709614f5276c655ce886e27854fe2f8c09d8369b6c2",
+    "src-tauri/src/policy/subagents.rs": "b1fc022b9f1f2070d1419fc33bae71d623e530dd3b9050db39906502c622a525",
+    "src/agent/transcript.ts": "f1b8bef86568e7eff068d94f41ae2af6cc55296bac199a76d1f1ad098f73288a",
+    "src/agent/toolRenderers.tsx": "33f05c144b7126b4769a6337958dfda4ebd8c62c811dc84d606c977770473fd6",
+    "src/components/pageFrame.css": "3456fa30ab33f740b7d65a3f90f34899d21ff550ff910ce77f9e32fea58a81e6",
+    "src/styles/surface-system.css": "792e28b32ccf5992618a43bae0f755b1456cb8fa7307f3aa1f7f402aebc3c9f2"
+  }
+}

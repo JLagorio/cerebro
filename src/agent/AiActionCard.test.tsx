@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { createRef } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   AiActionCard,
@@ -203,7 +204,7 @@ describe('a card’s status and its whole payload (M56.8)', () => {
   const card = () => screen.getByTestId('action-card');
   const open = () => fireEvent.click(screen.getByRole('button', { name: /notes\/plan\.md/ }));
 
-  it('reads an unfinished call on a stopped turn as interrupted, and stops spinning', () => {
+  it('reads an unfinished call on a stopped turn as interrupted, and stops its light', () => {
     render(
       <AiActionCard
         tool={call({ done: false, output: null })}
@@ -214,10 +215,11 @@ describe('a card’s status and its whole payload (M56.8)', () => {
     expect(card().getAttribute('data-status')).toBe('interrupted');
     expect(screen.getByTestId('action-interrupted').textContent).toBe(INTERRUPTED);
     expect(INTERRUPTED).toBe('Interrupted, may have completed');
+    expect(card().querySelector('.cb-ai-shimmer')).toBeNull();
     expect(card().querySelector('.animate-spin')).toBeNull();
   });
 
-  it('spins only while the call runs', () => {
+  it('lights its line only while the call runs, and says so in words', () => {
     render(
       <AiActionCard
         tool={call({ done: false, output: null })}
@@ -226,7 +228,8 @@ describe('a card’s status and its whole payload (M56.8)', () => {
       />,
     );
     expect(card().getAttribute('data-status')).toBe('running');
-    expect(card().querySelector('.animate-spin')).not.toBeNull();
+    expect(card().querySelector('.cb-ai-shimmer')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /^Running: get note/ })).toBeTruthy();
     expect(screen.queryByTestId('action-interrupted')).toBeNull();
   });
 
@@ -247,6 +250,40 @@ describe('a card’s status and its whole payload (M56.8)', () => {
     render(<AiActionCard tool={call({ failed: true })} onOpenPath={() => undefined} />);
     expect(card().getAttribute('data-status')).toBe('failed');
     expect(card().getAttribute('data-renderer')).toBe('step');
+  });
+
+  it('names its call by id on its root, and hands a renderer that root (M92.4)', () => {
+    const root = createRef<HTMLDivElement>();
+    // With detail to open, the root is the fold's; with none, a plain line's.
+    render(<AiActionCard ref={root} tool={call()} onOpenPath={() => undefined} />);
+    expect(card().getAttribute('data-tool-id')).toBe('t-1');
+    expect(root.current).toBe(card());
+    cleanup();
+    render(
+      <AiActionCard
+        ref={root}
+        tool={call({ id: 't-2', input: null, output: null })}
+        onOpenPath={() => undefined}
+      />,
+    );
+    expect(card().getAttribute('data-tool-id')).toBe('t-2');
+    expect(root.current).toBe(card());
+  });
+
+  it("shows a refused call's error without Claude Code's tool-error tags", () => {
+    render(
+      <AiActionCard
+        tool={call({
+          failed: true,
+          output: '<tool_use_error>File does not exist: notes/plan.md</tool_use_error>',
+        })}
+        onOpenPath={() => undefined}
+      />,
+    );
+    open();
+    expect(screen.getByTestId('action-output').textContent).toBe(
+      'File does not exist: notes/plan.md',
+    );
   });
 
   it('shows the whole payload in place of the preview', () => {

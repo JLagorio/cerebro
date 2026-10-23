@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildSystemPrompt, SYSTEM_FRAGMENTS } from './systemPrompt';
+import RETIRED from '../../shared/prompt/retired-terms.json';
+import {
+  attachmentFragments,
+  attachmentReader,
+  buildSystemPrompt,
+  SYSTEM_FRAGMENTS,
+} from './systemPrompt';
 import { grantedTools, mentionedTools, type PromptGrant } from '@/engine/toolGrant';
 import { PRODUCT_BRIEF } from '@/lib/productBrief';
 
@@ -304,6 +310,114 @@ describe('buildSystemPrompt opens with the product brief', () => {
         { grant, connectors: true, issuePrefixes: 'KES' },
       );
       expect(prompt.toLowerCase(), JSON.stringify([...grant.tools])).not.toContain('knowledge');
+    }
+  });
+});
+
+/**
+ * M91.17 — a file the person attached is named with the reader that opens
+ * it, and only to a run that holds that reader (CV-19); a run that holds
+ * none is told it can't open the file, so it says so rather than guessing.
+ */
+describe('buildSystemPrompt says what opens each attached file', () => {
+  const PDF = 'attachments/report.pdf';
+  const DOCX = 'attachments/brief.docx';
+  const BOARD = 'attachments/plan.canvas';
+  const SONG = 'attachments/theme.mp3';
+  const SHOT = 'attachments/screen.png';
+
+  /** The prompt's lines about what was attached. */
+  const attachedLines = (attachments: string[], grant: PromptGrant) =>
+    lines(buildSystemPrompt({ kind: 'none' }, { grant, attachments })).filter((line) =>
+      line.startsWith('The person attached'),
+    );
+
+  it('reads each kind with the reader the file-kinds table gives it', () => {
+    expect(attachmentReader(PDF)).toBe('Read');
+    expect(attachmentReader(SHOT)).toBe('Read');
+    expect(attachmentReader('attachments/notes.md')).toBe('Read');
+    expect(attachmentReader('attachments/rows.csv')).toBe('Read');
+    expect(attachmentReader(DOCX)).toBe('read_document');
+    expect(attachmentReader('attachments/deck.pptx')).toBe('read_document');
+    expect(attachmentReader('attachments/model.xlsx')).toBe('read_document');
+    expect(attachmentReader(BOARD)).toBe('read_canvas');
+    // Nothing a run holds opens these.
+    for (const path of [SONG, 'attachments/clip.mov', 'attachments/old.doc', 'attachments/a.zip']) {
+      expect(attachmentReader(path), path).toBeNull();
+    }
+    expect(attachmentReader('attachments/mystery')).toBeNull();
+  });
+
+  it('tells a run that holds Read to open an attached PDF with it', () => {
+    expect(attachedLines([PDF], { ...FULL, read: true })).toEqual([
+      'The person attached `attachments/report.pdf`: open it with your Read tool.',
+    ]);
+  });
+
+  it('tells a run without a reader that it can’t open the file', () => {
+    const closed = [
+      "The person attached `attachments/report.pdf`, which you can't open here: nothing this conversation holds reads it. If the question needs what it holds, say so.",
+    ];
+    // A read limit withdraws Read (M53.5), and a grant that never said so
+    // holds none.
+    expect(attachedLines([PDF], { ...FULL, read: false })).toEqual(closed);
+    expect(attachedLines([PDF], FULL)).toEqual(closed);
+    // An Office file is read_document's, and Read can't parse one.
+    expect(attachedLines([DOCX], holding(['get_note'], { read: true }))).toEqual([
+      "The person attached `attachments/brief.docx`, which you can't open here: nothing this conversation holds reads it. If the question needs what it holds, say so.",
+    ]);
+  });
+
+  it('names cerebro’s reader only to a run that holds it, and gathers files by reader', () => {
+    const grant: PromptGrant = { ...FULL, read: true };
+    expect(attachedLines([DOCX, BOARD, PDF, SHOT, SONG, 'attachments/old.doc'], grant)).toEqual([
+      'The person attached `attachments/brief.docx`: open it with read_document.',
+      'The person attached `attachments/plan.canvas`: open it with read_canvas.',
+      'The person attached `attachments/report.pdf` and `attachments/screen.png`: open them with your Read tool.',
+      "The person attached `attachments/theme.mp3` and `attachments/old.doc`, which you can't open here: nothing this conversation holds reads them. If the question needs what they hold, say so.",
+    ]);
+    const without = holding(
+      [...FULL.tools].filter((name) => name !== 'read_document'),
+      { read: true },
+    );
+    expect(attachedLines([DOCX, PDF], without)).toEqual([
+      'The person attached `attachments/report.pdf`: open it with your Read tool.',
+      "The person attached `attachments/brief.docx`, which you can't open here: nothing this conversation holds reads it. If the question needs what it holds, say so.",
+    ]);
+  });
+
+  it('declares exactly the cerebro tool each line names, and says Read only to a run holding it', () => {
+    const files = [DOCX, BOARD, PDF, SHOT, SONG];
+    for (const read of [true, false, undefined]) {
+      for (const tools of [[...FULL.tools], ['read_document'], ['read_canvas'], []]) {
+        const grant = holding(tools, read === undefined ? {} : { read });
+        for (const fragment of attachmentFragments(files, grant)) {
+          expect(mentionedTools(fragment.text), fragment.id).toEqual([...fragment.uses].sort());
+          for (const tool of fragment.uses) expect(grant.tools.has(tool), tool).toBe(true);
+          expect(fragment.text.includes('Read tool'), fragment.id).toBe(
+            fragment.id === 'attached-Read',
+          );
+          if (fragment.text.includes('Read tool')) expect(grant.read).toBe(true);
+        }
+        // Every file is said once, opened or not.
+        const said = attachmentFragments(files, grant)
+          .map((f) => f.text)
+          .join('\n');
+        for (const file of files) expect(said.split(`\`${file}\``).length - 1, file).toBe(1);
+      }
+    }
+  });
+
+  it('says nothing about attachments when none are attached, and no retired term when some are', () => {
+    expect(buildSystemPrompt({ kind: 'none' }, { grant: FULL, attachments: [] })).toBe(
+      buildSystemPrompt({ kind: 'none' }, { grant: FULL }),
+    );
+    for (const read of [true, false]) {
+      const prompt = buildSystemPrompt(
+        { kind: 'inbox' },
+        { grant: { ...FULL, read }, attachments: [PDF, DOCX, BOARD, SONG] },
+      ).toLowerCase();
+      for (const term of RETIRED.terms) expect(prompt).not.toContain(term.toLowerCase());
     }
   });
 });

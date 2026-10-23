@@ -41,7 +41,9 @@ test('declared deadlines place open work before databases and the switch removes
   expect(next).not.toBeNull();
   expect(first!.y + first!.height).toBeLessThan(next!.y);
   await coaching.click();
-  await expect(page.getByTestId('detail-title')).toHaveValue('Blank-state coaching copy');
+  await expect(page.getByTestId('detail-panel').locator('[data-page-title] h1')).toHaveText(
+    'Blank-state coaching copy',
+  );
   await page.keyboard.press('Escape');
 
   await showDatabases(page);

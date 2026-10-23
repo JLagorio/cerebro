@@ -19,6 +19,7 @@ import { ListPage } from '@/pages/ListPage';
 import { DiagramPage } from '@/pages/DiagramPage';
 import { DocPage } from '@/pages/DocPage';
 import { HomePage } from '@/pages/HomePage';
+import { PagesPage } from '@/pages/PagesPage';
 import { InboxPage } from '@/pages/InboxPage';
 import { KnowledgePage } from '@/pages/KnowledgePage';
 import { MyWorkPage } from '@/pages/MyWorkPage';
@@ -198,6 +199,8 @@ export function PaneOutlet() {
   switch (selection.kind) {
     case 'home':
       return <HomePage />;
+    case 'pages':
+      return <PagesPage />;
     case 'inbox':
       return <InboxPage />;
     // M43 — open work across every database, grouped by type.

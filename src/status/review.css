@@ -1,0 +1,89 @@
+/* Review's decisions (M91.14). The proposals agents queued and the page writes
+   ask-first agents queued are Confirmation cards (components/ai/Confirmation),
+   in Knowledge's Waiting on you and flush in a concept's review bar, and the
+   bar's one ask is a Suggestion. Unlayered like the elements' own sheets, and
+   scoped to the classes these surfaces add. */
+
+/* A card's title row holds its headline and the headline's risk: it wraps
+   rather than squeezing the headline. */
+.cb-review-card .cb-ai-item-title {
+  flex-wrap: wrap;
+  row-gap: var(--sp-1);
+}
+
+/* In Waiting on you (NeedsYouSection) a card is one cell of a grid of
+   reading-width columns, as tall as its row, with its answers at its foot so
+   a row's answers line up (M52.5): the header, then the body taking the
+   height the row leaves, then its notices and its answers. */
+.cb-review-cards > .cb-ai-confirmation {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto 1fr;
+}
+.cb-review-cards > .cb-ai-confirmation > [data-slot='item-media'] {
+  grid-area: 1 / 1;
+}
+.cb-review-cards > .cb-ai-confirmation > [data-slot='item-content'] {
+  grid-area: 1 / 2;
+}
+/* No icon, no first column: the headline starts on the body's edge. */
+.cb-review-cards
+  > .cb-ai-confirmation:not(:has(> [data-slot='item-media']))
+  > [data-slot='item-content'] {
+  grid-column: 1 / 3;
+}
+.cb-review-cards > .cb-ai-confirmation > [data-slot='confirmation-meta'] {
+  grid-area: 1 / 3;
+}
+.cb-review-cards
+  > .cb-ai-confirmation
+  > :is(
+    [data-slot='confirmation-body'],
+    [data-slot='confirmation-refusal'],
+    [data-slot='confirmation-notice'],
+    [data-slot='confirmation-outcome'],
+    [data-slot='confirmation-answers']
+  ) {
+  grid-column: 1 / -1;
+}
+
+/* On its concept's page a card sits flush in the review bar's own box. */
+.cb-review-card[data-flush].cb-ai-confirmation.cb-ai-item {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* The concept review bar's one ask (ConceptReviewBar, M52.3): a Suggestion
+   that hands the Assistant its prompt, sized to sit beside Verify, its glyph
+   the AI's colour. Borderless like every suggestion; the ask the concept is
+   due leads, in full ink on a quiet fill. */
+.cb-ai-suggestion.cb-review-bar-ask {
+  width: auto;
+  flex: none;
+  padding: 4px 8px;
+  color: var(--n-600);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.cb-ai-suggestion.cb-review-bar-ask:hover {
+  color: var(--n-900);
+}
+.cb-review-bar-ask .cb-ai-suggestion-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cb-review-bar-ask .cb-ai-suggestion-label > svg {
+  color: var(--synapse-500);
+}
+.cb-ai-suggestion.cb-review-bar-ask[data-lead] {
+  background: var(--surface-sunken);
+  color: var(--n-900);
+}
+.cb-ai-suggestion.cb-review-bar-ask[data-lead]:hover {
+  background: var(--n-100);
+}

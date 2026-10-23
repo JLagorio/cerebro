@@ -28,19 +28,19 @@ import { VIEW_KINDS, viewKind } from '@/views/viewKinds';
  */
 
 /**
- * A tab's look, spelled once (M52.5) — the strip and the underlined tab. The
+ * A tab's look, spelled once (M52.5) — the strip and its quiet selected pill. The
  * strip carries no side padding: this row pads it, and Knowledge's three
  * tabs, which borrow the look without the saved-view machinery, line the
  * strip up with the table beneath them instead.
  */
-export const VIEW_TAB_STRIP = 'flex min-w-0 flex-none items-end border-b border-n-200';
+export const VIEW_TAB_STRIP = 'flex min-w-0 flex-none items-center';
 
 export function viewTabClass(active: boolean): string {
   return [
-    'inline-flex max-w-[220px] items-center gap-1.5 whitespace-nowrap border-0 border-b-2 bg-transparent px-3 pb-2.5 pt-2 text-sm',
+    'inline-flex h-8 max-w-[220px] items-center gap-1.5 whitespace-nowrap rounded-full border-0 px-3 text-ui',
     active
-      ? 'border-cortex-500 font-semibold text-n-900'
-      : 'border-transparent font-normal text-n-500 hover:text-n-800',
+      ? 'bg-n-100 font-medium text-n-900'
+      : 'bg-transparent font-normal text-n-500 hover:bg-n-50 hover:text-n-800',
   ].join(' ');
 }
 
@@ -182,7 +182,9 @@ export function ViewTabs({
   return (
     // A container of its own (M52.5): the strip answers to the column it is
     // in, which a peek and the Assistant can narrow to 400px.
-    <div className={`${VIEW_TAB_STRIP} @container/viewtabs px-6`}>
+    <div
+      className={`cb-view-tabs ${VIEW_TAB_STRIP} @container/viewtabs flex-wrap gap-y-2 px-4 py-1.5 @min-[720px]:px-6`}
+    >
       {deleting !== null && (
         <Dialog
           open
@@ -230,7 +232,7 @@ export function ViewTabs({
         // trailing icons sit OUTSIDE this strip so they cannot scroll away.
         // Its scrollbar is hidden, so while it continues past the edge that
         // edge fades (M52.5) — a hard cut read "+ Vi".
-        className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex min-w-0 basis-full items-center gap-1 overflow-x-auto @min-[560px]/viewtabs:basis-auto @min-[560px]/viewtabs:flex-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={moreRight ? FADE_RIGHT : undefined}
       >
         {/* The tabs get their own box, so the sortable measures ONLY them: its
@@ -244,7 +246,7 @@ export function ViewTabs({
         <div
           ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
           data-testid="view-tab-slots"
-          className="flex flex-none items-end gap-0.5"
+          className="flex flex-none items-center gap-1"
           style={sortable.containerStyle}
         >
           {views.map((view, index) => {
@@ -269,17 +271,9 @@ export function ViewTabs({
                 className="group relative flex-none"
                 style={sortable.rowStyle(index)}
               >
-                {/* The grip sits in the tab's own left padding, which is dead
-                  space — an appended handle would shove every tab sideways
-                  the moment the pointer arrived, and one overlaying the icon
-                  would have to be aligned by hand against a button whose
-                  vertical padding is asymmetric.
-
-                  That padding is 10px, which is why this takes the `tab`
-                  kind rather than the 18 x 24 row slot (M46.2 Task 6): the
-                  row grip transposed for a horizontal list, keeping its
-                  glyph, ink, cursor and reveal, giving up only the width the
-                  surface has no room for. */}
+                {/* The compact tab grip sits in the pill's left padding.
+                  Its reserved hit area keeps hover/focus from shifting the
+                  tab, while the wider row grip would cover the layout icon. */}
                 {onReorder !== undefined && (
                   <Tooltip label="Drag to reorder">
                     <Grip
@@ -313,7 +307,6 @@ export function ViewTabs({
                     setMenu({ x: e.clientX, y: e.clientY, id: view.id });
                   }}
                   className={viewTabClass(active)}
-                  style={{ borderBottomStyle: 'solid' }}
                 >
                   <Icon name={view.icon ?? kind.icon} size={13} />
                   <span className="min-w-0 truncate">{view.name}</span>
@@ -355,7 +348,7 @@ export function ViewTabs({
             data-testid="new-view"
             aria-label="New view"
             onClick={() => setCreating(true)}
-            className="mb-1 ml-1 inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
+            className="ml-1 inline-flex h-8 items-center gap-1 rounded-full border-0 bg-transparent px-2 text-metadata text-n-500 hover:bg-n-50 hover:text-n-800"
           >
             <Icon name="plus" size={13} />
             {/* A narrow column keeps the glyph and the name (its aria-label). */}
@@ -375,7 +368,9 @@ export function ViewTabs({
       </div>
 
       {trailing !== undefined && (
-        <div className="flex flex-none items-center gap-0.5 pb-1 pl-2">{trailing}</div>
+        <div className="flex min-w-0 flex-wrap items-center gap-1 @min-[560px]/viewtabs:flex-none @min-[560px]/viewtabs:pl-3">
+          {trailing}
+        </div>
       )}
 
       {menu !== null && (
@@ -642,7 +637,7 @@ function NewViewForm({
               type="button"
               data-testid="create-view"
               onClick={() => onCreate(effective, type)}
-              className="rounded-md border-0 bg-cortex-500 px-2.5 py-1 text-xs font-medium text-n-0 hover:bg-cortex-600"
+              className="rounded-md border-0 bg-action-primary px-2.5 py-1 text-xs font-medium text-on-action-primary hover:bg-action-primary-hover active:bg-action-primary-press"
             >
               Create
             </button>

@@ -4,7 +4,7 @@
 }
 
 .cb-home-content {
-  max-width: 920px;
+  max-width: var(--surface-readable);
   margin-inline: auto;
   padding: var(--sp-16) var(--sp-10) var(--sp-16);
 }
@@ -23,9 +23,9 @@
 
 .cb-home-welcome h1 {
   margin: var(--sp-2) 0 var(--sp-3);
-  font-size: var(--fs-3xl);
-  font-weight: 550;
-  line-height: 1.2;
+  font-size: var(--fs-page-title);
+  font-weight: var(--w-semibold);
+  line-height: var(--lh-page-title);
   letter-spacing: -0.025em;
 }
 
@@ -36,55 +36,59 @@
   line-height: 1.6;
 }
 
-.cb-home-ask {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
-  width: 100%;
-  min-height: 112px;
-  padding: var(--sp-6);
-  border: 1px solid var(--n-200);
-  border-radius: var(--r-xl);
-  background: var(--surface-raised);
-  text-align: left;
+/* Home's ask is a Suggestion (M91.14), drawn as Home's one wide entry: its
+   sparkle leads both lines and its arrow trails them. Scoped under .cb-home
+   so it outranks the element's own row look (components/ai/conversation.css). */
+.cb-home .cb-home-ask {
+  position: relative;
+  gap: var(--sp-3);
+  min-height: 64px;
+  padding: var(--sp-3) var(--sp-4) var(--sp-3) calc(var(--sp-4) + 32px + var(--sp-3));
+  border: 1px solid transparent;
+  border-radius: var(--r-lg);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font-size: var(--fs-ui);
+  font-weight: 500;
   transition:
     border-color var(--motion-hover),
     background-color var(--motion-hover);
 }
 
-.cb-home-ask:hover {
-  border-color: var(--synapse-300);
-  background: var(--surface-ai);
+.cb-home .cb-home-ask:hover {
+  border-color: var(--border-subtle);
+  background: var(--n-100);
 }
 
 .cb-home-ask-icon {
+  position: absolute;
+  top: 50%;
+  left: var(--sp-4);
   display: grid;
   place-items: center;
-  flex: none;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--r-lg);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-md);
   color: var(--text-ai);
-  background: var(--surface-ai);
+  background: transparent;
+  translate: 0 -50%;
 }
 
-.cb-home-ask-copy {
-  display: flex;
+.cb-home .cb-home-ask .cb-ai-suggestion-text {
   flex: 1;
-  min-width: 0;
-  flex-direction: column;
   gap: var(--sp-1);
-  font-size: var(--fs-lg);
-  font-weight: 500;
 }
 
-.cb-home-ask-copy > :last-child {
+.cb-home .cb-home-ask .cb-ai-suggestion-description {
   color: var(--text-meta);
   font-size: var(--fs-sm);
   font-weight: 400;
+  line-height: var(--lh-sm);
 }
 
-.cb-home-ask-arrow {
+.cb-home .cb-home-ask > svg {
+  width: 19px;
+  height: 19px;
   color: var(--text-meta);
 }
 
@@ -164,19 +168,20 @@
   background: var(--surface-sunken);
 }
 
-.cb-document-toolbar {
-  min-height: 52px;
-  border-bottom: 1px solid var(--n-100);
-  background: var(--surface-raised);
+/* The page's action bar lives with PageToolbar (components/pageToolbar.css). */
+.cb-document-content {
+  width: 100%;
+  max-width: var(--surface-readable, 880px);
+  margin-inline: auto;
+  padding: 40px var(--surface-inset, 32px) 120px;
 }
 
-.cb-document-content {
-  padding-top: var(--sp-12);
-  padding-bottom: var(--sp-12);
+.cb-document-content-wide {
+  max-width: none;
 }
 
 .cb-doc-narrow .cb-document-content {
-  padding-top: var(--sp-8);
+  padding: 32px 16px 96px;
 }
 
 /* Only the full-page editor's ordinary top-level prose gets reading spacing.
@@ -188,16 +193,10 @@
   > .bn-block-group
   > .bn-block-outer
   > .bn-block
-  > .bn-block-content:is(
-    [data-content-type='paragraph'],
-    [data-content-type='bulletListItem'],
-    [data-content-type='numberedListItem'],
-    [data-content-type='checkListItem'],
-    [data-content-type='quote']
-  ) {
-  padding-block: var(--sp-1) var(--sp-2);
-  font-size: var(--fs-lg);
-  line-height: 1.75;
+  > .bn-block-content:is([data-content-type='paragraph'], [data-content-type='quote']) {
+  padding-block: 4px 10px;
+  font-size: var(--fs-prose);
+  line-height: var(--lh-prose);
 }
 
 .cb-document-content
@@ -207,7 +206,8 @@
   > .bn-block-outer
   > .bn-block
   > .bn-block-content[data-content-type='heading']:not([data-level='1']) {
-  padding-top: var(--sp-5);
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-1);
   padding-bottom: var(--sp-2);
 }
 
@@ -216,9 +216,9 @@
     padding: var(--sp-8) var(--sp-5) var(--sp-12);
   }
 
-  .cb-home-ask {
+  .cb-home .cb-home-ask {
     gap: var(--sp-3);
-    padding: var(--sp-4);
+    padding: var(--sp-4) var(--sp-4) var(--sp-4) calc(var(--sp-4) + 32px + var(--sp-3));
   }
 
   .cb-home-collections {

@@ -1,12 +1,17 @@
+import { KeyboardBlockMenu } from './KeyboardBlockMenu';
+import { Popover } from '@/components/ui/Popover';
+import { moveWithSelection } from './blockActions';
 import { settleSheetDrafts } from '@/sheet/pendingSheets';
 import { nextSheetName, newSheetSource } from '@/engine/sheet/gridEdit';
 import { parseSheetFence, sheetNames, sheetSourcesOf } from '@/engine/sheet/fence';
 import '@blocknote/mantine/style.css';
 import './editor.css';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { PageTitleProjection } from './pageTitleProjection';
+import { HeldSelection } from './heldSelection';
+import { TableSizePicker } from './TableSizePicker';
 import {
   BlockNoteSchema,
-  createCodeBlockSpec,
   defaultBlockSpecs,
   defaultInlineContentSpecs,
   inlineContentToNodes,
@@ -35,10 +40,11 @@ import { CommentHighlights } from './commentHighlights';
 import { FindBar } from './FindBar';
 import { FindHighlights } from './findHighlights';
 import { canInsertColumnsAt, COLUMN_COUNTS, newColumnList } from './columnCommands';
-import { codeBlockOptions } from '@blocknote/code-block';
+import { codeBlockSpec } from './codeBlock';
 import { onAgentEvent, runAgent, startedOrThrow } from '@/agent/agentIpc';
 import { createLinkedPage } from '@/app/listActions';
 import { AskAiPopover } from '@/editor/AskAiPopover';
+import { isAiBlockRunning, setAiBlockRunning } from '@/editor/aiBlockRuns';
 import { AiFormattingToolbar, CarriedBlockMenu, type Preset } from '@/editor/SelectionToolbar';
 import { PromoteDialog } from './PromoteDialog';
 import { linkPromotedLines, promotable, readChecklistLine } from './promoteLines';
@@ -118,16 +124,6 @@ import {
 import { applySteps, inPlace, planExternal, settleChoice, type OpenChoice } from './reconcile';
 
 /**
- * The fully-featured code block (shiki highlighting, the full language list),
- * whose language is empty until someone picks one (M55.15). The package's
- * default is `javascript`, so a bare fence reopened as a JavaScript fence:
- * the save wrote a word the file never had, and the lossy-import check locked
- * the page for it. Empty is what a bare fence means, and the serializer writes
- * it back bare; the picker shows it as Plain Text.
- */
-const codeBlockSpec = createCodeBlockSpec({ ...codeBlockOptions, defaultLanguage: '' });
-
-/**
  * The table controls a markdown table cannot carry, switched off (M55.15):
  * split and merged cells (a cell spans one column), cell colours, and the
  * header toggles (a markdown table always has a header row and never a header
@@ -141,7 +137,7 @@ export const TABLE_SETTINGS = {
   headers: false,
 } as const;
 
-// Default schema with that code block swapped in, plus the Cerebro custom
+// Default schema with our code block swapped in (codeBlock.tsx), plus the Cerebro custom
 // blocks (AI block, callout, columns, database, mermaid, sheet, whiteboard, the child-page list,
 // the page card) and inline chips: wikilinks, assignees, dates, and footnote
 // citations (M2.x, M47.2, M48.1, M51.5, M55.13, M55.14).
@@ -191,13 +187,15 @@ type SlashMenuItem = DefaultReactSuggestionItem & { key?: SlashKey };
  * BlockNote's table, with the header row a markdown table must have (M55.4).
  * Without one the first save wrote an empty header row above the cells.
  */
-const insertTable = (editor: CerebroEditor): void => {
+const insertTable = (editor: CerebroEditor, rows = 2, columns = 3): void => {
   insertOrUpdateBlockForSlashMenu(editor, {
     type: 'table',
     content: {
       type: 'tableContent',
       headerRows: 1,
-      rows: [{ cells: ['', '', ''] }, { cells: ['', '', ''] }],
+      rows: Array.from({ length: rows }, () => ({
+        cells: Array.from({ length: columns }, () => ''),
+      })),
     },
   });
 };
@@ -206,6 +204,7 @@ const insertTable = (editor: CerebroEditor): void => {
 export function slashMenuItems(
   editor: CerebroEditor,
   ours: DefaultReactSuggestionItem[] = [],
+  onTable?: () => void,
 ): SlashMenuItem[] {
   // The React list spreads each core entry, key and all; only its declared
   // type leaves the key off.
@@ -216,7 +215,14 @@ export function slashMenuItems(
     ...blockNote
       .filter((item) => !DROPPED_SLASH_KEYS.has(item.key))
       .map((item) =>
-        item.key === 'table' ? { ...item, onItemClick: () => insertTable(editor) } : item,
+        item.key === 'table'
+          ? {
+              ...item,
+              title: 'Table',
+              subtext: 'Simple Markdown cells with a header row',
+              onItemClick: onTable ?? (() => insertTable(editor)),
+            }
+          : item,
       ),
     ...ours,
   ];
@@ -340,8 +346,10 @@ function BlockGripButton({
         // Remove FIRST, then insert. The other order leaves the document
         // briefly holding two blocks with the same id, and BlockNote resolves
         // `getBlock` by id.
-        editor.removeBlocks([moving]);
-        editor.insertBlocks([moving as never], target, spot.placement);
+        moveWithSelection(editor as CerebroEditor, () => {
+          editor.removeBlocks([moving]);
+          editor.insertBlocks([moving as never], target, spot.placement);
+        });
       }}
     >
       {sideMenu}
@@ -399,6 +407,10 @@ export interface MarkdownEditorProps {
   readOnly?: boolean;
   /** A user edit was made and a save is now pending (fires per keystroke). */
   onDirty?: () => void;
+  /** Page metadata is presentation inside the same editor, never document content. */
+  pageChromeHost?: HTMLElement;
+  pageTitle?: string;
+  bodyVisible?: boolean;
 }
 
 /** One place an outside write and the page's unsaved typing disagree. */
@@ -451,6 +463,9 @@ export function MarkdownEditor({
   autoFocus = false,
   readOnly = false,
   onDirty,
+  pageChromeHost,
+  pageTitle,
+  bodyVisible = true,
 }: MarkdownEditorProps) {
   // Filled in below, once the editor exists: the typed-citation rule needs the
   // editor to close the link menu a marker's `[` opened, and it is handed to
@@ -503,10 +518,15 @@ export function MarkdownEditor({
     },
     // M70.1: comment highlights, and M59.6: find highlights, each drawn as
     // decorations outside the document.
-    extensions: [CommentHighlights(), FindHighlights()],
+    extensions: [CommentHighlights(), FindHighlights(), PageTitleProjection(), HeldSelection()],
   });
   closeLinkMenu.current = () => editor.getExtension(SuggestionMenu)?.closeMenu();
   leaveAnswer.current = (event) => leaveAiAnswer(editor, event);
+  useEffect(() => {
+    editor
+      .getExtension(PageTitleProjection)
+      ?.configure(pageTitle === undefined ? null : (pageChromeHost ?? null), bodyVisible);
+  }, [editor, pageChromeHost, pageTitle, bodyVisible]);
   // M48.4 — what the block drag measures against. The editor's own host
   // element, so a drop can be resolved against every rendered block including
   // the ones inside columns.
@@ -601,6 +621,16 @@ export function MarkdownEditor({
   // side-menu button, floats NEXT TO the task line (not a modal); writes
   // assignee/due chips into that block.
   const [assign, setAssign] = useState<{ blockId: string; x: number; y: number } | null>(null);
+  const [tablePicker, setTablePicker] = useState<HTMLElement | null>(null);
+  const [keyboardBlock, setKeyboardBlock] = useState<{ id: string; anchor: HTMLElement } | null>(
+    null,
+  );
+  const exclusiveTool =
+    asking !== null || assign !== null || tablePicker !== null || keyboardBlock !== null;
+  useEffect(() => {
+    if (exclusiveTool) closeLinkMenu.current();
+    if (asking === null) editor.getExtension(HeldSelection)?.clear();
+  }, [editor, exclusiveTool, asking]);
   const [assignee, setAssignee] = useState('');
   const [dueDate, setDueDate] = useState('');
   const lastSaved = useRef<string | null>(null);
@@ -1082,10 +1112,16 @@ export function MarkdownEditor({
   const focusBlockField = (id: string, type: string, tries = 10) => {
     const escape = (s: string) =>
       typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(s) : s;
-    const content = `[data-content-type="${escape(type)}"] input`;
+    // An input, or the AI block's question, a Prompt Input's textarea (M91.14).
+    const fields = ['input', 'textarea']
+      .flatMap((tag) => {
+        const content = `[data-content-type="${escape(type)}"] ${tag}`;
+        return [`:scope > ${content}`, `:scope > * > ${content}`];
+      })
+      .join(', ');
     const field = host.current
       ?.querySelector(`.bn-block[data-id="${escape(id)}"]`)
-      ?.querySelector<HTMLInputElement>(`:scope > ${content}, :scope > * > ${content}`);
+      ?.querySelector<HTMLElement>(fields);
     if (field != null) {
       field.focus();
       return;
@@ -1373,13 +1409,20 @@ export function MarkdownEditor({
    * is (M17.16): it transforms text that is already in the prompt, and a run
    * that could call open_note would navigate the reader away from the block
    * they are watching.
+   *
+   * While the answer is written the block is marked running (aiBlockRuns.ts,
+   * M91.14), which it draws as working, from the ask until the answer lands
+   * or the run ends without one; a second ask meanwhile is refused, since
+   * two answers would race for the same children.
    */
   useEffect(() => {
     const onRun = (event: Event) => {
       const { id, prompt } = (event as CustomEvent<{ id: string; prompt: string }>).detail;
       if (vaultPath === null || prompt.trim() === '') return;
       const block = editor.getBlock(id);
-      if (block === undefined) return;
+      if (block === undefined || isAiBlockRunning(editor, id)) return;
+      setAiBlockRunning(editor, id, true);
+      const settled = () => setAiBlockRunning(editor, id, false);
       void (async () => {
         try {
           const document = await blocksToMarkdown(editor);
@@ -1412,11 +1455,15 @@ export function MarkdownEditor({
             if (e.kind === 'Error') {
               toast(e.message);
               stop();
+              settled();
             }
             if (e.kind === 'Done') {
               stop();
               const clean = unwrapReplyFence(text);
-              if (editor.getBlock(id) === undefined || clean === '') return;
+              if (editor.getBlock(id) === undefined || clean === '') {
+                settled();
+                return;
+              }
               // The answer is markdown, and it becomes the block's children
               // read the way the file will read it back (M53.9) — a list is a
               // list, a [[link]] a chip — so what is on screen now is what
@@ -1438,11 +1485,13 @@ export function MarkdownEditor({
                   } as never);
                   scheduleEmit();
                 })
-                .catch((err: unknown) => toast(err instanceof Error ? err.message : String(err)));
+                .catch((err: unknown) => toast(err instanceof Error ? err.message : String(err)))
+                .finally(settled);
             }
           }, runId);
         } catch (err) {
           toast(err instanceof Error ? err.message : String(err));
+          settled();
         }
       })();
     };
@@ -1459,14 +1508,39 @@ export function MarkdownEditor({
   // window so it only fires for the editor that has focus — two editors are on
   // screen at once whenever the record panel is open beside a doc.
   const onEditorKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== 'k' || !(e.metaKey || e.ctrlKey) || readOnly) return;
+    if (readOnly) return;
     // The find bar sits inside this host, and the browser reports text
     // selected in its <input> through window.getSelection(): without this,
     // ⌘K on a selected query would ask AI to rewrite the query, and Apply
     // would insert into the bar's React-owned DOM (M59.6).
-    if (e.target instanceof Element && e.target.closest('[data-testid="find-bar"]') !== null) {
+    if (
+      e.target instanceof Element &&
+      e.target.closest('[data-testid="find-bar"], .cb-page-editor-chrome') !== null
+    ) {
       return;
     }
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      // Portalled controls still bubble through this React host. Only the
+      // native editor, never its active contextual tool, owns block actions.
+      if (
+        exclusiveTool ||
+        !(e.target instanceof Element) ||
+        e.target.closest('.bn-editor') !== editor.domElement ||
+        e.target.closest('input, textarea, select, [contenteditable="false"]') !== null
+      )
+        return;
+      const block = editor.getTextCursorPosition().block;
+      const anchor = host.current?.querySelector<HTMLElement>(
+        `[data-id="${block.id}"] .bn-block-content`,
+      );
+      if (anchor !== undefined && anchor !== null) {
+        e.preventDefault();
+        e.stopPropagation();
+        setKeyboardBlock({ id: block.id, anchor });
+      }
+      return;
+    }
+    if (e.key !== 'k' || !(e.metaKey || e.ctrlKey)) return;
     const text = window.getSelection()?.toString() ?? '';
     // Nothing selected is not an error — it is the other feature (a slash
     // menu), and stealing the keystroke to show an empty rewrite would be
@@ -1475,10 +1549,11 @@ export function MarkdownEditor({
     e.preventDefault();
     const live = window.getSelection()?.getRangeAt(0);
     target.current = live?.cloneRange() ?? null;
+    editor.getExtension(HeldSelection)?.hold();
     const rect = live?.getBoundingClientRect();
     setAsking({
       text,
-      x: Math.min(rect?.left ?? 80, window.innerWidth - 440),
+      x: rect?.left ?? 80,
       y: (rect?.bottom ?? 80) + 6,
     });
   };
@@ -1486,22 +1561,26 @@ export function MarkdownEditor({
   /**
    * Open the rewrite surface from the toolbar.
    *
-   * The DOM range is saved into `asking` here, while it still exists: clicking
-   * the bar moves focus, and by the time the popover mounts the selection the
-   * user made is gone. Same reason Cmd-K captures the string rather than
-   * reading it back later.
+   * Capture the editor's selection before the contextual input takes focus.
+   * WebKit may collapse its DOM range when a toolbar button receives the
+   * pointer, while ProseMirror still owns the person's exact text selection.
    */
   const askFromToolbar = (preset?: Preset) => {
-    const live = window.getSelection();
-    if (live === null || live.rangeCount === 0 || live.isCollapsed) return;
-    const text = live.toString();
+    const { from, to } = editor.prosemirrorState.selection;
+    if (from === to) return;
+    const text = editor.getSelectedText();
     if (text.trim() === '') return;
-    const range = live.getRangeAt(0);
-    target.current = range.cloneRange();
+    const start = editor.prosemirrorView.domAtPos(from);
+    const end = editor.prosemirrorView.domAtPos(to);
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    target.current = range;
+    editor.getExtension(HeldSelection)?.hold();
     const rect = range.getBoundingClientRect();
     setAsking({
       text,
-      x: Math.min(rect.left, window.innerWidth - 440),
+      x: rect.left,
       y: rect.bottom + 8,
       preset: preset?.instruction,
     });
@@ -1561,7 +1640,7 @@ export function MarkdownEditor({
       data-os-drop="editor"
       data-os-drag-over={attachmentZone.over || undefined}
       data-testid="markdown-editor"
-      className="cerebro-editor min-h-0 flex-1"
+      className={`cerebro-editor min-h-0 flex-1${pageTitle === undefined ? '' : ' cb-page-editor'}`}
       onKeyDown={onEditorKeyDown}
     >
       {loaded && <FindBar editor={editor} host={host} readOnly={readOnly} />}
@@ -1579,6 +1658,8 @@ export function MarkdownEditor({
             // rendered). Left on, BlockNote mounts a SECOND controller and two
             // toolbars stack on the same selection.
             formattingToolbar={false}
+            linkToolbar={!exclusiveTool}
+            tableHandles={!exclusiveTool}
           >
             <FilePanelController filePanel={AttachmentFilePanel} />
             <SuggestionMenuController
@@ -1649,20 +1730,32 @@ export function MarkdownEditor({
                 // BlockNote's entries less DROPPED_SLASH_KEYS, then ours: the
                 // date, columns, Cerebro's blocks and per-template inserts.
                 filterItems(
-                  slashMenuItems(editor, [
-                    dateSlashItem(),
-                    ...columnSlashItems(),
-                    ...blockSlashItems(),
-                    ...templateSlashItems(),
-                  ]),
+                  slashMenuItems(
+                    editor,
+                    [
+                      dateSlashItem(),
+                      ...columnSlashItems(),
+                      ...blockSlashItems(),
+                      ...templateSlashItems(),
+                    ],
+                    () => {
+                      const id = editor.getTextCursorPosition().block.id;
+                      const anchor = host.current?.querySelector<HTMLElement>(
+                        `[data-id="${id}"] .bn-block-content`,
+                      );
+                      // The slash command's Enter must finish before the picker
+                      // can own its next Enter.
+                      if (anchor) window.setTimeout(() => setTablePicker(anchor), 0);
+                    },
+                  ),
                   query,
                 )
               }
             />
-            {/* M18: AI at the head of the editor's OWN formatting toolbar. A
+            {/* M86: formatting leads the editor's own selection toolbar. A
               second floating bar beside BlockNote's fought it for the same few
               pixels on every selection. */}
-            {!readOnly && (
+            {!readOnly && !exclusiveTool && (
               <AiFormattingToolbar
                 onAsk={askFromToolbar}
                 onPromote={
@@ -1707,6 +1800,53 @@ export function MarkdownEditor({
           onCreated={finishPromotion}
         />
       )}
+      {keyboardBlock !== null && !readOnly && (
+        <KeyboardBlockMenu
+          editor={editor}
+          blockId={keyboardBlock.id}
+          anchor={keyboardBlock.anchor}
+          onClose={() => {
+            setKeyboardBlock(null);
+            editor.focus();
+          }}
+          onAssign={
+            editor.getBlock(keyboardBlock.id)?.type === 'checkListItem'
+              ? () => {
+                  openAssignDialog(keyboardBlock.id);
+                  setKeyboardBlock(null);
+                }
+              : undefined
+          }
+          onPromote={
+            notePath !== null && editor.getBlock(keyboardBlock.id)?.type === 'checkListItem'
+              ? () => {
+                  const block = editor.getBlock(keyboardBlock.id);
+                  if (block !== undefined) setPromoting(promotable([block], entries, notePath));
+                  setKeyboardBlock(null);
+                }
+              : undefined
+          }
+        />
+      )}
+      {tablePicker !== null && !readOnly && (
+        <TableSizePicker
+          anchor={tablePicker}
+          onInsert={(rows, columns) => {
+            setTablePicker(null);
+            inPlace(editor, () => insertTable(editor, rows, columns));
+            editor.focus();
+          }}
+          onContinueTyping={(text) => {
+            setTablePicker(null);
+            editor.insertInlineContent(text);
+            editor.focus();
+          }}
+          onClose={() => {
+            setTablePicker(null);
+            editor.focus();
+          }}
+        />
+      )}
       {flash !== null && (
         <SectionFlash
           key={flash.n}
@@ -1716,26 +1856,27 @@ export function MarkdownEditor({
         />
       )}
       {asking !== null && (
-        <div
-          className="fixed inset-0 z-40"
-          onMouseDown={() => setAsking(null)}
-          onWheel={(e) => {
-            if (e.target === e.currentTarget) setAsking(null);
-          }}
-        >
-          <div
-            className="absolute"
-            style={{ left: asking.x, top: asking.y }}
-            onMouseDown={(e) => e.stopPropagation()}
+        <span className="fixed" style={{ left: asking.x, top: asking.y }}>
+          <Popover
+            role="group"
+            ariaLabel="Selection actions"
+            trapFocus
+            onClose={() => {
+              setAsking(null);
+              editor.focus();
+            }}
           >
             <AskAiPopover
               selection={asking.text}
               preset={asking.preset}
               onReplace={replaceSelection}
-              onClose={() => setAsking(null)}
+              onClose={() => {
+                setAsking(null);
+                editor.focus();
+              }}
             />
-          </div>
-        </div>
+          </Popover>
+        </span>
       )}
       {assign !== null && (
         // Anchored popover, not a modal — it floats beside the task line
@@ -1805,7 +1946,7 @@ export function MarkdownEditor({
               <button
                 type="button"
                 onClick={submitAssign}
-                className="h-7 rounded-md border-0 bg-cortex-500 px-2.5 text-xs font-medium text-n-0 hover:bg-cortex-600"
+                className="h-7 rounded-md border-0 bg-action-primary px-2.5 text-xs font-medium text-on-action-primary hover:bg-action-primary-hover active:bg-action-primary-press"
               >
                 Apply
               </button>

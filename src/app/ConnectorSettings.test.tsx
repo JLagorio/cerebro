@@ -21,6 +21,7 @@ import {
 import * as ipc from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { chooseOption, optionLabels } from '@/test/chooseOption';
 
 describe('ConnectorSettings approval surface', () => {
   beforeEach(() => {
@@ -160,6 +161,31 @@ describe('ConnectorSettings approval surface', () => {
     fireEvent.click(screen.getByLabelText('Remove jira'));
     expect(useUiStore.getState().stdioApprovals['/vault']).toEqual([]);
     await waitFor(() => expect(vi.mocked(ipc.connectorStatus)).toHaveBeenCalledTimes(3));
+  });
+
+  it('the transport picker makes the target a command, and a stdio add approves exactly it', async () => {
+    vi.mocked(ipc.readConnectors).mockResolvedValue('');
+    render(<ConnectorSettings />);
+    fireEvent.change(await screen.findByPlaceholderText('Name'), { target: { value: 'files' } });
+    const transport = screen.getByRole('button', { name: 'Connector transport' });
+    expect(transport.getAttribute('data-value')).toBe('http');
+    expect(optionLabels(transport)).toEqual(['http', 'stdio']);
+    chooseOption(transport, 'stdio');
+    expect(transport.getAttribute('data-value')).toBe('stdio');
+    fireEvent.change(screen.getByPlaceholderText('npx -y @some/mcp'), {
+      target: { value: 'npx -y @acme/files-mcp' },
+    });
+    fireEvent.click(screen.getByText('Add'));
+    const added: ConnectorSpec = {
+      name: 'files',
+      transport: 'stdio',
+      url: '',
+      command: 'npx',
+      args: ['-y', '@acme/files-mcp'],
+      enabled: true,
+      extra: {},
+    };
+    expect(useUiStore.getState().stdioApprovals['/vault']).toEqual([approvalKey(added)]);
   });
 
   it('says legacy mode loads your global config but grants none of its tools', async () => {

@@ -30,20 +30,28 @@ test('My work keys peek in place, type in the body, and close one thing per Esca
     'data-focused',
     'true',
   );
-  const secondTitle = await page.getByTestId('detail-title').inputValue();
+  const secondTitle = (await page
+    .getByTestId('detail-panel')
+    .locator('[data-page-title] h1')
+    .textContent())!;
   await page.keyboard.press('j');
   await expect(page.locator(`[data-cursor-key="${third}"]`)).toHaveAttribute(
     'data-focused',
     'true',
   );
-  await expect(page.getByTestId('detail-title')).not.toHaveValue(secondTitle);
-  const title = await page.getByTestId('detail-title').inputValue();
+  await expect(page.getByTestId('detail-panel').locator('[data-page-title] h1')).not.toHaveText(
+    secondTitle,
+  );
+  const title = (await page
+    .getByTestId('detail-panel')
+    .locator('[data-page-title] h1')
+    .textContent())!;
   const body = peek.locator('.bn-editor [data-content-type="paragraph"]').first();
   await body.click();
   await page.keyboard.type('j');
   await expect(body).toContainText('j');
   await expect.poll(() => readMockFile(page, third!)).toMatch(/\n[^#\n]*j/);
-  await expect(page.getByTestId('detail-title')).toHaveValue(title);
+  await expect(page.getByTestId('detail-panel').locator('[data-page-title] h1')).toHaveText(title);
   await page.screenshot({ path: testInfo.outputPath('my-work-peek.png') });
   await page.keyboard.press('Escape');
   await expect(peek).toHaveCount(0);

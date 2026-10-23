@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openAssistantPanel } from './boot';
 
 /**
  * M52 — the assistant is never pushed off-screen.
@@ -33,7 +33,7 @@ async function peekBesideAssistant(
   await row.getByRole('button', { name: /^Open / }).click();
   const peek = page.getByTestId('detail-panel');
   await expect(peek).toBeVisible();
-  await page.keyboard.press('ControlOrMeta+j');
+  await openAssistantPanel(page);
   const assistant = page.getByTestId('ai-panel');
   await expect(assistant).toBeVisible();
   return { peek, assistant };
@@ -66,7 +66,7 @@ async function openPage(page: Page, title: string) {
 }
 
 async function openAssistant(page: Page): Promise<Locator> {
-  await page.keyboard.press('ControlOrMeta+j');
+  await openAssistantPanel(page);
   const assistant = page.getByTestId('ai-panel');
   await expect(assistant).toBeVisible();
   return assistant;
@@ -158,7 +158,7 @@ async function logAssistantFrames(page: Page) {
 function badFrames(log: Frame[]): Frame[] {
   return log.filter((f) => {
     if (f.width === null) return !f.tab;
-    if (f.width < 319 || (f.shown ?? 0) < f.width - 1) return true;
+    if (f.width < 320 || (f.shown ?? 0) < f.width - 1) return true;
     const edge = (f.edge ?? 0) + 0.5;
     return (f.send !== null && f.send > edge) || (f.close !== null && f.close > edge);
   });
@@ -235,7 +235,7 @@ test.describe('shell layout (M52)', () => {
     expect(await storedWidth(page, 'cerebro.detailWidth')).toBe(560);
 
     // With the assistant closed the room comes back, and so does the 560.
-    await page.keyboard.press('ControlOrMeta+j');
+    await assistant.getByRole('button', { name: 'Close AI panel', exact: true }).click();
     await expect(assistant).toHaveCount(0);
     await expect.poll(async () => Math.round((await box(peek)).width)).toBe(560);
 
@@ -251,9 +251,9 @@ test.describe('shell layout (M52)', () => {
   });
 
   test('the sidebar header keeps its controls at the sidebar floor', async ({ page }) => {
-    // Peek + assistant at 1280 squeeze the sidebar to its 180px floor, where
+    // Peek + assistant at 1292 squeeze the sidebar to its 180px floor, where
     // the wordmark pushed Hide sidebar past the sidebar's clipped edge.
-    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.setViewportSize({ width: 1292, height: 800 });
     await boot(page);
     await peekBesideAssistant(page);
     const sidebar = page.getByTestId('sidebar');
@@ -275,15 +275,28 @@ test.describe('shell layout (M52)', () => {
     await openPage(page, 'Sync error rate');
     const column = page.getByTestId('doc-column');
     const side = page.getByTestId('doc-side-panel');
-    await expect(side).toBeVisible();
 
-    // The sidebar gave first, so the column holds its floor with the panel beside it.
+    // The sidebar gave first, and the column holds its floor: the panel beside
+    // it gives only down to the toolbar actions it opens under, then folds
+    // (owner, 2026-10-19), and its button brings it back as a drawer.
     expect((await box(page.getByTestId('sidebar'))).width).toBeLessThan(264);
     const c = await box(column);
     expect(c.width).toBeGreaterThanOrEqual(360);
-    expect(await side.getAttribute('data-overlay')).toBeNull();
     const verify = await box(column.getByRole('button', { name: 'Verify' }));
     expect(verify.x + verify.width).toBeLessThanOrEqual(c.x + c.width);
+    if ((await side.count()) === 0) {
+      await page
+        .getByTestId('doc-page')
+        .getByRole('button', { name: 'Details', exact: true })
+        .click();
+      await expect(side).toHaveAttribute('data-overlay', 'true');
+    } else {
+      expect(await side.getAttribute('data-overlay')).toBeNull();
+    }
+    const actions = await box(page.getByTestId('doc-page').locator('.cb-document-actions'));
+    expect((await box(side)).width).toBeGreaterThanOrEqual(actions.width);
+    expect((await box(column)).width).toBeGreaterThanOrEqual(360);
+    await expectInsideViewport(page, side);
     await expectInsideViewport(page, assistant);
   });
 
@@ -305,7 +318,10 @@ test.describe('shell layout (M52)', () => {
     );
 
     // Asked for, it floats over the column rather than crushing it.
-    await page.getByTestId('doc-page').getByRole('button', { name: 'Show panel' }).click();
+    const details = page
+      .getByTestId('doc-page')
+      .getByRole('button', { name: 'Details', exact: true });
+    await details.click();
     const side = page.getByTestId('doc-side-panel');
     await expect(side).toHaveAttribute('data-overlay', 'true');
     expect((await box(column)).width).toBeGreaterThanOrEqual(360);
@@ -313,7 +329,8 @@ test.describe('shell layout (M52)', () => {
     await expectInsideViewport(page, assistant);
 
     // Hiding it is the user's word, and that one is written.
-    await page.getByTestId('doc-page').getByRole('button', { name: 'Hide panel' }).click();
+    await expect(details).toHaveAttribute('aria-pressed', 'true');
+    await details.click();
     await expect(side).toHaveCount(0);
     expect(await page.evaluate(() => localStorage.getItem('cerebro.conceptPanelOpen'))).toBe(
       'false',
@@ -354,7 +371,10 @@ test.describe('shell layout (M52)', () => {
     await boot(page);
     await peekBesideAssistant(page);
     const frames = await logAssistantFrames(page);
-    const jumps = [1300, 1000, 1300, 1240, 1190, 1240, 1221, 1083, 1221, 1500, 1100, 1500, 1050];
+    const jumps = [
+      1300, 1000, 986, 985, 986, 1300, 1274, 1273, 1240, 1190, 1240, 1094, 1093, 1221, 1083, 1221,
+      1500, 1100, 1500, 1050,
+    ];
     for (const width of jumps) {
       await page.setViewportSize({ width, height: 900 });
       await nextFrame(page);
@@ -421,7 +441,9 @@ test.describe('shell layout (M52)', () => {
     await expect(page.getByTestId('sidebar')).toBeHidden();
   });
 
-  test('below the rail width the assistant parks without costing the sidebar', async ({ page }) => {
+  test('below the rail width the assistant parks while retaining the sidebar preference', async ({
+    page,
+  }) => {
     // Verified at 1050: pressing the Assistant beside a record took the
     // sidebar from 264 to its 44px rail and parked the assistant anyway.
     await page.setViewportSize({ width: 1050, height: 800 });
@@ -438,12 +460,21 @@ test.describe('shell layout (M52)', () => {
     await expect(peek).toBeVisible();
     const sidebar = page.getByTestId('sidebar');
     const before = Math.round((await box(sidebar)).width);
+    const preference = await stored(page, 'cerebro.sidebarWidth');
 
     await page.keyboard.press('ControlOrMeta+j');
+    // Dock explicitly: the shortcut opens a floating conversation, while
+    // this narrow layout intentionally parks the docked presentation.
+    await page.getByTestId('ai-panel').getByRole('button', { name: 'Dock conversation' }).click();
     await expect(page.getByTestId('ai-parked-tab')).toBeVisible();
     await expect(page.getByTestId('app-rail')).toBeVisible();
     await expect(sidebar).toBeVisible();
-    expect(Math.round((await box(sidebar)).width)).toBe(before);
+    // The largest fit reserves rail, paper gutter/borders, canvas, record
+    // and the parked tab. Fitting it does not overwrite the saved width.
+    expect(Math.round((await box(sidebar)).width)).toBe(
+      Math.min(before, 1050 - 54 - 400 - 320 - 32),
+    );
+    expect(await stored(page, 'cerebro.sidebarWidth')).toBe(preference);
     await expectInsideViewport(page, peek);
   });
 
@@ -472,10 +503,10 @@ test.describe('shell layout (M52)', () => {
   });
 
   test('a drag that cannot widen the sidebar keeps the width it had', async ({ page }) => {
-    // Verified at 1280: the ceiling beside a record and the assistant is the
+    // At 1292, the ceiling beside a record and the assistant is the
     // sidebar's 180 floor, so a drag to widen it stored 180 over its 264 and
     // it stayed 180 once the record closed.
-    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.setViewportSize({ width: 1292, height: 800 });
     await boot(page);
     const { peek } = await peekBesideAssistant(page);
     const sidebar = page.getByTestId('sidebar');
@@ -531,7 +562,7 @@ test.describe('shell layout (M52)', () => {
     await boot(page);
     await openAssistant(page);
     await openPage(page, 'Sync error rate');
-    const show = page.getByTestId('doc-page').getByRole('button', { name: 'Show panel' });
+    const show = page.getByTestId('doc-page').getByRole('button', { name: 'Details', exact: true });
     const side = page.getByTestId('doc-side-panel');
     const column = page.getByTestId('doc-column');
 
@@ -557,8 +588,9 @@ test.describe('shell layout (M52)', () => {
     await page.mouse.click(c.x + 40, c.y + c.height / 2);
     await expect(side).toHaveCount(0);
     expect(await stored(page, 'cerebro.conceptPanelOpen')).toBe('true');
-    // Folded, not hidden: the toggle still offers the panel.
+    // Folded, not hidden: the button still offers the panel, unpressed.
     await expect(show).toBeVisible();
+    await expect(show).toHaveAttribute('aria-pressed', 'false');
   });
 
   test("Escape in the composer's [[ menu closes the menu, not the drawer", async ({ page }) => {
@@ -569,7 +601,10 @@ test.describe('shell layout (M52)', () => {
     await boot(page);
     const assistant = await openAssistant(page);
     await openPage(page, 'Sync error rate');
-    await page.getByTestId('doc-page').getByRole('button', { name: 'Show panel' }).click();
+    await page
+      .getByTestId('doc-page')
+      .getByRole('button', { name: 'Details', exact: true })
+      .click();
     const side = page.getByTestId('doc-side-panel');
     await expect(side).toHaveAttribute('data-overlay', 'true');
 
@@ -599,7 +634,7 @@ test.describe('shell layout (M52)', () => {
     await expect(page.getByTestId('doc-pages-panel')).toBeVisible();
     const assistant = await openAssistant(page);
 
-    // Pages (216) + side (272) + column beside a 380px assistant: the Pages
+    // Pages (216) + side (300) + column beside a 380px assistant: the Pages
     // panel folds to its button, the side panel stays, the column holds.
     await expect(page.getByTestId('doc-pages-panel')).toHaveCount(0);
     await expect(page.getByTestId('doc-side-panel')).toBeVisible();
@@ -637,10 +672,13 @@ test.describe('shell layout (M52)', () => {
     await boot(page);
     await openAssistant(page);
     await openPage(page, 'Phoenix cutover standup');
-    await page.getByTestId('doc-page').getByRole('button', { name: 'Show panel' }).click();
+    await page
+      .getByTestId('doc-page')
+      .getByRole('button', { name: 'Details', exact: true })
+      .click();
     const side = page.getByTestId('doc-side-panel');
     await expect(side).toHaveAttribute('data-overlay', 'true');
-    await page.getByTestId('doc-panel-tab-info').click();
+    await expect(side).toHaveAttribute('data-panel', 'details');
 
     const field = side.getByRole('textbox', { name: 'Ingest format' });
     await field.fill('webvtt');
@@ -678,6 +716,7 @@ test.describe('shell layout (M52)', () => {
       const peek = page.getByTestId('detail-panel');
       await expect(peek).toBeVisible();
       await page.keyboard.press('ControlOrMeta+j');
+      await page.getByTestId('ai-panel').getByRole('button', { name: 'Dock conversation' }).click();
 
       const tab = page.getByTestId('ai-parked-tab');
       await expect(tab).toBeVisible();

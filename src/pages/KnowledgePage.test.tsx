@@ -1,6 +1,6 @@
 import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Entry } from '@/engine/types';
 import { ReviewPager } from '@/knowledge/ReviewQueue';
@@ -229,13 +229,15 @@ describe('KnowledgePage review queue (M51.2)', () => {
     );
   });
 
-  it('keeps the review count on the tab', () => {
+  it('keeps the review count on the tab', async () => {
     useVaultStore.setState({
       vaultPath: '/vault',
       entries: [concept({ path: 'knowledge/new.md', title: 'Fresh' })],
     });
     render(<KnowledgePage selection={{ kind: 'knowledge', nav: { tab: 'all' } }} />);
-    expect(screen.getByTestId('knowledge-tab-review').textContent).toBe('Review1');
+    await waitFor(() =>
+      expect(screen.getByTestId('knowledge-tab-review').textContent).toBe('Review1'),
+    );
   });
 });
 
@@ -432,7 +434,7 @@ describe('KnowledgePage as a table (M52.5)', () => {
     expect(cell('Unsigned', 'summary')).toBe('—');
   });
 
-  it('says how many there are and how many wait, and Start review opens the first the queue would', () => {
+  it('says how many there are and how many wait, and Start review opens the first the queue would', async () => {
     useVaultStore.setState({
       vaultPath: '/vault',
       entries: [
@@ -447,7 +449,9 @@ describe('KnowledgePage as a table (M52.5)', () => {
     render(<KnowledgePage selection={{ kind: 'knowledge', nav: { tab: 'all' } }} />);
     // The count beside the title, as a view's; the summary says what waits.
     expect(screen.getByTestId('knowledge-count').textContent).toBe('2');
-    expect(screen.getByTestId('knowledge-summary').textContent).toBe('2 to verify');
+    await waitFor(() =>
+      expect(screen.getByTestId('knowledge-summary').textContent).toBe('2 to verify'),
+    );
     // The number that matters most rides on the button.
     expect(screen.getByTestId('knowledge-start-count').textContent).toBe('2');
     fireEvent.click(screen.getByTestId('knowledge-start-review'));
@@ -455,7 +459,7 @@ describe('KnowledgePage as a table (M52.5)', () => {
     expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'knowledge/due.md' });
   });
 
-  it('offers no Start review with nothing waiting, and says so', () => {
+  it('offers no Start review with nothing waiting, and says so', async () => {
     useVaultStore.setState({
       vaultPath: '/vault',
       entries: [
@@ -469,10 +473,12 @@ describe('KnowledgePage as a table (M52.5)', () => {
     render(<KnowledgePage selection={{ kind: 'knowledge', nav: { tab: 'all' } }} />);
     expect(screen.queryByTestId('knowledge-start-review')).toBeNull();
     expect(screen.getByTestId('knowledge-count').textContent).toBe('1');
-    expect(screen.getByTestId('knowledge-summary').textContent).toBe('nothing to review');
+    await waitFor(() =>
+      expect(screen.getByTestId('knowledge-summary').textContent).toBe('nothing to review'),
+    );
   });
 
-  it("counts and starts a folder's own review in a folder's view", () => {
+  it("counts and starts a folder's own review in a folder's view", async () => {
     useVaultStore.setState({
       vaultPath: '/vault',
       entries: [
@@ -497,7 +503,9 @@ describe('KnowledgePage as a table (M52.5)', () => {
     );
     expect(screen.getAllByTestId('concept-row')).toHaveLength(2);
     expect(screen.getByTestId('knowledge-count').textContent).toBe('2');
-    expect(screen.getByTestId('knowledge-summary').textContent).toBe('1 to verify');
+    await waitFor(() =>
+      expect(screen.getByTestId('knowledge-summary').textContent).toBe('1 to verify'),
+    );
     // The crumb names the folder, so its one section draws no band.
     expect(screen.queryByTestId('concept-group')).toBeNull();
     // The tabs count the bundle, so a folder's view draws no count on them.
@@ -702,6 +710,28 @@ describe('KnowledgePage as a table (M52.5)', () => {
     resetMockFs();
   });
 
+  it('keeps an unreadable proposal queue out of the total and names the uncertainty', async () => {
+    failNext('review_queue');
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [
+        concept({
+          path: 'knowledge/signed.md',
+          title: 'Signed',
+          properties: props({ verified: [{ by: 'human:josef', at: '2026-07-01' }] }),
+        }),
+      ],
+    });
+    render(<KnowledgePage selection={{ kind: 'knowledge', nav: { tab: 'all' } }} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('knowledge-summary').textContent).toBe(
+        'nothing to verify · proposals unavailable',
+      ),
+    );
+    expect(screen.queryByText('nothing to review')).toBeNull();
+    expect(screen.getByTestId('knowledge-tab-review').textContent).toBe('Review');
+  });
+
   it('never says nothing to review when the queued writes could not be read', async () => {
     failNext('pending_writes');
     useVaultStore.setState({
@@ -715,7 +745,7 @@ describe('KnowledgePage as a table (M52.5)', () => {
       ],
     });
     render(<KnowledgePage selection={{ kind: 'knowledge', nav: { tab: 'all' } }} />);
-    expect(await screen.findByText('nothing to verify')).not.toBeNull();
+    expect(await screen.findByText('nothing to verify · page writes unavailable')).not.toBeNull();
     expect(screen.queryByText('nothing to review')).toBeNull();
     expect(screen.getByTestId('knowledge-tab-review').textContent).toBe('Review');
   });

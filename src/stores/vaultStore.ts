@@ -1,6 +1,11 @@
 import { inheritedAgentsPatch } from '@/engine/assignment';
 import { create } from 'zustand';
-import { announceExternalWrites, flushOpenPages } from '@/editor/openPages';
+import {
+  announceExternalWrites,
+  editorHoldersOf,
+  flushOpenPages,
+  heldOpenPages,
+} from '@/editor/openPages';
 import {
   batchFailureWords,
   openReportWords,
@@ -15,7 +20,7 @@ import type { CollectionFile, Entry, Schema, ListFile } from '@/engine/types';
 import { parseListYaml } from '@/engine/views';
 import * as ipc from '@/lib/ipc';
 import { coalescedRefresh, writeFence, type PassOutcome } from '@/lib/trailingRefresh';
-import { applyEntryPatch } from '@/engine/entryPatch';
+import { applyEntryPatch, garbledKey } from '@/engine/entryPatch';
 import { useUiStore } from '@/stores/uiStore';
 import { useUndoStore } from '@/stores/undoStore';
 
@@ -400,6 +405,11 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const normalized = Object.fromEntries(
       Object.entries(patch).map(([key, value]) => [key, value === undefined ? null : value]),
     );
+    const garbled = garbledKey(normalized);
+    if (garbled !== null) {
+      useUiStore.getState().toast(`Couldn't save ${garbled}: its value came through garbled`);
+      return false;
+    }
     // Schema enforcement (M2.x properties engine): declared fields must
     // match their YAML-declared shape or the write never reaches disk.
     const target = get().entries.find((e) => e.path === path);
@@ -473,31 +483,46 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     // After those, unlike patchFrontmatter: a title cell commits on every
     // blur, so one clicked and left unchanged mid-open must not toast.
     if (refusedAcrossVaults(state)) return false;
-    // Optimistic and fenced, like patchFrontmatter: `title` is a top-level
-    // Entry field rather than frontmatter, so applyEntryPatch is not involved. The
-    // new bytes' hash is not known until the rescan below reads them (M55.2).
-    try {
-      await fencedWrite(
-        () =>
-          set({
-            entries: get().entries.map((e) =>
-              e.path === path ? { ...e, title: trimmed, hash: null } : e,
-            ),
-          }),
-        () => ipc.setNoteTitle(vault, path, trimmed),
-      );
-    } catch {
-      useUiStore.getState().toast("Couldn't rename record");
-      await get().rescan(); // disk truth wins: revert the optimistic update
-      return false;
+    const ticket = openTicket;
+    const sameVault = () => openTicket === ticket && get().vaultPath === vault;
+    // A table can rename a page whose body is open elsewhere. Settle that
+    // owner's existing writes before taking the title write, then hold new
+    // saves through the write and rescan. Otherwise a delayed body save can
+    // put the previous H1 back after the table reports success.
+    if (editorHoldersOf(path).length > 0) {
+      await flushOpenPages();
+      if (!sameVault() || refusedAcrossVaults(get())) return false;
+      if (heldOpenPages().includes(path)) {
+        useUiStore.getState().toast('Save or resolve the open page before renaming it');
+        return false;
+      }
+      const current = get().entries.find((entry) => entry.path === path);
+      if (current === undefined) return false;
+      if (current.title === trimmed) return true;
     }
-    // Unconditionally, unlike patchFrontmatter's `!inTauri()` guard: a title
-    // feeds derived state the optimistic update does not reach — wikilink
-    // resolution and the dossiers keyed off it. `rescan` catches and toasts
-    // its own failure, so a refresh that fails must not report the rename
-    // as failed; it already landed on disk.
-    await get().rescan();
-    return true;
+    let saved = false;
+    await announceExternalWrites([path], async () => {
+      try {
+        await fencedWrite(
+          () =>
+            set({
+              entries: get().entries.map((entry) =>
+                entry.path === path ? { ...entry, title: trimmed, hash: null } : entry,
+              ),
+            }),
+          () => ipc.setNoteTitle(vault, path, trimmed),
+        );
+        // Reconcile the owning editor before releasing its held save. The
+        // title feeds links and dossiers too, so this scan is required in
+        // Tauri even when its watcher suppresses our own write's echo.
+        if (sameVault()) await get().rescan();
+        saved = true;
+      } catch {
+        useUiStore.getState().toast("Couldn't rename record");
+        if (sameVault()) await get().rescan();
+      }
+    });
+    return saved;
   },
 
   async applyBatch(ops, options = {}) {
@@ -505,6 +530,13 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const vault = state.vaultPath;
     if (vault === null) return null;
     if (refusedAcrossVaults(state)) return null;
+    for (const op of ops) {
+      const garbled = op.op === 'patch' ? garbledKey(op.set) : null;
+      if (garbled !== null) {
+        useUiStore.getState().toast(`Couldn't save ${garbled}: its value came through garbled`);
+        return null;
+      }
+    }
     const ticket = openTicket;
     const sameVault = () => openTicket === ticket && get().vaultPath === vault;
     await flushOpenPages();

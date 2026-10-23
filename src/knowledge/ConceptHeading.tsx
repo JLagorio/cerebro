@@ -142,7 +142,7 @@ export function ConceptHeading({ concept }: { concept: Concept }) {
         label="Concept title"
         placeholder="Untitled concept"
         value={concept.title}
-        className="text-3xl font-semibold leading-[43px] text-n-900"
+        className="text-page-title font-semibold tracking-[-0.025em] text-n-900"
         onCommit={(next) => {
           if (next !== '') void patchFrontmatter(concept.entry.path, { title: next });
         }}

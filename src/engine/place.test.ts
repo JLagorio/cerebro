@@ -36,6 +36,7 @@ const list = (over: Partial<ListFile> = {}): ListFile => ({
  */
 const ONE_OF_EACH: { [K in Selection['kind']]: Extract<Selection, { kind: K }> } = {
   home: { kind: 'home' },
+  pages: { kind: 'pages' },
   inbox: { kind: 'inbox' },
   mywork: { kind: 'mywork' },
   knowledge: { kind: 'knowledge', nav: { tab: 'runs', run: 'run-1' }, path: 'knowledge/a.md' },
@@ -280,7 +281,7 @@ describe('placeLabel — a destination says what the nav says (M59.1)', () => {
     }
     // Every destination but the two subjects ONE_OF_EACH fills in (a Studio
     // prototype, an agent).
-    expect(walked).toBe(9);
+    expect(walked).toBe(10);
   });
 
   it('says History for pulse and Work for workspace', () => {

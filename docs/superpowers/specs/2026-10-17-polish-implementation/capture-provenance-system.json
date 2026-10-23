@@ -1,0 +1,122 @@
+{
+  "recorded_utc": "2026-10-17T19:15:09.047757+00:00",
+  "run": "/private/tmp/cerebro-m90/full-e2e-fresh-final",
+  "result": "687 passed (14.8m), exit0, no retries or snapshot updates",
+  "review": "Final WebKit Library light and Agent partial light inspected directly, plus final Chromium Library dark and Agent partial light. Earlier both-theme specimen inspection documented in system-evidence.md; this is provisional agent review, not owner acceptance.",
+  "files": [
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-shared-cont-c7339-ast-size-and-focus-in-light-webkit/foundation-library-light.png",
+      "destination": "W02-library-light-webkit.png",
+      "sha256": "b88f776fd2e9364f3198f4ba4084bfbba9afefc89ccb5c29f03f9828decd0afc",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-states-operational-f1beb-st-states-readable-in-light-webkit/agent-spend-partial-light.png",
+      "destination": "W02-agent-partial-light-webkit.png",
+      "sha256": "d80d56ea1f3051fd80ebfdeb5ec09116cf02ecf88e086663ac409dc07b8a7373",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-shared-cont-2fef9-rast-size-and-focus-in-dark-webkit/foundation-library-dark.png",
+      "destination": "system/library-dark-webkit.png",
+      "sha256": "e127f7ebe4afaea3b2608dd616503823ed640adb16f78c879e62084ef9ffa415",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-shared-cont-c7339-ast-size-and-focus-in-light-webkit/foundation-mail-light.png",
+      "destination": "system/mail-light-webkit.png",
+      "sha256": "bebf1c23a7f2ebea61ac5c9f2226f5599bc291930053940186f208f72fb3f2e7",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-shared-cont-2fef9-rast-size-and-focus-in-dark-webkit/foundation-mail-dark.png",
+      "destination": "system/mail-dark-webkit.png",
+      "sha256": "08c3619448062dfe8d4644000ddd605c96d97ac8f35f5bfdadc2ae96548d4dd7",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-My-work-wra-4770f-id-deadline-honest-in-light-webkit/mywork-long-title-light.png",
+      "destination": "system/mywork-long-title-light-webkit.png",
+      "sha256": "e1dc18de2dd1dcfc03aa1a41e0357d970676a3f1d09c40d44d68d8ddeb38562a",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-My-work-wra-21631-lid-deadline-honest-in-dark-webkit/mywork-long-title-dark.png",
+      "destination": "system/mywork-long-title-dark-webkit.png",
+      "sha256": "8c8d221d76439d79a953714a049e869327bd34f7b8f77e414b5efe83ad458969",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-states-operational-1df1c-est-states-readable-in-dark-webkit/fleet-runs-partial-dark.png",
+      "destination": "system/fleet-partial-dark-webkit.png",
+      "sha256": "7f5a6329051a23cf4b048a8eff522e0a37b4c2f020ac22dd3e3ed31787f67805",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-states-operational-1df1c-est-states-readable-in-dark-webkit/home-mywork-unavailable-dark.png",
+      "destination": "system/home-mywork-unavailable-dark-webkit.png",
+      "sha256": "21c6a9b89c46cf29ff7a8c303d9fba99dc538119b5f3126039fcec7a178a78d6",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-system-shared-cont-c7339-ast-size-and-focus-in-light-chromium/foundation-library-light.png",
+      "destination": "system/library-light-chromium.png",
+      "sha256": "4a87bb538f7df12401a2d2d37fc982418eb799804a622c1ce94581162865f5b2",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final/surface-states-operational-f1beb-st-states-readable-in-light-chromium/agent-spend-partial-light.png",
+      "destination": "system/agent-partial-light-chromium.png",
+      "sha256": "ee3055a37207fea4a6be8b81195f55dcf3e8a01c7eb3138036de37d3147a7234",
+      "kind": "final full-suite browser capture"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final.log",
+      "destination": "system/full-browser-result.txt",
+      "sha256": "be185a8e006be50b656eb15d4e2dd33e1e874e786b8f1adc6dc3ab0269df4b0a",
+      "kind": "final full-suite log"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final-list.log",
+      "destination": "system/full-browser-inventory.txt",
+      "sha256": "070ef9eba634d66b0fe46fe7418dd00567aad93c100a82a836ea3d1a86084019",
+      "kind": "final full-suite inventory"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-fresh-final-source.json",
+      "destination": "system/full-browser-launch-source.json",
+      "sha256": "db98cb9230a3910e3dd317512bcac866086cee128246f72db4f7ed45c4473217",
+      "kind": "unchanged launch source metadata"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/full-e2e-final.log",
+      "destination": "system/diagnostic-browser-result.txt",
+      "sha256": "4719f98ba3d722b650fd3d4580c8e40bffcb137a3da687980fcfa4eb6ce020f0",
+      "kind": "first complete diagnostic run log"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/fresh-focused-22.log",
+      "destination": "system/focused-browser-result.txt",
+      "sha256": "34dde486d69209f31dcfed2dd51669ac8db2e02111dc65cb2563ffb76b344096",
+      "kind": "23-case focused rerun log"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/fresh-title-retry.log",
+      "destination": "system/title-retry-result.txt",
+      "sha256": "468dd36ad8ac07f987ece8b62f2679dc88d1a0db841b41256799429606f2cb8c",
+      "kind": "2-case fixture helper verification log"
+    },
+    {
+      "source": "/private/tmp/cerebro-m90/system-stale-expectations.json",
+      "destination": "system/stale-expectations.json",
+      "sha256": "ee7a31890f4d12b284f90d6cf8ccfb74b654710b345bfb22a55234b5d21763eb",
+      "kind": "75-test assertion cleanup result"
+    },
+    {
+      "source": "launch metadata plus final local fingerprint computation",
+      "destination": "system/full-browser-source.json",
+      "sha256": "7fa9761277ecb25d8e8651efa6aa022ae029c2db457a5771bed7a96b0e7247d9",
+      "kind": "final browser result and source provenance"
+    }
+  ]
+}

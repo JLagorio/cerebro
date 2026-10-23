@@ -10,7 +10,8 @@ import { PENDING_COPY, PendingWriteCard } from './PendingWriteCard';
 /**
  * One page write an ask-first agent queued for Review (M57.4c): named by
  * its manifest title, its draft editable, and every typed answer read where
- * it lands.
+ * it lands. It is a Confirmation (M91.14): one group named by its title,
+ * whose state says what its answers can do.
  */
 
 const decide = vi.hoisted(() => vi.fn());
@@ -96,6 +97,8 @@ describe('PendingWriteCard (M57.4c)', () => {
     fireEvent.click(screen.getByTestId('pending-write-allow'));
     await waitFor(() => expect(decide).toHaveBeenCalledTimes(1));
     expect(decide).toHaveBeenLastCalledWith('/vault', ID, true, null, null);
+    cleanup();
+    card();
     fireEvent.change(screen.getByTestId('write-draft-field-body'), {
       target: { value: '# Vendor delay risk\n' },
     });
@@ -108,6 +111,18 @@ describe('PendingWriteCard (M57.4c)', () => {
       { ...WRITE.input, body: '# Vendor delay risk\n' },
       null,
     );
+  });
+
+  it('holds Allow while an edit the form cannot send waits', () => {
+    card();
+    const allow = screen.getByTestId('pending-write-allow') as HTMLButtonElement;
+    expect(allow.disabled).toBe(false);
+    // A draft that is no JSON object is an edit the form cannot send.
+    fireEvent.click(screen.getByTestId('write-draft-json-toggle'));
+    fireEvent.change(screen.getByTestId('write-draft-json'), { target: { value: '["no"]' } });
+    expect(allow.disabled).toBe(true);
+    // Reject never waits on the edit.
+    expect((screen.getByTestId('pending-write-reject') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it.each([
@@ -146,5 +161,81 @@ describe('PendingWriteCard (M57.4c)', () => {
     card();
     fireEvent.click(screen.getByTestId('pending-write-allow'));
     await waitFor(() => expect(toasts()).toEqual(["Couldn't decide: runtime db gone"]));
+    // Nothing was decided: the card waits for an answer still.
+    expect(screen.getByTestId('pending-write-card').dataset.state).toBe('pending');
+    expect((screen.getByTestId('pending-write-allow') as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe('PendingWriteCard as a Confirmation (M91.14)', () => {
+  it('is one group named by its title, its who and when beside it', () => {
+    card();
+    const group = screen.getByRole('group', { name: 'Create a note' });
+    expect(group).toBe(screen.getByTestId('pending-write-card'));
+    expect(group.dataset.slot).toBe('confirmation');
+    expect(group.dataset.state).toBe('pending');
+    const meta = group.querySelector('[data-slot="confirmation-meta"]');
+    expect(meta?.contains(screen.getByTestId('pending-write-when'))).toBe(true);
+    expect(meta?.contains(screen.getByTestId('card-author'))).toBe(true);
+  });
+
+  it('offers nothing to press while a decision is on its way', async () => {
+    let land: (decision: PendingDecision) => void = () => undefined;
+    decide.mockReturnValue(
+      new Promise<PendingDecision>((resolve) => {
+        land = resolve;
+      }),
+    );
+    card();
+    fireEvent.click(screen.getByTestId('pending-write-allow'));
+    const shown = screen.getByTestId('pending-write-card');
+    await waitFor(() => expect(shown.dataset.state).toBe('answering'));
+    expect(shown.getAttribute('aria-busy')).toBe('true');
+    expect((screen.getByTestId('pending-write-allow') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('pending-write-reject') as HTMLButtonElement).disabled).toBe(true);
+    land({ outcome: 'rejected' });
+    await waitFor(() => expect(shown.dataset.state).toBe('answered'));
+  });
+
+  it('says how it was answered in place of the answers until the queue reads again', async () => {
+    decide.mockResolvedValue({ outcome: 'applied', path: WRITE.target });
+    card();
+    fireEvent.click(screen.getByTestId('pending-write-allow'));
+    const outcome = await screen.findByRole('status');
+    expect(outcome.textContent).toBe(`Applied — ${WRITE.target}`);
+    expect(screen.getByTestId('pending-write-card').dataset.state).toBe('answered');
+    // A second press cannot decide a write that no longer waits.
+    expect(screen.queryByTestId('pending-write-allow')).toBeNull();
+    expect(screen.queryByTestId('pending-write-reject')).toBeNull();
+    expect(decide).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits still under a refused edit, its answers live', async () => {
+    decide.mockResolvedValue({ outcome: 'edit_refused', reason: 'Not in scope.' });
+    card();
+    fireEvent.change(screen.getByTestId('write-draft-field-body'), {
+      target: { value: '# Moved\n' },
+    });
+    fireEvent.click(screen.getByTestId('pending-write-allow'));
+    await waitFor(() =>
+      expect(screen.getByTestId('pending-write-card').dataset.state).toBe('refused'),
+    );
+    expect(screen.getByTestId('pending-write-refused').getAttribute('role')).toBe('alert');
+    expect((screen.getByTestId('pending-write-allow') as HTMLButtonElement).disabled).toBe(false);
+    // An edit after the refusal clears it.
+    fireEvent.change(screen.getByTestId('write-draft-field-body'), {
+      target: { value: '# Moved again\n' },
+    });
+    expect(screen.queryByTestId('pending-write-refused')).toBeNull();
+    expect(screen.getByTestId('pending-write-card').dataset.state).toBe('pending');
+  });
+
+  it('asks for the reason only once Reject is pressed, in place of Reject', () => {
+    card();
+    fireEvent.click(screen.getByTestId('pending-write-reject'));
+    expect(screen.queryByTestId('pending-write-reject')).toBeNull();
+    const reason = screen.getByTestId('pending-write-reason');
+    expect(reason.getAttribute('placeholder')).toBe(PENDING_COPY.reason);
+    expect(document.activeElement).toBe(reason);
   });
 });

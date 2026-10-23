@@ -3,8 +3,10 @@
 //! `shared/policy/policy.v3.json` is the one table (`format: 3` since M27.4;
 //! `policy.v1.json` and `policy.v2.json` are frozen beside it as the
 //! registration gates' negative controls), `tools.v1.json` is the one tool
-//! manifest (M54.1, `tools`), and `tool-approval.v1.json` decides what the
-//! CLI's own tools may do in a run (M57.2, `tool_approval`).
+//! manifest (M54.1, `tools`), `tool-approval.v1.json` decides what the
+//! CLI's own tools may do in a run (M57.2, `tool_approval`), and
+//! `subagents.v1.json` bounds the subagents a run may start and defines the
+//! agent types Cerebro starts them as (M91.1, M91.2a, `subagents`).
 //! `authority-routes.v1.json` and its
 //! content-addressed snapshots are the one authority artifact. Rust compiles
 //! them in with `include_str!`; the TS side imports the identical files
@@ -38,6 +40,7 @@ pub mod qualification;
 pub mod rejection;
 pub mod review;
 pub mod risk;
+pub mod subagents;
 pub mod submit;
 pub mod table;
 pub mod tool_approval;

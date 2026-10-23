@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import YAML from 'yaml';
 import { boot, readMockFile, openDestination } from './boot';
+import { chooseOption } from './select';
 const PATH = 'records/agents/release-scout.md';
 const schedule = async (page: Page) =>
   YAML.parse(/^---\n([\s\S]*?)\n---\n/.exec(await readMockFile(page, PATH))![1])
@@ -30,11 +31,11 @@ test('a phrase and monthly list persist, next time is soonest, and an invalid ph
   await editor.getByRole('button', { name: 'Done', exact: true }).click();
   await expect.poll(() => schedule(page)).toBe('weekly mon,thu 17:00');
   editor = await editSchedule(page);
-  await editor.getByLabel('Repeat', { exact: true }).selectOption('monthly');
-  await editor.getByLabel('Day of month').selectOption('last');
+  await chooseOption(editor.getByLabel('Repeat', { exact: true }), 'Every month');
+  await chooseOption(editor.getByLabel('Day of month'), 'Last day');
   await editor.getByLabel('Time', { exact: true }).fill('18:00');
   await editor.getByRole('button', { name: 'Add a time' }).click();
-  await editor.getByLabel('Repeat', { exact: true }).nth(1).selectOption('weekdays');
+  await chooseOption(editor.getByLabel('Repeat', { exact: true }).nth(1), 'Every weekday');
   await editor.getByLabel('Time', { exact: true }).nth(1).fill('08:30');
   await page.screenshot({ path: info.outputPath('schedule-list.png'), fullPage: true });
   await editor.getByRole('button', { name: 'Done', exact: true }).click();
@@ -62,7 +63,7 @@ test('Resume and an earlier schedule edit leave the waiting count unchanged with
   await page.getByTestId('agent-duty-toggle').click();
   await expect(page.getByTestId('agent-duty-toggle')).toHaveText('Resume');
   let editor = await editSchedule(page);
-  await editor.getByLabel('Repeat', { exact: true }).selectOption('daily');
+  await chooseOption(editor.getByLabel('Repeat', { exact: true }), 'Every day');
   await editor.getByLabel('Time', { exact: true }).fill('08:00');
   await editor.getByRole('button', { name: 'Done', exact: true }).click();
   await expect.poll(() => schedule(page)).toBe('daily 08:00');

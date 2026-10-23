@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+
+// The one Shiki, stood in for: a fence's grammar "loads" at once, each line
+// marked so a test can see it was highlighted.
+const { highlight } = vi.hoisted(() => ({ highlight: vi.fn() }));
+vi.mock('@/workspace/highlighter', () => ({ highlight }));
+
 import { MessageText } from './MessageMarkdown';
 import { HOVER_OPEN_MS, resetHoverCards } from '@/components/ui/HoverCard';
+import { resolveIcon } from '@/components/ui/Icon';
 import { makeEntry } from '@/engine/testHelpers';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -218,6 +225,67 @@ describe('MessageText', () => {
     expect(screen.getByText('const x = 1;').tagName).toBe('CODE');
   });
 
+  describe('drawn with the AI elements (M91.13)', () => {
+    it('draws a fence as a Code Block with a copy button, plain without a theme', () => {
+      const { container } = show('```ts\nconst a = 1;\n```');
+      const block = container.querySelector('[data-slot="code-block"]') as HTMLElement;
+      expect(block.dataset.language).toBe('ts');
+      expect(block.querySelector('pre')?.textContent).toBe('const a = 1;');
+      expect(screen.getByRole('button', { name: 'Copy the code' })).toBeTruthy();
+      expect(highlight).not.toHaveBeenCalled();
+    });
+
+    it('highlights a fence for the theme its caller passes, and never one with no language', async () => {
+      highlight.mockImplementation(async (code: string) => (
+        <pre>
+          <code>
+            {code.split('\n').map((line, n) => (
+              <span key={n} className="line">
+                <span data-token="">{line}</span>
+              </span>
+            ))}
+          </code>
+        </pre>
+      ));
+      render(
+        <MessageText
+          text={'```ts\nconst a = 1;\n```\n\n```\nplain\n```'}
+          onOpen={vi.fn()}
+          theme="dark"
+        />,
+      );
+      expect(highlight).toHaveBeenCalledWith('const a = 1;', 'ts', 'dark');
+      expect(highlight).toHaveBeenCalledTimes(1);
+      expect(await screen.findByText('const a = 1;', { selector: '[data-token]' })).toBeTruthy();
+      highlight.mockReset();
+    });
+
+    it('says what a task list holds in words, and offers nothing to tick', () => {
+      const { container } = show('- [x] Read the risks\n- [ ] File the follow-up\n- plain item');
+      const tasks = [...container.querySelectorAll('li[data-task]')];
+      expect(tasks.map((li) => li.getAttribute('data-task'))).toEqual(['done', 'todo']);
+      expect(tasks.map((li) => li.textContent)).toEqual([
+        'Done: Read the risks',
+        'To do: File the follow-up',
+      ]);
+      expect(container.querySelector('input')).toBeNull();
+      expect(screen.queryByRole('checkbox')).toBeNull();
+      expect(container.querySelectorAll('li:not([data-task])')).toHaveLength(1);
+      expect(resolveIcon('square-check').Comp).not.toBeNull();
+      expect(resolveIcon('square').Comp).not.toBeNull();
+    });
+
+    it('links only an http(s) address: mailto and the rest are their words (CV-16)', () => {
+      const { container } = show(
+        '[mail](mailto:ops@example.com), [file](file:///etc/passwd), [site](https://example.com/x)',
+      );
+      const anchors = [...container.querySelectorAll('a')];
+      expect(anchors.map((a) => a.getAttribute('href'))).toEqual(['https://example.com/x']);
+      for (const anchor of anchors) expect(anchor.getAttribute('href')).toMatch(/^https?:\/\//);
+      expect(container.textContent).toBe('mail, file, site');
+    });
+  });
+
   describe('hover previews (M59.7)', () => {
     let at = 200;
     const hover = (el: Element) => {
@@ -259,12 +327,27 @@ describe('MessageText', () => {
       expect(screen.queryByTestId('hover-card')).toBeNull();
     });
 
-    it('gives a wikilink inside a link label no card', () => {
+    it('adds a citation card to a reply’s link, its name and role unchanged', () => {
+      show('See [the scanner notes](https://www.example.com/scanners).');
+      const link = screen.getByRole('link', { name: 'the scanner notes' });
+      expect(link.getAttribute('target')).toBe('_blank');
+      hover(link);
+      const card = screen.getByTestId('hover-card');
+      expect(card.textContent).toContain('the scanner notes');
+      const out = within(card).getByRole('link', { name: /example\.com \(opens in a new tab\)/ });
+      expect(out.getAttribute('href')).toBe('https://www.example.com/scanners');
+      expect(link.getAttribute('aria-describedby')).not.toBeNull();
+    });
+
+    it('gives a wikilink inside a link label no card of its own: the link’s card names where it goes', () => {
       show('[see [[conflict-model-ships-whole]]](https://example.com)');
-      const anchor = screen.getByRole('link');
+      const anchor = screen.getByRole('link', { name: 'see Conflict model ships whole' });
       expect(within(anchor).queryByRole('button')).toBeNull();
       hover(anchor);
-      expect(screen.queryByTestId('hover-card')).toBeNull();
+      const card = screen.getByTestId('hover-card');
+      expect(within(card).queryByTestId('page-preview-path')).toBeNull();
+      expect(card.textContent).toContain('see Conflict model ships whole');
+      expect(within(card).getByRole('link').getAttribute('href')).toBe('https://example.com');
     });
   });
 });

@@ -91,6 +91,17 @@ const ROWS = {
     nav: 'row',
     lights: ['home'],
   },
+  pages: {
+    id: 'pages',
+    go: 'p',
+    selection: { kind: 'pages' },
+    label: 'Pages',
+    icon: 'files',
+    aliases: 'all documents notes browse recent favorites',
+    nav: 'section',
+    door: 'Browse all pages',
+    lights: [],
+  },
   // M43 — open work across every database. Its quiet count is the page's own
   // membership rule (engine/myWork), never a promise the page cannot keep.
   mywork: {
@@ -216,6 +227,7 @@ const ROWS = {
 const ORDER: readonly DestinationKind[] = [
   'inbox',
   'home',
+  'pages',
   'mywork',
   'studio',
   'pulse',

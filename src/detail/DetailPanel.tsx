@@ -1,15 +1,14 @@
+import './DetailPanel.css';
 import { PullRequestStrip } from '@/detail/PullRequestStrip';
 import { PageRunsTab } from '@/detail/PageRunsTab';
 import { PageAgentsTab } from '@/detail/PageAgentsTab';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CerebroEditor } from '@/editor/MarkdownEditor';
+import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { DetailHeaderActions } from '@/detail/DetailHeaderActions';
 import { PageCoverBand, PageIconHeader } from '@/detail/PageChrome';
-import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
-import { RecordProperties } from '@/detail/RecordProperties';
+import { RecordPageProperties } from '@/detail/RecordPageProperties';
 import { CorrespondenceSection } from '@/detail/CorrespondenceSection';
 import { ImportProvenance } from '@/detail/ImportProvenance';
 import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
@@ -18,11 +17,9 @@ import { setTypeTabs } from '@/app/typeActions';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
-import { spliceTitleIntoBlocks } from '@/editor/markdown';
 import { localDateOf } from '@/engine/dates';
 import { UNTYPED_LABEL } from '@/engine/destinations';
 import { sourceFreshness } from '@/engine/ingest';
-import { resolveLayout } from '@/engine/layout';
 import { typeStyle } from '@/engine/typeCatalog';
 import { resolveViewTab } from '@/engine/viewTab';
 import { DISPLAY_DEFAULTS, type Entry } from '@/engine/types';
@@ -30,7 +27,6 @@ import { ViewTabEmbed } from '@/views/ViewTabEmbed';
 import { PageKnowledge } from '@/knowledge/PageKnowledge';
 import { conceptsAbout, conceptsFrom, isKnowledgePath } from '@/engine/okf';
 import { useConcepts } from '@/knowledge/useConcepts';
-import { setNoteTitle } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
 import { ownsEscape, useLayer } from '@/components/ui/layers';
@@ -86,7 +82,7 @@ function SourceFreshnessLine({ entry }: { entry: Entry }) {
  * Knowledge beside a RECORD (M12): what this note gave the base, and what
  * the base can give it back. The doc side panel carried this as a tab;
  * records open here instead now, so the loop follows them. Its body is the
- * page tab's, component for component (M52.3, `PageKnowledge`) — a record and
+ * page inspector's, component for component (M52.3, `PageKnowledge`) — a record and
  * a page read Knowledge the same way. Projects became ordinary records (M12.5
  * aftermath), so the dossier that lived on the project page rides the record
  * panel now — no type name routes specially.
@@ -107,19 +103,26 @@ function KnowledgeSection({ entry }: { entry: Entry }) {
   const open = toggled ?? (about.length > 0 || learnedFrom.length > 0);
   const setOpen = (next: boolean) => setToggled(next);
   return (
-    <section data-testid="detail-knowledge" className="mb-3.5 border-t border-n-100 pt-2">
+    <section data-testid="detail-knowledge" className="cb-peek-knowledge">
       <button
         type="button"
+        tabIndex={0}
         data-testid="detail-knowledge-toggle"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500 hover:text-n-800"
+        className="cb-peek-section-toggle"
       >
-        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={11} />
-        Knowledge
+        <Icon name="brain" size={14} />
+        <span>Knowledge</span>
+        {about.length + learnedFrom.length > 0 && (
+          <span className="cb-peek-section-count">
+            {new Set([...about, ...learnedFrom].map((concept) => concept.entry.path)).size}
+          </span>
+        )}
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
       </button>
       {open && (
-        <div className="pb-1 pt-2">
+        <div className="cb-peek-knowledge-content">
           <PageKnowledge entry={entry} />
         </div>
       )}
@@ -184,7 +187,6 @@ export function DetailPanel({
 } = {}) {
   const detailPath = useUiStore((s) => s.detailPath);
   const closeDetail = useUiStore((s) => s.closeDetail);
-  const toast = useUiStore((s) => s.toast);
   const width = useUiStore((s) => s.detailWidth);
   const setWidth = useUiStore((s) => s.setDetailWidth);
   // M52: the stored width is a preference, drawn at most the room left —
@@ -192,29 +194,16 @@ export function DetailPanel({
   const drawn = room === null ? width : fitWidth(width, room);
   const entry = useEntry(detailPath);
   const schema = useSchema();
-  const vaultPath = useVaultStore((s) => s.vaultPath);
-  const rescan = useVaultStore((s) => s.rescan);
   const entries = useVaultStore((s) => s.entries);
   // The saved-view catalog a `content: 'view'` tab resolves against.
   const views = useVaultStore((s) => s.views);
   const selection = useNavStore((s) => s.selection);
   const navigate = useNavStore((s) => s.navigate);
 
-  const [title, setTitle] = useState('');
-  // Task 12: the body lives in the BlockNote editor (NoteBodyEditor owns
-  // load/save). The handle is only needed for the rename splice below.
-  const editorRef = useRef<CerebroEditor | null>(null);
-  // M45.1 — whether the full property stack is open under the heading strip.
-  // Sticky per record PATH (switching records resets it), and the untouched
-  // default is derived per render below rather than stored: it must track
-  // whether the strip actually SHOWS, which can change without the path
-  // changing (clearing the strip's last hide_when_empty field folds it away).
-  const [details, setDetails] = useState<{ path: string; shown: boolean } | null>(null);
   // M45.6 — which tab of the record is open. LOCAL, unlike the page's, which
   // rides `{ kind: 'doc', tab }` because a page is a place the back button
   // returns to; a peek is not one, so the tab is this component's state and
-  // the record it belongs to is stored beside it (the `details` idiom below:
-  // a one-slot cache that is reset the moment the panel points elsewhere).
+  // the record it belongs to is stored beside it and resets on a new path.
   const [tabPick, setTabPick] = useState<{ path: string; id: string } | null>(null);
 
   // M44.1: per-type presentation. Untyped records and types the schema
@@ -226,13 +215,13 @@ export function DetailPanel({
     DISPLAY_DEFAULTS;
 
   // M45.6 — the peek's tabs, derived ahead of the early return for the same
-  // reason `display` is: the editor-handle effect below reacts to whether the
-  // body renders at all, and a tab that is not Overview unmounts it.
+  // reason `display` is: the active tab controls the body projection while
+  // the single document owner remains mounted.
   //
   // `recordTabSet` is the page's own derivation (it lives beside the strip):
   // `tabs` drives the content swap, `saved` decides whether a strip exists.
   const { tabs, saved: savedTabs } = recordTabSet(entry ?? null, schema);
-  // Render-time derived-state reset, like `details`: the lens FORGETS the tab
+  // Render-time derived-state reset: the lens FORGETS the tab
   // of a record it left, so the next record opens on its own first tab.
   if (tabPick !== null && tabPick.path !== (entry?.path ?? null)) setTabPick(null);
   const activeTab =
@@ -241,36 +230,11 @@ export function DetailPanel({
       : undefined) ??
     tabs[0] ??
     null;
-  // Whether the Description block renders: the type's own `show_body`, AND a
+  // Whether the document body is visible: the type's own `show_body`, AND a
   // tab that shows the record's body at all (LayoutCanvas's fallback idiom —
   // a pick whose tab has died reads as the first tab, never as nothing).
   const showsBody = display.showBody && (activeTab === null || activeTab.content === 'overview');
 
-  useEffect(() => {
-    setTitle(entry?.title ?? '');
-  }, [entry?.path, entry?.title]);
-
-  useEffect(() => {
-    // The keyed NoteBodyEditor remounts on path change; drop the stale
-    // handle until the new editor reports ready. M44.1 follow-up: also drop
-    // it when the body stops rendering — NoteBodyEditor unmounts then too,
-    // and nothing else nulled this ref, so a later commitTitle's splice could
-    // hit a detached editor. M45.6 widened that trigger from `show_body` to
-    // `showsBody`, because switching to a Sections or View tab unmounts the
-    // editor for exactly the same reason; and split it off the
-    // title sync above, so a tab press no longer throws away a rename the
-    // user has typed but not committed.
-    //
-    // The dependencies are exactly the two things that unmount the editor.
-    // `entry.title` was a third until the M45.6 review, and it belonged to
-    // neither: a rename does not move the path (the file is rewritten in
-    // place), so the editor stayed mounted while this effect nulled the
-    // handle to it — and nothing hands it back, because `onReady` fires on
-    // mount. The next rename found null, skipped `spliceTitleIntoBlocks`,
-    // and M1.x returned: the editor's next debounced save writing the old H1
-    // over the newly renamed file.
-    editorRef.current = null;
-  }, [entry?.path, showsBody]);
   // M65.1: the record peek is its own key scope, under app; what it holds
   // binds its peek commands here.
   const peekScope = useKeyScope('peek');
@@ -297,31 +261,8 @@ export function DetailPanel({
 
   if (!detailPath || !entry) return null;
 
+  const knowledgeFile = isKnowledgePath(entry.path);
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
-
-  // M45.1 (spec §3.4) — the type's `layout.heading` renders as the key
-  // property strip between the title and the stack. `stripShows` is derived
-  // per render with the strip's own fold predicate (amended Task 7 ruling):
-  // the strip renders null when every cell folds, and the stack must never
-  // stay hidden behind a strip that is not on screen — it renders whenever
-  // `!stripShows || detailsShown`, and the untouched default for
-  // `detailsShown` is `!stripShows` (per path) rather than a stored false.
-  const typeDef = entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
-  // M46.1 — the layout is the RECORD's, resolved once and rendered above the
-  // tab strip on every tab. The engine holds no tab roster and now needs
-  // none: nothing here narrows a resolution, so the peek, the page and the
-  // customizer's canvas cannot disagree about what a record shows.
-  const headingFields =
-    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;
-  const stripShows =
-    headingFields.length > 0 && stripCells(entry, schema, headingFields).length > 0;
-  // Render-time derived-state reset (the React-sanctioned pattern): the lens
-  // FORGETS a record it left. A one-slot {path, shown} cache gave a one-deep
-  // memory — A(toggled) → B → A resurrected A's choice while A → B(toggled)
-  // → A reset it — and RecordProperties' keyed `revealed` resets on every
-  // switch, so remembering here was an accident, not a feature.
-  if (details !== null && details.path !== entry.path) setDetails(null);
-  const detailsShown = details?.path === entry.path ? details.shown : !stripShows;
 
   // The containing Collection (M12.5: the folder a legacy project.md marks),
   // unless you are already looking at it — a crumb back to the page you are
@@ -336,33 +277,80 @@ export function DetailPanel({
       ? (entries.find((e) => e.path === entry.project) ?? null)
       : null;
 
-  const commitTitle = async () => {
-    const trimmed = title.trim();
-    if (!vaultPath || trimmed === '' || trimmed === entry.title) {
-      setTitle(entry.title);
-      return;
-    }
-    // Failed rename: toast and revert the input to disk truth (16a guard
-    // discipline). The rescan is caught separately — after a successful
-    // rename the disk already holds the new name, so a refresh failure must
-    // not claim the rename failed.
-    try {
-      await setNoteTitle(vaultPath, entry.path, trimmed);
-    } catch {
-      toast("Couldn't rename item");
-      setTitle(entry.title);
-      return;
-    }
-    // M1.x stale-body-after-rename, block edition: splice the new H1 into
-    // the LIVE editor so its next debounced save writes the renamed title
-    // (and keeps any dirty description edits).
-    if (editorRef.current !== null) spliceTitleIntoBlocks(editorRef.current, trimmed);
-    try {
-      await rescan();
-    } catch {
-      toast("Couldn't refresh vault");
-    }
-  };
+  const pageChrome = knowledgeFile ? null : (
+    <>
+      <RecordPageProperties key={entry.path} entry={entry} schema={schema} />
+      <PullRequestStrip entry={entry} schema={schema} />
+      <CorrespondenceSection key={entry.path} entry={entry} schema={schema} />
+      {/* Provenance describes the record before its body on every tab. */}
+      {/* M34.5.3 — a cached copy says its own freshness. Null for every
+            record without fetch bookkeeping. */}
+      <SourceFreshnessLine entry={entry} />
+      <ImportProvenance entry={entry} />
+      {/* M45.6 — the peek shows the record's tabs. The user found them
+            missing here (2026-08-29): the strip mounted on the page and in
+            the layout editor, and the peek is the surface a table row opens
+            into. Same gate as the page — SAVED tabs only, because Simple
+            means no strip rather than a one-tab bar.
+
+            It sits UNDER the record's own blocks (M46.1) because those are
+            global and this bar divides them from the one tab's content: the
+            page and the customizer's canvas render exactly this order. The
+            page pins nothing above its scroll container anymore either.
+            The tabs share the record header's own content edge. */}
+      {savedTabs.length > 0 && activeTab !== null && (
+        <div className="cb-record-page-tabs">
+          <RecordTabs
+            tabs={tabs}
+            activeId={activeTab.id}
+            gutter="none"
+            hostType={entry.type}
+            onSelect={(id) => setTabPick({ path: entry.path, id })}
+            onChange={(next) => {
+              // The vault is the store: the peek writes the type's tabs
+              // exactly as the page does. Fire-and-forget by the store-layer
+              // invariant — `setTypeTabs` toasts and returns false.
+              if (entry.type !== null) void setTypeTabs({ name: entry.type, docPath: null }, next);
+            }}
+          />
+        </div>
+      )}
+      {/* M45.6 — the free-text arm: the tab's own sections, keyed by tab
+            because `_sections` is stored per tab id on the record itself. */}
+      {activeTab?.content === 'agents' && (
+        <PageAgentsTab entry={entry} entries={entries} schema={schema} />
+      )}
+      {activeTab?.content === 'runs' && (
+        <PageRunsTab entry={entry} entries={entries} schema={schema} />
+      )}
+      {activeTab?.content === 'sections' && (
+        <TabSections key={`${entry.path}#${activeTab.id}`} entry={entry} tabId={activeTab.id} />
+      )}
+      {/* M45.6 — the view arm: the real embedded database, resolved by the
+            engine (a dead pointer renders the card, never an empty view).
+            DECISION, weighed against rendering an honest "open the page" line
+            instead: the embed is HONEST at this width. `ViewTabEmbed` is
+            already shipped inside dashboard widgets, which resize well below
+            this panel's 360px floor (560px by default), it flows with the
+            host's scroll rather than demanding a height, and its `embedded`
+            flag already suppresses the detail-sibling registration that would
+            otherwise make the peek renumber itself from its own rows. A
+            column is a narrow database, not a broken one — and refusing to
+            draw rows we can draw would be inventing a capability gap. What is
+            genuinely narrow is chrome, not truth: the table scrolls
+            sideways, and pressing a row moves the ONE peek to that row's
+            record, which is what pressing a record anywhere in this app
+            does. */}
+      {activeTab?.content === 'view' && (
+        <ViewTabEmbed
+          resolution={resolveViewTab(activeTab, entry, entries, schema, views)}
+          entries={entries}
+          schema={schema}
+          scope={`viewtab:${activeTab.id}`}
+        />
+      )}
+    </>
+  );
 
   return (
     // M11: a COLUMN of the layout, not an overlay pinned to the viewport.
@@ -382,7 +370,7 @@ export function DetailPanel({
       // this is the one panel in the slot that shrinks, down to its floor, so
       // CSS gives the room beside the assistant in the window's own layout
       // pass. `drawn` is the same arithmetic measured, for the handle.
-      className="cb-panel-in relative z-30 flex h-full shrink flex-col border-l border-n-200 bg-n-0"
+      className="cb-record-peek cb-panel-in relative z-30 flex h-full shrink flex-col border-l border-n-200 bg-n-0"
       style={{ width, minWidth: RIGHT_PANEL_MIN_WIDTH }}
       {...peekScope.props}
     >
@@ -398,7 +386,7 @@ export function DetailPanel({
           max={dragCeiling(room, DETAIL_WIDTH_MAX)}
           onResize={setWidth}
         />
-        <header className="flex items-center gap-2 border-b border-n-100 px-4 py-3">
+        <header className="cb-peek-header flex items-center gap-2 border-b border-n-100">
           {/* M9.6: one resolver everywhere — a Risk looks like a Risk in the
             panel, the table, QuickOpen, and the assistant's transcript. */}
           <span
@@ -456,185 +444,43 @@ export function DetailPanel({
             <IconButton icon="x" label="Close" size="sm" onClick={closeDetail} />
           </span>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-3.5">
+        <div className="cb-peek-scroll min-h-0 flex-1 overflow-y-auto">
           {/* M55.11 — the page's cover and icon, the peek twin of the page's
             (M45.6). The header's type glyph above stays: it names the type. */}
-          <div className="-mx-4 -mt-3.5 mb-3.5 empty:hidden">
+          <div className="cb-peek-cover empty:hidden">
             <PageCoverBand entry={entry} editable={!isKnowledgePath(entry.path)} variant="peek" />
           </div>
           <PageIconHeader
             entry={entry}
             editable={!isKnowledgePath(entry.path)}
             variant="peek"
-            className="mb-3.5"
-          >
-            <input
-              data-testid="detail-title"
-              aria-label="Title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={() => void commitTitle()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                if (e.key === 'Escape') {
-                  e.stopPropagation();
-                  setTitle(entry.title);
-                }
-              }}
-              // focus-visible + the shared --ring token: every other control in
-              // the app uses that halo and suppresses it on plain mouse clicks.
-              className="-ml-2 min-w-0 flex-1 rounded-lg border border-transparent px-2 py-1 text-lg font-semibold leading-[22px] tracking-[-0.01em] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
-            />
-          </PageIconHeader>
-          {/* M45.1 — the key-property strip, with the expander that opens the
-            full stack. Keyed per record like the stack below, so field
-            popovers close on switch. */}
-          {headingFields.length > 0 && (
-            <HeadingProperties
-              key={`strip:${entry.path}`}
-              entry={entry}
-              schema={schema}
-              fields={headingFields}
-              detailsShown={detailsShown}
-              // M46.1: the expander is offered on EVERY tab, because the stack
-              // it opens stands on every tab. Gating it by tab kind would
-              // strand the record's sections behind a strip with no way to
-              // open — the same hole one layer down from the one this slice
-              // closed.
-              onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
-            />
-          )}
-          <PullRequestStrip entry={entry} schema={schema} />
-          {/* M3: extracted to RecordProperties — shared with the split view.
-            Keyed per record (prefixed: the sibling NoteBodyEditor also keys
-            on the path) so the add-property flyout closes on switch.
-
-            M46.1 — ABOVE the tab strip, on every tab. A section belongs to
-            the record, not to a tab (Notion's order, and the user's ruling:
-            "tabs are only for related data sources. fields shwo above"), so
-            the only thing that still hides this stack is the strip's own
-            fold — and the toggle for it now renders on every tab too. */}
-          {(!stripShows || detailsShown) && (
-            <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
-          )}
-          <CorrespondenceSection key={entry.path} entry={entry} schema={schema} />
-          {/* The peek's own chrome (M45.6, re-placed M46.1): freshness and the
-            knowledge loop are facts about the RECORD, not about the lens you
-            have open, and a tab that hid them would make them unreachable
-            from the peek rather than merely elsewhere.
-
-            They sit with the other global blocks, ABOVE the strip: everything
-            below it is the open tab's own content and nothing else, which is
-            the whole shape this slice restores. On an untabbed record that is
-            the pre-tabs panel line for line — the knowledge loop above the
-            Description, where it has always been — and on a view tab they
-            stand above the embedded table rather than however many rows below
-            it. Fixed position either way: chrome that moves when you press a
-            tab is worse than chrome in an awkward place. The two heavy blocks
-            stay at the foot of the panel, where they have always been. */}
-          {/* M34.5.3 — a cached copy says its own freshness. Null for every
-            record without fetch bookkeeping. */}
-          <SourceFreshnessLine entry={entry} />
-          <ImportProvenance entry={entry} />
-          {/* M12: records lost the doc side panel when display:doc died, and
-            the knowledge loop must not die with it — the same commit state
-            and related-concepts view, collapsed until asked (M8.3's rule:
-            the assistant never speaks first). */}
-          <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
-          {/* M45.6 — the peek shows the record's tabs. The user found them
-            missing here (2026-08-29): the strip mounted on the page and in
-            the layout editor, and the peek is the surface a table row opens
-            into. Same gate as the page — SAVED tabs only, because Simple
-            means no strip rather than a one-tab bar.
-
-            It sits UNDER the record's own blocks (M46.1) because those are
-            global and this bar divides them from the one tab's content: the
-            page and the customizer's canvas render exactly this order. The
-            page pins nothing above its scroll container anymore either.
-            `-mx-4` lets the underline reach both edges of the panel while
-            `gutter="sm"` keeps the tabs on this column's own 16px inset. */}
-          {savedTabs.length > 0 && activeTab !== null && (
-            <div className="-mx-4 mb-3.5">
-              <RecordTabs
-                tabs={tabs}
-                activeId={activeTab.id}
-                gutter="sm"
-                hostType={entry.type}
-                onSelect={(id) => setTabPick({ path: entry.path, id })}
-                onChange={(next) => {
-                  // The vault is the store: the peek writes the type's tabs
-                  // exactly as the page does. Fire-and-forget by the store-layer
-                  // invariant — `setTypeTabs` toasts and returns false.
-                  if (entry.type !== null)
-                    void setTypeTabs({ name: entry.type, docPath: null }, next);
-                }}
-              />
+            className="cb-peek-icon"
+          />
+          {knowledgeFile && (
+            <div className="px-7 pb-3">
+              <h1 className="m-0 text-workspace-title font-semibold text-n-900">{entry.title}</h1>
+              <p className="mb-0 mt-2 text-metadata text-n-500">
+                Open the page for its review and evidence.
+              </p>
             </div>
           )}
-          {/* M44.1 — the type's display config gates the body; M45.6 — so does
-            the open tab (`showsBody`). DocPage's body IS the page; this is
-            the peek panel's Description block. */}
-          {showsBody && (
-            <>
-              <div
-                data-testid="detail-body-heading"
-                className="mb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500"
-              >
-                Description
-              </div>
-              {/* Task 12: rich markdown editor replaces the raw textarea. Keyed by
-                path so switching items reloads cleanly. */}
-              <NoteBodyEditor
-                key={entry.path}
-                path={entry.path}
-                owner="peek"
-                compact
-                onReady={({ editor }) => {
-                  editorRef.current = editor;
-                }}
-              />
-            </>
-          )}
-          {/* M45.6 — the free-text arm: the tab's own sections, keyed by tab
-            because `_sections` is stored per tab id on the record itself. */}
-          {activeTab?.content === 'agents' && (
-            <PageAgentsTab entry={entry} entries={entries} schema={schema} />
-          )}
-          {activeTab?.content === 'runs' && (
-            <PageRunsTab entry={entry} entries={entries} schema={schema} />
-          )}
-          {activeTab?.content === 'sections' && (
-            <TabSections key={`${entry.path}#${activeTab.id}`} entry={entry} tabId={activeTab.id} />
-          )}
-          {/* M45.6 — the view arm: the real embedded database, resolved by the
-            engine (a dead pointer renders the card, never an empty view).
-            DECISION, weighed against rendering an honest "open the page" line
-            instead: the embed is HONEST at this width. `ViewTabEmbed` is
-            already shipped inside dashboard widgets, which resize well below
-            this panel's 360px floor (560px by default), it flows with the
-            host's scroll rather than demanding a height, and its `embedded`
-            flag already suppresses the detail-sibling registration that would
-            otherwise make the peek renumber itself from its own rows. A
-            column is a narrow database, not a broken one — and refusing to
-            draw rows we can draw would be inventing a capability gap. What is
-            genuinely narrow is chrome, not truth: the table scrolls
-            sideways, and pressing a row moves the ONE peek to that row's
-            record, which is what pressing a record anywhere in this app
-            does. */}
-          {activeTab?.content === 'view' && (
-            <ViewTabEmbed
-              resolution={resolveViewTab(activeTab, entry, entries, schema, views)}
-              entries={entries}
-              schema={schema}
-              scope={`viewtab:${activeTab.id}`}
-            />
-          )}
-          {/* The foot of the panel, under whatever the tab showed: the two
-            blocks that can run long, in the place they have always held. */}
-          {/* M9.4 — every version of this note, and what each one changed.
-            Renders nothing when there is no history, so a note you just
-            created does not get a heading over an empty list. */}
-          <GitHistoryPanel path={entry.path} />
+          <NoteBodyEditor
+            key={entry.path}
+            path={entry.path}
+            owner="peek"
+            compact
+            pageTitle={knowledgeFile ? undefined : entry.title}
+            readOnly={knowledgeFile}
+            sections={knowledgeFile}
+            pageChrome={pageChrome}
+            bodyVisible={knowledgeFile || showsBody}
+          />
+          {/* Supporting context follows the content on every tab. These
+              read-only disclosures never become editor blocks or file bytes. */}
+          <div className="cb-peek-support">
+            {!knowledgeFile && <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />}
+            <GitHistoryPanel key={`history:${entry.path}`} path={entry.path} compact />
+          </div>
           {/* M9.7 — the diff appears under the body, not over the panel. */}
           <InlineDiff path={entry.path} />
         </div>
@@ -649,7 +495,7 @@ export function DetailPanel({
             {entry.path}
           </div>
         )}
-        <footer className="flex items-center gap-3 border-t border-n-100 px-4 py-2.5 [font-family:var(--font-mono)] text-2xs text-n-400">
+        <footer className="cb-peek-footer flex items-center gap-3 border-t border-n-100 text-metadata text-n-400">
           <span>Created {localDateOf(entry.createdAt).slice(0, 10)}</span>
           <span>Modified {localDateOf(entry.modifiedAt).slice(0, 10)}</span>
         </footer>

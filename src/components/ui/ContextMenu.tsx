@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { useGhostOnUnmount } from '@/components/ui/motion';
 import { useFocusRestore } from '@/hooks/useFocusRestore';
 
 export interface ContextMenuItem {
@@ -34,6 +35,8 @@ export function ContextMenu({
   // menu as its own opener, and drop focus on `<body>` every time the menu
   // closed, which is what it used to do.
   useFocusRestore();
+  // Closed, a copy of it fades at the pointer (components/ui/motion.ts).
+  useGhostOnUnmount(menuRef, 'cb-popover-leave', { strip: ['cb-menu-in'] });
 
   useEffect(() => {
     const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
@@ -90,7 +93,7 @@ export function ContextMenu({
         role="menu"
         onKeyDown={onKeyDown}
         style={{ left, top, width: MENU_WIDTH }}
-        className="cb-menu-in fixed z-50 rounded-lg border border-n-200 bg-n-0 py-1 shadow-[0_8px_24px_rgba(22,26,36,0.14)]"
+        className="cb-menu-in cb-context-menu fixed z-50 rounded-lg border border-n-200 bg-n-0 py-1 shadow-[0_8px_24px_rgba(22,26,36,0.14)]"
       >
         {items.map((item) => (
           <button
@@ -102,7 +105,7 @@ export function ContextMenu({
               item.onSelect();
             }}
             className={[
-              'flex w-full items-center gap-2 border-0 bg-transparent px-2.5 py-[5px] text-left text-sm',
+              'motion-hover flex w-full items-center gap-2 border-0 bg-transparent px-2.5 py-[5px] text-left text-sm',
               item.danger ? 'text-danger-600 hover:bg-danger-50' : 'text-n-700 hover:bg-n-50',
             ].join(' ')}
           >

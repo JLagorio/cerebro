@@ -21,14 +21,43 @@
 //!   rules ask about it, which nobody can answer in `-p`.
 //! - No `mcp__<server>__authenticate` tool is offered, and the result carries
 //!   no server-error key, so neither is a signal here.
+//!
+//! The same first init names each connector's status in the run's Reach
+//! (M92.8, `connector_inits`), read by the one `server_init` the observer
+//! reads it by.
 
 use std::collections::HashMap;
 
 use chrono::{DateTime, SecondsFormat, Utc};
+use serde::Serialize;
 use serde_json::Value;
 
 use super::{content_blocks, server_init, RunConnectors, ServerInit};
 use crate::runtime::connector_status::{Observation, Signal, State};
+
+/// One connector a run loads, and the status its first init named it in
+/// (M92.8): what the run's Reach says of it.
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+pub struct ConnectorInit {
+    /// Its name in the vault's list, which init reports it under.
+    pub name: String,
+    /// Its status as that init spelled it (`ServerInit::word`): `absent`
+    /// when the init's list leaves it out, `unreported` when the init has no
+    /// list or no status for it.
+    pub status: String,
+}
+
+/// Each of `names`, the connectors a run loads by their names in the vault's
+/// list, in their order, with the status `init` names it in (M92.8).
+pub(crate) fn connector_inits(names: &[String], init: &Value) -> Vec<ConnectorInit> {
+    names
+        .iter()
+        .map(|name| ConnectorInit {
+            name: name.clone(),
+            status: server_init(init, name).word().to_string(),
+        })
+        .collect()
+}
 
 /// One server the run merged, and what its stream said about it.
 struct Server {
@@ -462,6 +491,47 @@ mod tests {
             observations[0].seen_at, "2026-10-13T09:00:09.000Z",
             "seen when its last error came back"
         );
+    }
+
+    #[test]
+    fn connector_inits_name_each_loaded_server_as_the_init_spells_it() {
+        // M92.8: the Reach reads the run's first init by the vault's names,
+        // as the observer does, and says what it left out rather than
+        // guessing.
+        let event: Value = serde_json::from_str(INIT).unwrap();
+        let names = owned(&["ok", "auth", "down", "slow", "off", "gone"]);
+        let statuses: Vec<(String, String)> = connector_inits(&names, &event)
+            .into_iter()
+            .map(|init| (init.name, init.status))
+            .collect();
+        let expected: Vec<(String, String)> = [
+            ("ok", "connected"),
+            ("auth", "needs-auth"),
+            ("down", "failed"),
+            ("slow", "pending"),
+            ("off", "disabled"),
+            ("gone", "absent"),
+        ]
+        .iter()
+        .map(|(name, status)| (name.to_string(), status.to_string()))
+        .collect();
+        assert_eq!(statuses, expected);
+        // A word this build does not know is kept as the CLI spelled it, and
+        // an init with no list reports none.
+        let odd = init(&[("toy", "reconnecting")]);
+        assert_eq!(
+            connector_inits(&owned(&["toy"]), &odd),
+            [ConnectorInit {
+                name: "toy".into(),
+                status: "reconnecting".into()
+            }]
+        );
+        let bare = json!({ "type": "system", "subtype": "init" });
+        assert_eq!(
+            connector_inits(&owned(&["toy"]), &bare)[0].status,
+            "unreported"
+        );
+        assert!(connector_inits(&[], &odd).is_empty());
     }
 
     #[test]

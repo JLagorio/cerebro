@@ -1,13 +1,17 @@
 import { useRef, useState } from 'react';
+import { StepIcon } from '@/components/ai/StepLine';
+import { TraceIcon, TraceLine, TraceTitle } from '@/components/ai/Trace';
 import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
 import { stopAgent } from '@/agent/agentIpc';
+import { liveRunWords, runLogStatus } from '@/agent/elements/runs';
 import { placeLabel } from '@/engine/place';
 import { describeRun } from '@/engine/runLog';
 import { useNavStore } from '@/stores/navStore';
 import { useRunLogStore } from '@/stores/runLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import '@/status/runs.css';
 
 /**
  * What the assistant is doing, and a way back to it (M17.7).
@@ -21,6 +25,11 @@ import { useVaultStore } from '@/stores/vaultStore';
  * Each row answers those three. Clicking a row goes to where the run belongs;
  * Stop kills that run and only that run, which is a sentence that could not be
  * written before runs had ids.
+ *
+ * Each row is a trace line (M91.14): a run under way carries the working
+ * light, stilled under reduced motion, and says "Running" — "Starting" until
+ * its child exists — before its name; a logged run says how it ended in its
+ * icon, its ink and, for a screen reader, a word.
  */
 export function RunList() {
   const runs = useUiStore((s) => s.runs);
@@ -77,11 +86,6 @@ export function RunList() {
               data-testid="run-row"
               className="group flex items-center gap-1 rounded-md px-2 py-1 hover:bg-n-50"
             >
-              <Icon
-                name={run.owner === 'chat' ? 'message-square' : 'sparkles'}
-                size={11}
-                color="var(--n-400)"
-              />
               <button
                 type="button"
                 onClick={() => {
@@ -99,9 +103,19 @@ export function RunList() {
                 }}
                 className="min-w-0 flex-1 border-0 bg-transparent p-0 text-left"
               >
-                <span className="block truncate text-xs text-n-800">{run.label}</span>
+                <TraceLine
+                  status="running"
+                  statusText={liveRunWords(run.run !== null)}
+                  className="cb-run-line cb-run-line-xs"
+                >
+                  {/* Whose run: a conversation's, or a job's. */}
+                  <TraceIcon>
+                    <Icon name={run.owner === 'chat' ? 'message-square' : 'sparkles'} size={12} />
+                  </TraceIcon>
+                  <TraceTitle className="text-n-800">{run.label}</TraceTitle>
+                </TraceLine>
                 {run.place !== null && (
-                  <span className="block truncate text-2xs text-n-400">
+                  <span className="cb-run-extra block truncate text-2xs text-n-400">
                     {placeLabel(run.place, lookup)}
                   </span>
                 )}
@@ -134,13 +148,21 @@ export function RunList() {
                 // a run from before this shipped, or one that happened where
                 // no runtime database exists — and it says so rather than
                 // offering a link that would land nowhere.
+                const status = runLogStatus(entry.status);
                 const body = (
                   <>
-                    <span className="block truncate text-xs text-n-700">{entry.label}</span>
+                    <TraceLine
+                      status={status.trace}
+                      statusText={status.statusText}
+                      className="cb-run-line cb-run-line-xs"
+                    >
+                      <StepIcon state={status.state} icon={status.icon} />
+                      <TraceTitle className="text-n-700">{entry.label}</TraceTitle>
+                    </TraceLine>
                     {/* What it did, not what it said. The log is deliberately
                         not a transcript — see engine/runLog.ts. */}
                     <span
-                      className={`block truncate text-2xs ${
+                      className={`cb-run-extra block truncate text-2xs ${
                         entry.status === 'failed' ? 'text-danger-600' : 'text-n-400'
                       }`}
                     >

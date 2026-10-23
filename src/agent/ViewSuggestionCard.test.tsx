@@ -8,7 +8,8 @@ import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { ViewSuggestionCard } from './ViewSuggestionCard';
-import { TranscriptRows } from './toolRenderers';
+import { turnItems } from './elements/turn';
+import { StepItem } from './toolRenderers';
 import type { ToolCall } from './types';
 
 const { accept, clicked } = vi.hoisted(() => ({ accept: vi.fn(), clicked: vi.fn() }));
@@ -51,6 +52,17 @@ const tool = (over: Partial<ToolCall> = {}): ToolCall => ({
   ...over,
 });
 const card = () => screen.getByTestId('view-suggestion-card');
+/** A reply's calls as a turn draws them (ChatTurn, RunTranscript). */
+const rows = (tools: ToolCall[], streaming: boolean, readOnly = false) =>
+  turnItems({ id: 'reply', role: 'assistant', text: '', tools }, { streaming }).map((item) => (
+    <StepItem
+      key={item.key}
+      item={item}
+      streaming={streaming}
+      onOpenPath={vi.fn()}
+      readOnly={readOnly}
+    />
+  ));
 
 beforeEach(() => {
   accept.mockReset().mockResolvedValue('high-ratings');
@@ -136,7 +148,7 @@ describe('ViewSuggestionCard', () => {
     expect(screen.queryByRole('button', { name: /Add and place/ })).toBeNull();
   });
   it('run-detail cards permit Add but never placement', () => {
-    render(<TranscriptRows tools={[tool()]} streaming={false} onOpenPath={vi.fn()} readOnly />);
+    render(<>{rows([tool()], false, true)}</>);
     expect(screen.getByRole('button', { name: 'Add as a tab' })).toBeDefined();
     expect(screen.queryByRole('button', { name: /Add and place/ })).toBeNull();
   });
@@ -200,11 +212,12 @@ describe('ViewSuggestionCard', () => {
     '%s suggestion remains an action step',
     (state) => {
       render(
-        <TranscriptRows
-          tools={[tool({ failed: state === 'failed', done: state === 'failed' })]}
-          streaming={state === 'running'}
-          onOpenPath={vi.fn()}
-        />,
+        <>
+          {rows(
+            [tool({ failed: state === 'failed', done: state === 'failed' })],
+            state === 'running',
+          )}
+        </>,
       );
       expect(screen.queryByTestId('view-suggestion-card')).toBeNull();
       expect(screen.getByTestId('action-card').getAttribute('data-status')).toBe(state);

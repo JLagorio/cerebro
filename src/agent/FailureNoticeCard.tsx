@@ -1,3 +1,9 @@
+import { useMemo } from 'react';
+import { unwrapToolError } from '@/agent/errorText';
+import { UnfoldDetails } from '@/agent/Unfold';
+import { StackTrace } from '@/components/ai/StackTrace';
+import { useArrival } from '@/components/ui/motion';
+import { parseStackTrace } from '@/engine/ai/stackFrames';
 import type { FailureNotice } from '@/agent/types';
 
 /**
@@ -8,7 +14,9 @@ import type { FailureNotice } from '@/agent/types';
  * offer. This card shows those words as they came. It never switches on
  * `kind` (D3): a kind this build has never heard of still reads right,
  * because its title and body arrive with it. What Claude Code itself said
- * stays one click away, so the card never hides the evidence it summarizes.
+ * stays one click away, so the card never hides the evidence it summarizes;
+ * when that printed a stack, it is the AI elements' Stack Trace too
+ * (M91.13), its frames in this vault opening their page.
  */
 
 /** The words on each action's button. An action the card has no handler for
@@ -49,6 +57,8 @@ export function FailureNoticeCard({
   raw,
   actions = {},
   onRetry,
+  onOpenPath,
+  arrive = false,
 }: {
   notice: FailureNotice;
   /** What Claude Code said, word for word: the message's error. */
@@ -57,7 +67,14 @@ export function FailureNoticeCard({
   actions?: Partial<Record<string, () => void>>;
   /** Re-send the question this answer belongs to (M15). */
   onRetry?: () => void;
+  /** Opens a page a stack frame names. */
+  onOpenPath?: (path: string) => void;
+  /** The turn failed while the conversation watched (components/ui/motion.ts). */
+  arrive?: boolean;
 }) {
+  const arrival = useArrival(arrive);
+  const said = raw === undefined ? '' : unwrapToolError(raw).trim();
+  const stack = useMemo(() => said !== '' && parseStackTrace(said) !== null, [said]);
   const handler = notice.action === null ? undefined : actions[notice.action];
   const label = notice.action === null ? undefined : ACTION_LABELS[notice.action];
   // Only a limit names a window; one that named no reset says so rather
@@ -74,6 +91,7 @@ export function FailureNoticeCard({
       role="group"
       aria-label={notice.title}
       className="flex flex-col items-start gap-1.5 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-xs leading-[17px]"
+      {...arrival}
     >
       <span className="font-semibold text-danger-700">{notice.title}</span>
       <span className="text-n-700">{notice.body}</span>
@@ -86,10 +104,22 @@ export function FailureNoticeCard({
         <span className="text-2xs text-n-500">Reported by Claude Code {notice.cli_version}</span>
       )}
       {raw !== undefined && raw !== '' && (
-        <details data-testid="failure-notice-raw" className="text-2xs text-n-500">
-          <summary className="cursor-pointer">What Claude Code said</summary>
-          <p className="m-0 mt-1 whitespace-pre-wrap break-words">{raw}</p>
-        </details>
+        <UnfoldDetails
+          data-testid="failure-notice-raw"
+          className="text-2xs text-n-500"
+          summary={<summary className="cursor-pointer">What Claude Code said</summary>}
+        >
+          <p className="cb-chat-reveal m-0 mt-1 max-h-[200px] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {said}
+          </p>
+        </UnfoldDetails>
+      )}
+      {stack && (
+        <StackTrace
+          trace={said}
+          title="Stack trace"
+          onOpenPath={onOpenPath === undefined ? undefined : (path) => onOpenPath(path)}
+        />
       )}
       {((handler !== undefined && label !== undefined) || onRetry !== undefined) && (
         <div className="flex flex-wrap items-center gap-1.5">

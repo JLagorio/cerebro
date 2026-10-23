@@ -1,6 +1,6 @@
 import { isTemplate } from '@/lib/templates';
 import { isKnowledgePath } from './okf';
-import type { Entry, Schema } from './types';
+import type { Entry } from './types';
 
 /**
  * Inbox (M4) — the capture-then-organize workflow, after Tolaria's Inbox.
@@ -28,14 +28,6 @@ export const INBOX_DIR = 'inbox';
 /** App-managed frontmatter key. `_`-prefixed keys are hidden from property
  * surfaces (see isSystemProperty in engine/properties.ts). */
 export const ORGANIZED_KEY = '_organized';
-
-export type InboxPeriod = 'week' | 'month' | 'all';
-
-export const INBOX_PERIODS: { value: InboxPeriod; label: string }[] = [
-  { value: 'week', label: 'Week' },
-  { value: 'month', label: 'Month' },
-  { value: 'all', label: 'All' },
-];
 
 /**
  * Files that are structure rather than content: they are never "captures",
@@ -67,138 +59,14 @@ export function inInbox(entry: Entry): boolean {
   return !isStructural(entry) && !isOrganized(entry);
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-const PERIOD_DAYS: Record<InboxPeriod, number | null> = { week: 7, month: 30, all: null };
-
-/** True when `entry` was captured inside `period` counting back from `now`. */
-export function withinPeriod(entry: Entry, period: InboxPeriod, now: Date): boolean {
-  const days = PERIOD_DAYS[period];
-  if (days === null) return true;
-  const created = Date.parse(entry.createdAt);
-  // An unparseable createdAt must not silently vanish from every bounded
-  // period — surface it rather than hide it.
-  if (Number.isNaN(created)) return true;
-  return now.getTime() - created <= days * DAY_MS;
-}
-
-/** Inbox contents for a period, newest capture first. */
-export function inboxEntries(
-  entries: Entry[],
-  period: InboxPeriod = 'all',
-  now: Date = new Date(),
-): Entry[] {
+/** Inbox contents, newest capture first: every queued capture, however old. */
+export function inboxEntries(entries: Entry[]): Entry[] {
   return entries
-    .filter((e) => inInbox(e) && withinPeriod(e, period, now))
+    .filter(inInbox)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.title.localeCompare(b.title));
-}
-
-/** Per-period counts for the filter pills. */
-export function inboxCounts(entries: Entry[], now: Date = new Date()): Record<InboxPeriod, number> {
-  const queued = entries.filter(inInbox);
-  return {
-    week: queued.filter((e) => withinPeriod(e, 'week', now)).length,
-    month: queued.filter((e) => withinPeriod(e, 'month', now)).length,
-    all: queued.length,
-  };
 }
 
 /** Total Inbox size — the nav badge. */
 export function inboxCount(entries: Entry[]): number {
   return entries.filter(inInbox).length;
-}
-
-// --- Organize checklist ----------------------------------------------------
-
-export interface OrganizeCheck {
-  id: 'title' | 'type' | 'status' | 'links';
-  label: string;
-  done: boolean;
-  /** Why it matters — shown when the check is outstanding. */
-  hint: string;
-}
-
-/** `fld-7.md` → "Fld 7" — the parser's own title fallback (see Entry.title). */
-export function humanizeStem(filename: string): string {
-  const stem = filename.replace(/\.md$/, '').replace(/[-_]+/g, ' ').trim();
-  return stem === '' ? '' : stem[0].toUpperCase() + stem.slice(1);
-}
-
-/**
- * Whether a filename stem reads as machine-minted rather than written:
- * `capture-2026-07-28-1432`, `fld-7`, `img_0042`, `x`. Two tells — a token
- * that is nothing but digits (dates, stamps, counters), and a stem of a
- * single word (an id, never a sentence).
- */
-export function looksAutoNamed(filename: string): boolean {
-  const words = filename
-    .replace(/\.md$/, '')
-    .split(/[-_\s]+/)
-    .filter((w) => w !== '');
-  return words.length < 2 || words.some((w) => /^\d+$/.test(w));
-}
-
-/**
- * Whether the note carries a declared title or a real H1 rather than the
- * humanized-filename fallback. An explicit frontmatter title is evidence,
- * including a one-word document name. Entry has no "had an H1" flag, so
- * otherwise this compares against what the
- * fallback would have produced — but the comparison alone is wrong in the
- * common direction: captures and ingested docs get their FILENAME from their
- * title (`captureSlug` slugifies it), so a pasted "Standup notes for tuesday"
- * lands as `standup-notes-for-tuesday.md` and round-trips exactly, and the
- * check could never be satisfied no matter what the user typed. When the
- * title is the humanized stem, the name itself decides: a stem that reads as
- * machine-minted means no H1, a stem that reads as a phrase means the file
- * was named after one. Advisory either way — the checklist never blocks
- * organizing, so a wrong guess costs a nudge.
- */
-export function hasRealTitle(entry: Entry): boolean {
-  if (entry.title.trim() === '') return false;
-  if (typeof entry.properties.title === 'string' && entry.properties.title.trim() !== '')
-    return true;
-  if (entry.title !== humanizeStem(entry.filename)) return true;
-  return !looksAutoNamed(entry.filename);
-}
-
-/**
- * The review checklist for one capture: what would make this note findable
- * later. Advisory — organizing is always allowed with items outstanding.
- */
-export function organizeChecklist(entry: Entry, schema: Schema): OrganizeCheck[] {
-  const checks: OrganizeCheck[] = [
-    {
-      id: 'title',
-      label: 'Has a clear title',
-      done: hasRealTitle(entry),
-      hint: 'The first H1 is the title. A capture named after its filename is hard to find later.',
-    },
-    {
-      id: 'type',
-      label: 'Has a type',
-      done: entry.type !== null,
-      hint: 'The type decides which screens, views, and properties this note belongs to.',
-    },
-  ];
-
-  // Status only matters when the note's own type declares one — asking for
-  // a status on a Person or a Reference would be noise.
-  const statuses = entry.type === null ? [] : schema.statusSetFor(entry);
-  if (statuses.length > 0) {
-    const current = entry.properties.status;
-    checks.push({
-      id: 'status',
-      label: 'Has a status',
-      done: typeof current === 'string' && statuses.some((s) => s.id === current),
-      hint: 'Actionable notes need a status to show up in the right column or view.',
-    });
-  }
-
-  checks.push({
-    id: 'links',
-    label: 'Connected to something',
-    done: Object.keys(entry.relationships).length > 0 || entry.outgoingLinks.length > 0,
-    hint: 'A wikilink or a relation property is what makes this reachable from anywhere else.',
-  });
-
-  return checks;
 }

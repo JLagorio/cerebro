@@ -37,11 +37,17 @@ test('on demand creates pages, links a company, dismisses locally and restores',
   await expect(friend.getByRole('button', { name: 'Create company' })).toHaveCount(0);
   await person.getByRole('button', { name: 'Create company' }).click();
   await expect
+    .poll(() => page.evaluate(() => window.__cerebroMockFs.has('companies/initech.md')))
+    .toBe(true);
+  await expect
     .poll(() => readMockFile(page, 'companies/initech.md'))
     .toContain('domain: initech.example');
   await expect(person).toContainText('at Initech');
   await page.screenshot({ path: info.outputPath('unfiled.png'), animations: 'disabled' });
   await person.getByRole('button', { name: 'Create page', exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.__cerebroMockFs.has('people/newperson.md')))
+    .toBe(true);
   await expect
     .poll(() => readMockFile(page, 'people/newperson.md'))
     .toContain('company: "[[initech]]"');

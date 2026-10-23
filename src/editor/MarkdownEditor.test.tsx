@@ -946,6 +946,7 @@ describe('the / menu', () => {
     const editor = await openMenu();
     const table = options()[offered().indexOf(editor.dictionary.slash_menu.table.title)];
     fireEvent.click(table);
+    fireEvent.click(await screen.findByRole('button', { name: 'Insert table' }));
     await waitFor(() => expect(editor.document.some((b) => b.type === 'table')).toBe(true));
     const inserted = editor.document.find((b) => b.type === 'table')!;
     expect((inserted.content as { headerRows?: number }).headerRows).toBe(1);

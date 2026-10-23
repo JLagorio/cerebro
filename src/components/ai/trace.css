@@ -1,0 +1,153 @@
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   Trace (M91.7): lines of what an agent did, on the DS tokens. A line is
+   quiet ink that a hover inside a link or a trigger brings up to full; a
+   failed line is danger ink, a line not yet started is fainter, and a
+   running line's title carries the working light (`cb-ai-shimmer`,
+   index.css). Unlayered like the app's other surface stylesheets; motion
+   spends the tokens only. */
+
+.cb-ai-trace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+}
+
+/* A link or a trigger placed straight in a trace is the row: it takes the
+   line's width, and its focus ring. A link keeps the line's ink rather than
+   the app's link ink and hover underline (tokens/base.css). */
+.cb-ai-trace > :has(> .cb-ai-trace-line) {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  border-radius: var(--r-lg);
+  text-align: left;
+  outline: none;
+}
+.cb-ai-trace > :has(> .cb-ai-trace-line):focus-visible {
+  box-shadow: var(--ring);
+}
+.cb-ai-trace > a:has(> .cb-ai-trace-line),
+.cb-ai-trace > a:has(> .cb-ai-trace-line):hover {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cb-ai-trace-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  color: var(--n-600);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  transition: color var(--motion-hover);
+}
+:is(a, button) .cb-ai-trace-line {
+  cursor: pointer;
+}
+:is(a, button):hover .cb-ai-trace-line {
+  color: var(--n-900);
+}
+.cb-ai-trace-line[data-status='pending'] {
+  color: var(--n-500);
+}
+.cb-ai-trace-line[data-status='error'],
+:is(a, button):hover .cb-ai-trace-line[data-status='error'] {
+  color: var(--danger-600);
+}
+
+.cb-ai-trace-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.cb-ai-trace-icon svg {
+  pointer-events: none;
+}
+/* After the title, the icon is the line's indicator, drawn closer to it. */
+.cb-ai-trace-title ~ .cb-ai-trace-icon {
+  margin-left: calc(var(--sp-1) * -1);
+}
+
+.cb-ai-trace-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cb-ai-trace-description {
+  flex: none;
+  color: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.cb-ai-trace-collapsible {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.cb-ai-trace-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: transparent;
+  color: var(--n-600);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: color var(--motion-hover);
+}
+.cb-ai-trace-trigger:hover {
+  color: var(--n-900);
+}
+.cb-ai-trace-trigger:focus-visible {
+  box-shadow: var(--ring);
+}
+.cb-ai-trace-trigger:disabled {
+  cursor: default;
+}
+/* The chevron is the trigger's, outside the line, so a failed line tints it. */
+.cb-ai-trace-trigger:has([data-status='error']) {
+  color: var(--danger-600);
+}
+.cb-ai-trace-chevron {
+  transition: rotate var(--motion-turn);
+}
+.cb-ai-trace-trigger[aria-expanded='true'] > .cb-ai-trace-chevron {
+  rotate: 90deg;
+}
+
+.cb-ai-trace-panel {
+  min-width: 0;
+}
+/* The detail hangs from a rule drawn down the middle of the line's 16px icon
+   (8px in, less its own 1px). Muted, as the lines are; a block inside that
+   needs full ink (a code block) sets its own. */
+.cb-ai-trace-content {
+  min-width: 0;
+  margin: var(--sp-2) 0 var(--sp-1) 7px;
+  padding: 0 var(--sp-1) 0 var(--sp-4);
+  border-left: 1px solid var(--border-subtle);
+  color: var(--n-600);
+  line-height: 1.625;
+  overflow-wrap: break-word;
+}

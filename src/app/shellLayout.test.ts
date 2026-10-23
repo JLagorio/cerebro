@@ -1,5 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  CHAT_RAIL_DOCK_MIN,
+  CHAT_RAIL_WIDTH,
+  chatRailDocks,
   paneRowFloor,
   paneCapacity,
   paneParked,
@@ -16,6 +21,8 @@ import {
   roomAt,
   SHELL_BARE_TWO_PANEL_MIN,
   SHELL_CLASSES,
+  SHELL_FRAME_BORDER,
+  SHELL_FRAME_GUTTER,
   SHELL_PARKED_COLUMN_MIN,
   SHELL_RAIL_TWO_PANEL_MIN,
   SHELL_TWO_PANEL_MIN,
@@ -50,7 +57,8 @@ import {
  */
 
 /** The canvas row at 1440px beside a default-width sidebar. */
-const ROW_1440 = 1440 - SIDEBAR_WIDTH_DEFAULT;
+const ROW_1440 =
+  1440 - SIDEBAR_RAIL_WIDTH - SIDEBAR_WIDTH_DEFAULT - SHELL_FRAME_GUTTER - SHELL_FRAME_BORDER;
 
 describe('fitWidth', () => {
   it('draws a stored width that fits as it is', () => {
@@ -74,7 +82,7 @@ describe('panelRooms', () => {
       assistant: true,
       assistantWidth: AI_WIDTH_DEFAULT,
     });
-    // 1176 − 400 canvas − 380 assistant.
+    // The measured content row excludes navigation and the paper frame.
     expect(rooms.detail).toBe(ROW_1440 - CANVAS_MIN_WIDTH - AI_WIDTH_DEFAULT);
     // The widened record is drawn in that room, not at its stored 1000 …
     const record = fitWidth(DETAIL_WIDTH_MAX, rooms.detail);
@@ -148,7 +156,12 @@ describe('shellPlan', () => {
 
   it('derives its thresholds from the floors', () => {
     expect(SHELL_TWO_PANEL_MIN).toBe(
-      SIDEBAR_RAIL_WIDTH + SIDEBAR_WIDTH_MIN + CANVAS_MIN_WIDTH + 2 * RIGHT_PANEL_MIN_WIDTH,
+      SIDEBAR_RAIL_WIDTH +
+        SIDEBAR_WIDTH_MIN +
+        CANVAS_MIN_WIDTH +
+        2 * RIGHT_PANEL_MIN_WIDTH +
+        SHELL_FRAME_GUTTER +
+        SHELL_FRAME_BORDER,
     );
     expect(SHELL_TWO_PANEL_MIN).toBe(1274);
     expect(SHELL_RAIL_TWO_PANEL_MIN).toBe(SIDEBAR_RAIL_WIDTH + 1040);
@@ -158,7 +171,9 @@ describe('shellPlan', () => {
         SIDEBAR_WIDTH_MIN +
         CANVAS_MIN_WIDTH +
         RIGHT_PANEL_MIN_WIDTH +
-        PARKED_TAB_WIDTH,
+        PARKED_TAB_WIDTH +
+        SHELL_FRAME_GUTTER +
+        SHELL_FRAME_BORDER,
     );
     expect(SHELL_PARKED_COLUMN_MIN).toBe(986);
   });
@@ -207,7 +222,7 @@ describe('shellPlan', () => {
   });
 
   it("uses the room a user-collapsed sidebar gives back, and never writes over the user's word", () => {
-    expect(plan(1100, { collapsed: true })).toEqual({ sidebar: 'collapsed', assistant: 'drawn' });
+    expect(plan(1094, { collapsed: true })).toEqual({ sidebar: 'collapsed', assistant: 'drawn' });
     expect(plan(SHELL_BARE_TWO_PANEL_MIN - 1, { collapsed: true })).toEqual({
       sidebar: 'collapsed',
       assistant: 'parked',
@@ -357,10 +372,12 @@ describe('mainColumnFloor', () => {
   });
 
   it("counts a page's own side panel, so the sidebar gives before the reading column", () => {
-    // 400 canvas + 272 side panel + 380 assistant.
+    // 400 canvas + 300 side panel + 380 assistant.
     expect(
       mainColumnFloor({ detail: false, assistant: true, assistantWidth: 380, pageAside: true }),
-    ).toBe(`min(${CANVAS_MIN_WIDTH + DOC_PANEL_WIDTH + 380}px, 100vw - 234px)`);
+    ).toBe(
+      `min(${CANVAS_MIN_WIDTH + DOC_PANEL_WIDTH + 380 + SHELL_FRAME_BORDER}px, 100vw - 234px)`,
+    );
   });
 
   it('is capped at what the window holds beside a minimum sidebar', () => {
@@ -388,7 +405,9 @@ describe('sidebarCeiling', () => {
   const floor = mainColumnFloorPx({ detail: true, assistant: true, assistantWidth: 380 });
 
   it('stops the drag at what can be drawn beside the main column floor', () => {
-    expect(sidebarCeiling(1440, floor)).toBe(1440 - SIDEBAR_RAIL_WIDTH - floor);
+    expect(sidebarCeiling(1440, floor)).toBe(
+      1440 - SIDEBAR_RAIL_WIDTH - floor - SHELL_FRAME_GUTTER - SHELL_FRAME_BORDER,
+    );
     expect(sidebarCeiling(1440, floor)).toBe(286);
   });
 
@@ -457,6 +476,77 @@ describe('pageAsides', () => {
 
   it('never draws a Pages panel that is not open', () => {
     expect(pageAsides({ row: 2000, pages: false, side: false }).pages).toBe(false);
+  });
+
+  // The side panel opens under the toolbar's actions (pageFrame.css), so a
+  // wider set of actions raises its floor, and it folds that much sooner.
+  it("folds the side panel at the floor the toolbar's actions set for it", () => {
+    const sideFloor = DOC_PANEL_MIN_WIDTH + 64;
+    const row = DOC_COLUMN_MIN_WIDTH + sideFloor;
+    expect(pageAsides({ row, pages: false, side: true, sideFloor }).sideFits).toBe(true);
+    expect(pageAsides({ row: row - 1, pages: false, side: true, sideFloor }).sideFits).toBe(false);
+    // And the Pages panel counts the same floor beside it.
+    expect(
+      pageAsides({ row: row + DOC_PAGES_MIN_WIDTH - 1, pages: true, side: true, sideFloor }),
+    ).toEqual({ pages: false, sideFits: true });
+  });
+});
+
+/**
+ * M92.1: the canvas conversation's details rail docks beside the transcript
+ * where the canvas frame has room for a reading column, the rail and their
+ * gutters, and is a drawer under that. The frame is what the app rail and
+ * the sidebar leave of the window.
+ */
+describe('the canvas rail (M92.1)', () => {
+  /** The canvas frame in a window `window` px wide beside a sidebar. */
+  const frame = (window: number, sidebar: number) =>
+    window - SIDEBAR_RAIL_WIDTH - sidebar - SHELL_FRAME_GUTTER - SHELL_FRAME_BORDER;
+
+  it('is a fixed 300px, and docks from a 960px frame: 600 to read, 300, two 30px gutters', () => {
+    expect(CHAT_RAIL_WIDTH).toBe(300);
+    expect(CHAT_RAIL_DOCK_MIN).toBe(600 + CHAT_RAIL_WIDTH + 2 * 30);
+    expect(CHAT_RAIL_DOCK_MIN).toBe(960);
+  });
+
+  it('docks at 960 and is a drawer at 959; an unmeasured frame says nothing', () => {
+    expect(chatRailDocks(960)).toBe(true);
+    expect(chatRailDocks(1146)).toBe(true);
+    expect(chatRailDocks(959)).toBe(false);
+    expect(chatRailDocks(null)).toBeNull();
+    // A box with no width is no measurement (jsdom, or display: none).
+    expect(chatRailDocks(0)).toBeNull();
+  });
+
+  it.each([
+    [SIDEBAR_WIDTH_MIN, 1194],
+    [SIDEBAR_WIDTH_DEFAULT, 1254],
+    [SIDEBAR_WIDTH_MAX, 1474],
+  ])('beside a %ipx sidebar, docks from a %ipx window', (sidebar, window) => {
+    expect(frame(window, sidebar)).toBe(CHAT_RAIL_DOCK_MIN);
+    expect(chatRailDocks(frame(window, sidebar))).toBe(true);
+    expect(chatRailDocks(frame(window - 1, sidebar))).toBe(false);
+  });
+
+  it('docks in 1440 and 1280 windows beside the default sidebar, and not at 1100 (Q3)', () => {
+    expect(chatRailDocks(frame(1440, SIDEBAR_WIDTH_DEFAULT))).toBe(true);
+    expect(chatRailDocks(frame(1280, SIDEBAR_WIDTH_DEFAULT))).toBe(true);
+    expect(chatRailDocks(frame(1100, SIDEBAR_WIDTH_DEFAULT))).toBe(false);
+    // The widest sidebar takes the room at 1440; folded to the app rail, it
+    // gives it back.
+    expect(chatRailDocks(frame(1440, SIDEBAR_WIDTH_MAX))).toBe(false);
+    expect(chatRailDocks(frame(1100, 0))).toBe(true);
+  });
+
+  it('is drawn by CSS at the same numbers: chat.css spells them out', () => {
+    // Literal, because a container query cannot read a custom property.
+    const css = readFileSync(resolve(__dirname, '../agent/chat.css'), 'utf8');
+    expect(css).toContain(`--chat-rail-width: ${CHAT_RAIL_WIDTH}px;`);
+    const queries = [...css.matchAll(/@container chat-canvas \(min-width: (\d+)px\)/g)];
+    expect(queries.map(([, px]) => Number(px))).toEqual([CHAT_RAIL_DOCK_MIN]);
+    expect(css).toMatch(
+      /\.m71-chat-frame\[data-presentation='canvas'\] \{\s*container: chat-canvas/,
+    );
   });
 });
 

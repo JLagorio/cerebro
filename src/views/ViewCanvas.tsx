@@ -257,6 +257,7 @@ export function ViewCanvas({
     case 'chart':
       return (
         <ChartView
+          embedded={embedded}
           entries={entries}
           presentation={presentation}
           schema={schema}

@@ -3,7 +3,12 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import GRANT_SCOPE from '../../src-tauri/fixtures/grant-scope.json';
 import { TOOLS } from '@/lib/policy/tools';
-import { effectiveCeiling, plan, type ShellCeiling } from '@/lib/policy/toolApproval';
+import {
+  effectiveCeiling,
+  plan,
+  type DelegateCeiling,
+  type ShellCeiling,
+} from '@/lib/policy/toolApproval';
 import { makeEntry } from '@/test/factories';
 import {
   accessLines,
@@ -12,11 +17,13 @@ import {
   OWN_NOTES_TOOL,
   pageAccess,
   scopeAdmits,
+  summaryShort,
   summaryWords,
   writesInWords,
   type AccessRow,
 } from './agentAccess';
 import { parseReadScope, parseScope } from './agents';
+import { namesTool } from './toolGrant';
 import type { Entry } from './types';
 
 const REPO = join(__dirname, '../..');
@@ -79,14 +86,17 @@ function vault(...agents: Entry[]): Entry[] {
   return [...PAGES, ...agents];
 }
 
+/** The Settings ceilings at their defaults unless a test says otherwise:
+ * the shell off, subagents on. */
 function access(
   entries: Entry[],
   path: string,
   shell: ShellCeiling = 'off',
   panelAgent: string | null = null,
+  delegate: DelegateCeiling = 'on',
 ) {
   const type = entries.find((e) => e.path === path)?.type ?? null;
-  return pageAccess({ entries, path, type, shell, panelAgent });
+  return pageAccess({ entries, path, type, shell, delegate, panelAgent });
 }
 
 function row(rows: AccessRow[], actor: string): AccessRow {
@@ -132,6 +142,8 @@ describe('pageAccess', () => {
     expect(lines.reasons[0]).toBe('Inside its write scope: records/risks/.');
     expect(lines.reasons).toContain('Runs when you ask, or when another agent hands it work.');
     expect(summaryWords(page)).toBe('1 of 2 agents can change this page.');
+    // The Access header's words for the same count.
+    expect(summaryShort(page)).toBe('1 of 2 agents can change it');
   });
 
   it('refuses release-scout outside its scope', () => {
@@ -140,6 +152,7 @@ describe('pageAccess', () => {
     expect(r.write).toBe('none');
     expect(accessLines(r).reasons[0]).toBe('Outside its write scope: records/risks/.');
     expect(summaryWords(page)).toBe('No agent can change this page.');
+    expect(summaryShort(page)).toBe('No agent can change it');
   });
 
   it('lets the knowledge agent only read', () => {
@@ -290,6 +303,115 @@ describe('pageAccess', () => {
       expect(accessLines(r).reasons.some((l) => l.includes('Shell') || l.includes('shell'))).toBe(
         false,
       );
+    });
+  });
+
+  // M91.2d: whether, while you watch, it may hand reading to a researcher,
+  // read off plan() by the Subagents switch and the record's narrowing.
+  describe('subagents', () => {
+    const ON =
+      'While you watch, it can hand reading to a researcher that reports back and changes nothing.';
+    const OFF = 'Subagents are Off in Settings.';
+    const NARROWED = 'Its allowed tools leave out subagents.';
+    const said = (r: AccessRow) => {
+      const reasons = accessLines(r).reasons;
+      return [ON, OFF, NARROWED].filter((words) => reasons.includes(words));
+    };
+
+    /** The row agrees with plan(): it starts a researcher exactly when the
+     * attended plan names a type to start, never unattended, and the reason
+     * it gives for not starting one is one that withholds it. */
+    function agrees(r: AccessRow, delegate: DelegateCeiling) {
+      const allowed = r.axes.allowedTools;
+      const planned = (
+        kind: 'attended' | 'unattended',
+        ceiling: DelegateCeiling | undefined,
+        narrowed = true,
+      ) =>
+        plan({
+          kind,
+          shell: effectiveCeiling('off', r.axes.shell),
+          delegate: ceiling,
+          askFirst: r.axes.askFirst,
+          readScoped: r.axes.readScope !== null,
+          narrowing:
+            allowed === null || !narrowed
+              ? null
+              : (tool) => allowed.some((entry) => namesTool(entry, tool)),
+        }).allowed_agent_types.length > 0;
+      expect(r.delegate.attended).toBe(planned('attended', delegate));
+      // Nobody watches an unattended run, and it sends no switch.
+      expect(planned('unattended', undefined)).toBe(false);
+      if (r.delegate.withheld === 'ceiling') {
+        expect(delegate).toBe('off');
+        expect(planned('attended', 'on', false)).toBe(true);
+      }
+      if (r.delegate.withheld === 'narrowing') {
+        expect(planned('attended', delegate)).toBe(false);
+        expect(planned('attended', delegate, false)).toBe(true);
+      }
+    }
+
+    it('lets the panel hand reading to a researcher while the switch is on', () => {
+      const p = panelRow(access(vault(scout(), KNOWLEDGE), RISK).rows);
+      expect(p.delegate).toEqual({ attended: true, withheld: null });
+      expect(said(p)).toEqual([ON]);
+      agrees(p, 'on');
+      // The plain agent row, no narrowing, the same, and only while you watch.
+      const s = row(access(vault(scout(), KNOWLEDGE), RISK).rows, 'process:release-scout');
+      expect(said(s)).toEqual([ON]);
+      agrees(s, 'on');
+    });
+
+    it('says Off in Settings when the switch is off', () => {
+      const rows = access(vault(scout(), KNOWLEDGE), RISK, 'off', null, 'off').rows;
+      const p = panelRow(rows);
+      expect(p.delegate).toEqual({ attended: false, withheld: 'ceiling' });
+      expect(said(p)).toEqual([OFF]);
+      agrees(p, 'off');
+      // Off says so first, even for a record whose narrowing leaves it out.
+      const k = row(rows, 'process:knowledge');
+      expect(said(k)).toEqual([OFF]);
+      agrees(k, 'off');
+    });
+
+    it('reads a record that narrows the subagent tool out as not delegating, a bound panel too', () => {
+      // The knowledge agent's allowed-tools name neither Agent nor Task.
+      const rows = access(vault(scout(), KNOWLEDGE), RISK, 'off', 'knowledge').rows;
+      const k = row(rows, 'process:knowledge');
+      expect(k.delegate).toEqual({ attended: false, withheld: 'narrowing' });
+      expect(said(k)).toEqual([NARROWED]);
+      agrees(k, 'on');
+      const bound = panelRow(rows);
+      expect(bound.boundTo).toBe('Knowledge agent');
+      expect(said(bound)).toEqual([NARROWED]);
+      // Narrowed to nothing, the same.
+      const none = row(
+        access(vault(scout({ 'allowed-tools': [] })), RISK).rows,
+        'process:release-scout',
+      );
+      expect(said(none)).toEqual([NARROWED]);
+    });
+
+    it('keeps it for a narrowing that names the subagent tool, by its name or its alias', () => {
+      for (const name of ['Agent', 'Task']) {
+        const named = scout({ 'allowed-tools': ['get_note', name] });
+        const r = row(access(vault(named), RISK).rows, 'process:release-scout');
+        expect(r.delegate, name).toEqual({ attended: true, withheld: null });
+        expect(said(r)).toEqual([ON]);
+      }
+    });
+
+    it('leaves the reach it explains alone: a researcher reads under its run’s own grant', () => {
+      for (const delegate of ['on', 'off'] as const) {
+        const r = row(
+          access(vault(scout({ 'read-scope': ['delivery'] })), RISK, 'off', null, delegate).rows,
+          'process:release-scout',
+        );
+        expect([r.write, r.read, r.reads]).toEqual(['yes', false, true]);
+        // A read limit withdraws the shell, never the switch.
+        expect(r.delegate.attended).toBe(delegate === 'on');
+      }
     });
   });
 

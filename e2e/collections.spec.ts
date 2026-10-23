@@ -325,7 +325,9 @@ test('calendar: a day + on a range field writes a range (M53.16)', async ({ page
   await expect(chip).toBeVisible();
   // And it is a record like any other: it opens.
   await chip.click();
-  await expect(page.getByTestId('detail-title')).toHaveValue('Retro');
+  await expect(page.getByTestId('detail-panel').locator('[data-page-title] h1')).toHaveText(
+    'Retro',
+  );
 });
 
 /**

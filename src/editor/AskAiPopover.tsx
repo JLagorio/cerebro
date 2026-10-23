@@ -1,12 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Confirmation } from '@/components/ai/Confirmation';
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from '@/components/ai/PromptInput';
+import { Suggestion, Suggestions } from '@/components/ai/Suggestion';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { applyHunks, describeHunk, isUnchanged, rewriteHunks } from '@/engine/hunks';
 import { argumentHint, listSkills, skillPrompt, type SkillRef } from '@/engine/skills';
 import { readNote } from '@/lib/ipc';
+import { askAiWorking, rewriteDecision } from '@/agent/elements/writingAsk';
 import { onAgentEvent, runAgent, startedOrThrow } from '@/agent/agentIpc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { PRESETS } from './SelectionToolbar';
+import './editor.css';
 
 /**
  * Ask AI on a selection (M17.16), and run a skill on one (M17.17).
@@ -28,6 +39,16 @@ import { useVaultStore } from '@/stores/vaultStore';
  * It also does not span files. Anything multi-file escalates to the panel,
  * which has the context chips, the transcript, and the run registry; a popover
  * over one paragraph is the wrong surface to watch a five-file change from.
+ *
+ * ## Its elements (M91.14)
+ *
+ * The instruction is a Prompt Input (Enter asks, Shift+Enter is a new line),
+ * the writing actions are Suggestion rows, the working line carries the AI
+ * light, and the decision is a Confirmation whose body holds the hunks and
+ * its answers. Its own answers, not the card's approve and deny: Retry asks
+ * again and Apply writes the hunks the person kept, neither of which is a
+ * yes or a no to an agent's call. Like every control here, each takes an
+ * explicit `tabIndex`, without which WebKit leaves a button out of Tab.
  *
  * ## The tool policy
  *
@@ -60,6 +81,7 @@ export function AskAiPopover({
   // Seeded with the preset so Retry re-runs what was actually asked, and so
   // the box shows the instruction rather than going blank on a retry.
   const [instruction, setInstruction] = useState(preset ?? '');
+  const [showActions, setShowActions] = useState(false);
   const [state, setState] = useState<'asking' | 'running' | 'deciding'>(
     // Straight to 'running': the effect below fires after the first paint, and
     // starting at 'asking' would flash an empty prompt box for one frame.
@@ -67,22 +89,29 @@ export function AskAiPopover({
   );
   const [result, setResult] = useState('');
   const [accepted, setAccepted] = useState<Set<number>>(new Set());
-  const inputRef = useRef<HTMLInputElement>(null);
+  // The skill a run applies, so its working line can name it.
+  const [skillRun, setSkillRun] = useState<string | undefined>(undefined);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const cancelled = useRef(false);
 
   const skills = useMemo(() => listSkills(entries), [entries]);
   const rewrite = useMemo(() => rewriteHunks(selection, result), [selection, result]);
+  const decision = rewriteDecision(isUnchanged(rewrite) ? 0 : rewrite.hunks.length, accepted.size);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    // Mounted again — React's development double mount does that — it hears
+    // its run again: only an unmount for good leaves the answer unheard.
+    cancelled.current = false;
+    inputRef.current?.focus({ preventScroll: true });
     return () => {
       cancelled.current = true;
     };
   }, []);
 
-  const run = (message: string) => {
+  const run = (message: string, skill?: string) => {
     if (vaultPath === null || message.trim() === '') return;
     setState('running');
+    setSkillRun(skill);
     setResult('');
     void (async () => {
       try {
@@ -146,10 +175,16 @@ export function AskAiPopover({
       ].join('\n'),
     );
 
+  // Whether the preset was asked: a ref, so a second mount asks nothing more.
+  const presetAsked = useRef(false);
   useEffect(() => {
-    // A preset arrives already decided, so the run starts on mount and the
-    // input never appears. Runs once: `run` closes over state that changes
-    // during the run, and re-firing on it would start a second one mid-answer.
+    // A preset arrives already decided, so the run starts on mount, with the
+    // instruction shown working rather than waiting to be sent. Runs once:
+    // `run` closes over state that changes during the run, and re-firing on
+    // it — or on React's development double mount — would start a second one
+    // mid-answer.
+    if (presetAsked.current) return;
+    presetAsked.current = true;
     if (preset !== undefined && preset.trim() !== '') ask(preset);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -157,13 +192,17 @@ export function AskAiPopover({
   const runSkill = (skill: SkillRef) => {
     if (vaultPath === null) return;
     setState('running');
+    setSkillRun(skill.name);
     void (async () => {
       try {
         const raw = await readNote(vaultPath, skill.path);
         // M17.17: the same record, the same body, a second entry point. The
         // skill is told the passage IS the input, so a skill written for the
         // chat works here without being rewritten for it.
-        run(`${skillPrompt(skill, raw, selection)}\n\nApply it to this passage:\n${selection}`);
+        run(
+          `${skillPrompt(skill, raw, selection)}\n\nApply it to this passage:\n${selection}`,
+          skill.name,
+        );
       } catch {
         toast("Couldn't read the skill");
         setState('asking');
@@ -184,7 +223,7 @@ export function AskAiPopover({
       data-testid="ask-ai"
       role="dialog"
       aria-label="Ask AI about the selection"
-      className="w-[420px] max-w-full rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]"
+      className="max-h-[var(--popover-available-height,calc(100dvh-16px))] w-[420px] max-w-[var(--popover-available-width,calc(100vw-16px))] overflow-y-auto rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]"
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
@@ -194,24 +233,72 @@ export function AskAiPopover({
     >
       {state !== 'deciding' && (
         <>
-          <div className="flex items-center gap-1.5">
+          <PromptInput
+            // An empty instruction asks for nothing.
+            onSubmit={() => {
+              if (instruction.trim() !== '') ask();
+            }}
+            disabled={state === 'running'}
+            className="cb-ask-ai-field"
+          >
             <Icon name="sparkles" size={13} color="var(--synapse-500)" />
-            <input
-              ref={inputRef}
-              value={instruction}
-              disabled={state === 'running'}
-              onChange={(e) => setInstruction(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  ask();
-                }
-              }}
-              aria-label="What should the assistant do with this passage?"
-              placeholder={state === 'running' ? 'Working…' : 'Make it shorter, fix the tone…'}
-              className="min-w-0 flex-1 rounded-md border border-n-200 bg-n-0 px-2 py-1.5 text-sm outline-none placeholder:text-n-400 focus-visible:border-cortex-400"
+            <PromptInputBody>
+              <PromptInputTextarea
+                ref={inputRef}
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                aria-label="What should the assistant do with this passage?"
+                placeholder={state === 'running' ? 'Working…' : 'Make it shorter, fix the tone…'}
+              />
+            </PromptInputBody>
+            {/* Disabled while empty or working, and so out of the Tab order:
+                from the field, Tab reaches the writing actions. */}
+            <PromptInputSubmit
+              tabIndex={0}
+              aria-label="Ask"
+              status={state === 'running' ? 'submitted' : 'ready'}
+              disabled={state === 'running' || instruction.trim() === ''}
             />
-          </div>
+          </PromptInput>
+          {state === 'running' && (
+            <p data-testid="ask-ai-working" className="cb-ask-ai-working cb-ai-shimmer">
+              {askAiWorking(skillRun)}
+            </p>
+          )}
+          {state === 'asking' && (
+            <div className="mt-2 text-sm text-n-600">
+              <button
+                type="button"
+                tabIndex={0}
+                aria-expanded={showActions}
+                className="cursor-pointer rounded-md border-0 bg-transparent px-2 py-1 hover:bg-n-50"
+                onClick={() => setShowActions((value) => !value)}
+              >
+                Writing actions
+              </button>
+              {showActions && (
+                <Suggestions aria-label="Writing actions" className="cb-ask-ai-presets mt-1">
+                  {PRESETS.map((item) => (
+                    <Suggestion
+                      key={item.label}
+                      suggestion={item.instruction}
+                      tabIndex={0}
+                      data-testid="selection-preset"
+                      title={item.instruction}
+                      icon={null}
+                      onClick={(instruction) => {
+                        setInstruction(instruction);
+                        ask(instruction);
+                      }}
+                    >
+                      <Icon name={item.icon} size={14} />
+                      {item.label}
+                    </Suggestion>
+                  ))}
+                </Suggestions>
+              )}
+            </div>
+          )}
           {state === 'asking' && skills.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {/* M17.17 — Notion's move: a skill runs against selected prose,
@@ -220,6 +307,7 @@ export function AskAiPopover({
                 <button
                   key={skill.path}
                   type="button"
+                  tabIndex={0}
                   data-testid="ask-ai-skill"
                   onClick={() => runSkill(skill)}
                   title={`${skill.description}${argumentHint(skill) === '' ? '' : ` — ${argumentHint(skill)}`}`}
@@ -234,14 +322,18 @@ export function AskAiPopover({
       )}
 
       {state === 'deciding' && (
-        <>
-          {isUnchanged(rewrite) ? (
-            // Said out loud. An empty decision list reads as a failure, and
-            // "it decided nothing needed changing" is a real answer.
-            <p className="m-0 px-1 py-2 text-sm text-n-500">
-              The assistant left the passage as it was.
-            </p>
-          ) : (
+        <Confirmation
+          state="pending"
+          variant="outline"
+          data-testid="ask-ai-decision"
+          className="cb-ask-ai-decision"
+          // Said out loud when nothing changed: an empty decision list reads
+          // as a failure, and "it decided nothing needed changing" is a real
+          // answer.
+          title={decision.title}
+          summary={decision.summary}
+        >
+          {!isUnchanged(rewrite) && (
             <div
               data-testid="ask-ai-hunks"
               className="max-h-[240px] overflow-y-auto text-sm leading-[20px]"
@@ -255,6 +347,7 @@ export function AskAiPopover({
                   <button
                     key={i}
                     type="button"
+                    tabIndex={0}
                     data-testid="ask-ai-hunk"
                     aria-pressed={accepted.has(part.id)}
                     aria-label={describeHunk(part)}
@@ -291,18 +384,12 @@ export function AskAiPopover({
               )}
             </div>
           )}
-          <div className="mt-2 flex items-center gap-1.5">
-            <span className="flex-1 text-2xs text-n-400">
-              {isUnchanged(rewrite)
-                ? ''
-                : `${accepted.size} of ${rewrite.hunks.length} change${
-                    rewrite.hunks.length === 1 ? '' : 's'
-                  } · click one to toggle it`}
-            </span>
-            <Button size="sm" variant="secondary" onClick={() => setState('asking')}>
+          <div className="flex items-center justify-end gap-1.5">
+            <Button tabIndex={0} size="sm" variant="secondary" onClick={() => setState('asking')}>
               Retry
             </Button>
             <Button
+              tabIndex={0}
               size="sm"
               variant="primary"
               onClick={() => {
@@ -310,10 +397,10 @@ export function AskAiPopover({
                 onClose();
               }}
             >
-              {accepted.size === 0 ? 'Keep mine' : 'Apply'}
+              {decision.apply}
             </Button>
           </div>
-        </>
+        </Confirmation>
       )}
     </div>
   );

@@ -1,0 +1,4 @@
+
+> cerebro@0.1.0 typecheck /Users/joseflagorio/Development/cerebro
+> tsc --noEmit && tsc --noEmit -p tsconfig.tools.json && tsc --noEmit -p tsconfig.engine.json
+

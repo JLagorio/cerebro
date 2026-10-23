@@ -1,0 +1,150 @@
+/* The rail's Sources card (M92.6): a line per source, as the transcript's
+   Sources list draws one, the whole line a jump to the reply that used it
+   and its way out at its end; then "View all", which opens the whole list
+   in a layer beside it. Unlayered like the app's other surface stylesheets;
+   motion spends the tokens only. */
+
+.cb-rail-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cb-rail-source {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+/* The jump takes what its way out leaves it; its title truncates, never
+   the host after it (trace.css). */
+.cb-rail-source-jump {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px var(--sp-1);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: background-color var(--motion-hover);
+}
+.cb-rail-source-jump:hover {
+  background: var(--surface-sunken);
+}
+.cb-rail-source-jump:focus-visible,
+.cb-rail-source-open:focus-visible,
+.cb-rail-sources-more:focus-visible {
+  box-shadow: var(--ring);
+}
+
+/* The way out: a web page's link, or the button that opens a page in the
+   app. Quiet until a pointer or the keyboard reaches it. */
+.cb-rail-source-open,
+.cb-rail-source-open:hover {
+  text-decoration: none;
+}
+.cb-rail-source-open {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  outline: none;
+  transition:
+    background-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.cb-rail-source-open:hover {
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+
+/* Why the list may be short, over it: the card's own words, never the
+   list's. */
+.cb-rail-sources-missing {
+  margin: 0 0 var(--sp-2);
+  color: var(--text-secondary);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-rail-sources-missing:last-child {
+  margin-bottom: 0;
+}
+
+.cb-rail-sources-more {
+  margin-top: var(--sp-1);
+  padding: 2px var(--sp-1);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: color var(--motion-hover);
+}
+.cb-rail-sources-more:hover,
+.cb-rail-sources-more[aria-expanded='true'] {
+  color: var(--text-primary);
+}
+
+/* The whole list (`rail-sources-all`), a raised surface beside its anchor,
+   scrolling inside the room the window leaves it (Popover). */
+.cb-rail-sources-layer {
+  width: min(360px, var(--popover-available-width, 360px));
+  max-height: min(480px, var(--popover-available-height, 480px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-secondary);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  outline: none;
+}
+.cb-rail-sources-all {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-rail-sources-all-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0;
+  padding-inline: var(--sp-1);
+  color: var(--text-primary);
+  font-size: var(--fs-ui);
+  font-weight: var(--w-semibold);
+  line-height: var(--lh-ui);
+}
+.cb-rail-sources-all-count {
+  color: var(--text-meta);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.cb-rail-sources-all .cb-rail-sources-missing {
+  margin: 0;
+  padding-inline: var(--sp-1);
+}

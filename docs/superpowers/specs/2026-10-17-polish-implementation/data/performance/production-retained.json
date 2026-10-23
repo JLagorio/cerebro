@@ -1,0 +1,4786 @@
+{
+  "environment": {
+    "at": "2026-10-17T19:12:43.022Z",
+    "mode": "Production Vite preview; real app database navigation with existing browser mock",
+    "purpose": "Quiet-lane production timing diagnostic",
+    "platform": "darwin",
+    "release": "24.6.0",
+    "architecture": "arm64",
+    "cpu": "Apple M1 Pro",
+    "logicalCpus": 10,
+    "memoryGiB": 32,
+    "node": "v26.3.1",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "baseURL": "http://127.0.0.1:5392",
+    "fingerprint": "930a44e2eb4a6d60db313f2f3e28a2e633de80bb8e0d9deca51d058a30e70cbc",
+    "bundleFiles": [
+      {
+        "name": "assets/MarkdownEditor-BKeH3dII.css",
+        "bytes": 228575,
+        "sha256": "720c5df9546e0aeb3446a53e69f36f0a911b08d6f78f0da00fd4525c16c0e6b5"
+      },
+      {
+        "name": "assets/MarkdownEditor-DnenOqdF.js",
+        "bytes": 327960,
+        "sha256": "a93f254a22f020d7e092fec46eac92e8053533e32b4a26a772db7b4e435420b6"
+      },
+      {
+        "name": "assets/PdfViewer-CtYj1Qti.js",
+        "bytes": 7950,
+        "sha256": "c8957ace32604226934c56737bd5e35cae6e9054eeb6d7d2bcc7d4c124f7b4d1"
+      },
+      {
+        "name": "assets/PdfViewer-DAAGGcTy.css",
+        "bytes": 1387,
+        "sha256": "7a9344858ddf734a137c7663bf59dfb1ec80171c2cd002c7122c18e6aab01ebe"
+      },
+      {
+        "name": "assets/abap-BdImnpbu.js",
+        "bytes": 15852,
+        "sha256": "d0a7972c37e141f01cc3aaf9aabbbb3e87c4778b9fdd3ccb575d1e1ff279c0fc"
+      },
+      {
+        "name": "assets/abnfDiagram-VRR7QNED-oF7uXdsW.js",
+        "bytes": 1841,
+        "sha256": "3b07531076ac9042496b2c9dcb62f3237fbdeebcad1ad346210391fb9003e5f8"
+      },
+      {
+        "name": "assets/actionscript-3-B3316cI-.js",
+        "bytes": 15541,
+        "sha256": "34dcf5394cb476db026a03b23ebd94a8e72da98dc3303d958c8136a8287294b0"
+      },
+      {
+        "name": "assets/ada-bCR0ucgS.js",
+        "bytes": 48082,
+        "sha256": "fc5d05054dc584a01ec795083de1774ef07f3a29fc6cfbc1902c208a09862313"
+      },
+      {
+        "name": "assets/ahk-CsyLZFj1.js",
+        "bytes": 31439,
+        "sha256": "34bd9fb05b422d5bf8f532fbcdc6e68e0015b9115421252a79b0a755b01d1992"
+      },
+      {
+        "name": "assets/ahk2-8Zs4aa1G.js",
+        "bytes": 45065,
+        "sha256": "4c1fb4b6b82030376c3eb176b1e1019540706a406ff627ccdc80c27e04ebed1f"
+      },
+      {
+        "name": "assets/andromeeda-C4gqWexZ.js",
+        "bytes": 9015,
+        "sha256": "7fcfeda6c4e4d7cc1ce1c72aaca6d802bc7e107858bf0d34eca95ff4223669bd"
+      },
+      {
+        "name": "assets/angular-html-DA-rfuFy.js",
+        "bytes": 24287,
+        "sha256": "20c25efd0ad9b3afd86114f4ec9bf568ef3fd651ae9db9701bcf6f5e4e1c514f"
+      },
+      {
+        "name": "assets/angular-ts-BrjP3tb8.js",
+        "bytes": 183820,
+        "sha256": "d37531488d4cb2bcfd58c536f953ed9ad37b08de5250c49565bc59aedb8a30f6"
+      },
+      {
+        "name": "assets/apache-Pmp26Uib.js",
+        "bytes": 12456,
+        "sha256": "35abb1e73308f0f43a4f76af3a4c1157bf524cbfb2908581305f6fb1cf743b24"
+      },
+      {
+        "name": "assets/apex-DhZFqWV2.js",
+        "bytes": 47890,
+        "sha256": "391beb490d3d3517672f6fb51ae3c714a93f9178ce716226d852bd7c3189b683"
+      },
+      {
+        "name": "assets/apl-CORt7UWP.js",
+        "bytes": 24039,
+        "sha256": "39ecaee60e716b567b1728ed9c5192f1a188c02764af88c441bb29120b1d883c"
+      },
+      {
+        "name": "assets/applescript-Co6uUVPk.js",
+        "bytes": 29571,
+        "sha256": "e681551fbe1ac7d862ad06eae5833e6a32871de76532de01b27c5004c71c79df"
+      },
+      {
+        "name": "assets/ara-BRHolxvo.js",
+        "bytes": 6362,
+        "sha256": "f3c7f066af4d1907c2249c7089ae8b763d88ad2f25e88f867f20e3dbb256cffb"
+      },
+      {
+        "name": "assets/arc-ZOvfGKCC.js",
+        "bytes": 3426,
+        "sha256": "542768ebcd1ca151e358d19eb20d36e2ecdcad0c48d0ad3b8c6866e606724b18"
+      },
+      {
+        "name": "assets/architectureDiagram-ZJ3FMSHR-DsS_52Jl.js",
+        "bytes": 151397,
+        "sha256": "4d8bf9d301d54578b867298b4fe451c89b09a03cfddf12b86379376146a71edc"
+      },
+      {
+        "name": "assets/asciidoc-CSVQ5wI8.js",
+        "bytes": 136051,
+        "sha256": "9b414e47f97214f443fc137698fc42b6d4a633b91cb476241f8a1e7f2e84c4ae"
+      },
+      {
+        "name": "assets/asm-D_Q5rh1f.js",
+        "bytes": 40717,
+        "sha256": "a43218a06da8dd93a8dd3c2b458479674d973079fe18922fe556dafa17be50a9"
+      },
+      {
+        "name": "assets/astro-HNnZUWAn.js",
+        "bytes": 24008,
+        "sha256": "90149402df9427dfa75f428dac8873baa92b54d8043a6d15f3e3d4db717b5b0a"
+      },
+      {
+        "name": "assets/aurora-x-D-2ljcwZ.js",
+        "bytes": 13659,
+        "sha256": "e47c699d4515a3e898860e171aa49e276c80d475e49d57ec002afdccdd760781"
+      },
+      {
+        "name": "assets/awk-DMzUqQB5.js",
+        "bytes": 5461,
+        "sha256": "ff7d9aed38679838b5bbaae495275ae2e8fc5215811062e4eef19f6f786089cb"
+      },
+      {
+        "name": "assets/ayu-dark-DYE7WIF3.js",
+        "bytes": 20081,
+        "sha256": "7a9244f8489f4c2f8d98500f3b9d33bf84d934cde79120ddd1de6078b8c9dbc1"
+      },
+      {
+        "name": "assets/ayu-light-BA47KaF1.js",
+        "bytes": 20152,
+        "sha256": "3bfa9a52cf22931b3f65091b27f150d07deba32f82ec02488e36a4a24fe8ae31"
+      },
+      {
+        "name": "assets/ayu-mirage-32ctXXKs.js",
+        "bytes": 20085,
+        "sha256": "93f93dd14750e6e3453f99e549701050a9ca11ead2186befb232bb7bc6a173d1"
+      },
+      {
+        "name": "assets/ballerina-BFfxhgS-.js",
+        "bytes": 58693,
+        "sha256": "148a30bb0b51d5e1f00536337facfc90f70e659b3310d5875fc6d8db62c98f0c"
+      },
+      {
+        "name": "assets/bat-CickPsom.js",
+        "bytes": 12894,
+        "sha256": "0bd1f69ed1594d1e3832ca1d1108c52060f732c435e5cd2f10a1503bebeeca54"
+      },
+      {
+        "name": "assets/beancount-k_qm7-4y.js",
+        "bytes": 10373,
+        "sha256": "62cf81ef2432aa71aba4a8559e5c5970ce13576b19db0d75c421de19f0a662c6"
+      },
+      {
+        "name": "assets/berry-uYugtg8r.js",
+        "bytes": 3005,
+        "sha256": "6f2394fb74b945c92dea425f90c70222f319b72a6dd9c093a7e32ebfdf60d026"
+      },
+      {
+        "name": "assets/bibtex-CHM0blh-.js",
+        "bytes": 4795,
+        "sha256": "0a3dd8093d3aa1baaad2d1d98ecbf09c7f093517baee20e4d8e7de768c8dca37"
+      },
+      {
+        "name": "assets/bicep-Bmn6On1c.js",
+        "bytes": 5382,
+        "sha256": "77925b291b8d048086f7fd14d23fa4ab0a4831551b1e9512c035948cfab402ee"
+      },
+      {
+        "name": "assets/bird2-Bx8U0n9b.js",
+        "bytes": 38681,
+        "sha256": "9f2aedc9354dddaa9574b7baab60c748aaa6eb48f31cd7646dd76a700e061a24"
+      },
+      {
+        "name": "assets/blade-2xfisSek.js",
+        "bytes": 104981,
+        "sha256": "8fdb121d61e1429b61600d41b8fcec48946174c72353e4316e77c39c3dab1363"
+      },
+      {
+        "name": "assets/blockDiagram-677ZJIJ3-CFKqfcdX.js",
+        "bytes": 73771,
+        "sha256": "dad98716d34f4a4c990d5cfb4189c17d7481a109f20cd6c70aa111a9fc11ec94"
+      },
+      {
+        "name": "assets/bsl-DlhNcFeZ.js",
+        "bytes": 33952,
+        "sha256": "f599effaa335754093cda3c864965ebd032e4c4d949d8a2020d11c1f8a56c668"
+      },
+      {
+        "name": "assets/c-BIGW1oBm.js",
+        "bytes": 72113,
+        "sha256": "d6cf83167ef5e3f3ce64b34b57082b5ad6824eba4970eae9a278ab9285c9f3d8"
+      },
+      {
+        "name": "assets/c-CAONTdSz.js",
+        "bytes": 79402,
+        "sha256": "7442acaf51f62551fc621ab65d847232ecbca5b5740fc9d35f2d36d1365d1c69"
+      },
+      {
+        "name": "assets/c3-Dp5svz6Z.js",
+        "bytes": 26386,
+        "sha256": "467fcff92b5f23370ec946832136c846c3dbe31b7af2cd3682f012e4f48a02c5"
+      },
+      {
+        "name": "assets/c4Diagram-LMCZKHZV-BBpWNl_0.js",
+        "bytes": 69976,
+        "sha256": "2428f25ee4552e3c8a209a3b4c6cbe56319483a83b035e13538a28adaeffadf7"
+      },
+      {
+        "name": "assets/cadence-Bv_4Rxtq.js",
+        "bytes": 23669,
+        "sha256": "eb6ab19c5a35cd1da0a04c8a01c5be50284f5655462475a7f8656a32075de3df"
+      },
+      {
+        "name": "assets/cairo-KRGpt6FW.js",
+        "bytes": 2936,
+        "sha256": "cb3ef520248905e08410aa414b326b0a1ad308ef13c23dc9741340ba5d1ba610"
+      },
+      {
+        "name": "assets/catppuccin-frappe-CZL1YF0i.js",
+        "bytes": 50853,
+        "sha256": "c8cfacccb41906025c57884bb351fb1f809a99f23144db317bbf5067af8d2a8a"
+      },
+      {
+        "name": "assets/catppuccin-latte-DH-8KZSZ.js",
+        "bytes": 50851,
+        "sha256": "e223e1b9c2cae4e162dc524cc871ed8a627ac9126537c9f2509f1b259d365503"
+      },
+      {
+        "name": "assets/catppuccin-macchiato-B7yYVSCf.js",
+        "bytes": 50858,
+        "sha256": "756df570870dd0585fc565f0076d939d008d3e0ac4ffa5ea6f97157c459be69a"
+      },
+      {
+        "name": "assets/catppuccin-mocha-Ct7hS0mc.js",
+        "bytes": 50850,
+        "sha256": "efcbf0856a38b2a1c57cf545593de5327a6713418b157da1017fdc21a7003f4d"
+      },
+      {
+        "name": "assets/channel-CkzdhXtP.js",
+        "bytes": 113,
+        "sha256": "f93c01a748cc1865acdc9ce6e250f471fc19433891de5e943799a22ddbc24030"
+      },
+      {
+        "name": "assets/chapel-DTp_pixX.js",
+        "bytes": 6623,
+        "sha256": "4269e5ccebef4bd885e69f27b71fb68d995ca6171738ed7315335acdc041176f"
+      },
+      {
+        "name": "assets/chunk-2Q5K7J3B-kkp-UZWl.js",
+        "bytes": 193,
+        "sha256": "69107bd0856351cc1b08859d5d7bf42f133c0bc192dd8c8ce274daf813c67cbf"
+      },
+      {
+        "name": "assets/chunk-32BRIVSS-BFPgNN4l.js",
+        "bytes": 1915,
+        "sha256": "6af080d24e5270c5d0ccf1436e56b08c43d4ef8c8548669f68fc02e25261d10a"
+      },
+      {
+        "name": "assets/chunk-5VM5RSS4-DD7507hM.js",
+        "bytes": 366,
+        "sha256": "5d077854cdeb5c775ccd048896589f76c44ffd32a31ffda242dd7f72e252582e"
+      },
+      {
+        "name": "assets/chunk-EX3LRPZG-CvLLj1tz.js",
+        "bytes": 38154,
+        "sha256": "7e77f1d70b7f1910fe8127d3db86b1ebae5b56b5249db4a32af92bfece13095e"
+      },
+      {
+        "name": "assets/chunk-JWPE2WC7-CoK-wmrC.js",
+        "bytes": 227,
+        "sha256": "0aa389bdcb16eb369fa750880876e0cce9df9bce2d96fc402ddcc7d548ef0dda"
+      },
+      {
+        "name": "assets/chunk-MOJQB5TN-CW_Asf4R.js",
+        "bytes": 15735,
+        "sha256": "f85e554576cb58f1dfc1400860e4b5e15062ac443ddd15d06c95578d276fee26"
+      },
+      {
+        "name": "assets/chunk-RYQCIY6F-QI6wCOeC.js",
+        "bytes": 7081,
+        "sha256": "5587bc1657a23a9af4490edc15e55886c7b915b2b530e6a47c2a63f8a4487c9d"
+      },
+      {
+        "name": "assets/chunk-V7JOEXUC-8NGGo4-T.js",
+        "bytes": 49212,
+        "sha256": "c050dba3847fdcc071338c2d48a0d46a74600ae2c47874ccf66dc6bb7f315560"
+      },
+      {
+        "name": "assets/chunk-VR4S4FIN-C0_XKKJj.js",
+        "bytes": 506,
+        "sha256": "bbdd844d5dce9d32db65ccbf59a3828eabeddf021e0aff04a957b23c50b1820a"
+      },
+      {
+        "name": "assets/chunk-XXDRQBXY-CXKTJ-Yd.js",
+        "bytes": 262,
+        "sha256": "f6f2fdbd64a8a0b47c55cb17503d8a841b311cfa4464cb54099c906f14184f2c"
+      },
+      {
+        "name": "assets/clarity-Dn5IMItf.js",
+        "bytes": 14362,
+        "sha256": "cbde6347a4a9b2e7ddedb4a9240bf3889a722281d1f735b3ebe92c8198918e40"
+      },
+      {
+        "name": "assets/classDiagram-OUVF2IWQ-D86I2_Wp.js",
+        "bytes": 499,
+        "sha256": "f0212df7befeeb881970ca9e9d0ecf406e7e38d4d1edb8b54031a49ba4476d3a"
+      },
+      {
+        "name": "assets/classDiagram-v2-EOCWNBFH-D86I2_Wp.js",
+        "bytes": 499,
+        "sha256": "f0212df7befeeb881970ca9e9d0ecf406e7e38d4d1edb8b54031a49ba4476d3a"
+      },
+      {
+        "name": "assets/clojure-P80f7IUj.js",
+        "bytes": 6413,
+        "sha256": "d84e3798038c4ac8cc2748cd8a7b606de826d38cda40fcd1af0157a2c205fad3"
+      },
+      {
+        "name": "assets/cmake-D1j8_8rp.js",
+        "bytes": 9855,
+        "sha256": "20de18825679753afc48318521d760d4daea701c95137a58b7343f6ad6bed4f9"
+      },
+      {
+        "name": "assets/cobol-nBiQ_Alo.js",
+        "bytes": 39129,
+        "sha256": "dffe8f987f388eb80126a75094ecf4fabb516e711d09f482d8b465ecd57b524a"
+      },
+      {
+        "name": "assets/codeowners-Bp6g37R7.js",
+        "bytes": 547,
+        "sha256": "748b547cc141abd1b350d2f2e3b0562606ffaf23e88bb89c8b4e7f7df3c425f7"
+      },
+      {
+        "name": "assets/codeql-DsOJ9woJ.js",
+        "bytes": 26883,
+        "sha256": "d06a0d7ec54beba6ac8aac8db0675b696bda5a7756273663bf7b5cdab0d3285e"
+      },
+      {
+        "name": "assets/coffee-Ch7k5sss.js",
+        "bytes": 27422,
+        "sha256": "2cf05264d5ada366f643b56fa1145af2af574ed8bcd8ce653ffff95b24d8ab89"
+      },
+      {
+        "name": "assets/common-lisp-Cg-RD9OK.js",
+        "bytes": 22581,
+        "sha256": "2fc697c25d367e1f9f950e7bae36f1a739b500bb1e646396484edb3c7e23a96b"
+      },
+      {
+        "name": "assets/coq-C7JzOVbR.js",
+        "bytes": 6010,
+        "sha256": "0beffc40a3f6beae1448824d4633b9c7841253b7d2df5ad29e4e80ebc5ee358a"
+      },
+      {
+        "name": "assets/core-04CeFCZA.js",
+        "bytes": 38982,
+        "sha256": "cb321691c7ed3e977b0088a32a0be0bb44223b0079da44312692800ef40c3a2f"
+      },
+      {
+        "name": "assets/core-b35iMLeV.js",
+        "bytes": 880,
+        "sha256": "ada02ee5c5efb6042405d571333db17eed87593fa7efb6f07effea39fe2b32c9"
+      },
+      {
+        "name": "assets/cose-bilkent-JH36ORCC-Dfzsw45R.js",
+        "bytes": 81733,
+        "sha256": "3638cff26cf38801d1d2174357096ce9be98332eb2e578ed4263811101fd0668"
+      },
+      {
+        "name": "assets/cpp-B-1cyqAy.js",
+        "bytes": 829046,
+        "sha256": "5d1b37f18f7e5c073de1161f8d3d07cda8972b406cb0b41b6c051592069fb205"
+      },
+      {
+        "name": "assets/cpp-BMRokrvK.js",
+        "bytes": 785490,
+        "sha256": "b8840db7709a8c61f3826b21b9787665815eac54ad06b005f501501aac606017"
+      },
+      {
+        "name": "assets/crystal-DGywbUpC.js",
+        "bytes": 29388,
+        "sha256": "7292d63980960283d8036983107c7b911bc65bdf20d7d5218b8c8f95cfffc573"
+      },
+      {
+        "name": "assets/csharp-B5tIf4gD.js",
+        "bytes": 119794,
+        "sha256": "d529ce58437c5e167a94368e360965cc0c1fa40ac765cffddf6aac5cd46d2e28"
+      },
+      {
+        "name": "assets/csharp-DSvCPggb.js",
+        "bytes": 90189,
+        "sha256": "1ed6cae3a3f91c58b1ce9d8da2f95090c1804cd330b3ef813d35df14da2b88c6"
+      },
+      {
+        "name": "assets/css-CLj8gQPS.js",
+        "bytes": 49041,
+        "sha256": "2848016b846e4595ae4798cb70305f259eb0e8d297b0cc9fa4ac5b0b612a3166"
+      },
+      {
+        "name": "assets/css-D00Avvjo.js",
+        "bytes": 53541,
+        "sha256": "d327c672ff4e0186a25e92bed3d83f630ff952404b572343538d02978e519a83"
+      },
+      {
+        "name": "assets/csv-fuZLfV_i.js",
+        "bytes": 1143,
+        "sha256": "e78e725cd6790c0062e5e941943b776280c971046b16144a117a28f248156091"
+      },
+      {
+        "name": "assets/cue-D82EKSYY.js",
+        "bytes": 16204,
+        "sha256": "d462534c02551b41f1b3198ef6faa32fdfda6bc5aa14e441e6df367fb0485ea7"
+      },
+      {
+        "name": "assets/cynefin-VYW2F7L2-DmjpYPIJ.js",
+        "bytes": 687888,
+        "sha256": "327553b5dc4030e8769365b37b0a582c6337ca4be4e603ff4a26fc94e54ecc5d"
+      },
+      {
+        "name": "assets/cynefinDiagram-TSTJHNR4-CqIAlh9Y.js",
+        "bytes": 10129,
+        "sha256": "0a40259191549ccf7e48291b721b51716c7d754aae979e5a223d959035bd5174"
+      },
+      {
+        "name": "assets/cypher-COkxafJQ.js",
+        "bytes": 5956,
+        "sha256": "6953f20dbca19c201dd4a7845f0fb4f3f52a82ad0a0ec6e4a418e49dd7f50666"
+      },
+      {
+        "name": "assets/cytoscape.esm-D3_iZ_3b.js",
+        "bytes": 442924,
+        "sha256": "abfdfba7922c9940a0f958746526d1a8e4f18435a5695c15aaf3f1328b0146cc"
+      },
+      {
+        "name": "assets/d-85-TOEBH.js",
+        "bytes": 43795,
+        "sha256": "bc9e087cec1757269bb3e28c1df26140f6fc454de2ec7e453385d27ed3b39c18"
+      },
+      {
+        "name": "assets/dagre-VKFMJZFB-DAiFK21v.js",
+        "bytes": 8599,
+        "sha256": "826332d295dbac3414b5e64dd419873a4a607b837add52fd26df986ebdb93858"
+      },
+      {
+        "name": "assets/dark-plus-C3mMm8J8.js",
+        "bytes": 9097,
+        "sha256": "b8b869d6edc688a6855924a0fcbb663d8c22897e84f94f8273f53cb432be2d3a"
+      },
+      {
+        "name": "assets/dart-bE4Kk8sk.js",
+        "bytes": 8623,
+        "sha256": "2cdb81143af7036eaaee976385babd4e4610838e94e72c95eea43825a6d8260d"
+      },
+      {
+        "name": "assets/dax-CEL-wOlO.js",
+        "bytes": 5365,
+        "sha256": "e112cfc4f22edb11cf16e6cc9c6f30c1bc44d399442a826e1c2fa68be217f4b1"
+      },
+      {
+        "name": "assets/defaultLocale-DX6XiGOO.js",
+        "bytes": 4688,
+        "sha256": "0cefbd76f932c4eea4758d28169802589b1ad15b46607253de4bd82328998ece"
+      },
+      {
+        "name": "assets/desktop-BmXAJ9_W.js",
+        "bytes": 1833,
+        "sha256": "fbbe32cc99e0e74b11e742aaae97dfaf0a7b553719ec179638313cc8a8039cbe"
+      },
+      {
+        "name": "assets/diagram-FQU43EPY-BjVLA07x.js",
+        "bytes": 10748,
+        "sha256": "43f911ab6bd50dd2b7cb133f25aecd45ae3d46919aa77a119108abd1727d2491"
+      },
+      {
+        "name": "assets/diagram-G47NLZAW-Yap1Vv_5.js",
+        "bytes": 15989,
+        "sha256": "a10ffe1e162c50520c021746cd9713a558087015c3ff5f9a81d86a8b40019148"
+      },
+      {
+        "name": "assets/diagram-NH7WQ7WH-jLejferG.js",
+        "bytes": 4243,
+        "sha256": "27f0f8c93c0f5b4179a02d910199dcb1dabd9771a2ad363a6758ac376709bcb3"
+      },
+      {
+        "name": "assets/diagram-OA4YK3LP-CY2Nmo8e.js",
+        "bytes": 8366,
+        "sha256": "bd9f51167dc384fec85ab3440da3113386b4874b2866af54ebfc50f803134eec"
+      },
+      {
+        "name": "assets/diagram-WEI45ONY-B6vEPxnc.js",
+        "bytes": 5957,
+        "sha256": "dbd375eab45852aab7ad767c9812e2385c3053a947d226979e79e69c1480421d"
+      },
+      {
+        "name": "assets/diff-D97Zzqfu.js",
+        "bytes": 2569,
+        "sha256": "071f6c7f36d51227bb0701147c7508f96a0f342ba5df808ed83a820ee486c17b"
+      },
+      {
+        "name": "assets/docker-BcOcwvcX.js",
+        "bytes": 1741,
+        "sha256": "0995ae194f7a702d1572e90b064fd0b1ee0a8da03b8f587c12261c00306eb145"
+      },
+      {
+        "name": "assets/dotenv-Da5cRb03.js",
+        "bytes": 1422,
+        "sha256": "551287cfbe5723329a252cc084780c0511bcf7e9fc6370c241cc458fe2b7dc62"
+      },
+      {
+        "name": "assets/dracula-BzJJZx-M.js",
+        "bytes": 21066,
+        "sha256": "6349dc749f3cf65b72d22a359e6dff84401fee8b3fccb62812bd8463e9e838c9"
+      },
+      {
+        "name": "assets/dracula-soft-BXkSAIEj.js",
+        "bytes": 21076,
+        "sha256": "77ad2cd2bdedc3fb6c78edb3fc9bacf6838ffcad1ec6927f3a7bb6e75e1cd8b7"
+      },
+      {
+        "name": "assets/dream-maker-BtqSS_iP.js",
+        "bytes": 10469,
+        "sha256": "44d40108b2579475555c0727913f37bf2f696a0ed48a68fd264cb601fde06cb6"
+      },
+      {
+        "name": "assets/ebnfDiagram-CCIWWBDH-zt6s7nrL.js",
+        "bytes": 2037,
+        "sha256": "851efaf60fa6c85cfc2d0c776b572d37751233f44df292d0a8f417d88eb27e8f"
+      },
+      {
+        "name": "assets/edge-FbVlp4U3.js",
+        "bytes": 2363,
+        "sha256": "ecc6b23827ccf76a05692cdc28127c80ab118eb59d2db10eadd04a2147458ceb"
+      },
+      {
+        "name": "assets/elixir-CkH2-t6x.js",
+        "bytes": 16321,
+        "sha256": "128234a685dd73c5f396a5b979409814f0e92ae83c8a5675f630e811f03042a0"
+      },
+      {
+        "name": "assets/elm-DbKCFpqz.js",
+        "bytes": 10968,
+        "sha256": "7deaadb185bfb1298a8ac5fed1a531457c7fdc5745a583ad0f783e16b8bcc1d6"
+      },
+      {
+        "name": "assets/emacs-lisp-C_m_b--Z.js",
+        "bytes": 790007,
+        "sha256": "3781ad56dc7351e3002090ecb5da37a5da738b922592e397f8a9d000afa9641f"
+      },
+      {
+        "name": "assets/engine-compile-TbebD7PT.js",
+        "bytes": 1440,
+        "sha256": "2b55bf7a3d82b28b2f975c7ff74559415cfaeac48a7d01b56b81346fe0cf8d0d"
+      },
+      {
+        "name": "assets/engine-javascript-CLojmtbF.js",
+        "bytes": 480,
+        "sha256": "c9d4aab188d4c9565fc0269e792ee33bf3889b80f68cb8a8ef86b5936bd001a0"
+      },
+      {
+        "name": "assets/erDiagram-Q63AITRT-2Py9eogE.js",
+        "bytes": 27131,
+        "sha256": "68771e965cb1310361656a363ee5b5d407199cb378f388cde481c88508ebcd94"
+      },
+      {
+        "name": "assets/erb-DXfck5VN.js",
+        "bytes": 2607,
+        "sha256": "953a6a99bbb1e41bbdfb04cc8852ef02ef0b7a2a926ed2553eb336f9918e4564"
+      },
+      {
+        "name": "assets/erlang-DsQrWhSR.js",
+        "bytes": 37480,
+        "sha256": "5dea30124e59e6a84f9519a5da5944d3470182989e62d9aa65bb9b068df90c13"
+      },
+      {
+        "name": "assets/event-mRUVqkR1.js",
+        "bytes": 1407,
+        "sha256": "407fd8d4ebc095657c43d28a1a8d033eabd29a12e582b1dd8497a416527c8e12"
+      },
+      {
+        "name": "assets/everforest-dark-BgDCqdQA.js",
+        "bytes": 53745,
+        "sha256": "826c6890db7a065c9d4ac75850fbadde410ca10872705c74bb6c1f543f051676"
+      },
+      {
+        "name": "assets/everforest-light-C8M2exoo.js",
+        "bytes": 53748,
+        "sha256": "2ac34042eb335675bd7c5035f2c81ccd503e6a60fe8b047396ab6486fa4f20f3"
+      },
+      {
+        "name": "assets/fennel-BYunw83y.js",
+        "bytes": 4768,
+        "sha256": "0bb4581df6bc62ce293fd6715c42bfe54b77ffb18ce9761d0262eee728079c6e"
+      },
+      {
+        "name": "assets/fish-BvzEVeQv.js",
+        "bytes": 13038,
+        "sha256": "31e609691f04394f54edcf86890e0f7a66aa8fed436d63da5480381875b1a3e5"
+      },
+      {
+        "name": "assets/flowDiagram-23GEKE2U-CsySAXsB.js",
+        "bytes": 60749,
+        "sha256": "dcfc8de12990a6e397b992739eb8ef24c49613d654ba545948bf8ae52e229ae7"
+      },
+      {
+        "name": "assets/fluent-C4IJs8-o.js",
+        "bytes": 3610,
+        "sha256": "2929a3bca0b053d7bf7abbe02db3da7d65692836a281dc04510baaa635514cb0"
+      },
+      {
+        "name": "assets/fortran-fixed-form-CkoXwp7k.js",
+        "bytes": 1665,
+        "sha256": "5368f7fe5dc74f0601978b78fea6617eaf5c03090f9f8600d67bd126729f9283"
+      },
+      {
+        "name": "assets/fortran-free-form-BxgE0vQu.js",
+        "bytes": 88969,
+        "sha256": "9aa28f072525e1fd2c4963431f29d5d0918c6bd422142c98e6182e4b998370dc"
+      },
+      {
+        "name": "assets/fsharp-CXgrBDvD.js",
+        "bytes": 25305,
+        "sha256": "2c0618c951b62650650d0c44950072534f0cfe3b4fcd58573a0024a64e53c52a"
+      },
+      {
+        "name": "assets/functions-BL2kQ5EL.js",
+        "bytes": 234624,
+        "sha256": "6fd49598c51ce812616806b99ff527b9cd8babbb8f5acda1d0d229aa25c71911"
+      },
+      {
+        "name": "assets/ganttDiagram-NO4QXBWP-BZ_f42-x.js",
+        "bytes": 69725,
+        "sha256": "f8ef50af821e5f04504bfdd80b60e2f55defb8e403e97431513ffff9d5435af7"
+      },
+      {
+        "name": "assets/gdresource-TyuKm33G.js",
+        "bytes": 5285,
+        "sha256": "fa0bb165705b7a74479b6b69878a4f61e336319072f052948f718f496e343ac2"
+      },
+      {
+        "name": "assets/gdscript-DqcFQ5yU.js",
+        "bytes": 19088,
+        "sha256": "bfc1eee2b816f02cbc065c443c31c47560040b7e34ae9ba256a3e0ecb7569e36"
+      },
+      {
+        "name": "assets/gdshader-DkwncUOv.js",
+        "bytes": 6326,
+        "sha256": "73f353c2c614fec2d8cfae89fb40ee57d4c406bc00b8aeafe4f7a0aa3395f603"
+      },
+      {
+        "name": "assets/genie-D0YGMca9.js",
+        "bytes": 3356,
+        "sha256": "1ae6367d77ad7ef0abbac818ca67a213ee812abb47d1aefc5427120b1a6fd13c"
+      },
+      {
+        "name": "assets/gherkin-DyxjwDmM.js",
+        "bytes": 11946,
+        "sha256": "c7bd366597ab12a5977d62813a92022bfbce506f2a3c70d0b3819aa39344c7ae"
+      },
+      {
+        "name": "assets/git-commit-F4YmCXRG.js",
+        "bytes": 1230,
+        "sha256": "783b8cb9af4cb9b869335cd5cca6a2125bb97719b21ef21b004c0974181bcae6"
+      },
+      {
+        "name": "assets/git-rebase-r7XF79zn.js",
+        "bytes": 983,
+        "sha256": "88402cafff4897e7d7931bdb17acfcad0916e1f54353e578e876b21055ccbef9"
+      },
+      {
+        "name": "assets/gitGraphDiagram-IHSO6WYX-CYBM43Qe.js",
+        "bytes": 29449,
+        "sha256": "ea61ffbe98b829c989b604e2167a262ab4c1e0b6911cf99ad15ed493502eff4c"
+      },
+      {
+        "name": "assets/github-dark-BwtFdqT8.js",
+        "bytes": 11405,
+        "sha256": "8f7ccd8274e8950ef099d389c70d379782cf17f39424090949ba45833eeee022"
+      },
+      {
+        "name": "assets/github-dark-DHJKELXO.js",
+        "bytes": 11405,
+        "sha256": "8f7ccd8274e8950ef099d389c70d379782cf17f39424090949ba45833eeee022"
+      },
+      {
+        "name": "assets/github-dark-default-Cuk6v7N8.js",
+        "bytes": 14435,
+        "sha256": "c748b560af550be6ed802ebe5433b0688f617925feafdd98d8e3d43470c24a1b"
+      },
+      {
+        "name": "assets/github-dark-dimmed-DH5Ifo-i.js",
+        "bytes": 14433,
+        "sha256": "8bb97e7c16cb22f8acf952c9e0af4d9bc1e13cc7ad44fadd98b5df37bf3ba5f4"
+      },
+      {
+        "name": "assets/github-dark-high-contrast-E3gJ1_iC.js",
+        "bytes": 14595,
+        "sha256": "18f1a70b963db803f141be93c79c80a0dc38f78cd47fea1ff8b05cec409b7fe9"
+      },
+      {
+        "name": "assets/github-dark-vbPMK5nw.js",
+        "bytes": 11405,
+        "sha256": "8f7ccd8274e8950ef099d389c70d379782cf17f39424090949ba45833eeee022"
+      },
+      {
+        "name": "assets/github-light-CBO01_j6.js",
+        "bytes": 11184,
+        "sha256": "9ad9f268476dc0edc85cdb9a9ae940ee7d0ad267d5de82810fef40d2f13462ab"
+      },
+      {
+        "name": "assets/github-light-CI5w4ROj.js",
+        "bytes": 11184,
+        "sha256": "9ad9f268476dc0edc85cdb9a9ae940ee7d0ad267d5de82810fef40d2f13462ab"
+      },
+      {
+        "name": "assets/github-light-DAi9KRSo.js",
+        "bytes": 11184,
+        "sha256": "9ad9f268476dc0edc85cdb9a9ae940ee7d0ad267d5de82810fef40d2f13462ab"
+      },
+      {
+        "name": "assets/github-light-default-D7oLnXFd.js",
+        "bytes": 14156,
+        "sha256": "212b28c6987d30991d6bc3f812cf69d93694a557235bd9e1e4460855edb2e4f4"
+      },
+      {
+        "name": "assets/github-light-high-contrast-BfjtVDDH.js",
+        "bytes": 14275,
+        "sha256": "1b1d4ff8b3fccaa0e7cfcf8688e7fb75b086e8b879c62353f6c580f8cd260e54"
+      },
+      {
+        "name": "assets/gleam-BspZqrRM.js",
+        "bytes": 2577,
+        "sha256": "96ee8ab10150415113386ffb698a6e578947cf099f72daf24984f09da77c2118"
+      },
+      {
+        "name": "assets/glimmer-js-ByusRIyA.js",
+        "bytes": 20071,
+        "sha256": "7813a14696d5f5971e16e5b1f8d9eaa38089532d1f240878bb41636006087a45"
+      },
+      {
+        "name": "assets/glimmer-ts-BfAWNZQY.js",
+        "bytes": 20071,
+        "sha256": "bbbfafb1ad45ae091bde6d2e499eed635b073cfda9146c664d9ca6102b3f73ba"
+      },
+      {
+        "name": "assets/glsl-DWYCVOCH.js",
+        "bytes": 3781,
+        "sha256": "b7572b58065ed517bcbea40dff245e4b5d6f12d3145cc8d438b71b756c1fc65c"
+      },
+      {
+        "name": "assets/glsl-DplSGwfg.js",
+        "bytes": 3634,
+        "sha256": "d73db15d8c26ce44204eccdc3f250039018f34902874d55920b51f171d75a737"
+      },
+      {
+        "name": "assets/gn-n2N0HUVH.js",
+        "bytes": 4002,
+        "sha256": "8ebd06d1b7db73d2b6a50f2072c23af6b2164783b8268fa8c8d643d4d3e72ae0"
+      },
+      {
+        "name": "assets/gnuplot-DdkO51Og.js",
+        "bytes": 14783,
+        "sha256": "44e79156d6f1fda5d964731ffbf67170dfc593edd18e9ad76f2e984d5e90a17c"
+      },
+      {
+        "name": "assets/go-C27-OAKa.js",
+        "bytes": 46818,
+        "sha256": "46ec75c1455e917fb6e0b1b4aa0f0b15686386aba0c8e3ca3615984ae9be696e"
+      },
+      {
+        "name": "assets/graph-DOmOIIwC.js",
+        "bytes": 23924,
+        "sha256": "97862517e3f2f5d40c14fb4b720dc42fd3219a1ab5abd1c560b0ebb06c82c4a2"
+      },
+      {
+        "name": "assets/graphql-B4lCw-YU.js",
+        "bytes": 19014,
+        "sha256": "39eda72621efc538f5542649da941dee007d042ff74ee4aa5b23759cef24e28a"
+      },
+      {
+        "name": "assets/graphql-ChdNCCLP.js",
+        "bytes": 18002,
+        "sha256": "ce3367ffe23232e3d6d2ce940d1bb233839c0ebf02b9f12b151108c8bc2d4b58"
+      },
+      {
+        "name": "assets/groovy-gcz8RCvz.js",
+        "bytes": 19179,
+        "sha256": "a03245cec1dc1cbbf9d68a083dcc04b77cbf748ad95bdd0291bf7ae3555bc1b2"
+      },
+      {
+        "name": "assets/gruvbox-dark-hard-CFHQjOhq.js",
+        "bytes": 22633,
+        "sha256": "d298e64968c577792359edbd2bee987149cd3b6252b82836f28dbd96cb521d3f"
+      },
+      {
+        "name": "assets/gruvbox-dark-medium-GsRaNv29.js",
+        "bytes": 22637,
+        "sha256": "cd2d75705169e923822a9f8bc1141e8f5e7c0a5af0b5ded469dc76e5d03ada21"
+      },
+      {
+        "name": "assets/gruvbox-dark-soft-CVdnzihN.js",
+        "bytes": 22633,
+        "sha256": "fdbd1d78ed6a4fce75feefb8797570a4568edce8ded59af0d99f83e20f3307dc"
+      },
+      {
+        "name": "assets/gruvbox-light-hard-CH1njM8p.js",
+        "bytes": 22636,
+        "sha256": "7b2fa3d574f3ef80a213d88fddb684431e94bdb472d523d8f0caad96d5d376f8"
+      },
+      {
+        "name": "assets/gruvbox-light-medium-DRw_LuNl.js",
+        "bytes": 22640,
+        "sha256": "62a938850d5e4fc934e44213eff465fb3618456b0490adc4887d4a83bd0d9e29"
+      },
+      {
+        "name": "assets/gruvbox-light-soft-hJgmCMqR.js",
+        "bytes": 22636,
+        "sha256": "090f38c249b8bccd7b283926da32fa0095e8c27b5dd88ae2746863f7b7bc4ccd"
+      },
+      {
+        "name": "assets/hack-BWmVpMyf.js",
+        "bytes": 81131,
+        "sha256": "e1db616f941bef37cfaf6623801373ea64b4d332d1d1214c231253897f9b4d00"
+      },
+      {
+        "name": "assets/haml-D5jkg6IW.js",
+        "bytes": 8263,
+        "sha256": "f09ee1a955cd9932c1d7cec12bcde382dd619a67be150e78cf3d3c804a2cd898"
+      },
+      {
+        "name": "assets/haml-og5woSF9.js",
+        "bytes": 10175,
+        "sha256": "a73bf4abd8c2262d7d91e6ae93ed7b3c8d0a3c0181d71021b5f7cf6dbd238ac2"
+      },
+      {
+        "name": "assets/handlebars-BpdQsYii.js",
+        "bytes": 12150,
+        "sha256": "59889a7191fa6a95d04786d70f83b38bcf8d73cb73e0da3b48e06c2b0bfc399d"
+      },
+      {
+        "name": "assets/haskell-Df6bDoY_.js",
+        "bytes": 41490,
+        "sha256": "164e3b023115e70432602c2da71d1c0ac7184ea91deea1dc70cf17ef74b84fa6"
+      },
+      {
+        "name": "assets/haskell-WIhM7dKi.js",
+        "bytes": 44968,
+        "sha256": "926c547fdf5026211bac0a9f82eb0bd4032f55913cf096e3104d1d7abe6eeb5b"
+      },
+      {
+        "name": "assets/haxe-CfZj7gIn.js",
+        "bytes": 35953,
+        "sha256": "ff0c7a20b0534485bc9a6dae421fcb7bc623bba5d646ba188bd38dcb4b85fff6"
+      },
+      {
+        "name": "assets/hcl-BWvSN4gD.js",
+        "bytes": 10053,
+        "sha256": "2d11254542388410861c6a6a3c0f57deb9c218fdc2c1c5ffac901bdb876fe80a"
+      },
+      {
+        "name": "assets/hjson-D5-asLiD.js",
+        "bytes": 12053,
+        "sha256": "6a7e74cb9d734dfd58aeeae9224a7b4b69a86edcc6b73d0e3e36e98dacb3300b"
+      },
+      {
+        "name": "assets/hlsl-D3lLCCz7.js",
+        "bytes": 7264,
+        "sha256": "f5bff090211e17e314660363157f351c5a0b8e707db3ef26cdd78c8522c7d133"
+      },
+      {
+        "name": "assets/horizon-BUw7H-hv.js",
+        "bytes": 8780,
+        "sha256": "d43f28552f920fd99607f754ce527ee0be5654097c479c446d86df933c911b72"
+      },
+      {
+        "name": "assets/horizon-bright-CUuTKBJd.js",
+        "bytes": 8787,
+        "sha256": "d0979e7f67f06dcbce9465dc5e78779ff667236e9cffdaa91d1078e6706b6047"
+      },
+      {
+        "name": "assets/houston-DnULxvSX.js",
+        "bytes": 35422,
+        "sha256": "91c981557306d7a18f7ff39d9060dd2b582604a75aff38ae79edc647e4d9ff93"
+      },
+      {
+        "name": "assets/html-DFLk5oZz.js",
+        "bytes": 59616,
+        "sha256": "9a8bfe1ad14a6e95078f9f15e8181ec2ee716d74a478d2329cdebc8c05a90162"
+      },
+      {
+        "name": "assets/html-derivative-DlHx6ybY.js",
+        "bytes": 900,
+        "sha256": "f94d90985d277a19bac83bcb3c913186fe83cb3388b4a21542b3f979fa48e20c"
+      },
+      {
+        "name": "assets/html-pp8916En.js",
+        "bytes": 57247,
+        "sha256": "ebe4cd4e01fd2bea09e62bc3e6117f98e0c50876ecc95aa142a3660f12a0bc53"
+      },
+      {
+        "name": "assets/http-jrhK8wxY.js",
+        "bytes": 4549,
+        "sha256": "5bb8464898add03e8c22970d9eb4cc467b40ae2888e4d5623c9fde4209dd4d29"
+      },
+      {
+        "name": "assets/hurl-irOxFIW8.js",
+        "bytes": 3652,
+        "sha256": "f87e3fbbc06d52e9d69c1a8cb0a3d64e430ccb85faddeb7a5f87aa12ed6d01a2"
+      },
+      {
+        "name": "assets/hxml-2-FPmUDs.js",
+        "bytes": 1894,
+        "sha256": "99083d2dd0908659f9dff7dce19edf0d572d8bc936dc22795b1f6cf0d1ce4f70"
+      },
+      {
+        "name": "assets/hy-DFXneXwc.js",
+        "bytes": 2648,
+        "sha256": "22df29d8b5c5119f1bd25e998bf7b359a29dc5b826e50597cee67731679cca68"
+      },
+      {
+        "name": "assets/imba-DGztddWO.js",
+        "bytes": 49930,
+        "sha256": "73402caea94e54100c970c652577abf4995f79310e7528744b46a37227057e35"
+      },
+      {
+        "name": "assets/index-BHQ6YnAK.css",
+        "bytes": 110658,
+        "sha256": "0b3fb7eac4671d3b2770ef9b18e390d54beff1320818d0ae3c6328b14d32adc8"
+      },
+      {
+        "name": "assets/index-BgLrS_2D.js",
+        "bytes": 42452,
+        "sha256": "9de7ee4bf6fa2eb0c535863b832b1062a1732c11524bdeed0cb1573560762665"
+      },
+      {
+        "name": "assets/index-Bns_6Dn0.js",
+        "bytes": 583130,
+        "sha256": "02ee6ed261cc10c0ad052bd67f829d5b60cd0dcb6bd7b539849045707f92af09"
+      },
+      {
+        "name": "assets/index-C9pxW9vs.js",
+        "bytes": 5315086,
+        "sha256": "b0701091529ec3f3b25b4442e8c8499ad89af84c591c26dd8297ec504a5d679c"
+      },
+      {
+        "name": "assets/index-CtEztN1P.js",
+        "bytes": 57384,
+        "sha256": "0476ca6a04d591b7b5869ab54f197bfc82be713596ccb487277180d285c7a57b"
+      },
+      {
+        "name": "assets/index-h-6SsJmn.js",
+        "bytes": 172,
+        "sha256": "74988c86e66f5a4867775421e3c199001ad2116933100418ebf4f9486ab9c420"
+      },
+      {
+        "name": "assets/index-wR4p4hNO.js",
+        "bytes": 45953,
+        "sha256": "d967ba9d777ce0ad3b7f2b9b562ec34a5f9e888cb2b985aa476ce0c0679c69f9"
+      },
+      {
+        "name": "assets/infoDiagram-FWYZ7A6U-_XZld2VM.js",
+        "bytes": 614,
+        "sha256": "236b8aa143faed94ae68129c3856e00d2e610ea33e207aec596830e58d9c5cf6"
+      },
+      {
+        "name": "assets/ini-BEwlwnbL.js",
+        "bytes": 1525,
+        "sha256": "7830e62a2a96e22c418b5a1e52ba15545ece3c5684346dd50fc174a60b3c225f"
+      },
+      {
+        "name": "assets/init-Gi6I4Gst.js",
+        "bytes": 147,
+        "sha256": "379fa880c14ad48f43b0c23ff56b30b2b808e8460fd9f9cad8bf7cb278c5b814"
+      },
+      {
+        "name": "assets/ishikawaDiagram-FXEZZL3T-D22Swoy9.js",
+        "bytes": 17502,
+        "sha256": "5b0ba5b22f1bf218367dccedc5301ba5b755baab00d2712088505d0e92819b4f"
+      },
+      {
+        "name": "assets/java-CylS5w8V.js",
+        "bytes": 27219,
+        "sha256": "2bec4be5ba0dea3d8258669df1e6957e1ba2590a1ad56c6e103ea8c00baeba7e"
+      },
+      {
+        "name": "assets/java-D3uEDCrY.js",
+        "bytes": 30895,
+        "sha256": "ad8babb927385f78dcd585b1987b3bb57eaf6b2c68ee24d5048b9d6fa20dbefc"
+      },
+      {
+        "name": "assets/javascript-eRS0TrZp.js",
+        "bytes": 194914,
+        "sha256": "d85ea7ebf8d35111031ea2726003f2baeea11a320773ea8d95a0af70e36185c4"
+      },
+      {
+        "name": "assets/javascript-wDzz0qaB.js",
+        "bytes": 174827,
+        "sha256": "a4a56cc72c7d0f1ecbbeb1ba6bf5f532193c8d13fc3de19910f8d64c70aec4e9"
+      },
+      {
+        "name": "assets/jinja-f2NsQr07.js",
+        "bytes": 5685,
+        "sha256": "16c44c1b5b54df5d7178ef7bd3486beac4e99d96e39338476eca7501ad720575"
+      },
+      {
+        "name": "assets/jison-wvAkD_A8.js",
+        "bytes": 9690,
+        "sha256": "3d09bd59c47dffe52f1eee5bd2371ecc2c8340daac0400872472affdf0c95392"
+      },
+      {
+        "name": "assets/journeyDiagram-5HDEW3XC-B64zG_2j.js",
+        "bytes": 23602,
+        "sha256": "2e4845a6dd5e746fe5493c7279be789f72cf6ca6100ff4847b992369a495b58c"
+      },
+      {
+        "name": "assets/json-CAhrKACI.js",
+        "bytes": 3065,
+        "sha256": "ab3fca2fdb9e824e78b6d95174f21d56a4520b65e7f957b936edc975c9bf2abe"
+      },
+      {
+        "name": "assets/json-Cp-IABpG.js",
+        "bytes": 2824,
+        "sha256": "ca32840cab9c2eb61da2afd6581e7a22c9937229f6b1a47115eea432794e7740"
+      },
+      {
+        "name": "assets/json5-C9tS-k6U.js",
+        "bytes": 3254,
+        "sha256": "84985fb6e4953e5eccc4d704e4db9eb5c0045b74a11d3edd3a9b4c0bd3d5c2e4"
+      },
+      {
+        "name": "assets/jsonc-Des-eS-w.js",
+        "bytes": 3109,
+        "sha256": "1a23e00b91a35d38fba019125c68139ed9c6b9a0bdb953e9b21a709875f41125"
+      },
+      {
+        "name": "assets/jsonc-hsrVBXzx.js",
+        "bytes": 3350,
+        "sha256": "3d32bfee1d8e30f297c55b8feab50b81a54e4b88585dd7f0cadbacd6a39cbf48"
+      },
+      {
+        "name": "assets/jsonl-BjDRLQe5.js",
+        "bytes": 3252,
+        "sha256": "275864453bc762af7fe46796af96886abb7c713fc09927709ab8d59df201ea6d"
+      },
+      {
+        "name": "assets/jsonl-DcaNXYhu.js",
+        "bytes": 3011,
+        "sha256": "10ebbfda6fda38f977a98ef80441310d350b084c6c27c811296ddcf2d84ba3ea"
+      },
+      {
+        "name": "assets/jsonnet-DFQXde-d.js",
+        "bytes": 3618,
+        "sha256": "198a5e9985d5d96fae3f00e0d707841393882f4b9e2bf60ab5145af13c88b513"
+      },
+      {
+        "name": "assets/jssm-C2t-YnRu.js",
+        "bytes": 2238,
+        "sha256": "5b09940400c8fb823c95c198c9363791948e6a9229da2873bdf27b806452b831"
+      },
+      {
+        "name": "assets/jsx-_8V8JC09.js",
+        "bytes": 197896,
+        "sha256": "9acc978633e268f674745549dd646fa6977d0489f69f99b584d730b7e48f64c1"
+      },
+      {
+        "name": "assets/jsx-g9-lgVsj.js",
+        "bytes": 177792,
+        "sha256": "abb8a7007d9a1f743c33283c233a509dc702eb618d1447d128b1330b73851bf2"
+      },
+      {
+        "name": "assets/julia-5Bft2YPA.js",
+        "bytes": 31076,
+        "sha256": "18a4fea8141c5a03ffdd60043d84b85a9886b7ab380ac81e98f2482f04464420"
+      },
+      {
+        "name": "assets/julia-Bwn1IV0M.js",
+        "bytes": 31211,
+        "sha256": "bb2f52de5fdd7f4edb044607ed21f69ea9ff0f346dec4e34ecce903df082d3b1"
+      },
+      {
+        "name": "assets/just-Cwhn7H3k.js",
+        "bytes": 11233,
+        "sha256": "1f9ec3de255a94efe8669a0f995d3b71cf518b35f82c9c7c18d4f0919357c109"
+      },
+      {
+        "name": "assets/kanagawa-dragon-BuwD2xS4.js",
+        "bytes": 17123,
+        "sha256": "b8c65fd96235e984ceae45fa618fbe6d1e12c351a0bd5ed598740e8626100aa6"
+      },
+      {
+        "name": "assets/kanagawa-lotus-C3DzagqV.js",
+        "bytes": 17122,
+        "sha256": "97f5cb8e805ce43842308ed2fc5d658c45c22b2ebfd5321e4abd3e85bbea3e93"
+      },
+      {
+        "name": "assets/kanagawa-wave-DFGoQZhC.js",
+        "bytes": 17119,
+        "sha256": "8013315ef8e305c56ab87cfdf3d74a1f284a2cbecde3a6e2e9311217fd522d90"
+      },
+      {
+        "name": "assets/kanban-definition-HUTT4EX6-fLFxN1Ge.js",
+        "bytes": 20327,
+        "sha256": "cfd311d2c904139f96b33d40cff73568d988768aace83bd77fc49dde1c1e9ba3"
+      },
+      {
+        "name": "assets/katex-HP8lGamR.js",
+        "bytes": 261313,
+        "sha256": "0b89c21cb463fd8180e300cb79a3e9e538accb78df5bdec67f0cbba4bdb7949e"
+      },
+      {
+        "name": "assets/kdl-DV7GczEv.js",
+        "bytes": 3629,
+        "sha256": "24eccbf01c8c213cb407ee8b0294e0fe4d362c2a6c173a9516d41bf76e8cd387"
+      },
+      {
+        "name": "assets/kotlin-BdnUsdx6.js",
+        "bytes": 8785,
+        "sha256": "2a95758b9ec1532516fb3fa38cdd82fed5534d944ca791f327e624ec94e829ac"
+      },
+      {
+        "name": "assets/kotlin-DovLmhsl.js",
+        "bytes": 10599,
+        "sha256": "74314d64534370ded2555437d165f65cc2aee1d1d16c77ea8cdf37800c7d1c46"
+      },
+      {
+        "name": "assets/kusto-wEQ09or8.js",
+        "bytes": 15173,
+        "sha256": "255f5391b61f30323769884f680e235da9cfe6d696f2dd9200543911c361f88c"
+      },
+      {
+        "name": "assets/laserwave-DUszq2jm.js",
+        "bytes": 11499,
+        "sha256": "d56a0486f8b143d6d31a0b0230ccc5914ffbb751543a7dc97d697cbc1152da69"
+      },
+      {
+        "name": "assets/latex-D5pSuvFb.js",
+        "bytes": 72902,
+        "sha256": "f8a21f5b96903566d1db591922ed566e07acdc687e54bac1421a6b99cd164e62"
+      },
+      {
+        "name": "assets/latex-DuBdnrWr.js",
+        "bytes": 87629,
+        "sha256": "ff4ae85d7f8568f7529a598d213c732f6db509e4147e43948e6c84e3378f6a2e"
+      },
+      {
+        "name": "assets/layout-D-LzfAck.js",
+        "bytes": 30997,
+        "sha256": "b598229dc48b69077ee6c3c2092783ebb4fee75cb8fe6a2e76167eccd874aa98"
+      },
+      {
+        "name": "assets/lean-BZvkOJ9d.js",
+        "bytes": 5784,
+        "sha256": "b34bf987976167f4de82af23930eaa4471b06320f236a5d00e3e9098fc704301"
+      },
+      {
+        "name": "assets/less-B1dDrJ26.js",
+        "bytes": 97633,
+        "sha256": "ed3ea44927fda1db6ba56ae932f08ce7f82f8d8a06d2b3d63e3b29db54ec5c65"
+      },
+      {
+        "name": "assets/less-BQp_T1Tn.js",
+        "bytes": 106487,
+        "sha256": "cfb9681f6ff6048483d21d54c258b6b7973b398515408534b60eb468aaf83430"
+      },
+      {
+        "name": "assets/light-plus-B7mTdjB0.js",
+        "bytes": 9941,
+        "sha256": "44ec2993b3cc158ca691da352114658cacc0812ba4678faec2a6370262415979"
+      },
+      {
+        "name": "assets/linear-IlhfeTG2.js",
+        "bytes": 5653,
+        "sha256": "3b142dd088e689fd7524e99f03854098562724dbea298fbb94b56cbbcfe00971"
+      },
+      {
+        "name": "assets/liquid-C0sCDyMI.js",
+        "bytes": 18089,
+        "sha256": "f44f6ac66721b61b4608a581bd973540d0326a8a5db6d7601259061b56d0666a"
+      },
+      {
+        "name": "assets/llvm-BZoOZj88.js",
+        "bytes": 5040,
+        "sha256": "9a303336a89f1f144e8dd97d8ffe91aa164544e6ab744a1c4b8b50b9fd54f66f"
+      },
+      {
+        "name": "assets/log-2UxHyX5q.js",
+        "bytes": 2852,
+        "sha256": "784500daa4b6a6ac32f95c19dc166914133189decc3ed10faf43578fe522a786"
+      },
+      {
+        "name": "assets/logo-BtOb2qkB.js",
+        "bytes": 3127,
+        "sha256": "0ded9d4454ae3e08017b17f93c117c3e451698f42109e15d69380ec089406060"
+      },
+      {
+        "name": "assets/lua-BaeVxFsk.js",
+        "bytes": 15535,
+        "sha256": "890724e2d1bc79e6f6498ce6cedd5a4bed0d9489121621c1946ef05e209f5623"
+      },
+      {
+        "name": "assets/lua-CeIsnURU.js",
+        "bytes": 17487,
+        "sha256": "bcdb4d78e68db7d30dc100872141f4f57d72a583db8b343bf14e85ead81a86cb"
+      },
+      {
+        "name": "assets/luau-BnpPk5vE.js",
+        "bytes": 16138,
+        "sha256": "d0910710cdeed2d7202da8c450539dcac97f6507c2e5dc0d25b0ae59a856b9d9"
+      },
+      {
+        "name": "assets/make-CHLpvVh8.js",
+        "bytes": 8961,
+        "sha256": "50df72a259773a4ca73a97534238010cdef78d632729871d880b58fcc6d3112f"
+      },
+      {
+        "name": "assets/map-DxJ2ADlA.js",
+        "bytes": 5070,
+        "sha256": "caf684b7a25676e3f43a63d91ea1ca8016cadb1ffa8aa59336f0bd692b9d130c"
+      },
+      {
+        "name": "assets/markdown-B6IgHDDD.js",
+        "bytes": 73282,
+        "sha256": "52695784a86d700a61b475365abcce134ae81443345d97086a9dd15f7bd16698"
+      },
+      {
+        "name": "assets/markdown-Cvjx9yec.js",
+        "bytes": 59335,
+        "sha256": "ce6a8b1a6ed9b803b1847231214ba37621c2fa51611ec3037d38b561b360c278"
+      },
+      {
+        "name": "assets/marko-DjSrsDqO.js",
+        "bytes": 25479,
+        "sha256": "48e64452df45eac2cb4e3b01aa799b084c1eab8bed09cb8d4e48a8b0039a4b64"
+      },
+      {
+        "name": "assets/material-theme-D5KoaKCx.js",
+        "bytes": 18615,
+        "sha256": "d0950f3965aecb678089843c133f238db6b308f218e98bdee1412de56b0af425"
+      },
+      {
+        "name": "assets/material-theme-darker-BfHTSMKl.js",
+        "bytes": 18629,
+        "sha256": "ec892813b7a31e9e2d83f54a05450f9a406de273628838b016e828db7ed72572"
+      },
+      {
+        "name": "assets/material-theme-lighter-B0m2ddpp.js",
+        "bytes": 18634,
+        "sha256": "4547e1325624259cb17dfa811e29b0d3e3f9a07c9f37b4cb8d4b4f945d9f2f5b"
+      },
+      {
+        "name": "assets/material-theme-ocean-CyktbL80.js",
+        "bytes": 18629,
+        "sha256": "f80d8209f2d352d0aea9f47759017fa0f994e71e79db1e722be9d82a974692a4"
+      },
+      {
+        "name": "assets/material-theme-palenight-Csfq5Kiy.js",
+        "bytes": 18635,
+        "sha256": "6261dfa64833f4e0c0316a1d41efc5ba6fc43a376bca6f936b4f3b76a6396af7"
+      },
+      {
+        "name": "assets/matlab-D7o27uSR.js",
+        "bytes": 16086,
+        "sha256": "463b698b6acd5b08065007f5376b060dda4fe19f9e27259da52d40a30bc2bc66"
+      },
+      {
+        "name": "assets/mdc-D1_yUvq7.js",
+        "bytes": 20175,
+        "sha256": "c75482b924124de5a5987cdbef73a24bb1091094d32885ed3176b85646095780"
+      },
+      {
+        "name": "assets/mdx-CBHb2NjO.js",
+        "bytes": 154760,
+        "sha256": "2b797859aa33814191ae4fac10a2e2949987a5a8cacdcd68c78a08e521ca65f6"
+      },
+      {
+        "name": "assets/mdx-Cmh6b_Ma.js",
+        "bytes": 136114,
+        "sha256": "c2c652334464f6085341dd1c46e32717e22556890fbc0d2651d9200f372069bb"
+      },
+      {
+        "name": "assets/mermaid-13BCItLu.js",
+        "bytes": 54814,
+        "sha256": "82f6b9a2ce0fadf1bf76a24d14b621412f28535d2786b60ea65cd656a1ef8576"
+      },
+      {
+        "name": "assets/mermaid-C-q6ruN6.js",
+        "bytes": 36072,
+        "sha256": "cc4085a4dcdd9ddd21e4ab090dc73aedaadbc5551e8fba3ef6b604262837385c"
+      },
+      {
+        "name": "assets/mermaid-CQcHuHx7.js",
+        "bytes": 54814,
+        "sha256": "82f6b9a2ce0fadf1bf76a24d14b621412f28535d2786b60ea65cd656a1ef8576"
+      },
+      {
+        "name": "assets/mermaid-layout-elk.core-CTgfhmvC.js",
+        "bytes": 711,
+        "sha256": "9ef8efa729f5289263c4d382b23b83637dc91bfb9978b8f0e11c0e44c3e8e7ba"
+      },
+      {
+        "name": "assets/mermaid.core-BiQ7ZVoa.js",
+        "bytes": 584564,
+        "sha256": "3ab21b692d4aded1cf1654a7f5ab0e7bc78a05d7562298a29f7194b8344d8442"
+      },
+      {
+        "name": "assets/min-dark-CafNBF8u.js",
+        "bytes": 6291,
+        "sha256": "4c0956f147c2dd5aef71894b78d7e95b7a766deeb20712ad94e5897bed620792"
+      },
+      {
+        "name": "assets/min-light-CTRr51gU.js",
+        "bytes": 6969,
+        "sha256": "27e91e09c261ea328ed371e734655f83543da150143a49d5ae39598dad6cd844"
+      },
+      {
+        "name": "assets/mindmap-definition-LN4V7U3C-8glM6kCZ.js",
+        "bytes": 23210,
+        "sha256": "392f9634fa95447d52a638e8a2fdcefceb34b270d98ef16cf03dbe4092781377"
+      },
+      {
+        "name": "assets/mipsasm-CKIfxQSi.js",
+        "bytes": 3259,
+        "sha256": "c2cdb4e8e7172f68f5bb6e0615696c2a023a2b8bfe008f424c8bbae1e120dd2b"
+      },
+      {
+        "name": "assets/mockSheet-C6QcwWSG.js",
+        "bytes": 8401,
+        "sha256": "2db24d80f9bdb3159723f598a3bef2c3fd7333ae2bf81e806bb86c20f0218107"
+      },
+      {
+        "name": "assets/module-RjUF93sV.js",
+        "bytes": 77267,
+        "sha256": "1af61063d9e00f475b4f95b3336f9d4f265d577798175859334c216f3559b795"
+      },
+      {
+        "name": "assets/mojo-DJz3ZmWd.js",
+        "bytes": 69517,
+        "sha256": "2ae4b80c95b301f58b8e7d8501dc64f73618221dd6b5614ed21b73b015971df9"
+      },
+      {
+        "name": "assets/monokai-BRVnQi9A.js",
+        "bytes": 8032,
+        "sha256": "7fc9211de0c0bb35524c6046c295201246b50441e96820c26aff7899441da823"
+      },
+      {
+        "name": "assets/moonbit-CHtswR0a.js",
+        "bytes": 24939,
+        "sha256": "d05eeed6319a5c728763648765a96cff3b65640c38cfadea62e464e1a4bfedca"
+      },
+      {
+        "name": "assets/move-el3G9tDJ.js",
+        "bytes": 17657,
+        "sha256": "b687a211e984e5dceb76fdd7eccdf8626d35241a97bb4f4e135d046db76aa46a"
+      },
+      {
+        "name": "assets/narrat-DRg8JJMk.js",
+        "bytes": 3672,
+        "sha256": "37b1a4a08e1a0d4cf06e1ca8adddf1c51b9600b695f017b911799099ac5d8671"
+      },
+      {
+        "name": "assets/native-48B9X9Wg.js",
+        "bytes": 432754,
+        "sha256": "6a1ff4041e386697784dd6dd372c118ac9f7ce9daef11a122abdba4f6f45c883"
+      },
+      {
+        "name": "assets/nextflow-C-mBbutL.js",
+        "bytes": 4510,
+        "sha256": "7c78f3d862753953afee76d5ae146df0b7dd4febb549893199ada62ae433b4b9"
+      },
+      {
+        "name": "assets/nextflow-groovy-vE_lwT2v.js",
+        "bytes": 10438,
+        "sha256": "b5e6334e56f5db6b389035922e884a0adb984b420b231d71be73d6716b337815"
+      },
+      {
+        "name": "assets/nginx-BpAMiNFr.js",
+        "bytes": 35374,
+        "sha256": "25b53af8ecce64bdefc084c8b7af5f27537ef7022618e8d90e4b20fd1ebe485f"
+      },
+      {
+        "name": "assets/night-owl-C39BiMTA.js",
+        "bytes": 28913,
+        "sha256": "2b8554d4a01b6e062bb929507c741070c04d4f194b424942c5f208891afa1360"
+      },
+      {
+        "name": "assets/night-owl-light-CMTm3GFP.js",
+        "bytes": 25902,
+        "sha256": "68b5b21d900e1409b772220982c7837bd77003f084069160edc37f9eccd46758"
+      },
+      {
+        "name": "assets/nim-BIad80T-.js",
+        "bytes": 22460,
+        "sha256": "ec12b2bd40df8b6bd6f9fed275a730551db132b69a8a420ddab621702c3bd5b8"
+      },
+      {
+        "name": "assets/nix-CwoSXNpI.js",
+        "bytes": 15511,
+        "sha256": "1d064eb88b18c48846c1ad0e438c869aa25813361efba72de9725932c0310449"
+      },
+      {
+        "name": "assets/nord-Ddv68eIx.js",
+        "bytes": 26723,
+        "sha256": "243a9dfea9c93c40586d279de5ea4cd8f3de380c2e3c0ea7ba58e93ef12cbcf5"
+      },
+      {
+        "name": "assets/nsis-BlV79W_Q.js",
+        "bytes": 13126,
+        "sha256": "33258d96bfe4dc252fc7c102ecc8f777ff72dbdea8d1d7786e079db5150b448a"
+      },
+      {
+        "name": "assets/nushell-D3jzshHO.js",
+        "bytes": 20882,
+        "sha256": "cbc1512887f0c8d9be69dfc2c1f1dee3df53ec9ae8e2e8501b0123c995946db5"
+      },
+      {
+        "name": "assets/objective-c-DXmwc3jG.js",
+        "bytes": 105413,
+        "sha256": "aa3b80179150c0bf74649497bbeb60a36f025631ea64ca23c9e2aca64ec71c44"
+      },
+      {
+        "name": "assets/objective-c-DyLnXl6t.js",
+        "bytes": 111705,
+        "sha256": "df3698f25dd049741a7835c6d29163af12db41dcecf705d24eb1a964b12f604e"
+      },
+      {
+        "name": "assets/objective-cpp-CLxacb5B.js",
+        "bytes": 171972,
+        "sha256": "9841e552a948f571c39f594fc27661f1262e589c9f53898c8ac2de469b1d85f3"
+      },
+      {
+        "name": "assets/ocaml-C0hk2d4L.js",
+        "bytes": 62449,
+        "sha256": "eb5a88927867a33e866a8fea38c91799b28739c6038264e5a3560519951d1dc3"
+      },
+      {
+        "name": "assets/odin-BBf5iR-q.js",
+        "bytes": 16513,
+        "sha256": "886d9212bdf48ee8eb6ba85adb1a07ca6519e5c60e4e73b5323c1cb4d8969939"
+      },
+      {
+        "name": "assets/one-dark-pro-DVMEJ2y_.js",
+        "bytes": 33787,
+        "sha256": "7c55d00426abb85391f3432fd1282150e0bd7d54a8e5de7553a1d65c31459eb2"
+      },
+      {
+        "name": "assets/one-light-C3Wv6jpd.js",
+        "bytes": 25300,
+        "sha256": "8f9b7f248dd34ae2acccfb35c8c095f0b581ea4e0d3351c7fe25721b914ae177"
+      },
+      {
+        "name": "assets/openscad-C4EeE6gA.js",
+        "bytes": 2824,
+        "sha256": "36bb06e21f4dae2e8f47a92050501a4c989273bafde4096e151f591635fbed55"
+      },
+      {
+        "name": "assets/ordinal-Cboi1Yqb.js",
+        "bytes": 1189,
+        "sha256": "71be569ce2355b7f256a834b3a4c11668fe80a880b3587c1b3b14e9e5dedf478"
+      },
+      {
+        "name": "assets/org-DM6o9KBp.js",
+        "bytes": 36323,
+        "sha256": "b47d41b3f87c0900d5b5072b9c337395c52759a8f0acfff971413467a3a38a9e"
+      },
+      {
+        "name": "assets/pascal-D93ZcfNL.js",
+        "bytes": 4150,
+        "sha256": "65c2b6be568561feb139eb54e384137c54c3d53b49be7be851e28aa0fc2f8c22"
+      },
+      {
+        "name": "assets/pdf-C2_sJa3b.js",
+        "bytes": 475192,
+        "sha256": "eb7e8c4983fa99922eb43d4fd1adef25cd4a3e0af8ff0c1a212c473673f14918"
+      },
+      {
+        "name": "assets/pdf.worker-BQEIRQK4.js",
+        "bytes": 64,
+        "sha256": "2d7f86e8396f96b2222ca5377db0feba46d9666f09709c36affb01002b1d66d0"
+      },
+      {
+        "name": "assets/pdf.worker-C_g5fE8W.js",
+        "bytes": 1234288,
+        "sha256": "5f51f22f514564ea04331ae910d557af6b3772148e77ce5923bd6a9e6b37338d"
+      },
+      {
+        "name": "assets/pdf_viewer-BZZNK8G7.css",
+        "bytes": 280130,
+        "sha256": "64233352989a3fe6f1bd32c8c8acd0a2da82c37894994453c65d75a792ae7572"
+      },
+      {
+        "name": "assets/pdf_viewer-DhhtB_H-.js",
+        "bytes": 225365,
+        "sha256": "12bcdc7d8395698b7ca794d147819fc016c6b4b3274b7620fe4adf5ee774d95d"
+      },
+      {
+        "name": "assets/pegDiagram-2B236MQR-BtZvHH_g.js",
+        "bytes": 1988,
+        "sha256": "5bbe6b70a10afe5884c1e0313a0279d85a87fe8965c6d8a53e6c062845586099"
+      },
+      {
+        "name": "assets/perl-B9cMNwum.js",
+        "bytes": 43156,
+        "sha256": "d86ac3f3fd974cb6d430769ac09a155fb45aa88b260bb6767ed6015ca9da81d4"
+      },
+      {
+        "name": "assets/php-Csjmro_R.js",
+        "bytes": 113090,
+        "sha256": "d343f73b0522b328ecd47df9de83cb919bcec370314c8f23c1e95d2126a636c4"
+      },
+      {
+        "name": "assets/php-DGGypua_.js",
+        "bytes": 115103,
+        "sha256": "c07863a7964599f889686ab1db24cc6bf41b6c7aabf7a0718384fe158dc7a8a2"
+      },
+      {
+        "name": "assets/pieDiagram-ENE6RG2P-BknKqUZr.js",
+        "bytes": 6325,
+        "sha256": "94402b413028d39c462543ec5c52516aa4ef3cb74c237066675c573007af76e4"
+      },
+      {
+        "name": "assets/pkl-u5AG7uiY.js",
+        "bytes": 10372,
+        "sha256": "1acafc1de9c65cd06c2b6a3b0bfb928a92fd13fa5182fbc4df0f03f41ca79c24"
+      },
+      {
+        "name": "assets/plastic-3e1v2bzS.js",
+        "bytes": 9295,
+        "sha256": "f507b7e3105e92c0d7de6346751da2f369d9d10a9237539fb2f41ca22f3f674d"
+      },
+      {
+        "name": "assets/plsql-ChMvpjG-.js",
+        "bytes": 8512,
+        "sha256": "5b08ff2f2caca88ca87a1e02c740ec32d06d8b96d70e210abcc2729858cd9a2e"
+      },
+      {
+        "name": "assets/po-BTJTHyun.js",
+        "bytes": 3239,
+        "sha256": "c6925708c8b9b9a2793d10218ab601e30f79eab0c2892985fd6b3f8382377b32"
+      },
+      {
+        "name": "assets/poimandres-CS3Unz2-.js",
+        "bytes": 33494,
+        "sha256": "f3a6399c5ae3fe8b7ce02c29c7278199a4ca3ff9b39be1b455a9124c17227de3"
+      },
+      {
+        "name": "assets/polar-C0HS_06l.js",
+        "bytes": 4671,
+        "sha256": "b6205f4f60671b327a436f3a5c02197826ed563c0c23d22d8231095515274c6d"
+      },
+      {
+        "name": "assets/postcss-B6Y8ymK-.js",
+        "bytes": 7496,
+        "sha256": "683b4a347666fe0056fcbf8c3f0e65618821195126c898188cd57049d1dea0c9"
+      },
+      {
+        "name": "assets/postcss-CXtECtnM.js",
+        "bytes": 6417,
+        "sha256": "748810304adf9da83f71983e99219a242fac24424483e68c0145e0edb6610136"
+      },
+      {
+        "name": "assets/powerquery-CEu0bR-o.js",
+        "bytes": 5903,
+        "sha256": "2560bd4cef47cf5dee7b8c2204ae8008ce73f85f41764683afa1d0988f4d1d7e"
+      },
+      {
+        "name": "assets/powershell-BmBUJMz7.js",
+        "bytes": 20158,
+        "sha256": "dc784b8a7baa1ec8a68fe8a790d540ae21c924c3181b239683d48bea87cfb1e0"
+      },
+      {
+        "name": "assets/prisma-Vru482bI.js",
+        "bytes": 7744,
+        "sha256": "b3fde1ec204bd87bc16f820a438db08ec481521edebdf36ab0c033ef0cfd5a1e"
+      },
+      {
+        "name": "assets/prolog-CbFg5uaA.js",
+        "bytes": 11356,
+        "sha256": "3cbc885011b27249f5a0b7660b6f7c87ac5ab4f44487107cc1e92d0c19ebb3cd"
+      },
+      {
+        "name": "assets/proto-C7zT0LnQ.js",
+        "bytes": 6548,
+        "sha256": "2f6893062281306a31a73dcc50949a332ade86a11565f7b78d66e28ed2aaa627"
+      },
+      {
+        "name": "assets/pug-DKIMFp6K.js",
+        "bytes": 13842,
+        "sha256": "c483d3e6e2d9a710ab36dba068fb4efbb1810cc2fbe7387b023bf6d2f53ade88"
+      },
+      {
+        "name": "assets/pug-H68hzDfE.js",
+        "bytes": 17171,
+        "sha256": "d4d3a507ff439a43c79711ff2ccd74cea7bafdd40f448a982d281cdc67f3d0c2"
+      },
+      {
+        "name": "assets/puppet-BMWR74SV.js",
+        "bytes": 11437,
+        "sha256": "a7a22bdeccfe37f60d59da8851019f47f08eef8250f9a1e2f25560c12a021467"
+      },
+      {
+        "name": "assets/purescript-CklMAg4u.js",
+        "bytes": 24686,
+        "sha256": "8fd484a61ea9faa0ef7e299f9188cb74dabea59625c822f537f7ae850d18daac"
+      },
+      {
+        "name": "assets/python-B6aJPvgy.js",
+        "bytes": 69952,
+        "sha256": "7652ab863f920a5959c4aa52d6decb8c11d23fd590773977ce8aa0fbb3c555c4"
+      },
+      {
+        "name": "assets/python-By0ufZ0-.js",
+        "bytes": 73424,
+        "sha256": "72da480e6d501ab397d32317265c86d9aa1231854fd29ea3fa630dbc2e40d047"
+      },
+      {
+        "name": "assets/qml-3beO22l8.js",
+        "bytes": 5336,
+        "sha256": "5c58408fde8b3b813f2519a720d074dc688eaff4cc4b6db2fb1b6215dd4aff65"
+      },
+      {
+        "name": "assets/qmldir-C8lEn-DE.js",
+        "bytes": 1002,
+        "sha256": "ad76c02c2bb338b0314af1cb1514f1fbbd31a1a78d5d931632e313fb9b374480"
+      },
+      {
+        "name": "assets/qss-IeuSbFQv.js",
+        "bytes": 7472,
+        "sha256": "24a87ea2b74ac3f815e14d173752f42380cd4ad6faabba3b0737c66c83d7e8c3"
+      },
+      {
+        "name": "assets/quadrantDiagram-ABIIQ3AL-FBhTbJ72.js",
+        "bytes": 34042,
+        "sha256": "c89d7d9d92685413698f853f05be92699b65b6e557d5ec19fc58cff4bc0753ec"
+      },
+      {
+        "name": "assets/r-Cf5RLm7j.js",
+        "bytes": 6735,
+        "sha256": "128c2bf72b3160e52494e9ee0a7ff6b89bf33eb2ceb8c03de16cacd8cedd1614"
+      },
+      {
+        "name": "assets/r-DyHXx6ZT.js",
+        "bytes": 7670,
+        "sha256": "f40fdd0acabe0df067f918f790cf81137b33e8cc643b6a8d58a3475f72d4c8a0"
+      },
+      {
+        "name": "assets/racket-BqYA7rlc.js",
+        "bytes": 92389,
+        "sha256": "34061595fb5ce70cda2139f9d82f5a980821fd92ea3ad48c6bbdde5ce887ff01"
+      },
+      {
+        "name": "assets/railroadDiagram-RFXS5EU6-cbqaTlIO.js",
+        "bytes": 1638,
+        "sha256": "8a80e5aff3703285c95b8eccfad01e99cf2a832dede76b47bb39ece4cb53e65d"
+      },
+      {
+        "name": "assets/raku-DXvB9xmW.js",
+        "bytes": 10472,
+        "sha256": "5fcd9c398ef0361d59c9d8122e3f949d13316c2f9dd673a3385c951b768ca711"
+      },
+      {
+        "name": "assets/razor-BjBPvh-w.js",
+        "bytes": 27510,
+        "sha256": "e165e23ff46246233efce03a919a09716ee599ee49e1c6a5c640e9365b9a3655"
+      },
+      {
+        "name": "assets/rbs-CpoqiR4B.js",
+        "bytes": 3311,
+        "sha256": "bef624b689e102d17e49bdb3305ba7ac1b3f5e3cbba51e1f5e2651adaae68183"
+      },
+      {
+        "name": "assets/red-hvxz__6c.js",
+        "bytes": 6418,
+        "sha256": "3b40434758594762bb16e5104430da75fc93299f3be3b71b0bb82f1343d9cadb"
+      },
+      {
+        "name": "assets/reg-C-SQnVFl.js",
+        "bytes": 2345,
+        "sha256": "c944196b442e75be8722bce04f9aa6ef7698200cfe314e998cd29b70faa75fff"
+      },
+      {
+        "name": "assets/regexp-CDVJQ6XC.js",
+        "bytes": 7988,
+        "sha256": "4f4da7e45d7bac4acaf584b492337cc0fcfc0b2453073026b7f2d2878935ed7a"
+      },
+      {
+        "name": "assets/regexp-YoNQ8D_6.js",
+        "bytes": 8308,
+        "sha256": "fc7c7dc754dc388a5b7efe90348d04855e0ed7cb5a51d5cdf4269c3a70c65922"
+      },
+      {
+        "name": "assets/rel-C3B-1QV4.js",
+        "bytes": 3368,
+        "sha256": "5e46343461aedbfdd92b75bcc78bf3f40b0383490f4e139874221766c4c73158"
+      },
+      {
+        "name": "assets/render-X3XFXER2-Btic7tpg.js",
+        "bytes": 1455244,
+        "sha256": "4e3ca2fd4037ef0a22270dda39ce104c861e5fef0deee5fafc397742353bf325"
+      },
+      {
+        "name": "assets/requirementDiagram-TGXJPOKE-rb7zNNOj.js",
+        "bytes": 31034,
+        "sha256": "9533087f02de0dd097777fed611aa24dfc629c61b06ce92e404d4a0435bc1c73"
+      },
+      {
+        "name": "assets/riscv-BM1_JUlF.js",
+        "bytes": 6914,
+        "sha256": "287e2bda433a92ccd15dbd75b8b95e2ee9ca016d3501387d1b923660fa69a52c"
+      },
+      {
+        "name": "assets/ron-D8l8udqQ.js",
+        "bytes": 3914,
+        "sha256": "c91a2f5aabc02f69e8844c66e8abbb5e2d6997c5868b974679b0dca8e68a6746"
+      },
+      {
+        "name": "assets/rose-pine-5qJOZa0Y.js",
+        "bytes": 21741,
+        "sha256": "2792556423027effc6d8f295bc358e0d0d503dc4044d9faa552373b100fc200c"
+      },
+      {
+        "name": "assets/rose-pine-dawn-zx0QlTCp.js",
+        "bytes": 21752,
+        "sha256": "281bac5cda64efc5b80c0227f3be933529a2a8075ef7a7ee79e6391b84181576"
+      },
+      {
+        "name": "assets/rose-pine-moon-C9pEdX9L.js",
+        "bytes": 21751,
+        "sha256": "be365d605f464bd505051701ffe065723ee5cae7cb87126ea49f6e8833229de1"
+      },
+      {
+        "name": "assets/rosmsg-BJDFO7_C.js",
+        "bytes": 4523,
+        "sha256": "895c74a701284063ecd96cff31b08b9e7d913b68d069907bd562b6db4f2a078d"
+      },
+      {
+        "name": "assets/rst-bs7f0vWN.js",
+        "bytes": 10673,
+        "sha256": "249e5af679ec989354485bca928c810edc4f64998b2359e22e18cdf8c2301ec4"
+      },
+      {
+        "name": "assets/ruby-C0TQ7zu5.js",
+        "bytes": 46719,
+        "sha256": "e9394f6234e1eeeb4039f18a69d390c92b7eea2cdf5978aefeff755af6f2135c"
+      },
+      {
+        "name": "assets/ruby-DDS1C_CT.js",
+        "bytes": 52780,
+        "sha256": "0b906bfcd5893a6969dc87177cfbc3d8b6b942cb57faa4829bbe7d0cd393291d"
+      },
+      {
+        "name": "assets/rust-B1yitclQ.js",
+        "bytes": 15069,
+        "sha256": "c48161f6b21740ac415d982a627f24bb81081225f7405632784f667cf915d985"
+      },
+      {
+        "name": "assets/rust-DYFNg61u.js",
+        "bytes": 15722,
+        "sha256": "1d13d9952d6e1494f95732733d6f5bdf2711e7c8c752752416ac0a617173711d"
+      },
+      {
+        "name": "assets/sankeyDiagram-HTMAVEWB-nj_2JcdI.js",
+        "bytes": 23231,
+        "sha256": "e6a4c052d32d52cc0a47ffe0a76e8878fd71d92e753cf5cb8b0c43f7bdeb21fb"
+      },
+      {
+        "name": "assets/sas-DEy46yEz.js",
+        "bytes": 9062,
+        "sha256": "0c67e604de0d4e3f02965e9ad7e9cb5b6d58757441537f0a929c237fc9939132"
+      },
+      {
+        "name": "assets/sass-Cj5Yp3dK.js",
+        "bytes": 9289,
+        "sha256": "d3d1152bdf9e9582f0d94521982944d7dacd0e8ece70a6a51dc621b146f90c05"
+      },
+      {
+        "name": "assets/sass-pz5lImlE.js",
+        "bytes": 10575,
+        "sha256": "a2ee88964a00c072e049be92f0d2d366d71b283998530fc3a6006f4aed639c18"
+      },
+      {
+        "name": "assets/scala-CqE71os6.js",
+        "bytes": 28889,
+        "sha256": "49722f789f01275a832469db84cef6009c48b2e9ceb5bf047b798399d5ce6093"
+      },
+      {
+        "name": "assets/scala-Cz-hiI9R.js",
+        "bytes": 31726,
+        "sha256": "a21898cb5cb174bc12df64e330b2010bae5f37cf4664e1add9e556d5beddf93b"
+      },
+      {
+        "name": "assets/scheme-C98Dy4si.js",
+        "bytes": 7169,
+        "sha256": "743503a0223f9e794eaa6e2ec9b1a4b9e23870ea92f8a91c608bd5632159a820"
+      },
+      {
+        "name": "assets/scss-CVnmbtiu.js",
+        "bytes": 29486,
+        "sha256": "f9603feb223614b2896e8370483d28d9eba01902c8f89882bcfe8d1326084e66"
+      },
+      {
+        "name": "assets/scss-D5BDwBP9.js",
+        "bytes": 27204,
+        "sha256": "82424791b215254726f7754b2b7ac79cf90ec58a31c023cc959957e832fa0326"
+      },
+      {
+        "name": "assets/sdbl-DVxCFoDh.js",
+        "bytes": 4702,
+        "sha256": "09bba6eb98cb1660429de423a032b8ecc9e943af9b2ae4dc798fe665b2f4de19"
+      },
+      {
+        "name": "assets/sequenceDiagram-DBY2YBRQ-Bs7fivBW.js",
+        "bytes": 116999,
+        "sha256": "aa395f7b6debcd03bf2f53a9c68e620196509ee41ad80f19fd98482b8392edfa"
+      },
+      {
+        "name": "assets/shaderlab-Dg9Lc6iA.js",
+        "bytes": 5922,
+        "sha256": "0f15272ff852b3807636b594b3f7ee05de4f01acf6cd35622e94c14eed99353f"
+      },
+      {
+        "name": "assets/shellscript-GUlTfq8i.js",
+        "bytes": 46206,
+        "sha256": "ee1ffe1af92d02a7f391ed9c7c03f46ae4e42e5541e7eeb28769f08ef56a1ceb"
+      },
+      {
+        "name": "assets/shellscript-Yzrsuije.js",
+        "bytes": 41479,
+        "sha256": "6a7311ff85af4098e170435bf140299e6be66e458e51d97ff91b2cea51300438"
+      },
+      {
+        "name": "assets/shellsession-BADoaaVG.js",
+        "bytes": 711,
+        "sha256": "8bb2a6459a5dbbe5364b504567be9b0eec02b9271d893c6377a1bb64d3f13c25"
+      },
+      {
+        "name": "assets/sizeCapture-X5ZJPWSS-CbqBA1be.js",
+        "bytes": 968,
+        "sha256": "0fa10c45ef313f11da6858b653ca1bec78573ff5f4092f381a59c6aa4a475c30"
+      },
+      {
+        "name": "assets/slack-dark-BthQWCQV.js",
+        "bytes": 9117,
+        "sha256": "f9254bd3bd7981950384332249c3bd31ff108fc659edd24b49ee6716bc23fac0"
+      },
+      {
+        "name": "assets/slack-ochin-DqwNpetd.js",
+        "bytes": 9431,
+        "sha256": "1ede16ae081bae361e415891901a4aa6dc20de301aef52403863933d74b76783"
+      },
+      {
+        "name": "assets/smalltalk-BOQMe2GC.js",
+        "bytes": 14126,
+        "sha256": "8a82ac5a55be2929a527f1f1881f7d14af5d259b1f4982e3986f70427d991866"
+      },
+      {
+        "name": "assets/smithy-cds9vsN8.js",
+        "bytes": 9134,
+        "sha256": "85bdf3806717e727b7a434840d9a3de7ff1f5c89b3ea383b4e9b5174129964ab"
+      },
+      {
+        "name": "assets/snazzy-light-Bw305WKR.js",
+        "bytes": 20773,
+        "sha256": "7721708cf2d4a690c8c599de620236acddccbbfedacf09ab0c6cc463f60ebe00"
+      },
+      {
+        "name": "assets/solarized-dark-CpvCGNkr.js",
+        "bytes": 7000,
+        "sha256": "6b2fb4056522348f65d9b08d2151f1164cf98ab31f47112a170808bfe2f49184"
+      },
+      {
+        "name": "assets/solarized-light-Dlz6yCKv.js",
+        "bytes": 6628,
+        "sha256": "123fd62b5015be797ca48aa510639da5ff1d1a818150a947fe817faab92c2212"
+      },
+      {
+        "name": "assets/solidity-DijEV5ha.js",
+        "bytes": 16407,
+        "sha256": "1220df9d38a31beeaafca62c249ba525d705c53eff4b013b1aa4d354e440bc41"
+      },
+      {
+        "name": "assets/soy-8wufbnw4.js",
+        "bytes": 6981,
+        "sha256": "e7c89ef03550bca1688783434d8247b5fcd3af09699450f82d14e3e3e3a32ec3"
+      },
+      {
+        "name": "assets/sparql-rVzFXLq3.js",
+        "bytes": 1480,
+        "sha256": "7ad999b9fba56728f2297fbee2250f845093f2b57eacd1fcb045d6f5a32d7de2"
+      },
+      {
+        "name": "assets/splunk-BtCnVYZw.js",
+        "bytes": 3436,
+        "sha256": "64ebc92eebd3550e91fbfc5fcbd72bfdec37d3e1d299660140ca28c2cd30cc1f"
+      },
+      {
+        "name": "assets/sql-CRqJ_cUM.js",
+        "bytes": 23428,
+        "sha256": "6df4a8b7587aced94ab3c692d791a8095269b8cb3106c7276088aaa3b7a016e7"
+      },
+      {
+        "name": "assets/sql-Dnqe7jJh.js",
+        "bytes": 24752,
+        "sha256": "fada77b3ed3ad42ad9b6957a1d069432f6ea8860adca88964a08acc3f7ff124f"
+      },
+      {
+        "name": "assets/ssh-config-_ykCGR6B.js",
+        "bytes": 3617,
+        "sha256": "59773508bec4b474f7a01df0c9a1d67d9cc6a5e90cd8be3355e7a51d45a48718"
+      },
+      {
+        "name": "assets/stata-DI20mbqo.js",
+        "bytes": 56991,
+        "sha256": "c1088b99636bbb8fcc125b1ff81b737bdf2f28d610ec6b66e7db8bafcd851e7b"
+      },
+      {
+        "name": "assets/stateDiagram-2N3HPSRC-DDpKqUO1.js",
+        "bytes": 10455,
+        "sha256": "197096f3a794bbe040e282a6ad8d15e990c7b555b12d71a25e99f076fb48d677"
+      },
+      {
+        "name": "assets/stateDiagram-v2-6OUMAXLB-1Ruxco9B.js",
+        "bytes": 460,
+        "sha256": "2af655f3c7e127582e8eca909d5c55ee6a610d191d8beb0982107b6a0a0ff4d9"
+      },
+      {
+        "name": "assets/stylus-BEDo0Tqx.js",
+        "bytes": 31074,
+        "sha256": "7f4744cdde011a08696b25091cb57a8af8762c48fe52bda2f929376600a17f23"
+      },
+      {
+        "name": "assets/surrealql-Cjom0U5J.js",
+        "bytes": 12059,
+        "sha256": "b8fa8288dbec49b3d2593e4d44c752ddaa370b2878b203d2d337440029467d4f"
+      },
+      {
+        "name": "assets/svelte-C_kR_pjO.js",
+        "bytes": 21034,
+        "sha256": "f1e8e0886db70261900e77c43e74724c8d2cfe8c3b06b8db4f34387efddaa14b"
+      },
+      {
+        "name": "assets/svelte-Cy7k_4gC.js",
+        "bytes": 18242,
+        "sha256": "8a74566ff0fda9c8b1f2954b7426257c3fe25d9a9624bcc844686aa175eb73f0"
+      },
+      {
+        "name": "assets/swift-C2oV4EkX.js",
+        "bytes": 87231,
+        "sha256": "9f7077844a225a537eea5869de8ca98bd00d512cf62674f7d0b903d827cab839"
+      },
+      {
+        "name": "assets/swift-D82vCrfD.js",
+        "bytes": 86687,
+        "sha256": "8b87fd88e98da6fee33e181d3a03ad5e7fdec59008fa592c28a9ab28e28d8fbe"
+      },
+      {
+        "name": "assets/swimlanes-5IMT3BWC-alNXPPnp.js",
+        "bytes": 118883,
+        "sha256": "880ad204f9c3ef6ee67abf44cf2f542dbd21e2c2eadec98895d74a11daf62852"
+      },
+      {
+        "name": "assets/swimlanesDiagram-G3AALYLV-DXOQeQkO.js",
+        "bytes": 580,
+        "sha256": "6f08ea9ae0b02751d3aa9763825723c0e179f8b62c90e35c615dbdb2f1f44763"
+      },
+      {
+        "name": "assets/synthwave-84-CbfX1IO0.js",
+        "bytes": 14036,
+        "sha256": "345be8ec59dedde8193a830c5119b99ab1a263d8a0b8d0d98580b21e5b53856f"
+      },
+      {
+        "name": "assets/system-verilog-0hqHdDBg.js",
+        "bytes": 26556,
+        "sha256": "94cef5676056c5a825431204170f562e1c4ddddcaf298ed19ed095c079fda2f7"
+      },
+      {
+        "name": "assets/systemd-4A_iFExJ.js",
+        "bytes": 7869,
+        "sha256": "7ee808ec3ed0bd4d87a6c0b5f034ce21b5522664b1a956381a3c287c674c0ffa"
+      },
+      {
+        "name": "assets/talonscript-CkByrt1z.js",
+        "bytes": 6757,
+        "sha256": "df10bc43abea3666beac95f07c8082bbd953cfcce01b384cac1e5bb783e3d656"
+      },
+      {
+        "name": "assets/tasl-QIJgUcNo.js",
+        "bytes": 3288,
+        "sha256": "f8ad184dcd423a710bfe0a7c84487334383318e2e1b7b98ef0371be9f3e6c130"
+      },
+      {
+        "name": "assets/tcl-dwOrl1Do.js",
+        "bytes": 4429,
+        "sha256": "a1a8b949384eb718737fa7f088b806e0ab6736264dbd3135ca01eaee68295f12"
+      },
+      {
+        "name": "assets/templ-DhtptRzy.js",
+        "bytes": 24064,
+        "sha256": "0243b01689951261ad4280046d38c9292c7dde9cbc3c8e58611d58ba1b57520d"
+      },
+      {
+        "name": "assets/terraform-BETggiCN.js",
+        "bytes": 11389,
+        "sha256": "845d38e761505099172e28bb36870b326f66ab907aaa625fcc9c4d0fee4eca49"
+      },
+      {
+        "name": "assets/tex-D96PA37w.js",
+        "bytes": 9669,
+        "sha256": "7ed401f4a81fc4d476c64370bcdb5320b2628c597fd55f3a6c211fd2ac9305ac"
+      },
+      {
+        "name": "assets/timeline-definition-FHXFAJF6-jJYh8yAA.js",
+        "bytes": 30867,
+        "sha256": "a5a83ff4bbab622876cc6a6af92ec89b2773224fd1e5afcf63c2f87ec494cfb0"
+      },
+      {
+        "name": "assets/tokyo-night-hegEt444.js",
+        "bytes": 35665,
+        "sha256": "e00a860ce7f328571e523246063124ac104fd16c7c4a1939985c04e2912dc8dc"
+      },
+      {
+        "name": "assets/toml-vGWfd6FD.js",
+        "bytes": 6426,
+        "sha256": "13957c3e75de850523d59c55223a274de54f38319159b54c11a41e1e909965de"
+      },
+      {
+        "name": "assets/transform-PyjPIuJY.js",
+        "bytes": 37573,
+        "sha256": "ba56feb6d4526c4c8310c9611cb0b0eb2b5b9c298b884c32a2ab7deec7db9ba0"
+      },
+      {
+        "name": "assets/ts-tags-D351s5mN.js",
+        "bytes": 16571,
+        "sha256": "254942c2287e5abe4b7c5926ae18f1b5a36130acde3f1f1b4bc79a5ed3a69c54"
+      },
+      {
+        "name": "assets/tsv-B_m7g4N7.js",
+        "bytes": 739,
+        "sha256": "1a04ec966e09f3783309f7536dae8e824d4f8ec6ec0b6e1880c1b95a3d17762b"
+      },
+      {
+        "name": "assets/tsx-COt5Ahok.js",
+        "bytes": 175536,
+        "sha256": "6f65bdaf80285d2241cf747f58b0c2bdd7485e25bbfbc0144840ed8e13f31a4d"
+      },
+      {
+        "name": "assets/tsx-ubaFQlaU.js",
+        "bytes": 195640,
+        "sha256": "0b7ffb784c4b7220906fc46cd487c42df819a7a11449d506b783a06c006409b7"
+      },
+      {
+        "name": "assets/turtle-BsS91CYL.js",
+        "bytes": 3700,
+        "sha256": "b39750a94e32101604c09b24cbc2b03cfec7089ea6b3af27863d2889003046bd"
+      },
+      {
+        "name": "assets/twig-27uCiNez.js",
+        "bytes": 21976,
+        "sha256": "154999e832173af31311faeaf013824e36aa56d4c38693a33a1f82333938baf6"
+      },
+      {
+        "name": "assets/typescript-BBgwK5l8.js",
+        "bytes": 201962,
+        "sha256": "7dac0f17990bd739db3e0993f997266ddf0bbdfb6591aa1f9cefa1f843bbdcf2"
+      },
+      {
+        "name": "assets/typescript-BPQ3VLAy.js",
+        "bytes": 181080,
+        "sha256": "fcdcca54a7ccb637627d4dba50774a3dc7a5bae93a9f0a43c7748114b1d1d75f"
+      },
+      {
+        "name": "assets/typespec-CAFt9gP4.js",
+        "bytes": 25045,
+        "sha256": "e1c6fefd6eda7001eeff766e90748b59a26bef3d5cbb7e35c3ed02d6b27fad3a"
+      },
+      {
+        "name": "assets/typst-BUadGCkm.js",
+        "bytes": 163547,
+        "sha256": "516589ec0858c9310085626d5520aee724ac36b36477940b01b6f1c6c4d4048e"
+      },
+      {
+        "name": "assets/v-BGw2Nkan.js",
+        "bytes": 13330,
+        "sha256": "2bb9592de1acc804eed5b3ea93f85a38740130bacc614a1ffdf2604f129607a0"
+      },
+      {
+        "name": "assets/vala-CsfeWuGM.js",
+        "bytes": 3370,
+        "sha256": "9ca40f96a2c5ea6c15a4aa070af170b6a4fb19dce1aea0162639c456e88c1ee6"
+      },
+      {
+        "name": "assets/values-CvCfeSvh.js",
+        "bytes": 61,
+        "sha256": "055ac6cf19760eacb7bd9958f6d8583738081a2370dc94ee8baba17ada74f1b4"
+      },
+      {
+        "name": "assets/vb-Cu-pLBUe.js",
+        "bytes": 6075,
+        "sha256": "90340c8b81180fcf3b886697596aa2d9519645c8c2a9cd4eaf92703898338938"
+      },
+      {
+        "name": "assets/vennDiagram-L72KCM5P-CkxgCAmy.js",
+        "bytes": 41996,
+        "sha256": "320853c545693ffdae4c60b3156137646454e36d88d9e307e09aa40e617f04ab"
+      },
+      {
+        "name": "assets/verilog-nZwndyjY.js",
+        "bytes": 6407,
+        "sha256": "4f4570244b06c1271caac10a3993318e7dc8badbba3d36c978500adb673b8e10"
+      },
+      {
+        "name": "assets/vesper-DRje8inN.js",
+        "bytes": 12733,
+        "sha256": "58c6b0d954b34636e4629f8fff94dec40609e9522fb08ebfd615d8063d017b54"
+      },
+      {
+        "name": "assets/vhdl-CeAyd5Ju.js",
+        "bytes": 24264,
+        "sha256": "4aa59b0e56b6ade915050f27c9359de4b33c7435f1e715b1027f6c44ff08d05f"
+      },
+      {
+        "name": "assets/viml-CJc9bBzg.js",
+        "bytes": 20365,
+        "sha256": "255a5fbaf5961b394d403c022e2b57baf6855132db6ab4e8b3f8b6ccffdc5fc6"
+      },
+      {
+        "name": "assets/vitesse-black-Bkuqu6BP.js",
+        "bytes": 13677,
+        "sha256": "f25530f6e39e64d7dcc0464821c2fff73bf5aab1e311d61645cd740e886a2160"
+      },
+      {
+        "name": "assets/vitesse-dark-D0r3Knsf.js",
+        "bytes": 13759,
+        "sha256": "f3a4064c8e89ebd2349cf3dbf3e211d73b05d11cbd9bbc00feefa1820d74990b"
+      },
+      {
+        "name": "assets/vitesse-light-CVO1_9PV.js",
+        "bytes": 13616,
+        "sha256": "272401bf8f7fa77313d7d3dbdc609a59bde479c8d69763047b5aa508e16ead9d"
+      },
+      {
+        "name": "assets/vue-BA7R1wfO.js",
+        "bytes": 28308,
+        "sha256": "ef911738aed4eceefbed04f2d9213e14ac94900d6a84d4ac1694e6762d43ba5c"
+      },
+      {
+        "name": "assets/vue-BqiEGhQt.js",
+        "bytes": 24956,
+        "sha256": "7fa1c0c0cf9501bceaafa5d5b7dfbc4ffc6ce7049c9d0327ccac359be6c57cd7"
+      },
+      {
+        "name": "assets/vue-html-AaS7Mt5G.js",
+        "bytes": 8472,
+        "sha256": "a9066b052de965759c4456bed9e3e412c25f1050f3585a2dc6714747bbec1c0e"
+      },
+      {
+        "name": "assets/vue-html-DGTakP9i.js",
+        "bytes": 8946,
+        "sha256": "ab4441cf517c21e639fcd67260651ae343506616e4f8a5b84122d1e1c2a21d65"
+      },
+      {
+        "name": "assets/vue-vine-BoDAl6tE.js",
+        "bytes": 190051,
+        "sha256": "afa7f4368fcaa78d83c5a184c2905effd031a31b5ef776352e62e219414a6496"
+      },
+      {
+        "name": "assets/vyper-CDx5xZoG.js",
+        "bytes": 74648,
+        "sha256": "ff66f70ed9d0a15a77389cfc35cef85ff1f4932bef9e508f9a19b1c87d7f46e9"
+      },
+      {
+        "name": "assets/wardleyDiagram-EHGQE667-DP696Wo6.js",
+        "bytes": 25534,
+        "sha256": "f5e05cb44fcdaea7b881ca1006c2d164b20efff693657cc2b2b23f40d7f00db1"
+      },
+      {
+        "name": "assets/wasm-BzdluPJ6.js",
+        "bytes": 12503,
+        "sha256": "7fd81f1a432c4b0931b4239545ae2df218c2d73f26f93d5d35d20d104ddc8398"
+      },
+      {
+        "name": "assets/wasm-CG6Dc4jp.js",
+        "bytes": 622336,
+        "sha256": "8deb47b0d7b203f733275b554ccf654df3b76026bd14cab89130ae2a61abd719"
+      },
+      {
+        "name": "assets/wasm-MzD3tlZU.js",
+        "bytes": 12007,
+        "sha256": "ecac025bef526964873260d057a8af935fe8b86da2b9845051051266b019c8da"
+      },
+      {
+        "name": "assets/wasm-Ota6l3lF.js",
+        "bytes": 25432,
+        "sha256": "3d51354a38a371980dfa5c8252d76d72a4d4b4eb6175b6b2a0848f19d7bde01b"
+      },
+      {
+        "name": "assets/wasm_bg-CkYabwho.js",
+        "bytes": 62,
+        "sha256": "532336d48485d2b21a3c41a934e33778c1c82398b9ed766c65bb8cbf027dd9e0"
+      },
+      {
+        "name": "assets/webview-iCtVumkK.js",
+        "bytes": 16530,
+        "sha256": "62a0b68ee2f50f03689b32c10ee139c69d68f01ce8bee8bf69b1f59ae1e88b99"
+      },
+      {
+        "name": "assets/wenyan-BV7otONQ.js",
+        "bytes": 2157,
+        "sha256": "40ed524c0cfce810853c17a6e99f8c357dc1ea9d5df901dcf60a2b7a45e63f7f"
+      },
+      {
+        "name": "assets/wgsl-BphOKwv5.js",
+        "bytes": 5623,
+        "sha256": "93c7122bcc949db7adde72ee4ea355ce2c61b3f7f1b439e94d76417116d13d28"
+      },
+      {
+        "name": "assets/wgsl-Dx-B1_4e.js",
+        "bytes": 5144,
+        "sha256": "97dee41e3f719e15ac2c06cbf36677252c7654e254f178128113744841a4806e"
+      },
+      {
+        "name": "assets/wikitext-BhOHFoWU.js",
+        "bytes": 55885,
+        "sha256": "22c8b6a379a9a1aa4df1fa90a85d054b78c5414e772c062611997d98de2cdb64"
+      },
+      {
+        "name": "assets/wit-5i3qLPDT.js",
+        "bytes": 21467,
+        "sha256": "2b2cfcdfceebf61cad332a1b126a7bce2afe89b0b5c6bf8791067154e8229bb9"
+      },
+      {
+        "name": "assets/wolfram-lXgVvXCa.js",
+        "bytes": 262391,
+        "sha256": "5077bf9f804422eafafce9c7bc5bfd04f094ae624f0136c9a33daeac942fe75d"
+      },
+      {
+        "name": "assets/xml-C1zs8cY-.js",
+        "bytes": 5759,
+        "sha256": "9a0ab432a8e8b1218ba73683a660781efd207b9dfe63eb7009c8d7540624a3ee"
+      },
+      {
+        "name": "assets/xml-sdJ4AIDG.js",
+        "bytes": 5384,
+        "sha256": "50f00554f7503986c098ada8706f8e6a8fdad39e5158c7626d31532a883a51e8"
+      },
+      {
+        "name": "assets/xsl-CtQFsRM5.js",
+        "bytes": 1385,
+        "sha256": "b47bbb39b319947a57525dc114ec30eb2e697bf451be75f0b79850866f6811be"
+      },
+      {
+        "name": "assets/xychartDiagram-FW5EYKEG-nk3plq_a.js",
+        "bytes": 41966,
+        "sha256": "3d6ea268cd973297d19f93a520df85bb48ebcafad9588a85a196ef9003ca3214"
+      },
+      {
+        "name": "assets/yaml-Buea-lGh.js",
+        "bytes": 10506,
+        "sha256": "a7a8b4fc14fa7ba338598f61185a3a13e49d7450830af367407ae61b9634bede"
+      },
+      {
+        "name": "assets/yaml-CF_Zl04g.js",
+        "bytes": 12251,
+        "sha256": "3e92217e7afb71f65b689ca87725b937ec087d0805ef0d77321e7d6fa5c70d8f"
+      },
+      {
+        "name": "assets/zenscript-DVFEvuxE.js",
+        "bytes": 3912,
+        "sha256": "58a812eb8d71121ee3bd6e513b8a20555bec44f968f7c378bd7ecbfde05866a7"
+      },
+      {
+        "name": "assets/zig-VOosw3JB.js",
+        "bytes": 5340,
+        "sha256": "7c369292579d89b781e91b76a4df1bfba604287c7a5e2c426925935ef08c0841"
+      },
+      {
+        "name": "index.html",
+        "bytes": 3509,
+        "sha256": "d2b1dfa930e7a9679e43a6af5022755717ecf961bb08d2a3ac1ffbe891e7e26b"
+      },
+      {
+        "name": "pdfjs/wasm/jbig2_nowasm_fallback.js",
+        "bytes": 145703,
+        "sha256": "04c795a6657a4553a64b781ea3e85256203d913c3b71b72b85fa3ce00622f458"
+      },
+      {
+        "name": "pdfjs/wasm/openjpeg_nowasm_fallback.js",
+        "bytes": 451590,
+        "sha256": "0f998419819da4491d8302222aa9e2ff2494685641aa2a6c21c3760c29f3e319"
+      },
+      {
+        "name": "pdfjs/wasm/quickjs-eval.js",
+        "bytes": 6213,
+        "sha256": "767927762bd1ed2a833d16d1fcccbec4a4c7155ebd7de776df14b979c311423b"
+      }
+    ],
+    "samples": 20,
+    "inputStopMs": 2000,
+    "fixtureDeadlineMs": 45000,
+    "overallDeadlineMs": 240000,
+    "teardownDeadlineMs": 10000,
+    "network": "Only the exact preview origin permitted; no external requests",
+    "input": "Synthetic bubbling ArrowDown at focused real table grid; event dispatch to two animation frames. No edits. Title plus12/24 declared text fields with140px explicit widths. Fresh browser context per fixture. No result limit. Full sidebar and page header retained.",
+    "navigation": "Seed in-memory markdown before Open demo vault; use actual Databases rail and Benchmark Type sidebar button. Measure page navigation to all expected DOM rows plus two frames separately from warmed input.",
+    "caveat": "Unthrottled headless Chromium on shared machine. Synthetic key-to-two-frame timing is diagnostic; not trusted native input-to-photon or packaged WKWebView performance."
+  },
+  "browser": "149.0.7827.55",
+  "results": [
+    {
+      "count": 1000,
+      "cols": 12,
+      "status": "complete",
+      "loadBefore": [
+        7.12841796875,
+        9.75927734375,
+        14.103515625
+      ],
+      "mountedMs": 1820,
+      "host": {
+        "x": 294,
+        "y": 125,
+        "width": 1146,
+        "height": 747,
+        "scrollWidth": 2127,
+        "scrollHeight": 36066
+      },
+      "renderedRows": 1000,
+      "columnCount": "14",
+      "contentVisibility": "visible",
+      "inputMs": [
+        393.60000002384186,
+        384.7999999523163,
+        376.5,
+        412.89999997615814,
+        377.30000001192093,
+        370.60000002384186,
+        392.30000001192093,
+        382.2999999523163,
+        387.9000000357628,
+        398.80000001192093,
+        373.60000002384186,
+        380.80000001192093,
+        391.89999997615814,
+        389.69999998807907,
+        397.5,
+        392.89999997615814,
+        390,
+        375.0999999642372,
+        392.5999999642372,
+        387.30000001192093
+      ],
+      "activeDescendants": [
+        "_r_16_row-1",
+        "_r_16_row-2",
+        "_r_16_row-3",
+        "_r_16_row-4",
+        "_r_16_row-5",
+        "_r_16_row-6",
+        "_r_16_row-7",
+        "_r_16_row-8",
+        "_r_16_row-9",
+        "_r_16_row-10",
+        "_r_16_row-11",
+        "_r_16_row-12",
+        "_r_16_row-13",
+        "_r_16_row-14",
+        "_r_16_row-15",
+        "_r_16_row-16",
+        "_r_16_row-17",
+        "_r_16_row-18",
+        "_r_16_row-19",
+        "_r_16_row-20"
+      ],
+      "longTasks": [
+        {
+          "at": 2851.199999988079,
+          "duration": 382
+        },
+        {
+          "at": 3248.199999988079,
+          "duration": 374
+        },
+        {
+          "at": 3637.7999999523163,
+          "duration": 366
+        },
+        {
+          "at": 4020.199999988079,
+          "duration": 403
+        },
+        {
+          "at": 4435.399999976158,
+          "duration": 367
+        },
+        {
+          "at": 4818.5,
+          "duration": 360
+        },
+        {
+          "at": 5194.699999988079,
+          "duration": 383
+        },
+        {
+          "at": 5589.299999952316,
+          "duration": 373
+        },
+        {
+          "at": 5978.199999988079,
+          "duration": 377
+        },
+        {
+          "at": 6372.899999976158,
+          "duration": 387
+        },
+        {
+          "at": 6773.699999988079,
+          "duration": 363
+        },
+        {
+          "at": 7152.299999952316,
+          "duration": 371
+        },
+        {
+          "at": 7539.199999988079,
+          "duration": 382
+        },
+        {
+          "at": 7933.799999952316,
+          "duration": 380
+        },
+        {
+          "at": 8331.899999976158,
+          "duration": 386
+        },
+        {
+          "at": 8733.899999976158,
+          "duration": 383
+        },
+        {
+          "at": 9131.299999952316,
+          "duration": 378
+        },
+        {
+          "at": 9525.199999988079,
+          "duration": 366
+        },
+        {
+          "at": 9907.199999988079,
+          "duration": 382
+        },
+        {
+          "at": 10302.599999964237,
+          "duration": 377
+        }
+      ],
+      "maxWarmedTaskMs": 403,
+      "writes": 0,
+      "finalRenderedRows": 1000,
+      "p95InputMs": 398.80000001192093,
+      "cursorActuallyMoved": true,
+      "loadAfter": [
+        6.4931640625,
+        9.53662109375,
+        13.97314453125
+      ]
+    },
+    {
+      "count": 100,
+      "cols": 12,
+      "status": "complete",
+      "loadBefore": [
+        6.4931640625,
+        9.53662109375,
+        13.97314453125
+      ],
+      "mountedMs": 220.80000001192093,
+      "host": {
+        "x": 294,
+        "y": 125,
+        "width": 1146,
+        "height": 747,
+        "scrollWidth": 2127,
+        "scrollHeight": 3666
+      },
+      "renderedRows": 100,
+      "columnCount": "14",
+      "contentVisibility": "visible",
+      "inputMs": [
+        28.80000001192093,
+        26.399999976158142,
+        26.100000023841858,
+        25.600000023841858,
+        30.400000035762787,
+        24.799999952316284,
+        30.80000001192093,
+        27.899999976158142,
+        25.100000023841858,
+        28.80000001192093,
+        25.5,
+        29.19999998807907,
+        25.299999952316284,
+        28.80000001192093,
+        24.899999976158142,
+        30,
+        25.69999998807907,
+        28,
+        29.19999998807907,
+        26.30000001192093
+      ],
+      "activeDescendants": [
+        "_r_16_row-1",
+        "_r_16_row-2",
+        "_r_16_row-3",
+        "_r_16_row-4",
+        "_r_16_row-5",
+        "_r_16_row-6",
+        "_r_16_row-7",
+        "_r_16_row-8",
+        "_r_16_row-9",
+        "_r_16_row-10",
+        "_r_16_row-11",
+        "_r_16_row-12",
+        "_r_16_row-13",
+        "_r_16_row-14",
+        "_r_16_row-15",
+        "_r_16_row-16",
+        "_r_16_row-17",
+        "_r_16_row-18",
+        "_r_16_row-19",
+        "_r_16_row-20"
+      ],
+      "longTasks": [],
+      "maxWarmedTaskMs": 0,
+      "writes": 0,
+      "finalRenderedRows": 100,
+      "p95InputMs": 30.400000035762787,
+      "cursorActuallyMoved": true,
+      "loadAfter": [
+        6.05322265625,
+        9.39453125,
+        13.89697265625
+      ]
+    },
+    {
+      "count": 100,
+      "cols": 24,
+      "status": "complete",
+      "loadBefore": [
+        6.05322265625,
+        9.39453125,
+        13.89697265625
+      ],
+      "mountedMs": 278.39999997615814,
+      "host": {
+        "x": 294,
+        "y": 125,
+        "width": 1146,
+        "height": 747,
+        "scrollWidth": 3807,
+        "scrollHeight": 3666
+      },
+      "renderedRows": 100,
+      "columnCount": "26",
+      "contentVisibility": "visible",
+      "inputMs": [
+        47.60000002384186,
+        45.30000001192093,
+        43.09999996423721,
+        43.200000047683716,
+        45.89999997615814,
+        42.80000001192093,
+        44,
+        50.19999998807907,
+        45.799999952316284,
+        43.5,
+        45.5,
+        44,
+        43.60000002384186,
+        43.10000002384186,
+        42.39999997615814,
+        43.19999998807907,
+        42.5,
+        43.40000003576279,
+        44.200000047683716,
+        43.69999998807907
+      ],
+      "activeDescendants": [
+        "_r_16_row-1",
+        "_r_16_row-2",
+        "_r_16_row-3",
+        "_r_16_row-4",
+        "_r_16_row-5",
+        "_r_16_row-6",
+        "_r_16_row-7",
+        "_r_16_row-8",
+        "_r_16_row-9",
+        "_r_16_row-10",
+        "_r_16_row-11",
+        "_r_16_row-12",
+        "_r_16_row-13",
+        "_r_16_row-14",
+        "_r_16_row-15",
+        "_r_16_row-16",
+        "_r_16_row-17",
+        "_r_16_row-18",
+        "_r_16_row-19",
+        "_r_16_row-20"
+      ],
+      "longTasks": [],
+      "maxWarmedTaskMs": 0,
+      "writes": 0,
+      "finalRenderedRows": 100,
+      "p95InputMs": 47.60000002384186,
+      "cursorActuallyMoved": true,
+      "loadAfter": [
+        6.05322265625,
+        9.39453125,
+        13.89697265625
+      ]
+    },
+    {
+      "count": 1000,
+      "cols": 24,
+      "status": "complete",
+      "loadBefore": [
+        6.05322265625,
+        9.39453125,
+        13.89697265625
+      ],
+      "mountedMs": 4216,
+      "host": {
+        "x": 294,
+        "y": 125,
+        "width": 1146,
+        "height": 747,
+        "scrollWidth": 3807,
+        "scrollHeight": 36066
+      },
+      "renderedRows": 1000,
+      "columnCount": "26",
+      "contentVisibility": "visible",
+      "inputMs": [
+        1381,
+        1338.5999999642372,
+        1348.1000000238419,
+        1337.699999988079,
+        1316.300000011921,
+        1330.6000000238419,
+        1341.5,
+        1310.5,
+        1358.699999988079,
+        1341.800000011921,
+        1325,
+        1308.199999988079,
+        1320.8999999761581,
+        1326.199999988079,
+        1325.0999999642372,
+        1319.5,
+        1316,
+        1313.5,
+        1376.199999988079,
+        1318.8999999761581
+      ],
+      "activeDescendants": [
+        "_r_16_row-1",
+        "_r_16_row-2",
+        "_r_16_row-3",
+        "_r_16_row-4",
+        "_r_16_row-5",
+        "_r_16_row-6",
+        "_r_16_row-7",
+        "_r_16_row-8",
+        "_r_16_row-9",
+        "_r_16_row-10",
+        "_r_16_row-11",
+        "_r_16_row-12",
+        "_r_16_row-13",
+        "_r_16_row-14",
+        "_r_16_row-15",
+        "_r_16_row-16",
+        "_r_16_row-17",
+        "_r_16_row-18",
+        "_r_16_row-19",
+        "_r_16_row-20"
+      ],
+      "longTasks": [
+        {
+          "at": 6142.5,
+          "duration": 1367
+        },
+        {
+          "at": 7529.099999964237,
+          "duration": 1325
+        },
+        {
+          "at": 8871.300000011921,
+          "duration": 1336
+        },
+        {
+          "at": 10226,
+          "duration": 1323
+        },
+        {
+          "at": 11564.899999976158,
+          "duration": 1304
+        },
+        {
+          "at": 12885,
+          "duration": 1319
+        },
+        {
+          "at": 14220.5,
+          "duration": 1329
+        },
+        {
+          "at": 15564.699999988079,
+          "duration": 1299
+        },
+        {
+          "at": 16888.399999976158,
+          "duration": 1328
+        },
+        {
+          "at": 18244.599999964237,
+          "duration": 1329
+        },
+        {
+          "at": 19594.599999964237,
+          "duration": 1309
+        },
+        {
+          "at": 20923.5,
+          "duration": 1297
+        },
+        {
+          "at": 22236.899999976158,
+          "duration": 1308
+        },
+        {
+          "at": 23561.099999964237,
+          "duration": 1314
+        },
+        {
+          "at": 24890.5,
+          "duration": 1314
+        },
+        {
+          "at": 26219.30000001192,
+          "duration": 1308
+        },
+        {
+          "at": 27542.899999976158,
+          "duration": 1304
+        },
+        {
+          "at": 28865.80000001192,
+          "duration": 1300
+        },
+        {
+          "at": 30186.5,
+          "duration": 1342
+        },
+        {
+          "at": 31564.899999976158,
+          "duration": 1305
+        }
+      ],
+      "maxWarmedTaskMs": 1367,
+      "writes": 0,
+      "finalRenderedRows": 1000,
+      "p95InputMs": 1376.199999988079,
+      "cursorActuallyMoved": true,
+      "loadAfter": [
+        5.27783203125,
+        8.8408203125,
+        13.513671875
+      ]
+    },
+    {
+      "count": 5000,
+      "cols": 12,
+      "status": "failed-or-timeout",
+      "loadBefore": [
+        5.27783203125,
+        8.8408203125,
+        13.513671875
+      ],
+      "error": "TimeoutError: locator.click: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByTestId('sidebar-type').filter({ hasText: 'Benchmark' }).first()\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" data-testid=\"sidebar-type\" class=\"cb-nav-row motion-hover bg-transparent font-normal text-n-700 hover:bg-n-100\">…</button>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n\u001b[2m    - performing click action\u001b[22m\n\u001b[2m    - click action done\u001b[22m\n\u001b[2m    - waiting for scheduled navigations to finish\u001b[22m\n",
+      "loadAfter": [
+        5.61572265625,
+        8.748046875,
+        13.39892578125
+      ]
+    }
+  ],
+  "stopReason": "A fixture failed/timed out; remaining fixtures unmeasured",
+  "machine": {
+    "before": {
+      "at": "2026-10-17T19:12:43.023Z",
+      "load": [
+        7.12841796875,
+        9.75927734375,
+        14.103515625
+      ],
+      "executableNames": [
+        "launchd",
+        "logd",
+        "UserEventAgent",
+        "fseventsd",
+        "mediaremoted",
+        "systemstats",
+        "configd",
+        "powerd",
+        "IOMFB_bics_daemon",
+        "corespeechd_system",
+        "watchdogd",
+        "mds",
+        "kernelmanagerd",
+        "diskarbitrationd",
+        "syslogd",
+        "thermalmonitord",
+        "opendirectoryd",
+        "apsd",
+        "launchservicesd",
+        "timed",
+        "usbmuxd",
+        "securityd",
+        "autofsd",
+        "dasd",
+        "distnoted",
+        "logind",
+        "revisiond",
+        "KernelEventAgent",
+        "bluetoothd",
+        "notifyd",
+        "corebrightnessd",
+        "AirPlayXPCHelper",
+        "com.apple.cmio.registerassistantservice",
+        "tccd",
+        "cfprefsd",
+        "WindowServer",
+        "loginwindow",
+        "contextstored",
+        "runningboardd",
+        "Code Helper (Plugin)",
+        "analyticsd",
+        "Code Helper (Plugin)",
+        "coreservicesd",
+        "lsd",
+        "airportd",
+        "coreaudiod",
+        "apfsd",
+        "nsurlsessiond",
+        "trustd",
+        "eligibilityd",
+        "distnoted",
+        "distnoted",
+        "socketfilterfw",
+        "authd",
+        "stripe",
+        "mdx-language-server",
+        "symptomsd",
+        "distnoted",
+        "distnoted",
+        "Code Helper (Plugin)",
+        "syspolicyd",
+        "mDNSResponder",
+        "appleh13camerad",
+        "cameracaptured",
+        "UVCAssistant",
+        "appleeventsd",
+        "suhelperd",
+        "distnoted",
+        "mds_stores",
+        "distnoted",
+        "backupd",
+        "distnoted",
+        "nix-daemon",
+        "com.docker.vmnetd",
+        "distnoted",
+        "com.apple.DriverKit-AppleBCMWLAN",
+        "com.apple.DriverKit-IOUserDockChannelSerial",
+        "com.apple.AppleUserHIDDrivers",
+        "com.corsair.cue.main.VirtualHIDDeviceDriver",
+        "locationd",
+        "mDNSResponderHelper",
+        "distnoted",
+        "WirelessRadioManagerd",
+        "audioclocksyncd",
+        "searchpartyd",
+        "modelmanagerd",
+        "coreauthd",
+        "distnoted",
+        "cfprefsd",
+        "wifianalyticsd",
+        "UserEventAgent",
+        "Code Helper (Plugin)",
+        "universalaccessd",
+        "WindowManager",
+        "pboard",
+        "rapportd",
+        "lsd",
+        "usernotificationsd",
+        "accountsd",
+        "identityservicesd",
+        "secd",
+        "nsurlsessiond",
+        "usernoted",
+        "trustd",
+        "distnoted",
+        "lockoutagent",
+        "containermanagerd",
+        "Code",
+        "fontd",
+        "WiFiAgent",
+        "fontworker",
+        "ctkd",
+        "sharingd",
+        "Google Chrome",
+        "NotificationCenter",
+        "sharedfilelistd",
+        "familycircled",
+        "awdd",
+        "DuckDuckGo",
+        "Music",
+        "Dock",
+        "ControlCenter",
+        "SystemUIServer",
+        "Finder",
+        "imagent",
+        "filecoordinationd",
+        "WallpaperAgent",
+        "ViewBridgeAuxiliary",
+        "automountd",
+        "AMPDeviceDiscoveryAgent",
+        "ContinuityCaptureAgent",
+        "gamepolicyd",
+        "chrome_crashpad_handler",
+        "Code Helper",
+        "Code Helper",
+        "oahd",
+        "chrome_crashpad_handler",
+        "nearbyd",
+        "UIKitSystem",
+        "milod",
+        "useractivityd",
+        "mediaremoteagent",
+        "BiomeAgent",
+        "SubmitDiagInfo",
+        "com.apple.dock.external.extra.arm64",
+        "corespotlightd",
+        "commerce",
+        "com.apple.dock.extra",
+        "com.apple.dock.external.extra.arm64",
+        "avconferenced",
+        "Code Helper (Renderer)",
+        "systemstats",
+        "Code Helper",
+        "Google Chrome Helper",
+        "Code Helper",
+        "IOUserBluetoothSerialDriver",
+        "IOUserBluetoothSerialDriver",
+        "fairplayd",
+        "Google Chrome Helper",
+        "mdbulkimport",
+        "icdd",
+        "Google Chrome Helper",
+        "WallpaperVideoExtension",
+        "Code Helper",
+        "Code Helper (Plugin)",
+        "imklaunchagent",
+        "Code Helper",
+        "CursorUIViewService",
+        "PAH_Extension",
+        "Code Helper",
+        "Google Chrome Helper (Renderer)",
+        "Google Chrome Helper (Renderer)",
+        "Code Helper (Renderer)",
+        "Code Helper (Plugin)",
+        "Google Chrome Helper (Renderer)",
+        "chrome-native-host",
+        "Google Chrome Helper (Renderer)",
+        "CVMServer",
+        "AMPLibraryAgent",
+        "Google Chrome Helper (Renderer)",
+        "docker",
+        "codex",
+        "com.apple.WebKit.Networking",
+        "pet",
+        "node",
+        "node_repl",
+        "node_repl",
+        "php",
+        "corespeechd",
+        "redis-server 127.0.0.1:6379",
+        "AirPlayUIAgent",
+        "diagnostics_agent",
+        "TextInputMenuAgent",
+        "ctkahp",
+        "Code Helper (Plugin)",
+        "php",
+        "Herd",
+        "mcp",
+        "mcp@latest",
+        "Code Helper (Renderer)",
+        "ctkahp",
+        "Spotify",
+        "Spotify Helper",
+        "Spotify Helper",
+        "Spotify Helper",
+        "Spotify Helper",
+        "Spotify Helper (Renderer)",
+        "Spotify Helper (Renderer)",
+        "com.duckduckgo.macos.DBP.backgroundAgent",
+        "node",
+        "node",
+        "mcp",
+        "Code Helper (Plugin)",
+        "node",
+        "de.beyondco.herd.helper",
+        "Code Helper (Plugin)",
+        "mdsync",
+        "8.4-fpm.conf)",
+        "nginx.conf",
+        "dnsmasq-arm64",
+        "com.apple.WebKit.GPU",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.Networking",
+        "php-fpm: pool herd",
+        "php-fpm: pool herd",
+        "com.apple.WebKit.Networking",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "Google Chrome Helper (Renderer)",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "rtcreportingd",
+        "syncdefaultsd",
+        "ChatGPT",
+        "com.apple.dock.external.extra.arm64",
+        "browser_crashpad_handler",
+        "browser_crashpad_handler",
+        "Codex (Service)",
+        "Codex (Service)",
+        "Codex (Service)",
+        "bare-modifier-monitor",
+        "codex",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "Codex (Service)",
+        "SkyComputerUseService",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "Autoupdate",
+        "Updater",
+        "BooksSpotlightExtension",
+        "com.apple.podcasts.SpotlightIndexExtension",
+        "RemindersSpotlightIndexExtension",
+        "proactived",
+        "codex",
+        "distnoted",
+        "csimporter",
+        "node_repl",
+        "node",
+        "mcp",
+        "php",
+        "mcp@latest",
+        "php",
+        "node_repl",
+        "node",
+        "node",
+        "mobileassetd",
+        "Codex (Renderer)",
+        "distnoted",
+        "Codex (Renderer)",
+        "node_repl",
+        "mcp@latest",
+        "mcp",
+        "php",
+        "php",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "codex",
+        "node",
+        "mcp@latest",
+        "node_repl",
+        "php",
+        "php",
+        "mcp",
+        "node",
+        "node",
+        "node_repl",
+        "Autoupdate",
+        "Updater",
+        "node",
+        "docker",
+        "node",
+        "node",
+        "node",
+        "com.apple.mail.SpotlightIndexExtension",
+        "codex",
+        "softwareupdated",
+        "adid",
+        "pkd",
+        "codex-code-mode-host",
+        "coreduetd",
+        "mbuseragent",
+        "dmd",
+        "Google Chrome Helper (Renderer)",
+        "Google Chrome Helper",
+        "Google Chrome Helper",
+        "Google Chrome Helper (Renderer)",
+        "ssh-agent",
+        "Google Chrome",
+        "chrome_crashpad_handler",
+        "ThemeWidgetControlViewService",
+        "Google Chrome Helper (GPU)",
+        "Google Chrome Helper",
+        "Google Chrome Helper",
+        "Google Chrome Helper (Alerts)",
+        "tccd",
+        "DiskUnmountWatcher",
+        "peopled",
+        "Codex (Service)",
+        "CrashReporterSupportHelper",
+        "voicebankingd",
+        "Google Chrome Helper (Renderer)",
+        "fileproviderd",
+        "node_repl",
+        "php",
+        "mcp",
+        "php",
+        "mcp@latest",
+        "CoreServicesUIAgent",
+        "mcp",
+        "mcp@latest",
+        "Google Chrome Helper (Renderer)",
+        "node",
+        "node",
+        "node",
+        "PowerChime",
+        "node",
+        "com.apple.WebKit.GPU",
+        "audiomxd",
+        "com.apple.WebKit.WebContent",
+        "IMAutomaticHistoryDeletionAgent",
+        "duetexpertd",
+        "wifivelocityd",
+        "node_repl",
+        "php",
+        "php",
+        "node",
+        "mcp@latest",
+        "mcp",
+        "node_repl",
+        "node",
+        "node",
+        "ssh",
+        "claude",
+        "node",
+        "npm exec chrome-devtools-mcp@latest",
+        "mcp@latest",
+        "chrome-devtools-mcp",
+        "node",
+        "node",
+        "ScapeMCPServer",
+        "node",
+        "node",
+        "claude",
+        "<defunct>",
+        "<defunct>",
+        "tail",
+        "ugrep",
+        "node_repl",
+        "php",
+        "php",
+        "FinderSyncExt",
+        "Google Chrome Helper (Renderer)",
+        "com.docker.backend",
+        "com.docker.backend",
+        "com.docker.dev-envs",
+        "com.docker.build",
+        "Docker Desktop",
+        "com.docker.virtualization",
+        "com.apple.Virtualization.VirtualMachine",
+        "Docker Desktop Helper (GPU)",
+        "Docker Desktop Helper",
+        "Siri",
+        "Keychain Circle Notification",
+        "replayd",
+        "com.apple.WebKit.WebContent",
+        "SiriNCService",
+        "Google Chrome Helper (Renderer)",
+        "findmybeaconingd",
+        "dataaccessd",
+        "calaccessd",
+        "contactsd",
+        "com.apple.WebKit.WebContent",
+        "chronod",
+        "WeatherWidget",
+        "WorldClockWidget",
+        "RemindersWidgetExtension",
+        "NewsToday2",
+        "CalendarWidgetExtension",
+        "StocksWidget",
+        "ScreenTimeWidgetExtension",
+        "php",
+        "php",
+        "node",
+        "mcp@latest",
+        "mcp",
+        "node_repl",
+        "node_repl",
+        "VTDecoderXPCService",
+        "node",
+        "node",
+        "siriactionsd",
+        "linkd",
+        "BackgroundTaskManagementAgent",
+        "amfid",
+        "XprotectService",
+        "logd_helper",
+        "talagentd",
+        "postgres",
+        "postgres: io worker 0",
+        "postgres: io worker 1",
+        "postgres: io worker 2",
+        "postgres: checkpointer",
+        "postgres: background writer",
+        "postgres: walwriter",
+        "postgres: autovacuum launcher",
+        "postgres: logical replication launcher",
+        "UsageTrackingAgent",
+        "AppPredictionIntentsHelperService",
+        "Code Helper (Renderer)",
+        "com.apple.WebKit.WebContent",
+        "Code Helper",
+        "Code Helper (Plugin)",
+        "codex",
+        "Code Helper (Plugin)",
+        "Code Helper (Renderer)",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "UserNotificationCenter",
+        "mcp",
+        "node",
+        "node_repl",
+        "php",
+        "php",
+        "mcp@latest",
+        "node_repl",
+        "node",
+        "node",
+        "codex-code-mode-host",
+        "CMFSyncAgent",
+        "IMDPersistenceAgent",
+        "Google Chrome",
+        "chrome_crashpad_handler",
+        "Google Chrome Helper (GPU)",
+        "Google Chrome Helper",
+        "Google Chrome Helper",
+        "codex",
+        "codex",
+        "node",
+        "node",
+        "codex",
+        "ManagedSettingsAgent",
+        "countryd",
+        "com.apple.WebKit.WebContent",
+        "Google Chrome Helper (Renderer)",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "php",
+        "node_repl",
+        "mlhostd",
+        "node",
+        "php",
+        "mcp@latest",
+        "node_repl",
+        "node",
+        "limactl",
+        "com.apple.Virtualization.VirtualMachine",
+        "AquaAppearanceHelper",
+        "ssh.sock [mux]",
+        "UniversalControl",
+        "managedcorespotlightd",
+        "spotlightknowledged",
+        "com.apple.WebKit.WebContent",
+        "biomed",
+        "triald",
+        "node_repl",
+        "node",
+        "php",
+        "mcp@latest",
+        "mcp",
+        "php",
+        "node_repl",
+        "ScreenTimeAgent",
+        "assistantd",
+        "homed",
+        "node",
+        "node",
+        "<defunct>",
+        "Docker Desktop Helper (Renderer)",
+        "maild",
+        "distnoted",
+        "node",
+        "esbuild",
+        "<defunct>",
+        "npm run storybook --no-open --ci",
+        "node",
+        "esbuild",
+        "Code Helper (Renderer)",
+        "esbuild",
+        "esbuild",
+        "Google Chrome Helper",
+        "Google Chrome Helper",
+        "Google Chrome Helper (Renderer)",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "mdx-language-server",
+        "stripe",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "AuthenticationServicesAgent",
+        "universalAccessAuthWarn",
+        "BambuStudio",
+        "com.apple.WebKit.GPU",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.Networking",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "Code Helper (Renderer)",
+        "Terminal",
+        "SetappAgent",
+        "SetappLauncher",
+        "IntelligencePlatformComputeService",
+        "Code Helper (Renderer)",
+        "codex",
+        "codex",
+        "node",
+        "node",
+        "Google Chrome Helper (Renderer)",
+        "distnoted",
+        "swtransparencyd",
+        "CloudTelemetryService",
+        "intents_helper",
+        "Code Helper (Plugin)",
+        "Code Helper",
+        "Code Helper",
+        "zsh",
+        "zsh",
+        "taskgated",
+        "ndoagent",
+        "gamecontrollerd",
+        "gamecontrolleragentd",
+        "businessservicesd",
+        "MessagesBlastDoorService",
+        "ospredictiond",
+        "audioanalyticsd",
+        "intelligenceflowd",
+        "idleassetsd",
+        "lskdd",
+        "CommCenter",
+        "Code Helper (Plugin)",
+        "Code Helper",
+        "codex",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "online-auth-agent",
+        "feedbackd",
+        "com.apple.WebKit.GPU",
+        "parsecd",
+        "itunescloudd",
+        "photolibraryd",
+        "ScopedBookmarkAgent",
+        "PlugInLibraryService",
+        "photoanalysisd",
+        "amsaccountsd",
+        "amsengagementd",
+        "swcd",
+        "ciphermld",
+        "usermanagerd",
+        "cloudphotod",
+        "codex-code-mode-host",
+        "Code Helper (Renderer)",
+        "Code Helper (Plugin)",
+        "Code Helper (Renderer)",
+        "Code Helper",
+        "codex",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "Code Helper (Renderer)",
+        "php",
+        "node_repl",
+        "php",
+        "mcp@latest",
+        "Code Helper (Plugin)",
+        "mcp",
+        "docker",
+        "Code Helper (Renderer)",
+        "node",
+        "node",
+        "nehelper",
+        "aned",
+        "PerfPowerServices",
+        "securityd_system",
+        "codex",
+        "cloudd",
+        "bird",
+        "extensionkitservice",
+        "ContainerMetadataExtractor",
+        "Autoupdate",
+        "Updater",
+        "distnoted",
+        "mapssyncd",
+        "node",
+        "esbuild",
+        "com.apple.WebKit.WebContent",
+        "distnoted",
+        "biometrickitd",
+        "coreautha",
+        "Messages",
+        "netbiosd",
+        "com.apple.WebKit.WebContent",
+        "backupd-helper",
+        "com.apple.WebKit.WebContent",
+        "MessagesBlastDoorService",
+        "recentsd",
+        "spotlightknowledged",
+        "generativeexperiencesd",
+        "deleted",
+        "sociallayerd",
+        "ContextService",
+        "deleted_helper",
+        "AssetCache",
+        "geodMachServiceBridge",
+        "aneuserd",
+        "ModelCatalogAgent",
+        "AssetCacheTetheratorService",
+        "siriknowledged",
+        "com.apple.quicklook.ThumbnailsAgent",
+        "storagekitd",
+        "com.apple.WebKit.WebContent",
+        "containermanagerd_system",
+        "AMPArtworkAgent",
+        "mobileactivationd",
+        "com.apple.tonelibraryd",
+        "textunderstandingd",
+        "siriinferenced",
+        "reversetemplated",
+        "SiriSuggestionsBookkeepingService",
+        "com.apple.WebKit.WebContent",
+        "followupd",
+        "cdpd",
+        "triald_system",
+        "com.apple.WebKit.WebContent",
+        "codex-code-mode-host",
+        "codex-code-mode-host",
+        "ReportCrash",
+        "Google Chrome Helper (Renderer)",
+        "Google Chrome Helper (Renderer)",
+        "com.apple.WebKit.WebContent",
+        "mcp",
+        "mcp@latest",
+        "php",
+        "com.apple.WebKit.WebContent",
+        "php",
+        "mcp",
+        "node",
+        "node_repl",
+        "php",
+        "node_repl",
+        "node",
+        "node",
+        "node_repl",
+        "php",
+        "mcp",
+        "mcp@latest",
+        "mcp@latest",
+        "php",
+        "php",
+        "mcp",
+        "mcp@latest",
+        "node_repl",
+        "node_repl",
+        "node_repl",
+        "simdiskimaged",
+        "diskimagesiod",
+        "SimLaunchHost.arm64",
+        "TGOnDeviceInferenceProviderService",
+        "distnoted",
+        "findmylocateagent",
+        "node",
+        "node",
+        "node",
+        "node",
+        "node",
+        "node",
+        "node",
+        "node",
+        "ctkd",
+        "com.apple.SafariPlatformSupport.Helper",
+        "com.apple.WebKit.WebContent",
+        "docker",
+        "donotdisturbd",
+        "searchpartyuseragent",
+        "mediaanalysisd",
+        "suggestd",
+        "knowledge-agent",
+        "mmaintenanced",
+        "Spotlight",
+        "diagnosticservicesd",
+        "keybagd",
+        "sysmond",
+        "nesessionmanager",
+        "sysextd",
+        "smd",
+        "amsondevicestoraged",
+        "mobiletimerd",
+        "MTLAssetUpgraderD",
+        "MENotificationAgent",
+        "SetStoreUpdateService",
+        "axassetsd",
+        "extensionkitservice",
+        "PackageThumbnailExtension",
+        "com.apple.audio.ComponentTagHelper",
+        "com.apple.SiriTTSService.TrialProxy",
+        "com.apple.SiriTTSService.TrialProxy",
+        "com.apple.SiriTTSService.TrialProxy",
+        "com.apple.SiriTTSService.TrialProxy",
+        "com.apple.SiriTTSService.TrialProxy",
+        "limactl",
+        "limactl",
+        "com.apple.Virtualization.VirtualMachine",
+        "com.apple.hiservices-xpcservice",
+        "ssh.sock [mux]",
+        "com.apple.WebKit.WebContent",
+        "routined",
+        "diskimagesiod",
+        "com.apple.accessibility.mediaaccessibilityd",
+        "AudioComponentRegistrar",
+        "webprivacyd",
+        "node",
+        "node_repl",
+        "php",
+        "Google Chrome Helper (Renderer)",
+        "php",
+        "node_repl",
+        "php",
+        "node",
+        "mcp@latest",
+        "php",
+        "mcp",
+        "node_repl",
+        "php",
+        "node",
+        "node_repl",
+        "php",
+        "node_repl",
+        "mcp",
+        "mcp@latest",
+        "cloudd",
+        "AppleSpell",
+        "sandboxd",
+        "neagent",
+        "node_repl",
+        "secinitd",
+        "AssetCacheLocatorService",
+        "CloudTelemetryService",
+        "osanalyticshelper",
+        "coresymbolicationd",
+        "node",
+        "com.apple.WebKit.WebContent",
+        "node",
+        "node",
+        "node",
+        "contactsdonationagent",
+        "node",
+        "node",
+        "esbuild",
+        "Google Chrome Helper (Renderer)",
+        "networkserviceproxy",
+        "node",
+        "node",
+        "node",
+        "node",
+        "node",
+        "php",
+        "mcp",
+        "mcp@latest",
+        "node_repl",
+        "php",
+        "node_repl",
+        "node_repl",
+        "node_repl",
+        "node_repl",
+        "node_repl",
+        "extensionkitservice",
+        "PlugInLibraryService",
+        "node",
+        "node",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "keyboardservicesd",
+        "pbs",
+        "cerebro",
+        "com.apple.WebKit.GPU",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.Networking",
+        "Google Chrome Helper (Renderer)",
+        "com.apple.geod",
+        "cfprefsd",
+        "iconservicesagent",
+        "iconservicesd",
+        "system_installd",
+        "installd",
+        "akd",
+        "naturallanguaged",
+        "callservicesd",
+        "CloudTelemetryService",
+        "XProtectBridgeService",
+        "Claude",
+        "StatusKitAgent",
+        "chrome_crashpad_handler",
+        "Claude Helper",
+        "Claude Helper",
+        "Claude Helper (Renderer)",
+        "Claude Helper (Renderer)",
+        "Claude Helper",
+        "disclaimer",
+        "disclaimer",
+        "disclaimer",
+        "server-puppeteer",
+        "npm exec firecrawl-mcp",
+        "Downloads",
+        "node",
+        "node",
+        "node",
+        "com.apple.CodeSigningHelper",
+        "disclaimer",
+        "disclaimer",
+        "disclaimer",
+        "Downloads",
+        "npm exec firecrawl-mcp",
+        "server-puppeteer",
+        "Claude Helper (Renderer)",
+        "node",
+        "node",
+        "node",
+        "audioaccessoryd",
+        "com.apple.geod",
+        "extensionkitservice",
+        "parsec-fbf",
+        "wifip2pd",
+        "ContextStoreAgent",
+        "IMTransferAgent",
+        "systemsoundserverd",
+        "AudioComponentRegistrar",
+        "com.apple.audio.SandboxHelper",
+        "systemstatusd",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "CoreLocationAgent",
+        "Google Chrome Helper (Renderer)",
+        "sleep",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "mdworker_shared",
+        "node",
+        "ps",
+        "mdwrite",
+        "PowerUIAgent",
+        "cfprefsd",
+        "Google Chrome Helper (Renderer)",
+        "Google Chrome Helper (Renderer)",
+        "com.apple.Safari.SafeBrowsing.Service",
+        "Signal",
+        "Signal Helper",
+        "Signal Helper",
+        "Signal Helper (Renderer)",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "diskimagesiod",
+        "ShipIt",
+        "node",
+        "node",
+        "esbuild",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "coreauthd",
+        "remoted",
+        "node",
+        "node",
+        "esbuild",
+        "cerebro",
+        "zsh",
+        "node",
+        "node",
+        "zsh",
+        "zsh",
+        "login",
+        "-zsh",
+        "codex",
+        "bun",
+        "node",
+        "esbuild",
+        "zsh",
+        "npm run storybook",
+        "npm run storybook",
+        "node",
+        "esbuild",
+        "esbuild",
+        "esbuild",
+        "zsh",
+        "npm start",
+        "sh",
+        "npm run dev",
+        "sh",
+        "node",
+        "turbo",
+        "zsh",
+        "bun",
+        "bash",
+        "node",
+        "node",
+        "esbuild",
+        "esbuild",
+        "redis-server 127.0.0.1:63190",
+        "node",
+        "bun",
+        "node",
+        "esbuild",
+        "bun",
+        "bash",
+        "node",
+        "npm run dev",
+        "node",
+        "zsh"
+      ]
+    },
+    "after": {
+      "at": "2026-10-17T19:13:46.325Z",
+      "load": [
+        5.61572265625,
+        8.748046875,
+        13.39892578125
+      ],
+      "executableNames": [
+        "launchd",
+        "logd",
+        "UserEventAgent",
+        "fseventsd",
+        "mediaremoted",
+        "systemstats",
+        "configd",
+        "powerd",
+        "IOMFB_bics_daemon",
+        "corespeechd_system",
+        "watchdogd",
+        "mds",
+        "kernelmanagerd",
+        "diskarbitrationd",
+        "syslogd",
+        "thermalmonitord",
+        "opendirectoryd",
+        "apsd",
+        "launchservicesd",
+        "timed",
+        "usbmuxd",
+        "securityd",
+        "autofsd",
+        "dasd",
+        "distnoted",
+        "logind",
+        "revisiond",
+        "KernelEventAgent",
+        "bluetoothd",
+        "notifyd",
+        "corebrightnessd",
+        "AirPlayXPCHelper",
+        "com.apple.cmio.registerassistantservice",
+        "tccd",
+        "cfprefsd",
+        "WindowServer",
+        "loginwindow",
+        "contextstored",
+        "runningboardd",
+        "Code Helper (Plugin)",
+        "analyticsd",
+        "Code Helper (Plugin)",
+        "coreservicesd",
+        "lsd",
+        "airportd",
+        "coreaudiod",
+        "apfsd",
+        "nsurlsessiond",
+        "trustd",
+        "eligibilityd",
+        "distnoted",
+        "distnoted",
+        "socketfilterfw",
+        "authd",
+        "stripe",
+        "mdx-language-server",
+        "symptomsd",
+        "distnoted",
+        "distnoted",
+        "Code Helper (Plugin)",
+        "syspolicyd",
+        "mDNSResponder",
+        "appleh13camerad",
+        "cameracaptured",
+        "UVCAssistant",
+        "appleeventsd",
+        "suhelperd",
+        "distnoted",
+        "mds_stores",
+        "distnoted",
+        "backupd",
+        "distnoted",
+        "nix-daemon",
+        "com.docker.vmnetd",
+        "distnoted",
+        "com.apple.DriverKit-AppleBCMWLAN",
+        "com.apple.DriverKit-IOUserDockChannelSerial",
+        "com.apple.AppleUserHIDDrivers",
+        "com.corsair.cue.main.VirtualHIDDeviceDriver",
+        "locationd",
+        "mDNSResponderHelper",
+        "distnoted",
+        "WirelessRadioManagerd",
+        "audioclocksyncd",
+        "searchpartyd",
+        "modelmanagerd",
+        "coreauthd",
+        "distnoted",
+        "cfprefsd",
+        "wifianalyticsd",
+        "UserEventAgent",
+        "Code Helper (Plugin)",
+        "universalaccessd",
+        "WindowManager",
+        "pboard",
+        "rapportd",
+        "lsd",
+        "usernotificationsd",
+        "accountsd",
+        "identityservicesd",
+        "secd",
+        "nsurlsessiond",
+        "usernoted",
+        "trustd",
+        "distnoted",
+        "lockoutagent",
+        "containermanagerd",
+        "Code",
+        "fontd",
+        "WiFiAgent",
+        "fontworker",
+        "ctkd",
+        "sharingd",
+        "Google Chrome",
+        "NotificationCenter",
+        "sharedfilelistd",
+        "familycircled",
+        "awdd",
+        "DuckDuckGo",
+        "Music",
+        "Dock",
+        "ControlCenter",
+        "SystemUIServer",
+        "Finder",
+        "imagent",
+        "filecoordinationd",
+        "WallpaperAgent",
+        "ViewBridgeAuxiliary",
+        "automountd",
+        "AMPDeviceDiscoveryAgent",
+        "ContinuityCaptureAgent",
+        "gamepolicyd",
+        "chrome_crashpad_handler",
+        "Code Helper",
+        "Code Helper",
+        "oahd",
+        "chrome_crashpad_handler",
+        "nearbyd",
+        "UIKitSystem",
+        "milod",
+        "useractivityd",
+        "mediaremoteagent",
+        "BiomeAgent",
+        "SubmitDiagInfo",
+        "com.apple.dock.external.extra.arm64",
+        "corespotlightd",
+        "commerce",
+        "com.apple.dock.extra",
+        "com.apple.dock.external.extra.arm64",
+        "avconferenced",
+        "Code Helper (Renderer)",
+        "systemstats",
+        "Code Helper",
+        "Google Chrome Helper",
+        "Code Helper",
+        "IOUserBluetoothSerialDriver",
+        "IOUserBluetoothSerialDriver",
+        "fairplayd",
+        "Google Chrome Helper",
+        "mdbulkimport",
+        "icdd",
+        "Google Chrome Helper",
+        "WallpaperVideoExtension",
+        "Code Helper",
+        "Code Helper (Plugin)",
+        "imklaunchagent",
+        "Code Helper",
+        "CursorUIViewService",
+        "PAH_Extension",
+        "Code Helper",
+        "Google Chrome Helper (Renderer)",
+        "Google Chrome Helper (Renderer)",
+        "Code Helper (Renderer)",
+        "Code Helper (Plugin)",
+        "Google Chrome Helper (Renderer)",
+        "chrome-native-host",
+        "Google Chrome Helper (Renderer)",
+        "CVMServer",
+        "AMPLibraryAgent",
+        "Google Chrome Helper (Renderer)",
+        "docker",
+        "codex",
+        "com.apple.WebKit.Networking",
+        "pet",
+        "node",
+        "node_repl",
+        "node_repl",
+        "php",
+        "corespeechd",
+        "redis-server 127.0.0.1:6379",
+        "AirPlayUIAgent",
+        "diagnostics_agent",
+        "TextInputMenuAgent",
+        "ctkahp",
+        "Code Helper (Plugin)",
+        "php",
+        "Herd",
+        "mcp",
+        "mcp@latest",
+        "Code Helper (Renderer)",
+        "ctkahp",
+        "Spotify",
+        "Spotify Helper",
+        "Spotify Helper",
+        "Spotify Helper",
+        "Spotify Helper",
+        "Spotify Helper (Renderer)",
+        "Spotify Helper (Renderer)",
+        "com.duckduckgo.macos.DBP.backgroundAgent",
+        "node",
+        "node",
+        "mcp",
+        "Code Helper (Plugin)",
+        "node",
+        "de.beyondco.herd.helper",
+        "Code Helper (Plugin)",
+        "mdsync",
+        "8.4-fpm.conf)",
+        "nginx.conf",
+        "dnsmasq-arm64",
+        "com.apple.WebKit.GPU",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.Networking",
+        "php-fpm: pool herd",
+        "php-fpm: pool herd",
+        "com.apple.WebKit.Networking",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "Google Chrome Helper (Renderer)",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "nginx: worker process",
+        "rtcreportingd",
+        "syncdefaultsd",
+        "ChatGPT",
+        "com.apple.dock.external.extra.arm64",
+        "browser_crashpad_handler",
+        "browser_crashpad_handler",
+        "Codex (Service)",
+        "Codex (Service)",
+        "Codex (Service)",
+        "bare-modifier-monitor",
+        "codex",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "Codex (Service)",
+        "SkyComputerUseService",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "Autoupdate",
+        "Updater",
+        "BooksSpotlightExtension",
+        "com.apple.podcasts.SpotlightIndexExtension",
+        "RemindersSpotlightIndexExtension",
+        "proactived",
+        "codex",
+        "distnoted",
+        "csimporter",
+        "node_repl",
+        "node",
+        "mcp",
+        "php",
+        "mcp@latest",
+        "php",
+        "node_repl",
+        "node",
+        "node",
+        "mobileassetd",
+        "Codex (Renderer)",
+        "distnoted",
+        "Codex (Renderer)",
+        "node_repl",
+        "mcp@latest",
+        "mcp",
+        "php",
+        "php",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "codex",
+        "node",
+        "mcp@latest",
+        "node_repl",
+        "php",
+        "php",
+        "mcp",
+        "node",
+        "node",
+        "node_repl",
+        "Autoupdate",
+        "Updater",
+        "node",
+        "docker",
+        "node",
+        "node",
+        "node",
+        "com.apple.mail.SpotlightIndexExtension",
+        "codex",
+        "softwareupdated",
+        "adid",
+        "pkd",
+        "codex-code-mode-host",
+        "coreduetd",
+        "mbuseragent",
+        "dmd",
+        "Google Chrome Helper (Renderer)",
+        "Google Chrome Helper",
+        "Google Chrome Helper",
+        "Google Chrome Helper (Renderer)",
+        "ssh-agent",
+        "Google Chrome",
+        "chrome_crashpad_handler",
+        "ThemeWidgetControlViewService",
+        "Google Chrome Helper (GPU)",
+        "Google Chrome Helper",
+        "Google Chrome Helper",
+        "Google Chrome Helper (Alerts)",
+        "tccd",
+        "DiskUnmountWatcher",
+        "peopled",
+        "Codex (Service)",
+        "CrashReporterSupportHelper",
+        "voicebankingd",
+        "Google Chrome Helper (Renderer)",
+        "fileproviderd",
+        "node_repl",
+        "php",
+        "mcp",
+        "php",
+        "mcp@latest",
+        "CoreServicesUIAgent",
+        "mcp",
+        "mcp@latest",
+        "Google Chrome Helper (Renderer)",
+        "node",
+        "node",
+        "node",
+        "PowerChime",
+        "node",
+        "com.apple.WebKit.GPU",
+        "audiomxd",
+        "com.apple.WebKit.WebContent",
+        "IMAutomaticHistoryDeletionAgent",
+        "duetexpertd",
+        "wifivelocityd",
+        "node_repl",
+        "php",
+        "php",
+        "node",
+        "mcp@latest",
+        "mcp",
+        "node_repl",
+        "node",
+        "node",
+        "ssh",
+        "claude",
+        "node",
+        "npm exec chrome-devtools-mcp@latest",
+        "mcp@latest",
+        "chrome-devtools-mcp",
+        "node",
+        "node",
+        "ScapeMCPServer",
+        "node",
+        "node",
+        "claude",
+        "<defunct>",
+        "<defunct>",
+        "tail",
+        "ugrep",
+        "node_repl",
+        "php",
+        "php",
+        "FinderSyncExt",
+        "Google Chrome Helper (Renderer)",
+        "com.docker.backend",
+        "com.docker.backend",
+        "com.docker.dev-envs",
+        "com.docker.build",
+        "Docker Desktop",
+        "com.docker.virtualization",
+        "com.apple.Virtualization.VirtualMachine",
+        "Docker Desktop Helper (GPU)",
+        "Docker Desktop Helper",
+        "Siri",
+        "Keychain Circle Notification",
+        "replayd",
+        "com.apple.WebKit.WebContent",
+        "SiriNCService",
+        "Google Chrome Helper (Renderer)",
+        "findmybeaconingd",
+        "dataaccessd",
+        "calaccessd",
+        "contactsd",
+        "com.apple.WebKit.WebContent",
+        "chronod",
+        "WeatherWidget",
+        "WorldClockWidget",
+        "RemindersWidgetExtension",
+        "NewsToday2",
+        "CalendarWidgetExtension",
+        "StocksWidget",
+        "ScreenTimeWidgetExtension",
+        "php",
+        "php",
+        "node",
+        "mcp@latest",
+        "mcp",
+        "node_repl",
+        "node_repl",
+        "VTDecoderXPCService",
+        "node",
+        "node",
+        "siriactionsd",
+        "linkd",
+        "BackgroundTaskManagementAgent",
+        "amfid",
+        "XprotectService",
+        "logd_helper",
+        "talagentd",
+        "postgres",
+        "postgres: io worker 0",
+        "postgres: io worker 1",
+        "postgres: io worker 2",
+        "postgres: checkpointer",
+        "postgres: background writer",
+        "postgres: walwriter",
+        "postgres: autovacuum launcher",
+        "postgres: logical replication launcher",
+        "UsageTrackingAgent",
+        "AppPredictionIntentsHelperService",
+        "Code Helper (Renderer)",
+        "com.apple.WebKit.WebContent",
+        "Code Helper",
+        "Code Helper (Plugin)",
+        "codex",
+        "Code Helper (Plugin)",
+        "Code Helper (Renderer)",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "UserNotificationCenter",
+        "mcp",
+        "node",
+        "node_repl",
+        "php",
+        "php",
+        "mcp@latest",
+        "node_repl",
+        "node",
+        "node",
+        "codex-code-mode-host",
+        "CMFSyncAgent",
+        "IMDPersistenceAgent",
+        "Google Chrome",
+        "chrome_crashpad_handler",
+        "Google Chrome Helper (GPU)",
+        "Google Chrome Helper",
+        "Google Chrome Helper",
+        "codex",
+        "codex",
+        "node",
+        "node",
+        "codex",
+        "ManagedSettingsAgent",
+        "countryd",
+        "com.apple.WebKit.WebContent",
+        "Google Chrome Helper (Renderer)",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "php",
+        "node_repl",
+        "mlhostd",
+        "node",
+        "php",
+        "mcp@latest",
+        "node_repl",
+        "node",
+        "limactl",
+        "com.apple.Virtualization.VirtualMachine",
+        "AquaAppearanceHelper",
+        "ssh.sock [mux]",
+        "UniversalControl",
+        "managedcorespotlightd",
+        "spotlightknowledged",
+        "com.apple.WebKit.WebContent",
+        "biomed",
+        "triald",
+        "node_repl",
+        "node",
+        "php",
+        "mcp@latest",
+        "mcp",
+        "php",
+        "node_repl",
+        "ScreenTimeAgent",
+        "assistantd",
+        "homed",
+        "node",
+        "node",
+        "<defunct>",
+        "Docker Desktop Helper (Renderer)",
+        "maild",
+        "distnoted",
+        "node",
+        "esbuild",
+        "<defunct>",
+        "npm run storybook --no-open --ci",
+        "node",
+        "esbuild",
+        "Code Helper (Renderer)",
+        "esbuild",
+        "esbuild",
+        "Google Chrome Helper",
+        "Google Chrome Helper",
+        "Google Chrome Helper (Renderer)",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "mdx-language-server",
+        "stripe",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "AuthenticationServicesAgent",
+        "universalAccessAuthWarn",
+        "BambuStudio",
+        "com.apple.WebKit.GPU",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.Networking",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "Code Helper (Renderer)",
+        "Terminal",
+        "SetappAgent",
+        "SetappLauncher",
+        "IntelligencePlatformComputeService",
+        "Code Helper (Renderer)",
+        "codex",
+        "codex",
+        "node",
+        "node",
+        "Google Chrome Helper (Renderer)",
+        "distnoted",
+        "swtransparencyd",
+        "CloudTelemetryService",
+        "intents_helper",
+        "Code Helper (Plugin)",
+        "Code Helper",
+        "Code Helper",
+        "zsh",
+        "zsh",
+        "taskgated",
+        "ndoagent",
+        "gamecontrollerd",
+        "gamecontrolleragentd",
+        "businessservicesd",
+        "MessagesBlastDoorService",
+        "ospredictiond",
+        "audioanalyticsd",
+        "intelligenceflowd",
+        "idleassetsd",
+        "lskdd",
+        "CommCenter",
+        "Code Helper (Plugin)",
+        "Code Helper",
+        "codex",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "online-auth-agent",
+        "feedbackd",
+        "com.apple.WebKit.GPU",
+        "parsecd",
+        "itunescloudd",
+        "photolibraryd",
+        "ScopedBookmarkAgent",
+        "PlugInLibraryService",
+        "photoanalysisd",
+        "amsaccountsd",
+        "amsengagementd",
+        "swcd",
+        "ciphermld",
+        "usermanagerd",
+        "cloudphotod",
+        "codex-code-mode-host",
+        "Code Helper (Renderer)",
+        "Code Helper (Plugin)",
+        "Code Helper (Renderer)",
+        "Code Helper",
+        "codex",
+        "Code Helper (Plugin)",
+        "Code Helper (Plugin)",
+        "Code Helper (Renderer)",
+        "php",
+        "node_repl",
+        "php",
+        "mcp@latest",
+        "Code Helper (Plugin)",
+        "mcp",
+        "docker",
+        "Code Helper (Renderer)",
+        "node",
+        "node",
+        "nehelper",
+        "aned",
+        "PerfPowerServices",
+        "securityd_system",
+        "codex",
+        "cloudd",
+        "bird",
+        "extensionkitservice",
+        "ContainerMetadataExtractor",
+        "Autoupdate",
+        "Updater",
+        "distnoted",
+        "mapssyncd",
+        "node",
+        "esbuild",
+        "com.apple.WebKit.WebContent",
+        "distnoted",
+        "biometrickitd",
+        "coreautha",
+        "Messages",
+        "netbiosd",
+        "com.apple.WebKit.WebContent",
+        "backupd-helper",
+        "com.apple.WebKit.WebContent",
+        "MessagesBlastDoorService",
+        "recentsd",
+        "spotlightknowledged",
+        "generativeexperiencesd",
+        "deleted",
+        "sociallayerd",
+        "ContextService",
+        "deleted_helper",
+        "AssetCache",
+        "geodMachServiceBridge",
+        "aneuserd",
+        "ModelCatalogAgent",
+        "AssetCacheTetheratorService",
+        "siriknowledged",
+        "com.apple.quicklook.ThumbnailsAgent",
+        "storagekitd",
+        "com.apple.WebKit.WebContent",
+        "containermanagerd_system",
+        "AMPArtworkAgent",
+        "mobileactivationd",
+        "com.apple.tonelibraryd",
+        "textunderstandingd",
+        "siriinferenced",
+        "reversetemplated",
+        "SiriSuggestionsBookkeepingService",
+        "com.apple.WebKit.WebContent",
+        "followupd",
+        "cdpd",
+        "triald_system",
+        "com.apple.WebKit.WebContent",
+        "codex-code-mode-host",
+        "codex-code-mode-host",
+        "ReportCrash",
+        "Google Chrome Helper (Renderer)",
+        "Google Chrome Helper (Renderer)",
+        "com.apple.WebKit.WebContent",
+        "mcp",
+        "mcp@latest",
+        "php",
+        "com.apple.WebKit.WebContent",
+        "php",
+        "mcp",
+        "node",
+        "node_repl",
+        "php",
+        "node_repl",
+        "node",
+        "node",
+        "node_repl",
+        "php",
+        "mcp",
+        "mcp@latest",
+        "mcp@latest",
+        "php",
+        "php",
+        "mcp",
+        "mcp@latest",
+        "node_repl",
+        "node_repl",
+        "node_repl",
+        "simdiskimaged",
+        "diskimagesiod",
+        "SimLaunchHost.arm64",
+        "TGOnDeviceInferenceProviderService",
+        "distnoted",
+        "findmylocateagent",
+        "node",
+        "node",
+        "node",
+        "node",
+        "node",
+        "node",
+        "node",
+        "node",
+        "ctkd",
+        "com.apple.SafariPlatformSupport.Helper",
+        "com.apple.WebKit.WebContent",
+        "docker",
+        "donotdisturbd",
+        "searchpartyuseragent",
+        "mediaanalysisd",
+        "suggestd",
+        "knowledge-agent",
+        "mmaintenanced",
+        "Spotlight",
+        "diagnosticservicesd",
+        "keybagd",
+        "sysmond",
+        "nesessionmanager",
+        "sysextd",
+        "smd",
+        "amsondevicestoraged",
+        "mobiletimerd",
+        "MTLAssetUpgraderD",
+        "MENotificationAgent",
+        "SetStoreUpdateService",
+        "axassetsd",
+        "extensionkitservice",
+        "PackageThumbnailExtension",
+        "com.apple.audio.ComponentTagHelper",
+        "com.apple.SiriTTSService.TrialProxy",
+        "com.apple.SiriTTSService.TrialProxy",
+        "com.apple.SiriTTSService.TrialProxy",
+        "com.apple.SiriTTSService.TrialProxy",
+        "com.apple.SiriTTSService.TrialProxy",
+        "limactl",
+        "limactl",
+        "com.apple.Virtualization.VirtualMachine",
+        "com.apple.hiservices-xpcservice",
+        "ssh.sock [mux]",
+        "com.apple.WebKit.WebContent",
+        "routined",
+        "diskimagesiod",
+        "com.apple.accessibility.mediaaccessibilityd",
+        "AudioComponentRegistrar",
+        "webprivacyd",
+        "node",
+        "node_repl",
+        "php",
+        "Google Chrome Helper (Renderer)",
+        "php",
+        "node_repl",
+        "php",
+        "node",
+        "mcp@latest",
+        "php",
+        "mcp",
+        "node_repl",
+        "php",
+        "node",
+        "node_repl",
+        "php",
+        "node_repl",
+        "mcp",
+        "mcp@latest",
+        "cloudd",
+        "AppleSpell",
+        "sandboxd",
+        "neagent",
+        "node_repl",
+        "secinitd",
+        "AssetCacheLocatorService",
+        "CloudTelemetryService",
+        "osanalyticshelper",
+        "coresymbolicationd",
+        "node",
+        "com.apple.WebKit.WebContent",
+        "node",
+        "node",
+        "node",
+        "contactsdonationagent",
+        "node",
+        "node",
+        "esbuild",
+        "Google Chrome Helper (Renderer)",
+        "networkserviceproxy",
+        "node",
+        "node",
+        "node",
+        "node",
+        "node",
+        "php",
+        "mcp",
+        "mcp@latest",
+        "node_repl",
+        "php",
+        "node_repl",
+        "node_repl",
+        "node_repl",
+        "node_repl",
+        "node_repl",
+        "extensionkitservice",
+        "PlugInLibraryService",
+        "node",
+        "node",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "keyboardservicesd",
+        "pbs",
+        "cerebro",
+        "com.apple.WebKit.GPU",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.Networking",
+        "Google Chrome Helper (Renderer)",
+        "com.apple.geod",
+        "cfprefsd",
+        "iconservicesagent",
+        "iconservicesd",
+        "system_installd",
+        "installd",
+        "akd",
+        "naturallanguaged",
+        "callservicesd",
+        "CloudTelemetryService",
+        "XProtectBridgeService",
+        "Claude",
+        "StatusKitAgent",
+        "chrome_crashpad_handler",
+        "Claude Helper",
+        "Claude Helper",
+        "Claude Helper (Renderer)",
+        "Claude Helper (Renderer)",
+        "Claude Helper",
+        "disclaimer",
+        "disclaimer",
+        "disclaimer",
+        "server-puppeteer",
+        "npm exec firecrawl-mcp",
+        "Downloads",
+        "node",
+        "node",
+        "node",
+        "com.apple.CodeSigningHelper",
+        "disclaimer",
+        "disclaimer",
+        "disclaimer",
+        "Downloads",
+        "npm exec firecrawl-mcp",
+        "server-puppeteer",
+        "Claude Helper (Renderer)",
+        "node",
+        "node",
+        "node",
+        "audioaccessoryd",
+        "com.apple.geod",
+        "extensionkitservice",
+        "parsec-fbf",
+        "wifip2pd",
+        "ContextStoreAgent",
+        "IMTransferAgent",
+        "systemsoundserverd",
+        "AudioComponentRegistrar",
+        "com.apple.audio.SandboxHelper",
+        "systemstatusd",
+        "CoreLocationAgent",
+        "Google Chrome Helper (Renderer)",
+        "sleep",
+        "node",
+        "chrome-headless-shell",
+        "chrome-headless-shell",
+        "chrome-headless-shell",
+        "mdworker_shared",
+        "com.apple.WebKit.WebContent",
+        "mdwrite",
+        "com.apple.WebKit.WebContent",
+        "com.apple.WebKit.WebContent",
+        "mdworker_shared",
+        "(chrome-headless-)",
+        "PowerUIAgent",
+        "cfprefsd",
+        "mdworker_shared",
+        "ps",
+        "Google Chrome Helper (Renderer)",
+        "Google Chrome Helper (Renderer)",
+        "com.apple.Safari.SafeBrowsing.Service",
+        "Signal",
+        "Signal Helper",
+        "Signal Helper",
+        "Signal Helper (Renderer)",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "cfprefsd",
+        "diskimagesiod",
+        "ShipIt",
+        "node",
+        "node",
+        "esbuild",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "Codex (Renderer)",
+        "coreauthd",
+        "remoted",
+        "node",
+        "node",
+        "esbuild",
+        "cerebro",
+        "zsh",
+        "node",
+        "node",
+        "zsh",
+        "zsh",
+        "login",
+        "-zsh",
+        "codex",
+        "bun",
+        "node",
+        "esbuild",
+        "zsh",
+        "npm run storybook",
+        "npm run storybook",
+        "node",
+        "esbuild",
+        "esbuild",
+        "esbuild",
+        "zsh",
+        "npm start",
+        "sh",
+        "npm run dev",
+        "sh",
+        "node",
+        "turbo",
+        "zsh",
+        "bun",
+        "bash",
+        "node",
+        "node",
+        "esbuild",
+        "esbuild",
+        "redis-server 127.0.0.1:63190",
+        "node",
+        "bun",
+        "node",
+        "esbuild",
+        "bun",
+        "bash",
+        "node",
+        "npm run dev",
+        "node",
+        "zsh"
+      ]
+    }
+  },
+  "bundleAfter": {
+    "fingerprint": "930a44e2eb4a6d60db313f2f3e28a2e633de80bb8e0d9deca51d058a30e70cbc",
+    "unchanged": true
+  }
+}

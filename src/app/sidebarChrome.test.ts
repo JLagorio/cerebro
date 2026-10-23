@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { rowClass } from '@/app/sidebarChrome';
+import { chevronClass, rowClass } from '@/app/sidebarChrome';
+
+/**
+ * A fold's chevron (app/shell.css `.cb-chevron`): every tree and section
+ * header draws `chevron-right` and turns it, so the class is the whole state.
+ */
+describe('chevronClass', () => {
+  it('turns the one chevron rather than naming another glyph', () => {
+    expect(chevronClass(false)).toBe('cb-chevron');
+    expect(chevronClass(true)).toBe('cb-chevron cb-chevron--open');
+  });
+});
 
 /**
  * The one row class every nav row wears — Sidebar's destinations and sections,

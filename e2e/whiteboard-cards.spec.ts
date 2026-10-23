@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile, showPages } from './boot';
+import { boot, readMockFile, showPageFolders } from './boot';
 const PATH = 'boards/cards.canvas';
 const DOC = 'notes/board-card-doc.md';
 const source = JSON.stringify({
@@ -224,7 +224,7 @@ test('renaming a cited page leaves the exact old whiteboard pointer visibly miss
   page,
 }) => {
   await open(page);
-  await showPages(page);
+  await showPageFolders(page);
   const tree = page.getByTestId('file-tree'),
     folder = tree.getByTestId('tree-folder').filter({ hasText: 'Notes' });
   if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click();

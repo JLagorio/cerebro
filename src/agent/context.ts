@@ -1,3 +1,4 @@
+import { kindFor, type FileKind } from '@/engine/fileKinds';
 import {
   conceptEdges,
   isKnowledgePath,
@@ -66,6 +67,10 @@ export interface ContextSnapshot {
    * `referencedNotes` because those are `[[links]]` found in the prompt — a
    * guess about what was meant — while these were put there on purpose. */
   attachedNotes?: (RecordSummary & { body?: string })[];
+  /** Files the person attached (M91.17), by their vault path and their kind
+   * in the file-kinds table. Not notes, so nothing of them is inlined: the
+   * system prompt says which the run can open, and with what. */
+  attachedFiles?: AttachedFile[];
   /**
    * What the knowledge bundle believes about the records already in context
    * (M17.20).
@@ -90,6 +95,11 @@ export interface ContextSnapshot {
    */
   knowledge?: KnowledgeNote[];
   vault: { types: string[]; projects: number; notes: number };
+}
+
+export interface AttachedFile {
+  path: string;
+  kind: FileKind;
 }
 
 export interface KnowledgeNote {
@@ -174,6 +184,9 @@ export interface SnapshotInput {
   /** Vault paths attached as context chips (M17.6). Resolved by exact path,
    * unlike `references`, which are wikilink targets matched by stem or title. */
   attached?: string[];
+  /** Vault paths of files attached as file chips (M91.17): copies the
+   * scan never lists, so they are told by path, never resolved to entries. */
+  files?: readonly string[];
   /** Where the conversation began, when that is not where the user is now. */
   startedIn?: string | null;
   /** The knowledge bundle, for the `about:` and `sources` lookup (M17.20,
@@ -251,6 +264,11 @@ export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
       .filter((e): e is Entry => e !== undefined)
       .map((e) => ({ ...summarize(e, schema), body: e.snippet }));
     if (resolved.length > 0) snapshot.attachedNotes = resolved;
+  }
+
+  const files = [...new Set(input.files ?? [])];
+  if (files.length > 0) {
+    snapshot.attachedFiles = files.map((path) => ({ path, kind: kindFor(path).kind }));
   }
 
   // M17.20 — what the base believes about what is already in context.

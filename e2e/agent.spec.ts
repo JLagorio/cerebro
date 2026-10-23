@@ -9,6 +9,7 @@ import {
   showPages,
   openAgents,
 } from './boot';
+import { chooseOption } from './select';
 
 /**
  * The panel runs against the scripted mock in browser mode (see
@@ -204,7 +205,10 @@ test('agent: shell access is one persisted ceiling in Settings, not a per-chat m
   // declare a policy before knowing what they were going to ask for; what the
   // agent may change now follows from which folder it is writing to.
   await openAssistantPanel(page);
-  await expect(page.getByTestId('ai-panel').getByRole('combobox')).toHaveCount(0);
+  // A select is a listbox button now (owner, 2026-10-18), so both shapes count.
+  await expect(
+    page.getByTestId('ai-panel').locator('select, [role="combobox"], [aria-haspopup="listbox"]'),
+  ).toHaveCount(0);
 
   await openDestination(page, 'Settings');
   await chooseSettingsSection(page, 'Assistant');
@@ -247,7 +251,14 @@ test('agent: a suggested filing is shown for approval, never applied', async ({ 
   );
 
   const capturePath = PROPOSED;
-  const card = page.getByTestId('proposal-card');
+  // The docked assistant leaves the reader less room, so the inspector may
+  // have folded; showing it opens it as a drawer, with Organize first.
+  const header = page.getByTestId('inbox-pane-header');
+  const details = header.getByRole('button', { name: 'Details', exact: true });
+  await expect(details).toBeVisible();
+  if ((await details.getAttribute('aria-pressed')) !== 'true') await details.click();
+  const card = page.getByTestId('doc-side-panel').getByTestId('proposal-card');
+  await expect(card).toHaveCount(1);
   await expect(card).toBeVisible();
   await expect(card).toContainText('reads as a task-like record');
   await expect(card).toContainText('Work item');
@@ -281,7 +292,11 @@ test('agent: organizing AI-written work records who signed off', async ({ page }
   const path = await aiRow.getAttribute('data-path');
   await aiRow.click();
 
-  await page.getByRole('button', { name: /Mark organized/i }).click();
+  // The Organize section's act; the Inbox toolbar carries the same one.
+  await page
+    .getByTestId('doc-side-panel')
+    .getByRole('button', { name: /Mark organized/i })
+    .click();
 
   // Organizing agent output IS the review, so it leaves a human stamp —
   // that is what closes the loop the knowledge bundle opened.
@@ -382,13 +397,16 @@ test('agent page: an agent is built from pickers, not from remembered strings', 
   // the library prints — so what will fire it is readable before it ever runs.
   await page.getByTestId('agent-add-trigger').click();
   const trigger = page.getByTestId('agent-editor-trigger-new').getByTestId('agent-trigger');
-  await trigger.getByLabel('Trigger 1 field').selectOption('status');
+  await chooseOption(trigger.getByLabel('Trigger 1 field'), 'status');
   // The value list is what the field has ACTUALLY held in this vault. Typed,
   // `status: blocked` in a vault whose statuses are todo/progress/done fires
   // never, and nothing anywhere would say so.
   const value = trigger.getByLabel('Trigger 1 value');
-  await expect(value.locator('option')).toContainText(['any value', 'at-risk']);
-  await value.selectOption('at-risk');
+  await value.click();
+  await expect(
+    page.getByRole('listbox', { name: 'Trigger 1 value' }).getByRole('option'),
+  ).toContainText(['any value', 'at-risk']);
+  await chooseOption(value, 'at-risk');
   // M18.5: what this waking in particular is for, on top of the standing
   // instructions. One agent usefully answers differently depending on what
   // woke it, and the alternative is three agents sharing 90% of their prose.
@@ -477,8 +495,8 @@ test('agent page: editing its schedule property updates the record', async ({ pa
   await expect(row).toContainText('none — off duty, runs only when you ask');
   await row.getByTestId('agent-prop-open').click();
   const editor = page.getByTestId('agent-editor-schedule');
-  await editor.getByLabel('Repeat').selectOption('weekly');
-  await editor.getByLabel('Day').selectOption('5');
+  await chooseOption(editor.getByLabel('Repeat', { exact: true }), 'Every week');
+  await chooseOption(editor.getByLabel('Day', { exact: true }), 'Friday');
   await editor.getByTestId('schedule-time').fill('17:30');
   expect(await scoutFile(page)).not.toContain('weekly fri');
 
@@ -546,9 +564,18 @@ test('editor: the same AI controls appear on a record, not only in Docs', async 
 
   const body = panel.locator('[data-testid="markdown-editor"] .bn-editor');
   await expect(body).toBeVisible({ timeout: 10_000 });
-  await body.click();
-  await page.keyboard.press('End');
-  await page.keyboard.type(' The pricing is annual.');
-  await page.getByText('The pricing is annual').click({ clickCount: 3 });
+  // This record starts with a title only. Enter from its real heading opens
+  // a writing paragraph; the editor's whole box also contains page metadata.
+  await body.locator('[data-page-title] h1').click();
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('The pricing is annual.');
+  const prose = body
+    .locator('[data-content-type="paragraph"]')
+    .filter({ hasText: 'The pricing is annual.' });
+  await expect(prose).toHaveText('The pricing is annual.');
+  await prose.click({ clickCount: 3 });
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString().trim()))
+    .toBe('The pricing is annual.');
   await expect(page.getByTestId('selection-ask-ai')).toBeVisible();
 });

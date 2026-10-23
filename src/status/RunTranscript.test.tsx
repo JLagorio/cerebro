@@ -166,6 +166,196 @@ describe('RunTranscript', () => {
       expect(screen.getByTestId('action-card').getAttribute('data-status')).toBe('interrupted');
       expect(screen.queryByTestId('run-transcript-running')).toBeNull();
     });
+
+    // A subagent at work when the file was read: its Agent call and its own
+    // second call have not ended.
+    const delegating: AgentStreamEvent[] = [
+      { kind: 'UserPrompt', text: 'Research the risks.' },
+      {
+        kind: 'ToolStart',
+        tool_name: 'Agent',
+        tool_id: 'a-1',
+        input: JSON.stringify({ description: 'Read the risks', prompt: 'Read every risk.' }),
+      },
+      {
+        kind: 'ToolStart',
+        tool_name: 'mcp__cerebro__get_note',
+        tool_id: 's-1',
+        input: '{"path":"records/risks/a.md"}',
+        parent: 'a-1',
+      },
+      { kind: 'ToolDone', tool_id: 's-1', output: 'Read it.', is_error: false, parent: 'a-1' },
+      {
+        kind: 'ToolStart',
+        tool_name: 'mcp__cerebro__get_note',
+        tool_id: 's-2',
+        input: '{"path":"records/risks/b.md"}',
+        parent: 'a-1',
+      },
+      { kind: 'TurnInterrupted', reason: 'cut_off' },
+    ];
+    const subagentOf = () =>
+      screen
+        .getByTestId('run-transcript-body')
+        .querySelector<HTMLElement>('[data-slot="subagent"]')!;
+
+    it('keeps a subagent still at work running while its run is running', async () => {
+      fleetRunTranscript.mockResolvedValue(readOf(delegating));
+      show(SESSION, true);
+      await expand();
+      expect(subagentOf().getAttribute('data-status')).toBe('running');
+      expect(subagentOf().textContent).not.toContain('Interrupted');
+    });
+
+    it('reads that subagent interrupted once its run is over', async () => {
+      fleetRunTranscript.mockResolvedValue(readOf(delegating));
+      show(SESSION, false);
+      await expand();
+      expect(subagentOf().getAttribute('data-status')).toBe('interrupted');
+    });
+  });
+
+  describe('a turn, drawn as the conversation draws one (M91.14)', () => {
+    const reasoned: AgentStreamEvent[] = [
+      { kind: 'UserPrompt', text: 'Weigh the release risks.' },
+      { kind: 'Thinking', message_id: 'm1', text: 'The rollback risk has no rehearsal on record.' },
+      {
+        kind: 'ToolStart',
+        tool_name: 'mcp__cerebro__get_note',
+        tool_id: 't-1',
+        input: '{"path":"records/risks/risk-rollback-unrehearsed.md"}',
+      },
+      { kind: 'ToolDone', tool_id: 't-1', output: 'Read it.', is_error: false },
+      {
+        kind: 'Text',
+        message_id: 'm1',
+        text: 'The **rollback** risk moved:\n\n- no rehearsal\n- no owner',
+      },
+      { kind: 'Result', text: 'The rollback risk moved.', session_id: SESSION },
+      { kind: 'TurnEnded', stop_reason: 'end_turn' },
+    ];
+
+    it('shows its reasoning in an open chain of thought, then its answer as markdown', async () => {
+      fleetRunTranscript.mockResolvedValue(readOf(reasoned));
+      show();
+      await expand();
+      const turn = screen.getByTestId('run-transcript-turn');
+      const chain = turn.querySelector<HTMLElement>('[data-slot="chain-of-thought"]')!;
+      // The run's latest turn: its chain starts open, its reasoning one line.
+      expect(chain.querySelector('button')!.getAttribute('aria-expanded')).toBe('true');
+      const reasoning = chain.querySelector<HTMLElement>('[data-slot="reasoning"]')!;
+      // No time on either side of it was recorded, so it says none (CV-05).
+      expect(reasoning.textContent).toBe('Thought');
+      fireEvent.click(reasoning.querySelector('button')!);
+      expect(reasoning.textContent).toContain('The rollback risk has no rehearsal on record.');
+      // The answer is the chat's markdown, not a plain paragraph.
+      const answer = turn.querySelector<HTMLElement>('.cb-run-answer')!;
+      expect(answer.querySelector('strong')?.textContent).toBe('rollback');
+      expect([...answer.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+        'no rehearsal',
+        'no owner',
+      ]);
+    });
+
+    it('shows its prompt as a quiet bubble at the start', async () => {
+      fleetRunTranscript.mockResolvedValue(readOf(reasoned));
+      show();
+      await expand();
+      const prompt = screen.getByTestId('run-transcript-prompt');
+      expect(prompt.getAttribute('data-align')).toBe('start');
+      expect(prompt.querySelector('[data-slot="bubble"]')?.getAttribute('data-variant')).toBe(
+        'muted',
+      );
+      expect(prompt.textContent).toBe('Weigh the release risks.');
+    });
+
+    it("draws a subagent's steps under it, with its tool uses and time as recorded", async () => {
+      fleetRunTranscript.mockResolvedValue(
+        readOf([
+          { kind: 'UserPrompt', text: 'Research the risks.' },
+          {
+            kind: 'ToolStart',
+            tool_name: 'Agent',
+            tool_id: 'a-1',
+            input: JSON.stringify({
+              description: 'Read the risks',
+              subagent_type: 'cerebro-researcher',
+              prompt: 'Read every risk.',
+            }),
+          },
+          {
+            kind: 'ToolStart',
+            tool_name: 'mcp__cerebro__get_note',
+            tool_id: 's-1',
+            input: '{"path":"records/risks/a.md"}',
+            parent: 'a-1',
+          },
+          { kind: 'ToolDone', tool_id: 's-1', output: 'Read it.', is_error: false, parent: 'a-1' },
+          {
+            kind: 'ToolResult',
+            tool_id: 'a-1',
+            data: {
+              type: 'agent',
+              status: 'completed',
+              tool_uses: 1,
+              duration_ms: 1400,
+              summary: 'Both risks moved.',
+            },
+          },
+          { kind: 'ToolDone', tool_id: 'a-1', output: 'Both risks moved.', is_error: false },
+          { kind: 'TurnEnded', stop_reason: 'end_turn' },
+        ]),
+      );
+      show();
+      await expand();
+      const subagent = screen
+        .getByTestId('run-transcript-body')
+        .querySelector<HTMLElement>('[data-renderer="subagent"]')!;
+      expect(subagent.getAttribute('data-slot')).toBe('subagent');
+      expect(subagent.textContent).toContain('Read the risks');
+      expect(subagent.textContent).toContain('cerebro-researcher');
+      expect(subagent.textContent).toContain('1 tool use · 1.4s');
+      expect(subagent.textContent).toContain('Both risks moved.');
+      // Its own read is a row inside it, not a row of the turn's.
+      expect(subagent.querySelectorAll('[data-testid="action-card"]')).toHaveLength(1);
+    });
+
+    it("says a failure Rust typed by its title, and one it could not in Claude Code's words", async () => {
+      const failed = (error: AgentStreamEvent): AgentStreamEvent[] => [
+        { kind: 'UserPrompt', text: 'Check the risks.' },
+        error,
+      ];
+      fleetRunTranscript.mockResolvedValue(
+        readOf(failed({ kind: 'Error', message: 'Claude Code exited with code 1' })),
+      );
+      show();
+      await expand();
+      expect(screen.getByTestId('turn-error').textContent).toContain(
+        'Claude Code exited with code 1',
+      );
+      cleanup();
+      fleetRunTranscript.mockResolvedValue(
+        readOf(
+          failed({
+            kind: 'Error',
+            message: 'raw words',
+            notice: {
+              kind: 'rate_limit',
+              title: 'Usage limit reached',
+              body: 'It resets later.',
+              action: null,
+              resets_at: null,
+              window: null,
+              cli_version: null,
+            },
+          }),
+        ),
+      );
+      show();
+      await expand();
+      expect(screen.queryByTestId('turn-error')).toBeNull();
+      expect(screen.getByTestId('run-transcript-turn').textContent).toBe('Usage limit reached');
+    });
   });
 
   it('says when one session holds several runs', async () => {

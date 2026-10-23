@@ -1,0 +1,146 @@
+{
+  "environment": {
+    "at": "2026-10-17T17:57:25.527Z",
+    "platform": "darwin",
+    "release": "24.6.0",
+    "architecture": "arm64",
+    "cpu": "Apple M1 Pro",
+    "logicalCpus": 10,
+    "memoryGiB": 32,
+    "loadBefore": [
+      15.28173828125,
+      14.00341796875,
+      12.11767578125
+    ],
+    "node": "v26.3.1",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "samples": 5,
+    "modulePath": "/src/views/BenchmarkBaseline.tsx",
+    "mode": "Vite development, unthrottled headless Chromium, sequential fixture mounts",
+    "externalNetwork": "blocked; localhost:5382 only",
+    "input": "Synthetic ArrowDown at row level; dispatch to two animation frames; all text fields 140px; title + 12/24 declared scalar fields; no record limit; no edits; each scroll +80px"
+  },
+  "browser": "149.0.7827.55",
+  "results": [
+    {
+      "count": 100,
+      "cols": 12,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 2155,
+        "scrollHeight": 3636
+      },
+      "inputMs": [
+        101.09999996423721,
+        78.80000001192093,
+        85.10000002384186,
+        83.09999996423721,
+        83.60000002384186
+      ],
+      "mountedMs": 163.19999998807907,
+      "p95InputMs": 101.09999996423721,
+      "maxWarmedTaskMs": 90,
+      "renderedRows": 100
+    },
+    {
+      "count": 100,
+      "cols": 24,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 3835,
+        "scrollHeight": 3636
+      },
+      "inputMs": [
+        137.10000002384186,
+        130.89999997615814,
+        126.60000002384186,
+        123.5,
+        134.5999999642372
+      ],
+      "mountedMs": 199.30000001192093,
+      "p95InputMs": 137.10000002384186,
+      "maxWarmedTaskMs": 130,
+      "renderedRows": 100
+    },
+    {
+      "count": 1000,
+      "cols": 12,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 2155,
+        "scrollHeight": 36036
+      },
+      "inputMs": [
+        935.8999999761581,
+        849.5,
+        900,
+        927.6999999880791,
+        924.1999999880791
+      ],
+      "mountedMs": 602.5999999642372,
+      "p95InputMs": 935.8999999761581,
+      "maxWarmedTaskMs": 912,
+      "renderedRows": 1000
+    },
+    {
+      "count": 1000,
+      "cols": 24,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 3835,
+        "scrollHeight": 36036
+      },
+      "inputMs": [
+        2343.600000023842,
+        2504.5,
+        2612.199999988079,
+        2288.199999988079,
+        2245.5
+      ],
+      "mountedMs": 886.1000000238419,
+      "p95InputMs": 2612.199999988079,
+      "maxWarmedTaskMs": 2565,
+      "renderedRows": 1000
+    },
+    {
+      "count": 5000,
+      "cols": 12,
+      "host": {
+        "width": 1340,
+        "height": 740,
+        "scrollWidth": 2155,
+        "scrollHeight": 180036
+      },
+      "inputMs": [
+        12637.5,
+        13409.699999988079,
+        13984.400000035763,
+        12748.5,
+        13114.699999988079
+      ],
+      "mountedMs": 2654.399999976158,
+      "p95InputMs": 13984.400000035763,
+      "maxWarmedTaskMs": 12780,
+      "renderedRows": 5000
+    },
+    {
+      "count": 5000,
+      "cols": 24,
+      "outcome": "stopped_after_budget",
+      "note": "Pre-optimization 5000x12 took 12.6\u201314.0 seconds per ArrowDown; 5000x24 run was stopped to bound the diagnostic and release other acceptance lanes. No p95 was obtained."
+    }
+  ],
+  "loadAfter": [
+    8.21728515625,
+    11.9267578125,
+    11.5751953125
+  ],
+  "stoppedAt": "2026-10-17T18:00:45.126540+00:00"
+}

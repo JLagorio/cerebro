@@ -20,7 +20,7 @@ beforeEach(async () => {
   useDoneMarksStore.getState().reset(null);
   useReminderStore.getState().reset(null);
   await useVaultStore.getState().openVault('/demo-vault');
-  useUiStore.setState({ inboxEnabled: true, inboxPeriod: 'all', homeTaskAssignee: '' });
+  useUiStore.setState({ inboxEnabled: true, homeTaskAssignee: '' });
 });
 describe('Home lanes', () => {
   it('registers every declared lane', () => {

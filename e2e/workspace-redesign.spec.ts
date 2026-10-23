@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, showPageFolders } from './boot';
 
 const rail = (page: Page) => page.getByTestId('app-rail');
 const area = (page: Page, name: string) => rail(page).getByRole('button', { name, exact: true });
@@ -24,7 +24,7 @@ test('the rail opens contextual shelves while retaining every workspace destinat
     ).toBeVisible();
   }
   await page.screenshot({ path: info.outputPath('home.png') });
-  await area(page, 'Pages').click();
+  await showPageFolders(page);
   await expect(page.getByTestId('file-tree')).toBeVisible();
   await expect(surfaces).toBeHidden();
   await area(page, 'Databases').click();
@@ -145,6 +145,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(sidebar).toHaveAttribute('data-overlay', 'true');
     expect((await sidebar.boundingBox())!.x).toBe(54);
     expect((await sidebar.boundingBox())!.width).toBe(240);
+    await showPageFolders(page);
     await expect(sidebar.getByTestId('file-tree')).toBeVisible();
     await expect(sync).toBeVisible();
     await page.screenshot({

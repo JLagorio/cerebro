@@ -1,0 +1,30 @@
+{
+  "at": "2026-10-17T17:57:00.354174+00:00",
+  "uptime": "10:57  up 5 days,  4:43, 2 users, load averages: 19.22 14.52 12.24\n",
+  "processes": [
+    "  PID COMM              %CPU     ELAPSED",
+    "36815 /Users/joseflago 109.5       00:17",
+    "27646 /System/Library/ 109.2 03-06:06:01",
+    "  832 /Applications/Vi  32.7 05-04:41:21",
+    "62447 /Applications/Vi  20.3 02-04:48:48",
+    "36930 /opt/homebrew/Ce  15.6       00:00",
+    " 1840 /Users/joseflago  13.1 05-04:40:43",
+    "  395 /usr/libexec/run  11.5 05-04:42:19",
+    "19120 /Users/joseflago  10.2 01-15:39:21",
+    " 2073 com.duckduckgo.m   5.9 05-04:40:32",
+    " 6756 /Users/joseflago   5.8 03-03:16:23",
+    "  562 /System/Library/   3.4 05-04:42:10",
+    "  391 /System/Library/   2.8 05-04:42:19",
+    "36813 /Users/joseflago   2.5       00:17",
+    "  921 /Applications/Vi   2.5 05-04:41:13",
+    "  829 /System/Library/   2.5 05-04:41:21",
+    "27520 /Applications/Do   2.4 03-06:06:03",
+    "  399 /Applications/Vi   2.2 04-22:57:33",
+    "40013 /System/Library/   2.1 03-05:13:48",
+    "18908 /Users/joseflago   2.0 01-15:39:34",
+    "32391 /Applications/Vi   1.6 01-19:24:10",
+    "  510 /usr/sbin/mDNSRe   1.6 05-04:42:18",
+    "36820 /System/Library/   1.4       00:16",
+    "28673 /System/Library/   1.4    03:53:47"
+  ]
+}

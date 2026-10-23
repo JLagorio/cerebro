@@ -1,4 +1,5 @@
 import { useId, useMemo, useState } from 'react';
+import { Select } from '@/components/ui/Select';
 import {
   applyDraftEdits,
   changedKeys,
@@ -175,7 +176,7 @@ export function WriteDraftForm({ title, schema, draft, disabled = false, onChang
               )}
             </label>
             {field.hint !== null && (
-              <span className="text-2xs text-n-500" data-testid="write-draft-hint">
+              <span className="text-metadata text-(--text-meta)" data-testid="write-draft-hint">
                 {field.hint}
               </span>
             )}
@@ -189,22 +190,30 @@ export function WriteDraftForm({ title, schema, draft, disabled = false, onChang
                 className="self-start"
               />
             ) : field.kind === 'choice' ? (
-              <select
-                {...common}
+              // A listbox button carries no required state of its own; the
+              // label's mark says it. None is a row only where the schema
+              // takes no value; a required field without one shows it as the
+              // placeholder, and a value off the schema's list shows as
+              // asked, for Rust to refuse rather than for the form to hide.
+              <Select
+                id={control}
+                testId={`write-draft-field-${field.key}`}
+                size="sm"
                 value={text}
                 disabled={locked}
-                onChange={(e) => edit(field.key, e.target.value)}
-                className="rounded-md border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800"
-              >
-                {(!field.required || field.nullable || text === '') && (
-                  <option value="">{DRAFT_COPY.none}</option>
-                )}
-                {field.options.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+                invalid={invalid === true}
+                placeholder={DRAFT_COPY.none}
+                onChange={(next) => edit(field.key, next)}
+                options={[
+                  ...(!field.required || field.nullable
+                    ? [{ value: '', label: DRAFT_COPY.none }]
+                    : []),
+                  ...field.options.map((option) => ({ value: option, label: option })),
+                  ...(text === '' || field.options.includes(text)
+                    ? []
+                    : [{ value: text, label: text }]),
+                ]}
+              />
             ) : field.kind === 'text' && (seeded.includes('\n') || seeded.length > LONG_TEXT) ? (
               <textarea
                 {...common}
@@ -235,7 +244,7 @@ export function WriteDraftForm({ title, schema, draft, disabled = false, onChang
         );
       })}
       {jsonOpen && flat.length > 0 && (
-        <div data-testid="write-draft-readonly" className="text-2xs text-n-500">
+        <div data-testid="write-draft-readonly" className="text-metadata text-(--text-meta)">
           {DRAFT_COPY.readOnly}
         </div>
       )}

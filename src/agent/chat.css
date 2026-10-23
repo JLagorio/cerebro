@@ -2,6 +2,8 @@
    shell changes its presentation in place; no second chat or draft is mounted. */
 .cb-chat {
   --chat-reading-width: 760px;
+  /* The canvas rail's width (M92.1); shellLayout's CHAT_RAIL_WIDTH. */
+  --chat-rail-width: 300px;
   background: var(--surface-app);
   color: var(--text-primary);
   min-height: 0;
@@ -9,9 +11,260 @@
   border-left: 1px solid var(--border-subtle);
   container-type: inline-size;
 }
+/* The canvas (M92.1) is a grid, not the panel's column: the header across
+   the top, the transcript and its composer under it, and beside them, where
+   the frame has room, the conversation's details (`ConversationRail`, the
+   third area). The header, the body and the composer keep their parents in
+   every presentation, so nothing remounts; floating and the docked panel
+   keep the flex column, and every rule here is the canvas's. */
 .cb-chat[data-presentation='canvas'] {
   flex: 1 1 0%;
   border-left: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: 'header' 'body';
+}
+.cb-chat[data-presentation='canvas'] > .cb-chat-header {
+  grid-area: header;
+}
+.cb-chat[data-presentation='canvas'] > .cb-chat-body {
+  grid-area: body;
+}
+/* The canvas frame (App's) is the container the rail asks of its width: a
+   container cannot style itself, and the aside is what the rail changes. */
+.m71-chat-frame[data-presentation='canvas'] {
+  container: chat-canvas / inline-size;
+}
+.cb-chat-rail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface-app);
+}
+/* Under the dock width the rail folds away, still mounted, so crossing the
+   dock width never remounts it (the panel makes it inert a frame on). It
+   opens on request as a drawer over the transcript, from under the header
+   to the floor, with a scrim over the rest that a press closes it from
+   (DrawerScrim). An absolutely placed grid child takes its area as its
+   containing block. */
+.cb-chat[data-presentation='canvas'] > .cb-chat-rail {
+  display: none;
+}
+.cb-chat[data-presentation='canvas'] > .cb-chat-rail[data-drawer] {
+  display: flex;
+  position: absolute;
+  grid-area: body;
+  inset-block: 0;
+  right: 0;
+  z-index: 20;
+  width: min(var(--chat-rail-width), 85%);
+  border-left: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-lg);
+  outline: none;
+}
+.cb-chat[data-presentation='canvas'] > .cb-chat-rail-scrim {
+  position: absolute;
+  grid-area: body;
+  inset: 0;
+  z-index: 19;
+}
+/* Docked where the frame holds a 600px reading column, the rail and their
+   gutters: shellLayout's CHAT_RAIL_DOCK_MIN. The composer narrows with the
+   transcript. A rail the panel still holds as a drawer is drawn docked here
+   too, in the same layout pass as the width that fits it, and the panel
+   lets the drawer go a frame on. */
+@container chat-canvas (min-width: 960px) {
+  .cb-chat[data-presentation='canvas']:has(> .cb-chat-rail) {
+    grid-template-columns: minmax(0, 1fr) var(--chat-rail-width);
+    grid-template-areas: 'header header' 'body rail';
+  }
+  .cb-chat[data-presentation='canvas'] > .cb-chat-rail,
+  .cb-chat[data-presentation='canvas'] > .cb-chat-rail[data-drawer] {
+    display: flex;
+    position: relative;
+    grid-area: rail;
+    inset: auto;
+    z-index: auto;
+    width: auto;
+    border-left: 0;
+    box-shadow: none;
+  }
+  .cb-chat[data-presentation='canvas'] > .cb-chat-rail-scrim {
+    display: none;
+  }
+}
+/* Floating is a presentation of the same controller and composer. The shell
+   positions its frame outside page layout; folding never moves React children. */
+.cb-chat[data-presentation='floating'] {
+  height: min(700px, var(--floating-chat-available-height, calc(100dvh - 120px)));
+  max-height: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: 24px;
+  overflow: hidden;
+}
+.cb-chat [hidden] {
+  display: none;
+}
+.cb-chat[data-presentation='floating'] .cb-chat-header {
+  height: 52px;
+  min-height: 52px;
+  padding: 10px 16px;
+  gap: 12px;
+}
+.cb-chat[data-presentation='floating'] .cb-chat-header-mark {
+  display: none;
+}
+.cb-chat[data-presentation='floating'] .cb-chat-body[data-empty='true'] {
+  overflow: hidden;
+}
+.cb-chat[data-presentation='floating'] .cb-chat-body::before,
+.cb-chat[data-presentation='floating'] .cb-chat-body::after {
+  display: none;
+}
+/* Floating, the transcript takes the card above the dock even while empty,
+   so the dock rests on the card's floor. */
+.cb-chat[data-presentation='floating'] .cb-chat-body > .cb-chat-conversation {
+  flex: 1 1 0%;
+}
+.cb-chat[data-presentation='floating'] .cb-chat-thread {
+  padding: 20px 24px 28px;
+  gap: 28px;
+}
+.cb-chat[data-presentation='floating'] .cb-chat-body .cb-chat-dock {
+  width: 100%;
+  padding: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.cb-chat[data-presentation='floating'] .cb-chat-composer {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 12px 16px;
+}
+.cb-chat[data-presentation='floating'] .cb-chat-starters {
+  display: none;
+}
+.cb-chat-heading {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+/* Floating's options, and the canvas rail's toggle (M92.1): plain buttons,
+   each a tab stop of its own; the toggle holds its fill while the rail it
+   names is shown. */
+.cb-chat-options,
+.cb-chat-rail-toggle {
+  display: flex;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.cb-chat-options:hover,
+.cb-chat-rail-toggle:hover,
+.cb-chat-rail-toggle[aria-expanded='true'] {
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+.cb-chat-options:focus-visible,
+.cb-chat-rail-toggle:focus-visible,
+.cb-chat-context-summary:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.cb-chat-unavailable {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+/* Minimized, the conversation rests as one round button over the page; the
+   header and body stay mounted under `hidden`. The shell sizes its frame to
+   the same 48px circle (app/shell.css), so nothing else takes a click. */
+.cb-chat[data-minimized] {
+  height: 48px;
+  border-radius: 50%;
+  overflow: visible;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+}
+/* Over the panel's border too, so the whole visible circle takes the click. */
+.cb-chat-fab {
+  position: absolute;
+  inset: -1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-ai);
+  cursor: pointer;
+  transition: background var(--motion-hover);
+}
+/* A wash of the ink over the raised ground, so hover lifts the button in
+   dark as it shades it in light. */
+.cb-chat-fab:hover {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+.cb-chat-fab:active {
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+.cb-chat-fab:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+/* Working: an arc turns on the button's edge. Reduced motion stills it
+   (`.animate-spin`, styles/index.css) and draws the whole ring instead. */
+.cb-chat-fab-ring {
+  position: absolute;
+  inset: 0;
+  border: 2px solid transparent;
+  border-top-color: var(--text-ai);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.cb-chat-fab[data-state='stopping'] .cb-chat-fab-ring {
+  border-top-color: var(--text-muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-chat-fab-ring {
+    border-color: var(--text-ai);
+  }
+  .cb-chat-fab[data-state='stopping'] .cb-chat-fab-ring {
+    border-color: var(--text-muted);
+  }
+}
+/* Waiting on the person: a dot on the button's shoulder, cut out of the
+   page behind it by a halo of the button's own ground. It lands as a mark
+   that should be noticed does, a little past its size and back. */
+.cb-chat-fab-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--warn-500);
+  box-shadow: 0 0 0 2px var(--surface-raised);
+  pointer-events: none;
+  animation: cb-mark-in var(--motion-spring) backwards;
 }
 .cb-chat-header {
   display: flex;
@@ -25,7 +278,7 @@
   display: inline-flex;
   color: var(--text-ai);
 }
-.cb-chat [data-testid='conversation-switcher'] {
+.cb-chat .cb-conversation-switcher {
   font-size: var(--fs-md);
   font-weight: var(--w-medium);
   padding: 6px;
@@ -47,22 +300,31 @@
   content: '';
   flex: 1 0 24px;
 }
-.cb-chat-body[data-empty='true'] .cb-chat-scroll {
+.cb-chat-body[data-empty='true'] > .cb-chat-conversation {
   flex: none;
-  overflow: visible;
 }
+/* The disclosed context row already separates the welcome from the input. */
 .cb-chat-body[data-empty='true'] .cb-chat-thread {
-  padding-block: 0 24px;
+  padding-block: 0;
 }
 .cb-chat-body[data-empty='true'] .cb-chat-dock {
   padding-block: 0;
 }
-.cb-chat-scroll {
-  flex: 1;
+/* The transcript (M91.12c) is a Chat (components/ai/Chat.tsx): its Message
+   Scroller takes what the dock leaves, and its viewport scrolls, keeping a
+   row that takes focus clear of its edges. The element fills its parent;
+   here the dock shares the body with it. An empty thread's state starts
+   where its first turn would. */
+.cb-chat .cb-chat-conversation {
+  flex: 1 1 0%;
+  height: auto;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+}
+.cb-chat-conversation .cb-ai-message-scroller-viewport {
   scroll-padding-block: 28px;
+}
+.cb-chat-conversation > .cb-ai-chat-empty {
+  justify-content: flex-start;
 }
 .cb-chat-thread {
   width: min(100%, var(--chat-reading-width));
@@ -113,106 +375,12 @@
   margin: 20px auto 0;
   padding-inline: var(--sp-6);
 }
-.cb-chat-suggestions {
-  display: grid;
-  width: 100%;
-  gap: var(--sp-1);
-  text-align: left;
-}
-.cb-chat-suggestion {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  border: 0;
-  border-radius: 8px;
-  padding: 9px 12px;
-  background: transparent;
-  color: var(--text-secondary);
-  text-align: left;
-  font: inherit;
-  font-size: var(--fs-sm);
-  cursor: pointer;
-  transition: background var(--motion-hover);
-}
-.cb-chat-suggestion:hover {
-  background: var(--surface-sunken);
-}
-.cb-chat-suggestion:focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
-}
-.cb-chat-suggestion svg {
-  flex: none;
-  color: var(--text-muted);
-}
 .cb-chat-welcome-note {
   margin: 14px 0 0;
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
   color: var(--text-muted);
   text-align: center;
-}
-.cb-chat-user {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 7px;
-}
-.cb-chat-user-bubble {
-  max-width: 88%;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  border-radius: 18px;
-  background: var(--surface-sunken);
-  color: var(--text-primary);
-  padding: var(--sp-3) var(--sp-4);
-  font-size: var(--fs-md);
-  line-height: 1.65;
-}
-.cb-chat-assistant {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-}
-.cb-chat-speaker {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  color: var(--text-secondary);
-  font-size: var(--fs-xs);
-  font-weight: var(--w-medium);
-}
-.cb-chat-speaker svg {
-  color: var(--text-ai);
-}
-.cb-chat-answer {
-  color: var(--text-primary);
-  font-size: var(--fs-md);
-  line-height: 1.75;
-  overflow-wrap: anywhere;
-}
-.cb-chat-answer p {
-  line-height: inherit;
-}
-.cb-chat-answer pre {
-  border-radius: 12px;
-  padding: var(--sp-4);
-}
-.cb-chat-answer th,
-.cb-chat-answer td {
-  padding: 10px;
-}
-.cb-chat-answer li {
-  margin-block: 6px;
-}
-.cb-chat [data-testid='action-group'] {
-  border-radius: 10px;
-  background: transparent;
-}
-.cb-chat [data-testid='action-group-toggle'] {
-  min-height: 36px;
-  padding: 9px var(--sp-3);
 }
 .cb-chat-dock {
   position: relative;
@@ -221,61 +389,160 @@
   margin-inline: auto;
   padding: var(--sp-2) var(--sp-4) var(--sp-4);
 }
-.cb-chat-composer {
-  position: relative;
-  border: 1px solid var(--border-subtle);
-  border-radius: 22px;
-  background: var(--surface-raised);
-  padding: var(--sp-3);
+/* The composer is the Prompt Input (components/ai/PromptInput.tsx), whose
+   pill it draws. Here it keeps to one row: the field gives way rather than
+   the tools dropping under it, so the floating dock stays one line (60px). */
+.cb-chat .cb-chat-composer {
+  flex-wrap: nowrap;
+}
+/* Typing, the composer lifts off the conversation a little, as ChatGPT's
+   does. Floating, it is the card's own floor, and the card has the lift. */
+.cb-chat:not([data-presentation='floating']) .cb-chat-composer:focus-within {
   box-shadow: var(--shadow-sm);
 }
-.cb-chat-composer:focus-within {
-  border-color: var(--border-strong);
-}
 .cb-chat-context {
-  max-height: min(160px, 18vh);
+  max-height: min(240px, 40vh);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.cb-chat-input {
-  min-width: 0;
-}
-.cb-chat-textarea {
-  display: block;
-  width: 100%;
-  min-height: 58px;
-  max-height: min(184px, 24vh);
-  resize: none;
-  overflow-y: auto;
-  padding: var(--sp-1) var(--sp-1) var(--sp-3);
-  border: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-  font-size: var(--fs-md);
-  line-height: 1.6;
-  outline: none;
-}
-.cb-chat-textarea::placeholder {
-  color: var(--text-muted);
-}
-.cb-chat-toolbar {
-  display: flex;
+.cb-chat-context-summary {
+  display: inline-flex;
+  flex: 0 1 auto;
   align-items: center;
   gap: 5px;
+  max-width: 136px;
   min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover),
+    color var(--motion-hover);
 }
-.cb-chat [data-testid='run-options'] {
-  height: 32px;
-  max-width: 200px;
+.cb-chat-context-summary:hover {
+  background: color-mix(in srgb, var(--text-primary) 6%, var(--surface-sunken));
+  color: var(--text-primary);
+}
+.cb-chat-context-summary > svg,
+.cb-chat-context-count {
+  flex: none;
+}
+.cb-chat-context-summary > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-chat-activity {
+  max-height: min(180px, 25dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.cb-chat-activity:not(:empty) {
+  padding: 12px 16px 0;
+}
+/* Up next (agent/UpNext.tsx) is a Queue at the dock's own scale: a quiet box
+   over the composer, its heading small, and rows of 12px where the queue's
+   lines are 14/20 elsewhere. An entry's editor opens under its words. */
+.cb-chat .cb-up-next {
+  gap: var(--sp-1);
+  margin-bottom: 6px;
+  padding: 6px var(--sp-2);
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-lg);
+  background: var(--n-25);
+}
+.cb-up-next .cb-ai-queue-section-body,
+.cb-up-next .cb-ai-queue-list {
+  gap: var(--sp-1);
+}
+.cb-up-next .cb-ai-queue-section-body {
+  margin-top: var(--sp-1);
+}
+.cb-up-next .cb-ai-queue-heading .cb-ai-trace-line {
+  color: var(--n-500);
+  font-size: var(--fs-2xs);
+  font-weight: var(--w-medium);
+  line-height: var(--lh-2xs);
+}
+.cb-up-next .cb-ai-queue-item .cb-ai-trace-line {
+  gap: 6px;
+  color: var(--n-700);
   font-size: var(--fs-xs);
-  border-radius: 8px;
+  line-height: var(--lh-xs);
 }
-.cb-chat .cb-chat-send {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border-radius: 50%;
+.cb-up-next .cb-ai-queue-item .cb-ai-trace-icon {
+  width: 12px;
+  height: 12px;
+  color: var(--n-400);
+}
+.cb-up-next .cb-ai-queue-item .cb-ai-trace-icon svg {
+  width: 11px;
+  height: 11px;
+}
+.cb-up-next .cb-ai-queue-detail {
+  padding-inline-start: 18px;
+}
+.cb-up-next .cb-ai-queue-item > .cb-ai-trace-line:empty {
+  display: none;
+}
+.cb-up-next .cb-working-text {
+  color: var(--n-500);
+  font-size: var(--fs-2xs);
+}
+.cb-up-next-note {
+  margin: 0;
+  color: var(--n-600);
+  font-size: var(--fs-2xs);
+  line-height: 15px;
+}
+.cb-up-next-note[data-tone='warn'] {
+  color: var(--warn-600);
+}
+/* The plan a turn works through (M91.12c, AiPanel's DockPlan) is a Queue at
+   the same scale, over Up next while the turn runs: a quiet box whose
+   sections are small lines and whose steps hang from a short rule in 12px
+   rows. */
+.cb-chat .cb-chat-plan {
+  gap: var(--sp-1);
+  margin-bottom: 6px;
+  padding: 6px var(--sp-2);
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-lg);
+  background: var(--n-25);
+}
+.cb-chat-plan .cb-ai-trace-content {
+  margin: var(--sp-1) 0 0 5px;
+  padding: 0 0 0 var(--sp-3);
+}
+.cb-chat-plan .cb-ai-queue-list {
+  gap: var(--sp-1);
+}
+.cb-chat-plan .cb-ai-trace-line {
+  gap: 6px;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cb-chat-plan .cb-ai-trace-icon {
+  width: 12px;
+  height: 12px;
+}
+.cb-chat-plan .cb-ai-trace-icon svg {
+  width: 11px;
+  height: 11px;
+}
+.cb-chat-dock > .cb-chat-context {
+  padding-inline: 12px;
+}
+.cb-chat[data-presentation='floating'] .cb-chat-footer {
+  padding: 0 16px 10px;
+  justify-content: flex-start;
 }
 .cb-chat-footer {
   display: flex;
@@ -304,21 +571,9 @@
     font-size: var(--fs-3xl);
     line-height: var(--lh-3xl);
   }
-  .cb-chat-answer,
-  .cb-chat-user-bubble {
-    font-size: var(--fs-lg);
-  }
   .cb-chat-dock {
     padding-inline: var(--sp-6);
     padding-bottom: var(--sp-6);
-  }
-  .cb-chat-composer {
-    padding: 14px;
-    border-radius: 24px;
-  }
-  .cb-chat-textarea {
-    min-height: 64px;
-    font-size: var(--fs-lg);
   }
 }
 @container (max-width: 340px) {
@@ -335,11 +590,16 @@
   .cb-chat-dock {
     padding-inline: 10px;
   }
-  .cb-chat [data-testid='run-options'] {
+  .cb-chat .cb-run-options {
     max-width: 135px;
   }
-  .cb-chat-toolbar {
+  .cb-chat .cb-chat-toolbar {
     gap: var(--sp-05);
+  }
+  /* The narrowest panel keeps the ring and gives up the figure: the share
+     is still the ring's arc, and the reading is still its name. */
+  .cb-chat-context-use .cb-ai-context-value {
+    display: none;
   }
 }
 @media (max-height: 700px) {
@@ -385,20 +645,228 @@
   flex: 1;
   overflow-y: auto;
 }
-.cb-conversation-nav [data-testid='conversation-group'] {
+.cb-conversation-nav .cb-conversation-group {
   margin-block: var(--sp-3) 6px;
   font-size: var(--fs-2xs);
   text-transform: none;
   letter-spacing: 0;
   color: var(--text-muted);
 }
-.cb-conversation-nav [data-testid='conversation-row'] {
+.cb-conversation-nav .cb-conversation-row {
   min-height: 40px;
   margin-block: 3px;
   padding: 9px 10px;
   border-radius: 9px;
 }
 
-.cb-chat-answer .cb-message-markdown > * + * {
-  margin-top: var(--sp-4);
+@container (max-width: 420px) {
+  .cb-chat-context-summary {
+    max-width: 80px;
+    padding-inline: 6px;
+  }
+  .cb-chat .cb-chat-composer {
+    gap: 6px;
+  }
+  .cb-chat[data-presentation='floating'] .cb-chat-composer {
+    padding-inline: 10px;
+  }
+}
+
+/* --- Motion (owner, 2026-10-19: "feel like Notion and ChatGPT") ------------
+   Every duration here is a token (styles/tokens/spacing.css), so reduced
+   motion stills all of it but the one loop, which says so itself. Entrances
+   fill backwards and move `opacity`, `translate` and `scale` only: nothing
+   an entrance set outlives it. */
+
+/* The floating card grows out of the button's corner, a little small and
+   low, on the arrival pair; folded, the button lands back in its place.
+   Beside a docked page panel (app/shell.css) the button, or the card, glides
+   to its new corner instead of jumping there, and the card's cap on its width
+   moves with it, so its far edge never clips for a frame. A cap moves only
+   from a length, never from `none`, so the frame keeps one at rest that
+   matches the width it already has (shell.css): it narrows nothing. The
+   frame is the shell's (App.tsx): its motion lives with the conversation it
+   frames. */
+.m71-chat-frame[data-presentation='floating'] {
+  max-width: calc(100% - 40px);
+  transition:
+    right var(--motion-enter),
+    max-width var(--motion-enter);
+}
+@media (width < 760px) {
+  .m71-chat-frame[data-presentation='floating'] {
+    max-width: calc(100% - 20px);
+  }
+}
+.m71-chat-frame[data-presentation='floating']:not([data-minimized]) {
+  --pop-y: 8px;
+  --pop-scale: 0.94;
+  transform-origin: bottom right;
+  animation: cb-pop-in var(--motion-enter) backwards;
+}
+.m71-chat-frame[data-presentation='floating'][data-minimized] {
+  animation: cb-mark-in var(--motion-spring) backwards;
+}
+/* Expanded over the page or docked beside it, the same conversation fades in
+   where it now stands: its frame moved, nothing in it remounted. */
+.cb-chat[data-presentation='canvas'],
+.cb-chat[data-presentation='panel'] {
+  animation: cb-fade-in var(--motion-enter) backwards;
+}
+
+/* The canvas rail (M92.1). Docked, it arrives once, as it mounts, a short
+   way in from its edge beside the transcript; a drawer comes the whole way
+   in over the transcript each time it opens, from the fold or from nothing.
+   Turned off, it leaves the way it came, quicker, held by Presence until it
+   has gone (components/ui/motion.ts); a drawer that folds away leaves as a
+   copy (ConversationRail's DrawerExit), the rail itself folded at once.
+   Neither takes a press while it travels. Reduced motion lands each where
+   it belongs at once. */
+.cb-chat[data-presentation='canvas'] > .cb-chat-rail[data-arrive] {
+  animation: cb-chat-rail-in var(--motion-enter) backwards;
+  pointer-events: none;
+}
+.cb-chat[data-presentation='canvas'] > .cb-chat-rail[data-drawer] {
+  animation: cb-chat-drawer-in var(--motion-enter) backwards;
+}
+.cb-chat[data-presentation='canvas'] > .cb-chat-rail[data-state='closed'] {
+  animation: cb-chat-rail-out var(--motion-exit) forwards;
+  pointer-events: none;
+}
+.cb-chat[data-presentation='canvas'] > .cb-chat-rail[data-drawer][data-state='closed'],
+.cb-chat[data-presentation='canvas'] > .cb-chat-rail[data-drawer].cb-chat-rail-leave {
+  animation: cb-chat-drawer-out var(--motion-exit) forwards;
+  pointer-events: none;
+}
+@keyframes cb-chat-rail-in {
+  from {
+    opacity: 0;
+    translate: 24px 0;
+  }
+}
+@keyframes cb-chat-rail-out {
+  to {
+    opacity: 0;
+    translate: 16px 0;
+  }
+}
+@keyframes cb-chat-drawer-in {
+  from {
+    translate: 100% 0;
+  }
+}
+@keyframes cb-chat-drawer-out {
+  to {
+    translate: 100% 0;
+  }
+}
+
+/* What arrives in the thread rises into it: a card that comes to wait on the
+   person, a notice about its transcript, the pull requests it opened. Each
+   is a row of the transcript (`.cb-chat-item`, a Message Scroller item) or
+   what one holds. A turn's own entrances, a send's messages and what a reply
+   gains, are chat-turn.css's. History is simply there (`useArrival`,
+   components/ui/motion.ts). */
+.cb-chat-thread > [data-arrive],
+.cb-chat-item > [data-arrive] {
+  --rise: 8px;
+  animation: cb-rise-in var(--motion-enter) backwards;
+}
+
+/* A fold turns its chevron rather than swapping it, as the sidebar's
+   `.cb-chevron` does (app/shell.css), and what it reveals drops in from
+   under its header as the person opens it (`Unfold`, agent/Unfold.tsx) —
+   never again as the conversation unfolds from its button with the fold
+   still open. A turn's own steps are trace rows, which turn and reveal as
+   the AI elements' collapsibles do (components/ai/trace.css). */
+.cb-chat-chevron,
+.cb-conversation-chevron {
+  transition: rotate var(--motion-turn);
+}
+[aria-expanded='true'] > .cb-chat-chevron {
+  rotate: 90deg;
+}
+.cb-conversation-switcher[aria-expanded='true'] > .cb-conversation-chevron {
+  rotate: 180deg;
+}
+.cb-chat-reveal[data-arrive]:not([hidden]) {
+  --rise: -4px;
+  animation: cb-rise-in var(--motion-enter) backwards;
+}
+
+/* The conversations menu, and the completion menu over the input, open as
+   Popover's menus do (index.css): grown from the side of their anchor, the
+   switcher's title below one, the input above the other. Closed, a copy of
+   each fades where it was (`cb-popover-leave`, components/ui/motion.ts),
+   its exit outranking an entrance the copy was taken in the middle of. The
+   switcher's menu can stay open while the conversation folds onto its
+   button, so its entrance is an arrival, played once; the completion menu
+   closes with the fold. */
+.cb-conversation-menu {
+  transform-origin: top left;
+}
+.cb-conversation-menu[data-arrive] {
+  animation: cb-pop-in var(--motion-pop) backwards;
+}
+.cb-conversation-menu.cb-popover-leave {
+  animation: cb-pop-out var(--motion-exit) forwards;
+}
+.cb-chat-complete {
+  transform-origin: bottom left;
+}
+.cb-chat-complete.cb-menu-in {
+  --pop-y: 2px;
+  animation-name: cb-pop-in;
+}
+
+/* Send and Stop (the Prompt Input's submit) give a little under the press,
+   wake from disabled by fading rather than snapping, and trade places as a
+   turn starts and ends by popping in small where the other was: an arrival,
+   so neither pops again when the conversation unfolds from its button. */
+.cb-chat .cb-ai-prompt-input-submit {
+  transition:
+    background-color var(--motion-hover),
+    opacity var(--motion-move),
+    scale var(--motion-pop);
+}
+.cb-chat-send-slot {
+  display: inline-flex;
+}
+.cb-chat-toolbar > [data-arrive] {
+  --pop-y: 0px;
+  --pop-scale: 0.8;
+  animation: cb-pop-in var(--motion-pop) backwards;
+}
+
+/* An empty conversation's welcome rises in as it comes into view, its
+   starters a beat apart after it (activepieces' chips), and the note under
+   them last. */
+.cb-chat-welcome[data-arrive] {
+  animation: cb-rise-in var(--motion-enter) backwards;
+}
+.cb-chat-suggestion[data-arrive] {
+  animation: cb-rise-in var(--motion-enter) backwards;
+  animation-delay: calc((var(--i, 0) + 2) * var(--dur-stagger));
+}
+.cb-chat-welcome-note[data-arrive] {
+  animation: cb-fade-in var(--motion-enter) backwards;
+  animation-delay: calc(6 * var(--dur-stagger));
+}
+
+/* Up next and the review notes rise in over the composer when something
+   comes to wait there; an entry joining a list already shown fades in where
+   it lands. A context chip pops in as it is attached, or as the place it
+   names changes. Arrivals all (components/ui/motion.ts): what was there when
+   the conversation opened is simply there. */
+.cb-chat-activity > section[data-arrive] {
+  animation: cb-rise-in var(--motion-enter) backwards;
+}
+.cb-chat-activity li[data-arrive] {
+  animation: cb-fade-in var(--motion-enter) backwards;
+}
+.cb-chat-dock > .cb-chat-context .cb-chat-chip[data-arrive] {
+  --pop-y: 0px;
+  --pop-scale: 0.9;
+  transform-origin: left center;
+  animation: cb-pop-in var(--motion-pop) backwards;
 }

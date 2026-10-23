@@ -11,7 +11,7 @@ export function KeyboardShortcutsSettings() {
       className="mb-6 rounded-xl border border-n-200 p-5"
     >
       <h2 className="mb-1 text-md font-semibold text-n-900">Keyboard shortcuts</h2>
-      <p className="mb-4 text-sm text-n-500">
+      <p className="mb-4 text-ui text-(--text-meta)">
         Every shortcut Cerebro answers to. Letters never fire while you type, and Escape always
         closes the innermost panel.
       </p>
@@ -31,7 +31,7 @@ export function KeyboardShortcutsSettings() {
                 <span className="flex items-center gap-2 text-n-700">
                   {row.label}
                   {row.desktopOnly && (
-                    <span className="rounded-sm bg-n-100 px-1.5 py-0.5 text-2xs text-n-500">
+                    <span className="rounded-sm bg-n-100 px-1.5 py-0.5 text-2xs text-(--text-meta)">
                       Desktop app
                     </span>
                   )}

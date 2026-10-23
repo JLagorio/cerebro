@@ -180,8 +180,8 @@ describe('PulsePage', () => {
     expect(within(dialog).getByTestId('diff-view')).toBeTruthy();
   });
 
-  // M58.4 (CV-35): the History page reads who made a commit as the page's
-  // History tab does, from the commit record alone.
+  // M58.4 (CV-35): the History page reads who made a commit as a page's
+  // History panel does, from the commit record alone.
   describe('attribution', () => {
     const scout = makeEntry({
       path: 'records/agents/release-scout.md',

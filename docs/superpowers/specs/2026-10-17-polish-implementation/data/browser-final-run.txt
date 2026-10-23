@@ -1,0 +1,27 @@
+
+Running 18 tests using 1 worker
+
+(node:58221) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [chromium] › e2e/data-display-polish.spec.ts:50:1 › six-column Gantt budgets a readable axis, resizes by keyboard and scrolls columns independently (2.4s)
+  ✓   2 [chromium] › e2e/data-display-polish.spec.ts:83:1 › default gallery cards and lists reflow in a 360px content host without writing defaults (2.2s)
+  ✓   3 [chromium] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus (2.1s)
+  ✓   4 [chromium] › e2e/data-display-polish.spec.ts:172:3 › table chrome and a refused scalar remain legible in light (2.2s)
+  ✓   5 [chromium] › e2e/data-display-polish.spec.ts:172:3 › table chrome and a refused scalar remain legible in dark (2.1s)
+  ✓   6 [chromium] › e2e/data-display-polish.spec.ts:235:1 › database destruction has entity scope and remains outside view settings (2.3s)
+  ✓   7 [chromium] › e2e/data-display-polish.spec.ts:251:1 › Knowledge group bands stick below the same 36px data header (1.4s)
+  ✓   8 [chromium] › e2e/data-display-polish.spec.ts:264:1 › alternate displays show meaningful data in both themes without writing on open (2.7s)
+  ✓   9 [chromium] › e2e/data-display-polish.spec.ts:297:1 › fixed rows preserve sticky hit targets, offscreen navigation, find and wrapped content (4.9s)
+(node:58494) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  10 [webkit] › e2e/data-display-polish.spec.ts:50:1 › six-column Gantt budgets a readable axis, resizes by keyboard and scrolls columns independently (4.6s)
+  ✓  11 [webkit] › e2e/data-display-polish.spec.ts:83:1 › default gallery cards and lists reflow in a 360px content host without writing defaults (3.6s)
+  ✓  12 [webkit] › e2e/data-display-polish.spec.ts:124:1 › a missing title target keeps its exact draft, and retry commits once with keyboard focus (3.2s)
+  ✓  13 [webkit] › e2e/data-display-polish.spec.ts:172:3 › table chrome and a refused scalar remain legible in light (3.7s)
+  ✓  14 [webkit] › e2e/data-display-polish.spec.ts:172:3 › table chrome and a refused scalar remain legible in dark (3.1s)
+  ✓  15 [webkit] › e2e/data-display-polish.spec.ts:235:1 › database destruction has entity scope and remains outside view settings (3.0s)
+  ✓  16 [webkit] › e2e/data-display-polish.spec.ts:251:1 › Knowledge group bands stick below the same 36px data header (1.7s)
+  ✓  17 [webkit] › e2e/data-display-polish.spec.ts:264:1 › alternate displays show meaningful data in both themes without writing on open (3.8s)
+  ✓  18 [webkit] › e2e/data-display-polish.spec.ts:297:1 › fixed rows preserve sticky hit targets, offscreen navigation, find and wrapped content (5.8s)
+
+  18 passed (57.0s)

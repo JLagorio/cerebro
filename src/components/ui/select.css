@@ -1,0 +1,262 @@
+/* The design system's select (Select.tsx): a listbox button and the list it
+   opens. No native <select> draws anywhere in the app (owner, 2026-10-18): a
+   native popup cannot carry the design system's type, icons or check marks,
+   and it looks like a different program in every theme. */
+.cb-select {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  vertical-align: middle;
+}
+
+.cb-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: var(--control-h);
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition:
+    background var(--motion-hover),
+    border-color var(--motion-hover);
+}
+
+.cb-select-sm .cb-select-trigger {
+  height: var(--control-h-sm);
+  padding: 0 6px 0 8px;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+
+.cb-select-trigger:hover {
+  border-color: var(--n-300);
+  background: var(--n-25);
+}
+
+.cb-select-trigger[aria-expanded='true'] {
+  border-color: var(--n-300);
+  background: var(--n-50);
+}
+
+.cb-select-trigger:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+
+.cb-select-trigger[aria-invalid='true'] {
+  border-color: var(--danger-500);
+}
+
+.cb-select-trigger:disabled {
+  border-color: var(--n-200);
+  background: var(--n-50);
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+/* Ghost: a value that reads as text until the pointer finds it — property
+   rows, the inspector, toolbars. */
+.cb-select-ghost .cb-select-trigger {
+  padding: 0 6px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.cb-select-ghost .cb-select-trigger:hover {
+  border-color: transparent;
+  background: var(--n-50);
+}
+
+.cb-select-ghost .cb-select-trigger[aria-expanded='true'] {
+  border-color: transparent;
+  background: var(--n-100);
+}
+
+.cb-select-ghost .cb-select-trigger:focus-visible {
+  border-color: var(--border-focus);
+}
+
+.cb-select-ghost .cb-select-trigger:disabled {
+  border-color: transparent;
+  background: transparent;
+}
+
+.cb-select-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cb-select-placeholder {
+  color: var(--n-400);
+}
+
+.cb-select-icon {
+  flex: none;
+  color: var(--n-500);
+}
+
+.cb-select-chevron {
+  flex: none;
+  color: var(--n-400);
+  transition: transform var(--motion-move);
+}
+
+.cb-select-trigger[aria-expanded='true'] .cb-select-chevron {
+  transform: rotate(180deg);
+}
+
+/* The list: the Popover panel and its rows, the same surface a Menu has. */
+.cb-select-list {
+  padding: 4px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-lg);
+  background: var(--n-0);
+  box-shadow: var(--shadow-lg);
+}
+
+.cb-select-options {
+  /* The rows' offsetParent, so the highlighted one can be scrolled to. */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.cb-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--n-800);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cb-select-sm-list .cb-select-option {
+  min-height: 28px;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+
+.cb-select-option[data-active] {
+  background: var(--n-50);
+}
+
+.cb-select-option[aria-disabled='true'] {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.cb-select-option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cb-select-option-hint {
+  flex: none;
+  color: var(--n-400);
+  font-size: var(--fs-meta);
+}
+
+.cb-select-check {
+  flex: none;
+  color: var(--cortex-600);
+}
+
+/* Searchable: a combobox. The search field sits flush at the top of the
+   list over a hairline, as Linear's and Notion's pickers carry theirs, and
+   the rows scroll beneath it. */
+.cb-select-list.cb-select-searchable {
+  padding: 0;
+}
+
+.cb-select-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--n-100);
+}
+
+.cb-select-search-icon {
+  flex: none;
+  color: var(--n-400);
+}
+
+.cb-select-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--n-800);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  outline: none;
+}
+
+.cb-select-search-input::placeholder {
+  color: var(--n-400);
+}
+
+.cb-select-sm-list .cb-select-search {
+  height: 32px;
+  padding: 0 10px;
+}
+
+.cb-select-sm-list .cb-select-search-input {
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+
+.cb-select-searchable .cb-select-options {
+  padding: 4px;
+}
+
+/* No rows: the listbox stays for the field to name, and draws nothing. */
+.cb-select-searchable .cb-select-options:empty {
+  display: none;
+}
+
+.cb-select-empty {
+  padding: 10px 12px;
+  color: var(--n-400);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+
+.cb-select-sm-list .cb-select-empty {
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}

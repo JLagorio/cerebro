@@ -76,6 +76,13 @@ const CARD_METRICS: Record<
   },
 };
 
+const DEFAULT_CARD_METRICS = {
+  column: 288,
+  pad: 'p-4',
+  title: 'text-ui',
+  clamp: 'line-clamp-3',
+};
+
 /**
  * One drop target: a column, inside a lane when the board sub-groups.
  *
@@ -290,7 +297,10 @@ function BoardCard({
   });
   const dragKeyDown = listeners?.onKeyDown as ((e: React.KeyboardEvent) => void) | undefined;
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
-  const metrics = CARD_METRICS[presentation.cardSize ?? 'medium'];
+  const metrics =
+    presentation.cardSize === undefined
+      ? DEFAULT_CARD_METRICS
+      : CARD_METRICS[presentation.cardSize];
   // M16.19: the card shows what the view says it shows. It used to resolve
   // `priority` and `assignee` by NAME, so the shared Properties page — the eye
   // toggles every other layout obeys — was a visible no-op here, and a vault
@@ -340,32 +350,36 @@ function BoardCard({
         // to the keyboard drag sensor, whose own handler this prop shadows.
         dragKeyDown?.(e);
       }}
-      style={{
-        borderLeft: `3px solid ${
-          column.ghost || !column.color ? 'var(--n-300)' : resolveOptionColor(column.color).solid
-        }`,
-      }}
-      className={`relative cursor-pointer rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-xs)] hover:border-n-300 hover:shadow-[var(--shadow-sm)] ${metrics.pad}`}
+      className={`cb-card-lift relative cursor-pointer rounded-xl border border-n-200 bg-n-0 hover:border-n-300 hover:shadow-[var(--shadow-sm)] ${metrics.pad}`}
     >
-      <div className="mb-1 flex items-center gap-1.5">
-        <span data-testid="card-key" className="[font-family:var(--font-mono)] text-2xs text-n-400">
-          {key}
-        </span>
+      {key !== '' && (
+        <div className="mb-2 flex items-center gap-1.5">
+          <span
+            data-testid="card-key"
+            className="[font-family:var(--font-mono)] text-2xs text-n-400"
+          >
+            {key}
+          </span>
+        </div>
+      )}
+      <div
+        className={`line-clamp-2 font-medium text-n-900 [overflow-wrap:anywhere] ${metrics.title}`}
+      >
+        {entry.title}
       </div>
-      <div className={`font-medium text-n-900 ${metrics.title}`}>{entry.title}</div>
       {/* M16.20: Notion's "Card preview › Page content". `Entry.snippet` has
           been produced by the scanner since v1 and, outside the Inbox
           queue's rows, rendered nowhere. */}
       {presentation.cardPreview === 'content' && entry.snippet !== '' && (
         <p
           data-testid="card-preview"
-          className={`m-0 mt-1 text-xs leading-[16px] text-n-500 ${metrics.clamp}`}
+          className={`m-0 mt-2 text-metadata text-n-500 ${metrics.clamp}`}
         >
           {entry.snippet}
         </p>
       )}
       {chips.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           {chips.map((c) => (
             <FieldChip key={c.field} resolved={c.resolved} />
           ))}
@@ -398,7 +412,10 @@ function BoardColumn({
     // business and a key may contain anything a frontmatter value may.
     data: { lane: column.lane?.key ?? '' },
   });
-  const metrics = CARD_METRICS[presentation.cardSize ?? 'medium'];
+  const metrics =
+    presentation.cardSize === undefined
+      ? DEFAULT_CARD_METRICS
+      : CARD_METRICS[presentation.cardSize];
   // M16.20 — Notion's "Color columns". A ghost or uncoloured column gets the
   // neutral tint rather than nothing: half a board painted and half of it
   // transparent reads as a rendering fault, not as a setting.
@@ -439,7 +456,7 @@ function BoardColumn({
           the space below the last card need no special case: the column IS
           the target, cards or not, and it lights identically either way. */}
       <InsertionLine gap={column.path} side="start" />
-      <div className="flex items-center gap-[7px] px-1 pb-[9px]">
+      <div className="flex items-center gap-2 px-2 pb-3">
         <span
           className="box-border h-2.5 w-2.5 rounded-full"
           style={
@@ -451,19 +468,19 @@ function BoardColumn({
                 }
           }
         />
-        <span className="text-sm font-semibold text-n-800">{column.label}</span>
-        <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
+        <span className="text-ui font-medium text-n-800">{column.label}</span>
+        <span className="rounded-full bg-n-100 px-1.5 text-metadata tabular-nums text-n-500">
           {column.entries.length}
         </span>
       </div>
       <div
         data-tinted={tinted ? 'true' : undefined}
-        className={`flex min-h-[60px] flex-col gap-2 rounded-lg ${tinted ? 'p-1.5' : 'p-0.5'}`}
+        className="flex min-h-[60px] flex-col gap-3 rounded-xl p-2"
         // The "Color columns" tint only. The drag-over wash that used to
         // override it is the line above now: a target is told by a 4px mark,
         // not by repainting a screen-height area, and a column that IS tinted
         // could not show the wash and its own colour at once anyway.
-        style={{ background: tinted ? tint : 'transparent' }}
+        style={{ background: tinted ? tint : 'var(--n-25)' }}
       >
         {column.entries.map((e) => (
           <BoardCard
@@ -617,7 +634,11 @@ export function BoardView({
     // plan's min-h-full for the placeholder's scroll-container classes.
     <div
       data-testid="board-view"
-      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4"
+      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-0 px-5 py-4"
+      style={{
+        paddingBottom: 'max(16px, var(--assistant-scroll-clearance, 0px))',
+        scrollPaddingBottom: 'var(--assistant-scroll-clearance, 0px)',
+      }}
     >
       {columns.length === 0 ? (
         // Fix (execution-log note 17a): groupEntries([], …) returns [] — an
@@ -640,7 +661,7 @@ export function BoardView({
               follows the cursor while the card itself stays put. */}
           <DragGhostLayer />
           {lanes === null ? (
-            <div className="flex items-start gap-3 overflow-x-auto">
+            <div className="flex items-start gap-4 overflow-x-auto">
               {columns.map((c) => (
                 <BoardColumn
                   key={c.path}
@@ -662,7 +683,7 @@ export function BoardView({
                 scope={scope}
                 path={lane.path}
               >
-                <div className="flex items-start gap-3 overflow-x-auto">
+                <div className="flex items-start gap-4 overflow-x-auto">
                   {laneColumns.map((c) => (
                     <BoardColumn
                       key={c.path}

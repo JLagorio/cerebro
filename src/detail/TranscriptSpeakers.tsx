@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
-import { Button } from '@/components/ui/Button';
+import { Icon } from '@/components/ui/Icon';
 import { useOpenPath } from '@/app/useOpenPath';
 import { humanize } from '@/detail/FieldEditor';
+import { InspectorAction, InspectorActions, InspectorSubhead } from '@/detail/InspectorParts';
 import { matchSpeakers, transcriptFacts, type SpeakerMatch } from '@/engine/transcripts';
 import { formatWikilink, resolveTarget } from '@/engine/wikilink';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -19,45 +20,46 @@ const WORDS = {
   add: (n: number, field: string) => `Add ${n} to ${field}`,
 } as const;
 
+/** A group of the Organize section: its subhead, a subhead's distance below
+ *  the Type row, and no rule of its own. */
 function Shell({ state, children }: { state: SpeakersState; children: React.ReactNode }) {
   return (
     <section
       data-testid="transcript-speakers"
       data-state={state}
       aria-label={WORDS.heading}
-      className="mt-3 border-t border-n-100 pt-3"
+      className="mt-3.5"
     >
-      <div className="pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
-        {WORDS.heading}
-      </div>
+      <InspectorSubhead label={WORDS.heading} />
       {children}
     </section>
   );
 }
 
+/** One speaker as the file names them, and on the right the page they
+ *  matched — a person's page, one press away — or why none did. */
 function Row({ match, open }: { match: SpeakerMatch; open: (path: string) => void }) {
   return (
     <li
       data-testid="speaker-row"
       data-match={match.kind}
-      className="flex items-baseline gap-2 py-0.5 text-xs"
+      className="flex min-h-7 min-w-0 items-center gap-3 text-ui"
     >
-      <span className="min-w-0 truncate text-n-700">{match.label}</span>
-      <span className="ml-auto flex-none">
-        {match.kind === 'matched' ? (
-          <button
-            type="button"
-            onClick={() => open(match.page.path)}
-            className="border-0 bg-transparent p-0 text-xs font-medium text-cortex-600 hover:underline"
-          >
-            {match.page.title}
-          </button>
-        ) : (
-          <span className="text-n-500">
-            {match.kind === 'none' ? WORDS.none : WORDS.ambiguous(match.count)}
-          </span>
-        )}
-      </span>
+      <span className="min-w-0 truncate text-n-800">{match.label}</span>
+      {match.kind === 'matched' ? (
+        <button
+          type="button"
+          onClick={() => open(match.page.path)}
+          className="-mr-2 ml-auto inline-flex min-w-0 items-center gap-1 rounded-sm border-0 bg-transparent px-2 py-0.5 text-metadata text-n-500 motion-hover hover:bg-n-50 hover:text-n-900"
+        >
+          <Icon name="user" size={12} className="flex-none text-n-400" />
+          <span className="truncate">{match.page.title}</span>
+        </button>
+      ) : (
+        <span className="ml-auto flex-none text-metadata text-n-400">
+          {match.kind === 'none' ? WORDS.none : WORDS.ambiguous(match.count)}
+        </span>
+      )}
     </li>
   );
 }
@@ -93,7 +95,7 @@ export function TranscriptSpeakers({ path }: { path: string }) {
     if (entry !== null && facts === null) return null;
     return (
       <Shell state="unavailable">
-        <p data-testid="section-unavailable" className="m-0 text-xs text-warn-600">
+        <p data-testid="section-unavailable" className="m-0 text-metadata text-warn-600">
           {WORDS.unavailable}
         </p>
       </Shell>
@@ -103,14 +105,14 @@ export function TranscriptSpeakers({ path }: { path: string }) {
   if (matches === null) {
     return (
       <Shell state="not-recorded">
-        <p className="m-0 text-xs text-n-500">{WORDS.notRecorded}</p>
+        <p className="m-0 text-metadata text-n-500">{WORDS.notRecorded}</p>
       </Shell>
     );
   }
   if (matches.length === 0) {
     return (
       <Shell state="empty">
-        <p className="m-0 text-xs text-n-500">{WORDS.empty}</p>
+        <p className="m-0 text-metadata text-n-500">{WORDS.empty}</p>
       </Shell>
     );
   }
@@ -148,9 +150,13 @@ export function TranscriptSpeakers({ path }: { path: string }) {
         ))}
       </ul>
       {field !== null && fits && toAdd.length > 0 && (
-        <Button variant="secondary" size="sm" className="mt-1.5" onClick={add}>
-          {WORDS.add(toAdd.length, humanize(field.name))}
-        </Button>
+        <InspectorActions>
+          <InspectorAction
+            icon="user-plus"
+            label={WORDS.add(toAdd.length, humanize(field.name))}
+            onClick={add}
+          />
+        </InspectorActions>
       )}
     </Shell>
   );

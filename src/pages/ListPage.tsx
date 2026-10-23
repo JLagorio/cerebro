@@ -1,3 +1,4 @@
+import { DatabaseActions } from '@/views/DatabaseActions';
 import { PageHeader } from '@/components/PageHeader';
 import { useEntryState } from '@/app/useEntryState';
 import type { TimeSlot } from '@/engine/timeGrid';
@@ -75,6 +76,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
 
   const [presentation, setPresentation] = useState<Presentation>(surface.presentation);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [entitySettings, setEntitySettings] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // M12.8: the chip bar below the tabs. Hidden until an icon engages it —
   // the icons tint when an axis is active, so nothing is silently filtered.
@@ -265,14 +267,17 @@ export function ListPage({ selection }: { selection: ListSelection }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1" data-testid="collection-page">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="cb-data-page flex min-h-0 min-w-0 flex-1 flex-col">
         <PageHeader
           title={
             <button
               type="button"
               data-testid="list-title-edit"
               title="Edit list name & settings"
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => {
+                setEntitySettings(true);
+                setSettingsOpen(true);
+              }}
               className="flex max-w-full items-center gap-3 rounded-md px-1 text-left hover:bg-n-50"
             >
               <Icon
@@ -286,10 +291,20 @@ export function ListPage({ selection }: { selection: ListSelection }) {
           }
           metadata={<span data-testid="view-count">{sortedEntries.length}</span>}
           actions={
-            <span className="inline-flex items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-2xs text-n-500">
-              {sourceLabel}
-              {filtered && ' · filtered'}
-            </span>
+            <>
+              <DatabaseActions
+                kind="list"
+                onRename={() => {
+                  setEntitySettings(true);
+                  setSettingsOpen(true);
+                }}
+                onDelete={() => setConfirmDelete(true)}
+              />
+              <span className="inline-flex items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-2xs text-n-500">
+                {sourceLabel}
+                {filtered && ' · filtered'}
+              </span>
+            </>
           }
         />
         {/* M11: the tab row IS the layout control. There is no pill strip in
@@ -358,9 +373,13 @@ export function ListPage({ selection }: { selection: ListSelection }) {
               search={search}
               onSearchChange={setSearch}
               settingsOpen={settingsOpen}
-              onSettingsOpenChange={setSettingsOpen}
+              onSettingsOpenChange={(open) => {
+                setEntitySettings(false);
+                setSettingsOpen(open);
+              }}
               settingsPanel={
                 <ViewSettingsPanel
+                  initialPage={entitySettings ? 'list' : 'root'}
                   list={{
                     ...list.definition,
                     views: list.definition.views.map((v) =>
@@ -372,10 +391,6 @@ export function ListPage({ selection }: { selection: ListSelection }) {
                   schema={schema}
                   onAddProperty={addProperty}
                   onClose={() => setSettingsOpen(false)}
-                  onDeleteList={() => {
-                    setSettingsOpen(false);
-                    setConfirmDelete(true);
-                  }}
                   onDeleteView={
                     list.definition.views.length > 1 ? () => removeView(activeId) : undefined
                   }

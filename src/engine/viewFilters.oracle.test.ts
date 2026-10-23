@@ -1,4 +1,5 @@
-import oracleSource from '@/test/filterOracle.ts?raw';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   ARITY,
@@ -144,7 +145,9 @@ it('registers every operator, kind and family with no missing or stray keys', ()
   sameKeys('families', FILTER_FAMILIES, FAMILY_TARGETS);
 });
 it('the oracle imports no evaluator code', () => {
-  const source = oracleSource;
+  // Keep this audit out of Vite's transform cache: a ?raw import can replace
+  // the real oracle's source map when coverage normalizes module URLs.
+  const source = readFileSync(join(__dirname, '../test/filterOracle.ts'), 'utf8');
   const imports = source.match(/^import[^;]+;/gm) ?? [];
   expect(imports).toHaveLength(1);
   expect(imports[0]).toMatch(/^import type .* from '@\/engine\/types';$/s);

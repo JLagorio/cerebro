@@ -133,37 +133,43 @@ export function AgentsPage({ selection }: { selection: AgentsSelection }) {
           </Button>
         }
       />
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-4">
-        {/* The roster's click OPENS the agent — its page, on the Runs tab
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="cb-surface-content cb-agents-content">
+          {/* The roster's click OPENS the agent — its page, on the Runs tab
             (M55.12); on this surface an agent is a destination, not a
             filter. The fleet lives here alone since M50.5; Knowledge's old
             runs deep link still renders the filtering copy, and has no tab of
             its own. */}
-        <section data-section="fleet" className="flex flex-col gap-2">
-          <AgentRoster
-            vaultPath={vaultPath}
-            focus={null}
-            onFocus={(actor) => {
-              if (actor === null) return;
-              const record = entries.filter(isAgentEntry).find((e) => agentRef(e).actor === actor);
-              navigate(
-                record === undefined
-                  ? { kind: 'agents', actor }
-                  : { kind: 'doc', path: record.path, tab: 'runs' },
-              );
-            }}
-          />
-          {/* M63.1b: what is waiting to wake them, between the roster and
+          <section data-section="fleet" className="flex flex-col gap-2">
+            <h2 className="cb-section-heading">Your agents</h2>
+            <AgentRoster
+              vaultPath={vaultPath}
+              focus={null}
+              onFocus={(actor) => {
+                if (actor === null) return;
+                const record = entries
+                  .filter(isAgentEntry)
+                  .find((e) => agentRef(e).actor === actor);
+                navigate(
+                  record === undefined
+                    ? { kind: 'agents', actor }
+                    : { kind: 'doc', path: record.path, tab: 'runs' },
+                );
+              }}
+            />
+            {/* M63.1b: what is waiting to wake them, between the roster and
               the run feed. Nested in the fleet section rather than splitting
               it, so the roster and the feed stay one section to address. */}
-          <section data-section="wakes" className="my-2">
-            <WakesSection vaultPath={vaultPath} />
+            <section data-section="wakes" className="my-2">
+              <WakesSection vaultPath={vaultPath} />
+            </section>
+            <section data-section="followups" className="my-2">
+              <FollowupList />
+            </section>
+            <h2 className="cb-section-heading">Recent runs</h2>
+            <FleetSection />
           </section>
-          <section data-section="followups" className="my-2">
-            <FollowupList />
-          </section>
-          <FleetSection />
-        </section>
+        </div>
       </div>
     </div>
   );

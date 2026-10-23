@@ -9,10 +9,9 @@ import { Lane } from './Lane';
 export function CapturesLane({ now, ctx }: { now: Date; ctx: BandContext }) {
   const entries = useVaultStore((s) => s.entries),
     status = useVaultStore((s) => s.status);
-  const enabled = useUiStore((s) => s.inboxEnabled),
-    period = useUiStore((s) => s.inboxPeriod);
+  const enabled = useUiStore((s) => s.inboxEnabled);
   if (!enabled) return null;
-  const data = captureRows(entries, period, now);
+  const data = captureRows(entries);
   const state = status === 'error' ? 'unavailable' : status === 'ready' ? 'ready' : 'loading';
   return (
     <Lane

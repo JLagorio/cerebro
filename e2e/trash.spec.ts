@@ -1,5 +1,11 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { chooseSettingsSection, boot, readMockFile, openDestination, showPages } from './boot';
+import {
+  chooseSettingsSection,
+  boot,
+  readMockFile,
+  openDestination,
+  showPageFolders,
+} from './boot';
 
 /**
  * The vault's own Trash (M60.8), on the mock backend. A page deleted from the
@@ -49,7 +55,7 @@ const treeRow = (page: Page, path: string): Locator =>
   page.getByTestId('file-tree').locator(`[data-testid="tree-row"][data-path="${path}"]`);
 
 async function unfold(page: Page, name: string) {
-  await showPages(page);
+  await showPageFolders(page);
   const folder = page.getByTestId('file-tree').getByTestId('tree-folder').filter({ hasText: name });
   if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click();
 }
@@ -123,6 +129,8 @@ test('a deleted page waits in the vault Trash and Settings restores it byte for 
   const again = await stampOf(page, PAGE);
   const other = '# Someone else\n';
   await page.evaluate(([p, b]) => window.__cerebroMockFs.set(p, b), [PAGE, other]);
+  await openDestination(page, 'Settings');
+  await chooseSettingsSection(page, 'Recently deleted');
   await expect(section.getByTestId('trash-item')).toHaveCount(1);
   await section.getByTestId('trash-restore').click();
   await expect(page.getByTestId('toast-host')).toContainText(

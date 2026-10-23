@@ -53,7 +53,9 @@ export function ReviewChip({
   by?: 'human' | 'agent' | null;
   /** Freshness or actor line appended after a separator. */
   detail?: string | null;
-  size?: 'sm' | 'md';
+  /** `glyph`: the icon alone in its colour, its words its name and tooltip —
+   *  for a one-line row with no room for a pill (the page inspector). */
+  size?: 'sm' | 'md' | 'glyph';
 }) {
   const agentOnly = status === 'current' && by === 'agent';
   const tone = agentOnly ? NEEDS_PERSON : TONE[status];
@@ -61,6 +63,23 @@ export function ReviewChip({
     by === null ? null : agentOnly ? 'confirmed by an agent' : BY[by],
     detail ?? null,
   ].filter((part) => part !== null);
+  if (size === 'glyph') {
+    const words = [agentOnly ? AGENT_ONLY_LABEL : REVIEW_LABELS[status], ...trailing].join(' · ');
+    return (
+      <span
+        data-testid="review-chip"
+        data-review={status}
+        data-by={by ?? 'nobody'}
+        role="img"
+        aria-label={words}
+        title={words}
+        className="inline-flex flex-none"
+        style={{ color: tone.fg }}
+      >
+        <Icon name={tone.icon} size={14} />
+      </span>
+    );
+  }
   return (
     <span
       data-testid="review-chip"

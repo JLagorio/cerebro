@@ -79,18 +79,18 @@ export function SheetView({
       <table data-testid="sheet-grid" className="w-max min-w-full border-collapse text-sm">
         <caption
           data-testid="sheet-name"
-          className="bg-n-25 px-3 py-2 text-left text-xs font-medium text-n-600"
+          className="h-9 border-b border-n-100 bg-n-25 px-3 py-2 text-left text-metadata font-medium text-n-600"
         >
           {sheet.name}
         </caption>
         <thead>
           <tr>
-            <th className="w-9 border border-n-200 bg-n-50" aria-label="Row" />
+            <th className="w-10 border border-n-100 bg-n-50" aria-label="Row" />
             {Array.from({ length: cols }, (_, col) => (
               <th
                 key={col}
                 scope="col"
-                className="min-w-24 border border-n-200 bg-n-50 px-3 py-1 text-center text-xs font-normal text-n-500"
+                className="h-8 min-w-30 border border-n-100 bg-n-50 px-3 py-1 text-center text-metadata font-normal text-n-600"
               >
                 {columnLabel(col + 1)}
               </th>
@@ -118,7 +118,7 @@ export function SheetView({
                     data-address={address}
                     data-kind={value?.kind ?? 'blank'}
                     title={paint.title}
-                    className={`max-w-72 truncate border border-n-200 px-3 py-1.5 ${paint.className}`}
+                    className={`h-8 max-w-72 truncate border border-n-100 px-2.5 py-1 text-ui ${paint.className}`}
                   >
                     {paint.display}
                   </td>

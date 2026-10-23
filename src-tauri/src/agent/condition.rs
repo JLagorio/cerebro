@@ -431,9 +431,11 @@ fn request(input: &Request, token: &str, url: &str) -> AgentRequest {
         message: input.prompt.clone(),
         system_prompt: None,
         session_id: None,
+        fork: None,
         model: Some("haiku".into()),
         shell: None,
         web: None,
+        delegate: None,
         connectors: Some(false),
         connector_names: Some(vec![]),
         attended: Some(false),
@@ -927,7 +929,10 @@ mod tests {
         assert_eq!(req.approved_stdio, Some(vec![]));
         let plan = crate::policy::tool_approval::plan_for(&req, false);
         assert!(plan.allowed.is_empty());
-        assert_eq!(plan.disallowed, crate::policy::tools::cli_names(|_| true));
+        assert_eq!(
+            plan.disallowed,
+            crate::policy::tools::cli_names(|tool| tool.name != "ToolSearch")
+        );
         assert_eq!(ELAPSED_SECONDS, 120);
     }
     #[test]

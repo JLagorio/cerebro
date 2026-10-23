@@ -71,7 +71,7 @@
  * that pill is the only thing saying it can be clicked. In a table cell the
  * same pill is a box floating INSIDE the cell: inset by the cell's own
  * padding horizontally and short of the row height vertically, so hovering a
- * 36px row lit a 22px rectangle in the middle of it. Notion's table gives the
+ * row lit a short rectangle in the middle of it. The table gives the
  * ROW a fill and the cell none, and the whole cell is the target — which
  * TableCell's click forwarding now makes true, so a fill marking out the part
  * that used to be clickable would be describing something that no longer
@@ -110,4 +110,29 @@
 .cb-row-open:focus-visible {
   opacity: 1;
   pointer-events: auto;
+}
+
+/* A cell already provides its 12px inset. Value triggers must not add a
+ * second inset inside it; small secondary controls retain their own target. */
+.cb-row .cb-cell-chrome [data-cell-primary] {
+  padding-inline: 0;
+}
+
+/* Column boundaries help while editing, but continuous row rules carry the
+ * resting table. No rounded joints between adjacent rows or frozen cells. */
+:is(.cb-row:hover, .cb-row:focus-within, .cb-row[data-focused='true']) > [role='gridcell'] {
+  border-right-color: var(--n-100);
+}
+
+/* Plain status values get a quiet label shape. Explicit coloured-chip
+ * presentations keep their saved appearance; empty cells remain blank. */
+.cb-row
+  [data-field-kind='status'][data-chip-style='plain']
+  .cb-cell-chrome
+  [data-cell-primary]:not([aria-label]) {
+  border-radius: 999px;
+  background-color: var(--n-50);
+  padding-inline: 8px;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
 }

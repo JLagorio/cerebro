@@ -65,7 +65,7 @@ export function FilterRuleRow({
   const ops = filterOpsFor(kind);
 
   return (
-    <div className="flex items-center gap-1.5" data-testid="filter-rule">
+    <div className="flex flex-wrap items-center gap-1.5" data-testid="filter-rule">
       <Dropdown
         size="sm"
         label="Filter property"

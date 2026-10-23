@@ -19,6 +19,7 @@ const current = (layout: PaneLayout) => paneById(layout, layout.active)!;
 it('claims every kind by the file it edits, without claiming a lens', () => {
   const examples = {
     home: [{ kind: 'home' }, null],
+    pages: [{ kind: 'pages' }, null],
     inbox: [{ kind: 'inbox' }, 'place:inbox'],
     mywork: [{ kind: 'mywork' }, null],
     changes: [{ kind: 'changes' }, null],

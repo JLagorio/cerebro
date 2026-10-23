@@ -16,9 +16,9 @@ import { useVaultStore } from '@/stores/vaultStore';
  * The person's own page opens, per vault, on this Mac (M59.3).
  *
  * localStorage `cerebro.openLog` holds `{vault: OpenLog}`. It ranks ⌘K and
- * the name pickers, and Settings' Recently opened shows and clears it. It
- * never reaches a prompt, an MCP tool, policy or the vault: nothing outside
- * this store, the pickers and that Settings section reads it.
+ * the name pickers, supplies Pages and the sidebar's Recents, and Settings'
+ * Recently opened shows and clears it. It never reaches a prompt, an MCP
+ * tool, policy or the vault.
  *
  * Only the person's opens land here. navStore records a page navigation
  * unless it was marked `byAgent`; `useOpenPath` records the opens that are

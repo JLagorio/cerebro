@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "artifact_version": 7,
-  "rule_version": "tool-approval/2026-10-15",
+  "artifact_version": 9,
+  "rule_version": "tool-approval/2026-10-22",
   "cli_version": "2.1.250",
   "min_cli_version": "2.1.250",
   "ceilings": {
@@ -18,6 +18,10 @@
       "no"
     ],
     "web": [
+      "off",
+      "on"
+    ],
+    "delegate": [
       "off",
       "on"
     ]
@@ -174,17 +178,22 @@
     },
     {
       "id": "delegate",
-      "ceiling": "none",
+      "ceiling": "delegate",
       "needs_default_mode": false,
+      "needs_gate": true,
+      "narrowed_out": "deny",
       "grid": {
         "attended": {
-          "any": "cli"
+          "off": "deny",
+          "on": "cli"
         },
         "unattended": {
-          "any": "cli"
+          "off": "deny",
+          "on": "deny"
         },
         "internal": {
-          "any": "deny"
+          "off": "deny",
+          "on": "deny"
         }
       },
       "card": null,
@@ -233,6 +242,151 @@
       "message": "Cerebro doesn't use plan mode. Carry on with the work, or describe your plan in your reply."
     },
     {
+      "id": "todo",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "any": "allow"
+        },
+        "unattended": {
+          "any": "deny"
+        },
+        "internal": {
+          "any": "deny"
+        }
+      },
+      "card": null,
+      "message": null
+    },
+    {
+      "id": "task_list",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "any": "deny"
+        },
+        "unattended": {
+          "any": "deny"
+        },
+        "internal": {
+          "any": "deny"
+        }
+      },
+      "card": null,
+      "message": null
+    },
+    {
+      "id": "background",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "any": "deny"
+        },
+        "unattended": {
+          "any": "deny"
+        },
+        "internal": {
+          "any": "deny"
+        }
+      },
+      "card": null,
+      "message": null
+    },
+    {
+      "id": "cross_session",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "any": "deny"
+        },
+        "unattended": {
+          "any": "deny"
+        },
+        "internal": {
+          "any": "deny"
+        }
+      },
+      "card": null,
+      "message": null
+    },
+    {
+      "id": "schedule",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "any": "deny"
+        },
+        "unattended": {
+          "any": "deny"
+        },
+        "internal": {
+          "any": "deny"
+        }
+      },
+      "card": null,
+      "message": null
+    },
+    {
+      "id": "outside",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "any": "deny"
+        },
+        "unattended": {
+          "any": "deny"
+        },
+        "internal": {
+          "any": "deny"
+        }
+      },
+      "card": null,
+      "message": null
+    },
+    {
+      "id": "skill",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "any": "deny"
+        },
+        "unattended": {
+          "any": "deny"
+        },
+        "internal": {
+          "any": "deny"
+        }
+      },
+      "card": null,
+      "message": null
+    },
+    {
+      "id": "meta",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "loads_tools": true,
+      "grid": {
+        "attended": {
+          "any": "cli"
+        },
+        "unattended": {
+          "any": "cli"
+        },
+        "internal": {
+          "any": "cli"
+        }
+      },
+      "card": null,
+      "message": null
+    },
+    {
       "id": "confirmable",
       "ceiling": "ask_first",
       "needs_default_mode": false,
@@ -269,6 +423,7 @@
     "denied": "Cerebro's settings don't allow this tool in this run.",
     "unlisted": "Cerebro doesn't allow this tool here.",
     "mode_mismatch": "This run had to ask before running commands, but Claude Code started in another permission mode or is older than 2.1.250, so Cerebro stopped it before it acted. Update Claude Code, or set Shell access to Off or On.",
+    "unknown_tool": "Claude Code offered a tool Cerebro doesn't know: {tool}. Cerebro stopped the run before it acted, since it can't say what that tool may do. Update Cerebro, or use the Claude Code version it supports.",
     "ask_first_unattended": "This agent asks before writing pages, and nobody is watching this run, so nothing was written. Say in your reply what you would have written.",
     "ask_first_unapproved": "This write needs the person's Allow first, and Cerebro has none for it, so nothing was written. Call the tool again to ask them.",
     "ask_first_declined": "The person declined this write, so nothing was written.",
@@ -366,5 +521,18 @@
   "queue_limits": {
     "open_per_actor": 20,
     "input_bytes": 262144
+  },
+  "agent_types": {
+    "builtin": [
+      "claude",
+      "claude-code-guide",
+      "Explore",
+      "general-purpose",
+      "Plan",
+      "statusline-setup"
+    ],
+    "allowed": [
+      "cerebro-researcher"
+    ]
   }
 }

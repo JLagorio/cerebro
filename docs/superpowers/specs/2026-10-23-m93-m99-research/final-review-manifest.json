@@ -1,0 +1,1167 @@
+{
+  "review_date": "2026-10-23",
+  "captured_at_utc": "2026-10-23T17:34:58.518562+00:00",
+  "cerebro_head": "23479518c2827d361c9c970abfac8245f9d84600",
+  "scope": "Four agent reviews plus coordinator, actual source comparison and documentation corrections only. Final hashes are a checkpoint, not an atomic snapshot of all reads. No product/reference/native/provider test pass implied.",
+  "documents": {
+    "markdown_count": 27,
+    "paired_milestones": 7,
+    "specs": 8,
+    "plans": 8,
+    "research_documents": 11,
+    "word_count": 64826,
+    "sha256": {
+      "docs/superpowers/plans/2026-10-23-m93-reliable-workspace.md": "c509ae0e41807edc9b57a277804fe174dcf43ef89aa71f0c86e31b880b05ab19",
+      "docs/superpowers/plans/2026-10-23-m94-ui-polish-and-journeys.md": "8059dd63b3671b7e8b0fd35c5f26acb6b7a4cc5d6513b3fdd79f8cf3eca68353",
+      "docs/superpowers/plans/2026-10-23-m95-chat-and-supervised-agents.md": "a2c05cb7bd91f839159da00a719c2dcb793550ec51562159314feed95ba71e29",
+      "docs/superpowers/plans/2026-10-23-m96-connectors-mcp-and-actions.md": "a06c6b9f2de5c28817184bbe03b924bb3be3537ed390fc6c591e98695e4b03ee",
+      "docs/superpowers/plans/2026-10-23-m97-knowledge-evidence-and-evaluation.md": "3dd4f8b32dfde19407ff290421f4260033c02e0ae5028447922635073b15eef3",
+      "docs/superpowers/plans/2026-10-23-m98-workflows-and-automation.md": "af43357af4b3000b62da7140eb492195fa0ad68c94a10ca08dfb4cc885888afa",
+      "docs/superpowers/plans/2026-10-23-m99-rust-services-and-storage.md": "cba6738535387a14accbfd55d3abdc88f18e09bf9afa1987c8607d89f74fd13e",
+      "docs/superpowers/plans/2026-10-23-m93-m99-master-roadmap.md": "74d688e38043aa531cb2b6efab56e1376ac4378ccdb787f7fab06765747ec915",
+      "docs/superpowers/specs/2026-10-23-m93-reliable-workspace-design.md": "5fa90e0fd76ed7516b0885aa4755ea0615ca6e6741a914e85cda5da6e35838e1",
+      "docs/superpowers/specs/2026-10-23-m94-ui-polish-and-journeys-design.md": "ce9008a21bf0c351cb51fa27178b111722e0ef6ae2a237b213065948587294a4",
+      "docs/superpowers/specs/2026-10-23-m95-chat-and-supervised-agents-design.md": "3e36a125847f311d210fe3ea81253c642a3c77508bb223aedb7358ae1493e0d9",
+      "docs/superpowers/specs/2026-10-23-m96-connectors-mcp-and-actions-design.md": "14530694afa33aad4a48d5f74d140aab2f9bfc0be2fbb2baa10d6ba9565c4f99",
+      "docs/superpowers/specs/2026-10-23-m97-knowledge-evidence-and-evaluation-design.md": "b6ffa91f109b6cdbfad3d4f1331135887f4a5ebf9ae39279b697dbcf47b794e9",
+      "docs/superpowers/specs/2026-10-23-m98-workflows-and-automation-design.md": "302ddfe168b2d34cbaa232fda4c6539d035030ee1b10a3ca41ef42d72f51d0f5",
+      "docs/superpowers/specs/2026-10-23-m99-rust-services-and-storage-design.md": "4d279ab3d264c83a9597ea578911f347a8a874f6b99e520279d10d433c8d88e0",
+      "docs/superpowers/specs/2026-10-23-m93-m99-program-design.md": "00332beed02592d6b9f818a803670d8aab84261fef7e0c6993a9526e31d4383b",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/README.md": "686cc488c90343e44bfe4b71f818ac9ce6866c1455fdc32f3f397b3bb18a3c4f",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/decisions.md": "bd8b6b014d0e0d58c99138d7b05a2260b449e51624798857e8cdef35c67cde61",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/evidence.md": "c2f97218678388bc1db356c6433d5a727d3607eeefffcdd5018d709dd62a68ef",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/final-actions-audit.md": "c9add6d2eb6b41dde0e7229e4888c9141bb8cad260be6cf83ad618251754349c",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/final-chat-audit.md": "7689150ecab108855e8b7c1c8c6971ebbe21e3b2a5dd77f1b2074a2b3f42b158",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/final-core-audit.md": "04590afab414a044d5b8ed786581c4daff8974037e9b710bc44c3684911fc4cf",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/final-product-audit.md": "0ecc5260e2688789dc9655f676b24cacdfd1ec68a419980e231f8f3819ee9c6b",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/final-review.md": "bac72bac4d72be594642f1840db2f41c692308cba06281a0b69a5512cf2df78d",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/reference-crosscheck.md": "29ada60629406c31662caac32d6cb0f2a6b837ae687425afa14cf9f54613d861",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/review-record.md": "ed15b487fcca2d92a2d2475598c76d5131ec5b499ad5fe49380540e325aa84b4",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/traceability.md": "110404bc83f62972237042df9843c14182a2c34402eda1f20076984051354fc1"
+    }
+  },
+  "coverage": {
+    "ranked_findings": 78,
+    "prior_packages": 34,
+    "ui_review_ids": 31,
+    "requirements": {
+      "REL": [
+        "REL-01",
+        "REL-02",
+        "REL-03",
+        "REL-04",
+        "REL-05",
+        "REL-06",
+        "REL-07",
+        "REL-08",
+        "REL-09",
+        "REL-10",
+        "REL-11",
+        "REL-12",
+        "REL-13"
+      ],
+      "UX": [
+        "UX-01",
+        "UX-02",
+        "UX-03",
+        "UX-04",
+        "UX-05",
+        "UX-06",
+        "UX-07",
+        "UX-08",
+        "UX-09",
+        "UX-10"
+      ],
+      "CHAT": [
+        "CHAT-01",
+        "CHAT-02",
+        "CHAT-03",
+        "CHAT-04",
+        "CHAT-05",
+        "CHAT-06",
+        "CHAT-07",
+        "CHAT-08",
+        "CHAT-09"
+      ],
+      "ACT": [
+        "ACT-01",
+        "ACT-02",
+        "ACT-03",
+        "ACT-04",
+        "ACT-05",
+        "ACT-06",
+        "ACT-07",
+        "ACT-08",
+        "ACT-09",
+        "ACT-10"
+      ],
+      "KNOW": [
+        "KNOW-01",
+        "KNOW-02",
+        "KNOW-03",
+        "KNOW-04",
+        "KNOW-05",
+        "KNOW-06",
+        "KNOW-07",
+        "KNOW-08",
+        "KNOW-09",
+        "KNOW-10",
+        "KNOW-11"
+      ],
+      "FLOW": [
+        "FLOW-01",
+        "FLOW-02",
+        "FLOW-03",
+        "FLOW-04",
+        "FLOW-05",
+        "FLOW-06",
+        "FLOW-07",
+        "FLOW-08",
+        "FLOW-09",
+        "FLOW-10"
+      ],
+      "CORE": [
+        "CORE-01",
+        "CORE-02",
+        "CORE-03",
+        "CORE-04",
+        "CORE-05",
+        "CORE-06",
+        "CORE-07",
+        "CORE-08",
+        "CORE-09",
+        "CORE-10",
+        "CORE-11",
+        "CORE-12"
+      ]
+    },
+    "phases": {
+      "M93": [
+        "M93.1",
+        "M93.2",
+        "M93.3",
+        "M93.4",
+        "M93.5",
+        "M93.6",
+        "M93.7",
+        "M93.8",
+        "M93.9",
+        "M93.10",
+        "M93.11"
+      ],
+      "M94": ["M94.1", "M94.2", "M94.3", "M94.4", "M94.5", "M94.6", "M94.7", "M94.8", "M94.9"],
+      "M95": ["M95.1", "M95.2", "M95.3", "M95.4", "M95.5", "M95.6", "M95.7"],
+      "M96": ["M96.1", "M96.2", "M96.3", "M96.4", "M96.5", "M96.6", "M96.7", "M96.8"],
+      "M97": ["M97.1", "M97.2", "M97.3", "M97.4", "M97.5", "M97.6", "M97.7", "M97.8"],
+      "M98": ["M98.1", "M98.2", "M98.3", "M98.4", "M98.5", "M98.6", "M98.7", "M98.8", "M98.9"],
+      "M99": ["M99.1", "M99.2", "M99.3", "M99.4", "M99.5", "M99.6", "M99.7", "M99.8"]
+    },
+    "example_source_files": {
+      "AppFlowy-main": 8,
+      "Morrow-main": 6,
+      "activepieces-main": 14,
+      "macro-main": 5,
+      "n8n-master": 8,
+      "plane-preview": 7,
+      "thought-desk-main": 2,
+      "tolaria-main": 3
+    }
+  },
+  "validation": {
+    "local_links_checked": 360,
+    "markdown_anchors_checked": 5,
+    "missing_links": [],
+    "structure_errors": [],
+    "external_links_listed_not_all_revalidated_here": [
+      "https://cli.github.com/manual/gh_auth_token",
+      "https://cli.github.com/manual/gh_help_environment",
+      "https://modelcontextprotocol.io/extensions/apps/overview",
+      "https://modelcontextprotocol.io/extensions/tasks/overview",
+      "https://modelcontextprotocol.io/specification/2026-07-28/changelog"
+    ],
+    "application_suites_executed": false,
+    "reference_applications_executed": false,
+    "native_browser_live_provider_executed": false
+  },
+  "preservation": {
+    "starting_paths": 3300,
+    "modified_packet_documents": [
+      "docs/superpowers/plans/2026-10-23-m93-m99-master-roadmap.md",
+      "docs/superpowers/plans/2026-10-23-m93-reliable-workspace.md",
+      "docs/superpowers/plans/2026-10-23-m94-ui-polish-and-journeys.md",
+      "docs/superpowers/plans/2026-10-23-m95-chat-and-supervised-agents.md",
+      "docs/superpowers/plans/2026-10-23-m96-connectors-mcp-and-actions.md",
+      "docs/superpowers/plans/2026-10-23-m97-knowledge-evidence-and-evaluation.md",
+      "docs/superpowers/plans/2026-10-23-m98-workflows-and-automation.md",
+      "docs/superpowers/plans/2026-10-23-m99-rust-services-and-storage.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-program-design.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/README.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/decisions.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/evidence.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/review-record.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-research/traceability.md",
+      "docs/superpowers/specs/2026-10-23-m93-reliable-workspace-design.md",
+      "docs/superpowers/specs/2026-10-23-m94-ui-polish-and-journeys-design.md",
+      "docs/superpowers/specs/2026-10-23-m95-chat-and-supervised-agents-design.md",
+      "docs/superpowers/specs/2026-10-23-m96-connectors-mcp-and-actions-design.md",
+      "docs/superpowers/specs/2026-10-23-m97-knowledge-evidence-and-evaluation-design.md",
+      "docs/superpowers/specs/2026-10-23-m98-workflows-and-automation-design.md",
+      "docs/superpowers/specs/2026-10-23-m99-rust-services-and-storage-design.md"
+    ],
+    "concurrent_changes_outside_packet": [
+      {
+        "path": "src/agent/agentIpc.test.ts",
+        "start_sha256": "e9ceb84f189ea10627e4f7cda437fac8d6c356808435977492d3fdec99d0411a",
+        "checkpoint_sha256": "16085fe99f8c6a3607f92aaefd29687a1e953bee06e7e6cc46347fec4bdadd5c"
+      },
+      {
+        "path": "src/agent/threadStatusStore.test.ts",
+        "start_sha256": "2760b3047a9f9d97beb96902f5f2cb380f02b977053b1dd827b165516365a970",
+        "checkpoint_sha256": "947edf4f61a4fe6a21b2dab2f36b64ec567fdb79557575cdcd90ccf3da01b29e"
+      },
+      {
+        "path": "src/agent/threadStatusStore.ts",
+        "start_sha256": "76984eacd17bda24d48051f0aab3457681257964b6d7c2c56979e113fb86633e",
+        "checkpoint_sha256": "22580e01c685d86ce3df9f392183c3c5ea26bcad10e099cdbdb6e8510d17bf0b"
+      },
+      {
+        "path": "src/agent/agentIpc.ts",
+        "start_sha256": "d885f1b362776f17ef5da70987bac709b19b9f51bc1e9c3353649c8f8d371c6d",
+        "checkpoint_sha256": "b9b17b1c79c6ebf360099312ffcd2b3580436b5422455dc3c593eb5c2d2d9459"
+      }
+    ],
+    "concurrent_new_paths_outside_packet": ["src/lab/sections/conversationStatus.tsx"],
+    "review_write_scope": "Only named M93–M99 documentation and research records. No application/reference source, dependencies, index or branch mutation by these reviewers."
+  },
+  "inspection_inventories": {
+    "core": [
+      ".prettierignore",
+      "AGENTS.md",
+      "docs/superpowers/plans/2026-10-23-m93-reliable-workspace.md",
+      "docs/superpowers/specs/2026-10-23-m93-reliable-workspace-design.md",
+      "docs/superpowers/plans/2026-10-23-m99-rust-services-and-storage.md",
+      "docs/superpowers/specs/2026-10-23-m99-rust-services-and-storage-design.md",
+      "docs/superpowers/plans/2026-10-23-m93-m99-master-roadmap.md",
+      "docs/superpowers/specs/2026-10-23-m93-m99-program-design.md",
+      "docs/superpowers/plans/2026-10-23-m91-implementation-record.md",
+      "src/editor/openPages.ts",
+      "src/app/quit.ts",
+      "src-tauri/src/shell/quit.rs",
+      "src/editor/NoteBodyEditor.tsx",
+      "src/editor/MarkdownEditor.tsx",
+      "src-tauri/src/runtime/scope.rs",
+      "src/whiteboard/useCanvasFile.ts",
+      "src/mermaid/useDiagramFile.ts",
+      "src/mermaid/CodeOverlay.tsx",
+      "src/sheet/pendingSheets.ts",
+      "src/lib/ipc.ts",
+      "src-tauri/src/vault/write.rs",
+      "src-tauri/src/vault/parse.rs",
+      "src-tauri/src/vault/scan.rs",
+      "src-tauri/src/vault/entry.rs",
+      "src-tauri/src/runtime/fleet.rs",
+      "src-tauri/src/runtime/mod.rs",
+      "src-tauri/src/knowledge.rs",
+      "src-tauri/src/ledger/mod.rs",
+      "src-tauri/src/ledger/project.rs",
+      "src-tauri/src/ledger/reduce.rs",
+      "src-tauri/src/ledger/shadow.rs",
+      "src/status/AgentRunHistory.tsx",
+      "src-tauri/src/mcp.rs",
+      "src-tauri/src/agent/mod.rs",
+      "src-tauri/src/agent/cli_agents.rs",
+      "docs/examples/macro-main/apps/web/src/features/email-compose/primitives/draft-autosave.ts",
+      "docs/examples/macro-main/apps/web/src/features/email-compose/primitives/draft-autosave.test.ts",
+      "docs/examples/tolaria-main/src/hooks/useNoteActions.ts",
+      "docs/examples/tolaria-main/src/hooks/useNoteActions.persistence.test.ts",
+      "docs/examples/tolaria-main/src-tauri/src/vault/rename_transaction.rs",
+      "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-user/src/migrations/migration.rs",
+      "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-user/src/migrations/doc_key_with_workspace.rs",
+      "docs/examples/AppFlowy-main/frontend/rust-lib/event-integration-test/tests/user/migration_test/document_test.rs",
+      "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-document/src/manager.rs"
+    ],
+    "actions": {
+      "actual_paths_read": [
+        "AGENTS.md",
+        "docs/superpowers/specs/2026-10-23-m96-connectors-mcp-and-actions-design.md",
+        "docs/superpowers/plans/2026-10-23-m96-connectors-mcp-and-actions.md",
+        "docs/superpowers/specs/2026-10-23-m98-workflows-and-automation-design.md",
+        "docs/superpowers/plans/2026-10-23-m98-workflows-and-automation.md",
+        "docs/superpowers/specs/2026-10-23-m93-m99-program-design.md",
+        "docs/superpowers/plans/2026-10-23-m93-m99-master-roadmap.md",
+        "docs/superpowers/specs/2026-10-23-m93-m99-research/decisions.md",
+        "src-tauri/src/connectors.rs",
+        "src-tauri/src/agent/mod.rs",
+        "src-tauri/src/agent/interaction.rs",
+        "src-tauri/src/runtime/dispatch.rs",
+        "src-tauri/src/runtime/wakes.rs",
+        "src-tauri/src/runtime/followups.rs",
+        "src-tauri/src/client_access.rs",
+        "src-tauri/src/policy/tool_approval.rs",
+        "src-tauri/src/policy/tools.rs",
+        "src-tauri/src/policy/table.rs",
+        "src-tauri/src/mcp.rs",
+        "src-tauri/src/forge.rs",
+        "shared/policy/tools.v1.json",
+        "src/lib/capture.ts",
+        "src/app/RecordComposer.tsx",
+        "shared/starter/README.md",
+        "shared/starter/vault/records/skills/draft-reply.md",
+        "docs/examples/activepieces-main/packages/server/api/src/app/app-connection/app-connection-service/app-connection-service.ts",
+        "docs/examples/activepieces-main/packages/server/api/src/app/app-connection/app-connection-service/app-connection.handler.ts",
+        "docs/examples/activepieces-main/packages/server/api/src/app/app-connection/app-connection-service/oauth2/oauth2-service.ts",
+        "docs/examples/activepieces-main/packages/server/api/src/app/flows/flow-version/flow-version.service.ts",
+        "docs/examples/activepieces-main/packages/server/api/src/app/flows/flow/flow.service.ts",
+        "docs/examples/activepieces-main/packages/server/api/src/app/waitpoints/resume-service.ts",
+        "docs/examples/activepieces-main/packages/server/api/src/app/waitpoints/waitpoint-service.ts",
+        "docs/examples/activepieces-main/packages/server/engine/src/lib/piece-context/connection-resolver.ts",
+        "docs/examples/activepieces-main/packages/server/engine/src/lib/piece-context/waitpoint-client.ts",
+        "docs/examples/activepieces-main/packages/server/engine/src/lib/handler/flow-executor.ts",
+        "docs/examples/activepieces-main/packages/server/engine/src/lib/handler/piece-executor.ts",
+        "docs/examples/activepieces-main/packages/server/engine/src/lib/helper/error-handling.ts",
+        "docs/examples/activepieces-main/packages/core/execution/src/lib/flow-run/execution/execution-journal.ts",
+        "docs/examples/activepieces-main/packages/core/execution/src/lib/flow-run/waitpoint/index.ts",
+        "docs/examples/n8n-master/packages/cli/src/wait-tracker.ts",
+        "docs/examples/n8n-master/packages/cli/src/oauth/oauth-browser-binding.service.ts",
+        "docs/examples/n8n-master/packages/cli/src/oauth/oauth.service.ts",
+        "docs/examples/n8n-master/packages/cli/src/controllers/oauth/oauth2-credential.controller.ts",
+        "docs/examples/n8n-master/packages/cli/src/credentials-helper.ts",
+        "docs/examples/n8n-master/packages/cli/src/workflows/workflow-publisher.service.ts",
+        "docs/examples/n8n-master/packages/cli/src/active-workflow-manager.ts",
+        "docs/examples/n8n-master/packages/workflow/src/workflow-data-proxy.ts"
+      ],
+      "command_help_only": ["gh auth token --help", "gh auth status --help"],
+      "note": "Scoped source reads/searches plus two official GitHub CLI manuals; no reference build/test/edit or credential/provider request. Subsequently corrected only the four owned M96/M98 draft documents.",
+      "official_pages_read": [
+        "https://cli.github.com/manual/gh_auth_token",
+        "https://cli.github.com/manual/gh_help_environment"
+      ]
+    },
+    "product": {
+      "mode": "source-only; full files or relevant excerpts/search matches actually read",
+      "root": "/Users/joseflagorio/Development/cerebro",
+      "paths": [
+        "AGENTS.md",
+        "docs/superpowers/specs/2026-10-23-m94-ui-polish-and-journeys-design.md",
+        "docs/superpowers/plans/2026-10-23-m94-ui-polish-and-journeys.md",
+        "docs/superpowers/specs/2026-10-23-m97-knowledge-evidence-and-evaluation-design.md",
+        "docs/superpowers/plans/2026-10-23-m97-knowledge-evidence-and-evaluation.md",
+        "docs/superpowers/specs/2026-10-23-m93-m99-program-design.md",
+        "docs/superpowers/plans/2026-10-23-m93-m99-master-roadmap.md",
+        "docs/superpowers/plans/2026-10-23-m91-implementation-record.md",
+        "docs/superpowers/plans/2026-10-23-m92-conversation-rail.md",
+        "docs/superpowers/specs/2026-10-23-m95-chat-and-supervised-agents-design.md",
+        "docs/superpowers/specs/2026-10-23-m93-m99-research/decisions.md",
+        "src/knowledge/KnowledgePanel.tsx",
+        "src/knowledge/ConceptReviewBar.tsx",
+        "src/agent/elements/decisionsSources.ts",
+        "src/agent/elements/turnSources.ts",
+        "src/agent/ChatInput.tsx",
+        "src/agent/systemPrompt.ts",
+        "src/agent/AiActionCard.tsx",
+        "src/components/ai/Context.tsx",
+        "src/components/ai/Sources.tsx",
+        "src/engine/ai/sources.ts",
+        "src/engine/ai/types.ts",
+        "src/engine/links.ts",
+        "src/engine/createRecord.ts",
+        "src/app/QuickOpen.tsx",
+        "src/app/useOpenPath.ts",
+        "src/app/CreateLauncher.tsx",
+        "src/app/CreateMenu.tsx",
+        "src/app/RecordComposer.tsx",
+        "src/stores/launcherStore.ts",
+        "src/library/AgentProperties.tsx",
+        "src/components/pageFrame.css",
+        "src/styles/surface-system.css",
+        "src-tauri/src/search.rs",
+        "src-tauri/src/vault/corpus.rs",
+        "src-tauri/src/vault/parse.rs",
+        "src-tauri/src/assembly/manifest.rs",
+        "shared/policy/subagents.v1.json",
+        "docs/examples/Morrow-main/src/app/components/PageView.tsx",
+        "docs/examples/Morrow-main/src/app/components/Sidebar.tsx",
+        "docs/examples/Morrow-main/src/app/editor/PageEditor.tsx",
+        "docs/examples/Morrow-main/src/core/links.ts",
+        "docs/examples/Morrow-main/src/app/styles/app.css",
+        "docs/examples/Morrow-main/src/app/styles/editor.css",
+        "docs/examples/thought-desk-main/src/lib/components/PageView.svelte",
+        "docs/examples/thought-desk-main/src/lib/components/SearchPalette.svelte",
+        "docs/examples/plane-preview/apps/web/components/issues/issue-modal/modal.tsx",
+        "docs/examples/plane-preview/apps/web/components/issues/issue-modal/provider.tsx",
+        "docs/examples/plane-preview/apps/web/components/issues/issue-modal/base.tsx",
+        "docs/examples/plane-preview/apps/web/components/issues/issue-modal/form.tsx",
+        "docs/examples/plane-preview/apps/web/components/issues/peek-overview/header.tsx",
+        "docs/examples/plane-preview/apps/web/components/pages/editor/page-root.tsx",
+        "docs/examples/plane-preview/apps/web/components/pages/editor/header/root.tsx",
+        "src/engine/okf.ts",
+        "src/editor/citations.ts"
+      ]
+    },
+    "chat": {
+      "baseline": "active dirty HEAD 2347951",
+      "reviewMode": "read-only focused source/document review; no tests",
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m95-chat-and-supervised-agents-design.md",
+          "inspection": "full document output plus focused producer reread after correction"
+        },
+        {
+          "path": "docs/superpowers/plans/2026-10-23-m95-chat-and-supervised-agents.md",
+          "inspection": "full document output plus focused phase/interface excerpts and corrected producer reread"
+        },
+        {
+          "path": "src/agent/useAgentChat.ts",
+          "inspection": "targeted event/start searches and user-message/outgoing request excerpts"
+        },
+        {
+          "path": "src/agent/transcript.ts",
+          "inspection": "targeted reducer searches and replay/healing excerpts"
+        },
+        {
+          "path": "src/agent/conversations.ts",
+          "inspection": "targeted symbol search only"
+        },
+        {
+          "path": "src-tauri/src/agent/mod.rs",
+          "inspection": "event definitions, completion lifecycle, targeted start/defer searches"
+        },
+        {
+          "path": "src-tauri/src/agent/fold.rs",
+          "inspection": "targeted event searches and user/result/dispatch excerpts"
+        },
+        {
+          "path": "src-tauri/src/agent/journal.rs",
+          "inspection": "journal contracts and bounded storage/read excerpts"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m93-reliable-workspace-design.md",
+          "inspection": "targeted interface search results"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m94-ui-polish-and-journeys-design.md",
+          "inspection": "targeted interface search results"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m96-connectors-mcp-and-actions-design.md",
+          "inspection": "targeted interface search and canonical subject/effect excerpts"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m97-knowledge-evidence-and-evaluation-design.md",
+          "inspection": "targeted interface search and source/evidence contract excerpt"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m98-workflows-and-automation-design.md",
+          "inspection": "targeted interface search and optional child-step excerpt"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m99-rust-services-and-storage-design.md",
+          "inspection": "targeted interface search results"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m93-m99-program-design.md",
+          "inspection": "targeted ownership interface search results"
+        },
+        {
+          "path": "docs/superpowers/plans/2026-10-23-m93-m99-master-roadmap.md",
+          "inspection": "targeted search and continuity interfaces excerpt"
+        },
+        {
+          "path": "docs/superpowers/plans/2026-10-23-m93-reliable-workspace.md",
+          "inspection": "targeted flush/history interface search results"
+        },
+        {
+          "path": "docs/superpowers/plans/2026-10-23-m96-connectors-mcp-and-actions.md",
+          "inspection": "targeted canonical action interface search results"
+        },
+        {
+          "path": "docs/superpowers/plans/2026-10-23-m97-knowledge-evidence-and-evaluation.md",
+          "inspection": "targeted source contract search results"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m93-m99-research/review-record.md",
+          "inspection": "targeted search matches only"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m93-m99-research/evidence.md",
+          "inspection": "targeted search matches only"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m93-m99-research/decisions.md",
+          "inspection": "targeted search matches only"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m93-m99-research/traceability.md",
+          "inspection": "targeted search matches only"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-23-m93-m99-research/source-manifest.json",
+          "inspection": "targeted search matches only"
+        }
+      ]
+    },
+    "coordinator": {
+      "paths": [
+        "AGENTS.md",
+        ".prettierignore",
+        "docs/superpowers/plans/2026-10-23-m91-implementation-record.md",
+        "docs/superpowers/plans/2026-10-23-m92-conversation-rail.md",
+        "src/agent/AiPanel.tsx",
+        "src/agent/ChatTurn.tsx",
+        "src/agent/conversations.ts",
+        "src/agent/useConversations.ts",
+        "src/agent/useAgentChat.ts",
+        "src/agent/transcript.ts",
+        "src/agent/useContextUse.ts",
+        "src/agent/types.ts",
+        "src/components/ai/Message.tsx",
+        "src-tauri/src/agent/mod.rs",
+        "src-tauri/src/agent/journal.rs",
+        "src-tauri/src/ledger/store.rs",
+        "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai-pub/src/persistence/chat_message_sql.rs",
+        "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai/src/chat.rs",
+        "docs/examples/AppFlowy-main/frontend/appflowy_flutter/lib/plugins/ai_chat/presentation/message/ai_message_action_bar.dart",
+        "docs/examples/AppFlowy-main/frontend/appflowy_flutter/lib/plugins/ai_chat/application/chat_edit_document_service.dart",
+        "docs/examples/macro-main/crates/agent_session/src/domain/events.rs",
+        "docs/examples/macro-main/crates/agent_session/src/domain/service/test/turn_projection.rs",
+        "docs/examples/macro-main/crates/agent_session/src/domain/service/first_output.rs"
+      ],
+      "mode": "source excerpts and targeted symbol searches, plus full paired M95 docs and integration documents"
+    }
+  },
+  "source_fingerprints": {
+    ".prettierignore": {
+      "sha256": "3b90143577b4e7bf29e0c7282f3c3dfc0a980f8c92ad5a410485e9ed3b30be10",
+      "bytes": 2013
+    },
+    "AGENTS.md": {
+      "sha256": "0e08592524c285e73a6ec09f7696c0af641fa17d0bd491bf387cc35da05f065e",
+      "bytes": 74988
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/lib/plugins/ai_chat/application/chat_edit_document_service.dart": {
+      "sha256": "c13587d9de9eeb23eb8c9a1aea910bc5d748747855e73a12061ad4a090dc0c89",
+      "bytes": 3464
+    },
+    "docs/examples/AppFlowy-main/frontend/appflowy_flutter/lib/plugins/ai_chat/presentation/message/ai_message_action_bar.dart": {
+      "sha256": "df5f5d8a8b056cb2a2079f2c72dd5b668abb56c37f5e161ac180cdf1de0c5443",
+      "bytes": 24727
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/event-integration-test/tests/user/migration_test/document_test.rs": {
+      "sha256": "3e306772f64940ea95b3882fd148fc584d7e3f00636198b529b3c6fe310e9976",
+      "bytes": 799
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai-pub/src/persistence/chat_message_sql.rs": {
+      "sha256": "6a5db9ab834af45ed1593bc429ffa8b0fe6348a9065345127a1d8d76e84555a7",
+      "bytes": 7431
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-ai/src/chat.rs": {
+      "sha256": "c731ab999b959f597eb342c0ae25fb77b95efe4ae5f33ac47baa0b1d6b5d7de3",
+      "bytes": 20948
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-document/src/manager.rs": {
+      "sha256": "bc087277444a0713aebf1316d73867161016bf31e84d849bc02d88e20d4804b0",
+      "bytes": 17104
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-user/src/migrations/doc_key_with_workspace.rs": {
+      "sha256": "7f9344d99eb28fe798834e7a893a87c8c3bae7ef67019a606fbb938c3d01f035",
+      "bytes": 1721
+    },
+    "docs/examples/AppFlowy-main/frontend/rust-lib/flowy-user/src/migrations/migration.rs": {
+      "sha256": "1a79dcc7415df6d1e8d354f48db4ed770157ff810ec5e5ed208f0716650145e8",
+      "bytes": 4744
+    },
+    "docs/examples/Morrow-main/src/app/components/PageView.tsx": {
+      "sha256": "052fa0e960eb02db307b0ca854d0a7bcd80755c70f742bade310de7471b3291d",
+      "bytes": 16967
+    },
+    "docs/examples/Morrow-main/src/app/components/Sidebar.tsx": {
+      "sha256": "9fb6c3acca2be9ae4f05165bc0cea04fd08661195faf248d9f06cd80837e9fe5",
+      "bytes": 23400
+    },
+    "docs/examples/Morrow-main/src/app/editor/PageEditor.tsx": {
+      "sha256": "ae2356cfcdd25ae57f81b180b69d387fbeadb8d044004238d26ff58240b45482",
+      "bytes": 10507
+    },
+    "docs/examples/Morrow-main/src/app/styles/app.css": {
+      "sha256": "85f93a2843857bf011a245d8ef3931712ea24826b2f066129c4d5e56964638b1",
+      "bytes": 29438
+    },
+    "docs/examples/Morrow-main/src/app/styles/editor.css": {
+      "sha256": "73e5ee9501e2ff5fc19b7f768034ac17007fc936660dd513d4b77eed3a85988e",
+      "bytes": 12316
+    },
+    "docs/examples/Morrow-main/src/core/links.ts": {
+      "sha256": "7b25dea9f486cb4776764c7fd6109fd3398448116765fe7b732c4d6c82e518f8",
+      "bytes": 4031
+    },
+    "docs/examples/activepieces-main/packages/core/execution/src/lib/flow-run/execution/execution-journal.ts": {
+      "sha256": "29ad842dec2f165f71432668310f780566b361c0a02fa2237788eec463da2fe9",
+      "bytes": 6700
+    },
+    "docs/examples/activepieces-main/packages/core/execution/src/lib/flow-run/waitpoint/index.ts": {
+      "sha256": "36d6b9d5d99aa50ad421a4bbcc1484898dfc06dded3b2a3b39e727f46f944cf5",
+      "bytes": 4427
+    },
+    "docs/examples/activepieces-main/packages/server/api/src/app/app-connection/app-connection-service/app-connection-service.ts": {
+      "sha256": "5815523f64fa7f7ef488830fd63f0b28a1e2a3fe10dcbe9f65f6a95db7303b93",
+      "bytes": 42031
+    },
+    "docs/examples/activepieces-main/packages/server/api/src/app/app-connection/app-connection-service/app-connection.handler.ts": {
+      "sha256": "a7b6284991bdfb23718aebe91f1985b84af0d8ca1e5d36b8439cc0a72f1f4465",
+      "bytes": 23193
+    },
+    "docs/examples/activepieces-main/packages/server/api/src/app/app-connection/app-connection-service/oauth2/oauth2-service.ts": {
+      "sha256": "bc5d90ac783a1095661611d3eaa7c8fba646eb3ae7e353d0d063eb269eb4b823",
+      "bytes": 1070
+    },
+    "docs/examples/activepieces-main/packages/server/api/src/app/flows/flow-version/flow-version.service.ts": {
+      "sha256": "5c5cf79d03a17b335f16d06b63c1724e8fece3f1d9e85bc4ee41ff9d91db1a99",
+      "bytes": 16009
+    },
+    "docs/examples/activepieces-main/packages/server/api/src/app/flows/flow/flow.service.ts": {
+      "sha256": "1d49c08a549416b50d103e78ce6007e853caafa3f04f17fa49fc526b6a3a060f",
+      "bytes": 37959
+    },
+    "docs/examples/activepieces-main/packages/server/api/src/app/waitpoints/resume-service.ts": {
+      "sha256": "04db9550b036945cf5e816e8dcffb3badc0c1545534f2496bcfba27710d6b2c4",
+      "bytes": 14926
+    },
+    "docs/examples/activepieces-main/packages/server/api/src/app/waitpoints/waitpoint-service.ts": {
+      "sha256": "85f13d66f05eb88299166fad8e987fd9f623f91056f3eef7c92e87fe7f658664",
+      "bytes": 13348
+    },
+    "docs/examples/activepieces-main/packages/server/engine/src/lib/handler/flow-executor.ts": {
+      "sha256": "ecba9cf63cd3af96a592bea21805e5dff4624cca877e48f468e2b0b346479d12",
+      "bytes": 7834
+    },
+    "docs/examples/activepieces-main/packages/server/engine/src/lib/handler/piece-executor.ts": {
+      "sha256": "c10fbc5b8c61a318fa2debefd3f9781b5f5624056f3c17f0dcc63d3c0a858013",
+      "bytes": 14461
+    },
+    "docs/examples/activepieces-main/packages/server/engine/src/lib/helper/error-handling.ts": {
+      "sha256": "e290ec02562cf9f4b6260849483ff2ddb32a73d1f4de5d3351fa3b4c445268d6",
+      "bytes": 2291
+    },
+    "docs/examples/activepieces-main/packages/server/engine/src/lib/piece-context/connection-resolver.ts": {
+      "sha256": "b9d2ce21f5f3484457c3e06a7dfe684b15293b3871e18ff67c0db6544ce4a94e",
+      "bytes": 4194
+    },
+    "docs/examples/activepieces-main/packages/server/engine/src/lib/piece-context/waitpoint-client.ts": {
+      "sha256": "6d973cc8fc7e0479e0ffe9a57d3d9429226cc1418b57a151081d9f2a9af6759b",
+      "bytes": 997
+    },
+    "docs/examples/macro-main/apps/web/src/features/email-compose/primitives/draft-autosave.test.ts": {
+      "sha256": "edc014620eec357d24d0f30ede98c42bb57d4afee1fd9161f1e13741ceca88ec",
+      "bytes": 6772
+    },
+    "docs/examples/macro-main/apps/web/src/features/email-compose/primitives/draft-autosave.ts": {
+      "sha256": "7233aa59da2f2414ce69969d2f4687fe392f21034d37ac829b04e96988f747ff",
+      "bytes": 3667
+    },
+    "docs/examples/macro-main/crates/agent_session/src/domain/events.rs": {
+      "sha256": "93d05ce62ce856dbddd2f9aeb7571b780eabd7cf393292d25c50194109d75f1b",
+      "bytes": 22777
+    },
+    "docs/examples/macro-main/crates/agent_session/src/domain/service/first_output.rs": {
+      "sha256": "a19d8573ab8e4027646c1fcca952ac20bc3b6f788fd09092f04364f613c49975",
+      "bytes": 3368
+    },
+    "docs/examples/macro-main/crates/agent_session/src/domain/service/test/turn_projection.rs": {
+      "sha256": "a1316e7eb195b11717fc5c5aa0d52ab33b418108874b5ae20a64b9c0cf41e9c7",
+      "bytes": 4170
+    },
+    "docs/examples/n8n-master/packages/cli/src/active-workflow-manager.ts": {
+      "sha256": "d0545720758ebb2dd0bb68e293d799faab26a43c255887d5fd944268c8be67ea",
+      "bytes": 39796
+    },
+    "docs/examples/n8n-master/packages/cli/src/controllers/oauth/oauth2-credential.controller.ts": {
+      "sha256": "44cf9b9e812bff8affcef7b274b5ca6fcfa536bd90097a13f55e673d7b175b6d",
+      "bytes": 9096
+    },
+    "docs/examples/n8n-master/packages/cli/src/credentials-helper.ts": {
+      "sha256": "d91f1a57f7bc2dcee500da775668dc9bf8c714450965d59a550bba78c4b1174b",
+      "bytes": 31890
+    },
+    "docs/examples/n8n-master/packages/cli/src/oauth/oauth-browser-binding.service.ts": {
+      "sha256": "fb8e31514cd3404ab823fc41acbf42d01157b6ab5a5e977305a0285538b674ed",
+      "bytes": 2876
+    },
+    "docs/examples/n8n-master/packages/cli/src/oauth/oauth.service.ts": {
+      "sha256": "02490342d4dcda4dd6ccb41442038a81260fcf469fb0a2d3e330504f4f7372e7",
+      "bytes": 61146
+    },
+    "docs/examples/n8n-master/packages/cli/src/wait-tracker.ts": {
+      "sha256": "2d5699f9284d8b385edeb1ee4981ba3baba12a749c7e97bf4923e7d0499a9b37",
+      "bytes": 15053
+    },
+    "docs/examples/n8n-master/packages/cli/src/workflows/workflow-publisher.service.ts": {
+      "sha256": "628c26fa9aad2afdf57c818d8eb2063b5c3d22469a8ae0b6c6c767ce3baeb1be",
+      "bytes": 4125
+    },
+    "docs/examples/n8n-master/packages/workflow/src/workflow-data-proxy.ts": {
+      "sha256": "705bd737c59d65e9bcc455f5410907ad5a7c3dda24cbb7940965307605ab6a4a",
+      "bytes": 56853
+    },
+    "docs/examples/plane-preview/apps/web/components/issues/issue-modal/base.tsx": {
+      "sha256": "65c42023b5c7329dc01a302f2bcaf237b2820e033419be2dbdcfc2c5f1d445ab",
+      "bytes": 16225
+    },
+    "docs/examples/plane-preview/apps/web/components/issues/issue-modal/form.tsx": {
+      "sha256": "961cf24339414db967c65b8b6f87da023205c471a2feebbbe1b189a0a59b83d3",
+      "bytes": 16803
+    },
+    "docs/examples/plane-preview/apps/web/components/issues/issue-modal/modal.tsx": {
+      "sha256": "310d4b2f9a1009665321826bcc7651ea377900469203f5fc0a228ddcf3c30af9",
+      "bytes": 1758
+    },
+    "docs/examples/plane-preview/apps/web/components/issues/issue-modal/provider.tsx": {
+      "sha256": "ba856257b5a802fdb87b9f97b89ecfbdc199cd7da0dc7d761b8ebe962bb97a72",
+      "bytes": 2200
+    },
+    "docs/examples/plane-preview/apps/web/components/issues/peek-overview/header.tsx": {
+      "sha256": "5114cc9c325214548d03b99097752f9daf1f3488c9d86dc97b6abf6e0ef276cd",
+      "bytes": 7915
+    },
+    "docs/examples/plane-preview/apps/web/components/pages/editor/header/root.tsx": {
+      "sha256": "faa2d280f111c705197ca528b24acd75c747c1cf3ea204f44efa3d363b3987ba",
+      "bytes": 2584
+    },
+    "docs/examples/plane-preview/apps/web/components/pages/editor/page-root.tsx": {
+      "sha256": "9e34e16eb58288394ad073ef0b51c548cce0589edef5ba9eb45c3c6d7fca086c",
+      "bytes": 6965
+    },
+    "docs/examples/thought-desk-main/src/lib/components/PageView.svelte": {
+      "sha256": "b9ed715e8c263035064aff20a15bbb2040d0f30aef8331357b5f71683e58425f",
+      "bytes": 8755
+    },
+    "docs/examples/thought-desk-main/src/lib/components/SearchPalette.svelte": {
+      "sha256": "1f193b691d8df220565164d3e2d033563da7d8d37eb6682fb3a1f7ff060208e1",
+      "bytes": 16590
+    },
+    "docs/examples/tolaria-main/src-tauri/src/vault/rename_transaction.rs": {
+      "sha256": "37beb330d66294939db8ad226ab06d9bfb71fc37645162404be83e1838bcb1ca",
+      "bytes": 8537
+    },
+    "docs/examples/tolaria-main/src/hooks/useNoteActions.persistence.test.ts": {
+      "sha256": "3ac8cb2b826592c95d43b1edb8d78219872c1b9520cbfc098f5d4bf1a1390840",
+      "bytes": 2751
+    },
+    "docs/examples/tolaria-main/src/hooks/useNoteActions.ts": {
+      "sha256": "920ea32dc16771fb0bfaebd5b5dc43a36103fc2dcf9411b05f46da791781b04e",
+      "bytes": 30520
+    },
+    "docs/superpowers/plans/2026-10-23-m91-implementation-record.md": {
+      "sha256": "40f9b9f865f21260169bb290de3f5559dbe63146f8737a6eea3813f0aa20135d",
+      "bytes": 11704
+    },
+    "docs/superpowers/plans/2026-10-23-m92-conversation-rail.md": {
+      "sha256": "4a8ba7cec45c764959a978e9c861658d223aacfab0a96d21b2283cd51d6cc945",
+      "bytes": 42369
+    },
+    "docs/superpowers/plans/2026-10-23-m93-m99-master-roadmap.md": {
+      "sha256": "74d688e38043aa531cb2b6efab56e1376ac4378ccdb787f7fab06765747ec915",
+      "bytes": 27219
+    },
+    "docs/superpowers/plans/2026-10-23-m93-reliable-workspace.md": {
+      "sha256": "c509ae0e41807edc9b57a277804fe174dcf43ef89aa71f0c86e31b880b05ab19",
+      "bytes": 31213
+    },
+    "docs/superpowers/plans/2026-10-23-m94-ui-polish-and-journeys.md": {
+      "sha256": "8059dd63b3671b7e8b0fd35c5f26acb6b7a4cc5d6513b3fdd79f8cf3eca68353",
+      "bytes": 30505
+    },
+    "docs/superpowers/plans/2026-10-23-m95-chat-and-supervised-agents.md": {
+      "sha256": "a2c05cb7bd91f839159da00a719c2dcb793550ec51562159314feed95ba71e29",
+      "bytes": 35033
+    },
+    "docs/superpowers/plans/2026-10-23-m96-connectors-mcp-and-actions.md": {
+      "sha256": "a06c6b9f2de5c28817184bbe03b924bb3be3537ed390fc6c591e98695e4b03ee",
+      "bytes": 27064
+    },
+    "docs/superpowers/plans/2026-10-23-m97-knowledge-evidence-and-evaluation.md": {
+      "sha256": "3dd4f8b32dfde19407ff290421f4260033c02e0ae5028447922635073b15eef3",
+      "bytes": 21588
+    },
+    "docs/superpowers/plans/2026-10-23-m98-workflows-and-automation.md": {
+      "sha256": "af43357af4b3000b62da7140eb492195fa0ad68c94a10ca08dfb4cc885888afa",
+      "bytes": 33988
+    },
+    "docs/superpowers/plans/2026-10-23-m99-rust-services-and-storage.md": {
+      "sha256": "cba6738535387a14accbfd55d3abdc88f18e09bf9afa1987c8607d89f74fd13e",
+      "bytes": 18730
+    },
+    "docs/superpowers/specs/2026-10-23-m93-m99-program-design.md": {
+      "sha256": "00332beed02592d6b9f818a803670d8aab84261fef7e0c6993a9526e31d4383b",
+      "bytes": 14644
+    },
+    "docs/superpowers/specs/2026-10-23-m93-m99-research/decisions.md": {
+      "sha256": "bd8b6b014d0e0d58c99138d7b05a2260b449e51624798857e8cdef35c67cde61",
+      "bytes": 12012
+    },
+    "docs/superpowers/specs/2026-10-23-m93-m99-research/evidence.md": {
+      "sha256": "c2f97218678388bc1db356c6433d5a727d3607eeefffcdd5018d709dd62a68ef",
+      "bytes": 9292
+    },
+    "docs/superpowers/specs/2026-10-23-m93-m99-research/review-record.md": {
+      "sha256": "ed15b487fcca2d92a2d2475598c76d5131ec5b499ad5fe49380540e325aa84b4",
+      "bytes": 9251
+    },
+    "docs/superpowers/specs/2026-10-23-m93-m99-research/source-manifest.json": {
+      "sha256": "ca8adad867ba1b3221078109c5bc275ffd2ee4b2e35ebd587e2687455ae16790",
+      "bytes": 39648
+    },
+    "docs/superpowers/specs/2026-10-23-m93-m99-research/traceability.md": {
+      "sha256": "110404bc83f62972237042df9843c14182a2c34402eda1f20076984051354fc1",
+      "bytes": 58530
+    },
+    "docs/superpowers/specs/2026-10-23-m93-reliable-workspace-design.md": {
+      "sha256": "5fa90e0fd76ed7516b0885aa4755ea0615ca6e6741a914e85cda5da6e35838e1",
+      "bytes": 18993
+    },
+    "docs/superpowers/specs/2026-10-23-m94-ui-polish-and-journeys-design.md": {
+      "sha256": "ce9008a21bf0c351cb51fa27178b111722e0ef6ae2a237b213065948587294a4",
+      "bytes": 26423
+    },
+    "docs/superpowers/specs/2026-10-23-m95-chat-and-supervised-agents-design.md": {
+      "sha256": "3e36a125847f311d210fe3ea81253c642a3c77508bb223aedb7358ae1493e0d9",
+      "bytes": 30030
+    },
+    "docs/superpowers/specs/2026-10-23-m96-connectors-mcp-and-actions-design.md": {
+      "sha256": "14530694afa33aad4a48d5f74d140aab2f9bfc0be2fbb2baa10d6ba9565c4f99",
+      "bytes": 28368
+    },
+    "docs/superpowers/specs/2026-10-23-m97-knowledge-evidence-and-evaluation-design.md": {
+      "sha256": "b6ffa91f109b6cdbfad3d4f1331135887f4a5ebf9ae39279b697dbcf47b794e9",
+      "bytes": 22569
+    },
+    "docs/superpowers/specs/2026-10-23-m98-workflows-and-automation-design.md": {
+      "sha256": "302ddfe168b2d34cbaa232fda4c6539d035030ee1b10a3ca41ef42d72f51d0f5",
+      "bytes": 30988
+    },
+    "docs/superpowers/specs/2026-10-23-m99-rust-services-and-storage-design.md": {
+      "sha256": "4d279ab3d264c83a9597ea578911f347a8a874f6b99e520279d10d433c8d88e0",
+      "bytes": 18982
+    },
+    "shared/policy/subagents.v1.json": {
+      "sha256": "a2c731302ce8f45add865709614f5276c655ce886e27854fe2f8c09d8369b6c2",
+      "bytes": 895
+    },
+    "shared/policy/tools.v1.json": {
+      "sha256": "f5adf89e3ea73da28a89c6756e0cc74d09d89edd14a00d644eb1cb528aa28240",
+      "bytes": 112799
+    },
+    "shared/starter/README.md": {
+      "sha256": "83a4c74a0318f9d06d8be449ba2cb301a359bf80b8c22f9ec449a088c5b8c664",
+      "bytes": 1039
+    },
+    "shared/starter/vault/records/skills/draft-reply.md": {
+      "sha256": "fad0d8a647bb1f145dc7e3efc76e94f3a2c9b9bcb7c48d418194267615142be3",
+      "bytes": 2329
+    },
+    "src-tauri/src/agent/cli_agents.rs": {
+      "sha256": "ef7a640f1e71f980292a284942ca2a0e4bc38d8e7ffee05b0bbee15932be4f13",
+      "bytes": 57543
+    },
+    "src-tauri/src/agent/fold.rs": {
+      "sha256": "61b7d748f9aee05fc0abff35de0dd63c60a0c69181ff6fe2c7b2bb0e7ef78663",
+      "bytes": 189086
+    },
+    "src-tauri/src/agent/interaction.rs": {
+      "sha256": "1ca9630e185b67735744d01a66e5633e8fc79d1b99c7e97745ba1df507f77528",
+      "bytes": 143427
+    },
+    "src-tauri/src/agent/journal.rs": {
+      "sha256": "45a8b3c2c79e001b128e2883377f026380d891a20b883bfc8a54d5ba50c9ae31",
+      "bytes": 25306
+    },
+    "src-tauri/src/agent/mod.rs": {
+      "sha256": "20d6fce4c087aa2c8b9c3f502f5d59ba4cd3dca1d2582d49a799b74034d2baea",
+      "bytes": 450937
+    },
+    "src-tauri/src/assembly/manifest.rs": {
+      "sha256": "edb27ddf513a7b8d8abdc254641713cd25592afb51a6a86869703abb6d154da5",
+      "bytes": 41218
+    },
+    "src-tauri/src/client_access.rs": {
+      "sha256": "4ae7d23a967264eaef77dcca624a064fd3666e542bac19cfdd9c25e4ab9430f2",
+      "bytes": 2579
+    },
+    "src-tauri/src/connectors.rs": {
+      "sha256": "e75c93a218cdcb05bad3876b19578b593cc1568f4a647f7966af151c490cfbc9",
+      "bytes": 92827
+    },
+    "src-tauri/src/forge.rs": {
+      "sha256": "18a723f409e9e9bae15418a13d00bc2af750079d581b43b07ffda2eed9c623ed",
+      "bytes": 33871
+    },
+    "src-tauri/src/knowledge.rs": {
+      "sha256": "446de3b31e9d3f84039afcaf77f4b19059f140b15d5a6f1a90a3dec380ebc3d1",
+      "bytes": 103896
+    },
+    "src-tauri/src/ledger/mod.rs": {
+      "sha256": "259c807a17cf46d3a6f13d7b061c2c213b870b8bd067f3df9487a247b65f9658",
+      "bytes": 21184
+    },
+    "src-tauri/src/ledger/project.rs": {
+      "sha256": "ea8ab0c2ecde68ed4fce3e2325d2f2e6b857434a43543c6535d24653d1c643d0",
+      "bytes": 16228
+    },
+    "src-tauri/src/ledger/reduce.rs": {
+      "sha256": "32b4a1c1d5feac4fcecfcc292495894ac15253148d47aadf151c4b5fba8c3f19",
+      "bytes": 306016
+    },
+    "src-tauri/src/ledger/shadow.rs": {
+      "sha256": "f798f1dd0129453ddb8915499a9d2943b39cda247b8dfba1cdc39ddd18250b81",
+      "bytes": 56822
+    },
+    "src-tauri/src/ledger/store.rs": {
+      "sha256": "a89856c7b8405e43bf0af2ed741d3d73823351eb87f04bc9bed3bdfb4cce6fec",
+      "bytes": 5673
+    },
+    "src-tauri/src/mcp.rs": {
+      "sha256": "0fd3ced870a8b1c35a8bd94c6b5aca4532b52557a008587cc73fa4cc049e4a37",
+      "bytes": 864413
+    },
+    "src-tauri/src/policy/table.rs": {
+      "sha256": "e23dd0c0a137c2d2f92600282d5ff2c9e84559b7d8ad470537c493ad1e1e677a",
+      "bytes": 64345
+    },
+    "src-tauri/src/policy/tool_approval.rs": {
+      "sha256": "13abdbe858a00ef1ee04800878f19f17ec352fbdb9896809f26c1d9f8eb7e8de",
+      "bytes": 140379
+    },
+    "src-tauri/src/policy/tools.rs": {
+      "sha256": "4de6f010ab75ddcae4e7cdd28c7c80ea5a3b5af37cd425589446c8e8df734141",
+      "bytes": 114290
+    },
+    "src-tauri/src/runtime/dispatch.rs": {
+      "sha256": "7a4b0187d0ca2ef3b5138ee7664e30406513e0d1efda35f9a466d6c5ae4d34d6",
+      "bytes": 189174
+    },
+    "src-tauri/src/runtime/fleet.rs": {
+      "sha256": "d36c0ccfb0e3a80ed30de4485fd7eba1c08c24cd955d8d832c5e672128ea2da0",
+      "bytes": 94836
+    },
+    "src-tauri/src/runtime/followups.rs": {
+      "sha256": "712c81cc7ce95f318ce0aec75eacde283e906758c12bac79cd19ea36c81f5db9",
+      "bytes": 26956
+    },
+    "src-tauri/src/runtime/mod.rs": {
+      "sha256": "faf67c241c71fce435515f3b526fa269bdf6812b4fff35830a976a117d1a01b9",
+      "bytes": 122444
+    },
+    "src-tauri/src/runtime/scope.rs": {
+      "sha256": "1f674239564bfed3057361143bdf375567c510b8e4e5f1fd466cb3f81ed00c86",
+      "bytes": 7652
+    },
+    "src-tauri/src/runtime/wakes.rs": {
+      "sha256": "238b8efd5291413bb1876d05159025773e570839d58a9d05b11e98fe342e9270",
+      "bytes": 72995
+    },
+    "src-tauri/src/search.rs": {
+      "sha256": "c337dfd85960cc4196e4aa3da59fa0d024b21474ad92dc341024248317239e5e",
+      "bytes": 72525
+    },
+    "src-tauri/src/shell/quit.rs": {
+      "sha256": "ce6a7c7edb89d07ef5aecd41feac0116b30c74a045d7afbcc0103bfbac71f55e",
+      "bytes": 18467
+    },
+    "src-tauri/src/vault/corpus.rs": {
+      "sha256": "b033bbd0cccac0208f7ad90ae72932d2db1853d904615b4225ccc69f7f2a9de0",
+      "bytes": 19828
+    },
+    "src-tauri/src/vault/entry.rs": {
+      "sha256": "3c17323188647c37a9d647d441b2d507910448de77b35a17c5056e1690b8e430",
+      "bytes": 15207
+    },
+    "src-tauri/src/vault/parse.rs": {
+      "sha256": "aacc41994b69386af7110f59e738aa53f980e1621d71a50fc6cb0cae0326edd8",
+      "bytes": 18024
+    },
+    "src-tauri/src/vault/scan.rs": {
+      "sha256": "175f57f78b17fa50438c168ef4fd0ca0a4bd0c6b82fcfc3fecad17fc981fbe01",
+      "bytes": 26908
+    },
+    "src-tauri/src/vault/write.rs": {
+      "sha256": "5cbd0e287f25182bcb00165a70fb163e7ac6a5e193933f93ecd852f9ea37c698",
+      "bytes": 313483
+    },
+    "src/agent/AiActionCard.tsx": {
+      "sha256": "56a6e0fd31fb7622c1d2ea6c5130e0b2fda73994592f35529a8b3d3ec4af23b8",
+      "bytes": 12298
+    },
+    "src/agent/AiPanel.tsx": {
+      "sha256": "8903ea52c4dd03c71aeab6713c8f538816c2be87ab639fa5a6c504fefa2646a9",
+      "bytes": 90718
+    },
+    "src/agent/ChatInput.tsx": {
+      "sha256": "caf6f170a2feedc772726574ee07c1602f67ccf24f29fea7b573934cb283683b",
+      "bytes": 28702
+    },
+    "src/agent/ChatTurn.tsx": {
+      "sha256": "a1b12c2ff6dbd459e3b1a28634b005c5980e9dd1715c614b76acecfb2e7b45a8",
+      "bytes": 19681
+    },
+    "src/agent/conversations.ts": {
+      "sha256": "d65d4a5e1d32a2cddc69c13e7b55e4511510324f3958a1235ccac18d4423af0e",
+      "bytes": 33372
+    },
+    "src/agent/elements/decisionsSources.ts": {
+      "sha256": "38edaa38f8ca16af78dfe32ddbc154dc8ac95e000c546c6026961fcf5e5bd3c2",
+      "bytes": 2592
+    },
+    "src/agent/elements/turnSources.ts": {
+      "sha256": "26a92bed58fe188e86347eb268b5dbae7f5b53f239d5e8e4f980cc2e7ba50cc3",
+      "bytes": 2752
+    },
+    "src/agent/systemPrompt.ts": {
+      "sha256": "a6228a5dd2069892264e0d9d23fc4ab75fdd9f6d3e95d6c0ab17db4dc8fa6464",
+      "bytes": 16830
+    },
+    "src/agent/transcript.ts": {
+      "sha256": "898597426d4379f7a72ad8e3026b4a8a662cf76cef4ff0f64aef775e0e7d5294",
+      "bytes": 48107
+    },
+    "src/agent/types.ts": {
+      "sha256": "5af2b8826ed889815fecfcb8adb6f16c77b8edbeb8a37d3ee73c2771503c32fc",
+      "bytes": 31575
+    },
+    "src/agent/useAgentChat.ts": {
+      "sha256": "439b2bfa33c2fb2495fbe1ceda9b97ca87084b294eb799b722b8d9699770b57e",
+      "bytes": 63618
+    },
+    "src/agent/useContextUse.ts": {
+      "sha256": "311231f20f1f294f31fcb1fd0305a6cd2437ed4d9bc483cc9f984da06342d399",
+      "bytes": 3000
+    },
+    "src/agent/useConversations.ts": {
+      "sha256": "a5958e948c5a359d530a5ea4f33dd7a039f08ae5714b2bd116e27721d9c9f3c1",
+      "bytes": 21904
+    },
+    "src/app/CreateLauncher.tsx": {
+      "sha256": "c3300e3ff3e4c5317d855147a17005dce3acfa5bdd35f72868b35a5e9946b3aa",
+      "bytes": 8715
+    },
+    "src/app/CreateMenu.tsx": {
+      "sha256": "8686d1ffec25f7fdfc1b216ee96e0c31cc872ad6a8d030e30c4c624feca5ccd2",
+      "bytes": 3447
+    },
+    "src/app/QuickOpen.tsx": {
+      "sha256": "6de84efe59daea15f33fdda205a482cbb191613d9971412f9675221fe90b34c4",
+      "bytes": 29832
+    },
+    "src/app/RecordComposer.tsx": {
+      "sha256": "115fc019f17ae904d79ce464ed3bbe1ab6ba6e8ef16ed17a5083222f0e317ff8",
+      "bytes": 9276
+    },
+    "src/app/quit.ts": {
+      "sha256": "2bd9e936efa8691cc07c779ad7eb5286849f83609c1eb8ef481aec727e32dd8e",
+      "bytes": 8230
+    },
+    "src/app/useOpenPath.ts": {
+      "sha256": "8d66a8a6ed21ff32507e376582186697015d3c7c7c58ed5691d22b6ef0640378",
+      "bytes": 8357
+    },
+    "src/components/ai/Context.tsx": {
+      "sha256": "5125cbabce3e1de33bb65a19228fa40ec0494948217e630fb8418ad457ab8690",
+      "bytes": 9476
+    },
+    "src/components/ai/Message.tsx": {
+      "sha256": "6e6e7eed2bc1579c214ceea4578f2f9b027d2d16c4c9bbc092b49aafe67c484c",
+      "bytes": 7289
+    },
+    "src/components/ai/Sources.tsx": {
+      "sha256": "09b1bffb2658ee42f2892e52d3626e23daf5c9ba26b49cb60c5b663922b8f4f6",
+      "bytes": 6642
+    },
+    "src/components/pageFrame.css": {
+      "sha256": "3456fa30ab33f740b7d65a3f90f34899d21ff550ff910ce77f9e32fea58a81e6",
+      "bytes": 6266
+    },
+    "src/editor/MarkdownEditor.tsx": {
+      "sha256": "74c5cbff05a369f2236ddac5b3c8ec193c153134544ae99b69dbf199b4ce780d",
+      "bytes": 79268
+    },
+    "src/editor/NoteBodyEditor.tsx": {
+      "sha256": "b675d2cf5b5394eabdcb178de672c3b4600fa94061317c508c68a03756927bc2",
+      "bytes": 26404
+    },
+    "src/editor/citations.ts": {
+      "sha256": "49fa27eb57b81628a9809ec0983d41fd298801740346e91a3eeb60280742896a",
+      "bytes": 9452
+    },
+    "src/editor/openPages.ts": {
+      "sha256": "01787d4b8c55384da84f76efaa249f5df7532e9c71241ff91f0f81f9804ba11d",
+      "bytes": 6748
+    },
+    "src/engine/ai/sources.ts": {
+      "sha256": "969159ac7a617ec4a2a65d95fc57f3fdf9f216be746b83aae62d16e100844eab",
+      "bytes": 8869
+    },
+    "src/engine/ai/types.ts": {
+      "sha256": "cdf9b858188e9f783261917e660048c3f7525b58c4de5b879662e347f820c8f3",
+      "bytes": 4886
+    },
+    "src/engine/createRecord.ts": {
+      "sha256": "103c3e1c7dcab04ccd4cff3c40cf5dab8a2dd5f95add0572331746b239054586",
+      "bytes": 6110
+    },
+    "src/engine/links.ts": {
+      "sha256": "c52c63a38d49f2ed2645e4cf00b529665b24cc24e71dcd504243db19eba37857",
+      "bytes": 3254
+    },
+    "src/engine/okf.ts": {
+      "sha256": "3ee39fe757f98c44f53dddcdf3cebb0767a3c80ee509c6ec520b79b1d9d4702a",
+      "bytes": 65454
+    },
+    "src/knowledge/ConceptReviewBar.tsx": {
+      "sha256": "7766e5e3a4ddec1207fc21a6b44231f17fc8f4500c7b99a23b4dca69440dcccf",
+      "bytes": 14437
+    },
+    "src/knowledge/KnowledgePanel.tsx": {
+      "sha256": "ccd3354e232c981043370212b487f54e5bf926b14c7ddddc6278aa787bbe247f",
+      "bytes": 19543
+    },
+    "src/lib/capture.ts": {
+      "sha256": "933149c101ac478a2d36ecc5187a8cba6e160c4ec69b8a72cb11a70024c60ccc",
+      "bytes": 1481
+    },
+    "src/lib/ipc.ts": {
+      "sha256": "707b5a959c4309722a2eedf9a327c23a9bae39280a9c6aaedd7f666bd3197cd6",
+      "bytes": 64639
+    },
+    "src/library/AgentProperties.tsx": {
+      "sha256": "f1b269b57f8e6359c9c371604d4eba2797d8bf31ec78c094e30e2103412ca4c3",
+      "bytes": 53621
+    },
+    "src/mermaid/CodeOverlay.tsx": {
+      "sha256": "503c87bff18f2f2a91b5d08e461defb16b3f0bd702b519f428be2b199f95207e",
+      "bytes": 9257
+    },
+    "src/mermaid/useDiagramFile.ts": {
+      "sha256": "da5751824cb796e073e34d31d673ae787625c34f0672c4a9c69c3f242edcacfe",
+      "bytes": 9562
+    },
+    "src/sheet/pendingSheets.ts": {
+      "sha256": "a5413056316dc4b848bac298050aefe043558d598598db0d56d56fff657b898f",
+      "bytes": 614
+    },
+    "src/status/AgentRunHistory.tsx": {
+      "sha256": "80235d07600b0b946789239791dfc79e99fcb3af193c4423f01f6947b860a589",
+      "bytes": 8420
+    },
+    "src/stores/launcherStore.ts": {
+      "sha256": "88c495f9c1f8fd23e932b3908b6994ef40cdbaa772708d3ad2839e4133fa523c",
+      "bytes": 2369
+    },
+    "src/styles/surface-system.css": {
+      "sha256": "3340d631d9c93a7b169853bf71954f91427460f8a8e8193f6541c56fa0cdf5c6",
+      "bytes": 2800
+    },
+    "src/whiteboard/useCanvasFile.ts": {
+      "sha256": "6486bb1b3571f3a59d618f13e1d9d664fdfe941413e10748e52c792c966b95bf",
+      "bytes": 9808
+    }
+  },
+  "prior_checkpoint": "source-manifest.json"
+}

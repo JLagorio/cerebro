@@ -37,6 +37,8 @@ async function line(): Promise<HTMLElement> {
 }
 
 describe('LastChange (M58.1b)', () => {
+  // The Info section's "Changed by" value: who and when; the sentence it
+  // stands for is its tooltip.
   it('names you for your own save', async () => {
     pageAttribution.mockResolvedValue({
       state: 'recorded',
@@ -47,7 +49,9 @@ describe('LastChange (M58.1b)', () => {
       at: at(),
     });
     render(<LastChange entry={page} />);
-    expect((await line()).textContent).toBe('Last changed by You · 2 hours ago');
+    const el = await line();
+    expect(el.textContent).toBe('You · 2 hours ago');
+    expect(el.title).toBe('Last changed by You · 2 hours ago');
     expect(pageAttribution).toHaveBeenCalledWith('/vault', 'records/risks/a.md');
   });
 
@@ -62,8 +66,8 @@ describe('LastChange (M58.1b)', () => {
     });
     render(<LastChange entry={page} />);
     const el = await line();
-    expect(el.textContent).toBe('Last changed by Release scout · 2 hours ago · you allowed it');
-    expect(el.getAttribute('title')).toBe('process:release-scout');
+    expect(el.textContent).toBe('Release scout · 2 hours ago · you allowed it');
+    expect(el.dataset.actor).toBe('process:release-scout');
   });
 
   it('says an outside change is unattributed', async () => {
@@ -78,7 +82,8 @@ describe('LastChange (M58.1b)', () => {
     render(<LastChange entry={page} />);
     const el = await line();
     expect(el.dataset.state).toBe('unattributed');
-    expect(el.textContent).toBe(
+    expect(el.textContent).toBe('Outside Cerebro · unattributed');
+    expect(el.title).toBe(
       'Changed outside Cerebro since Assistant wrote it 2 hours ago — unattributed',
     );
   });
@@ -86,11 +91,13 @@ describe('LastChange (M58.1b)', () => {
   it('says when nothing was recorded, and when Knowledge changed it', async () => {
     pageAttribution.mockResolvedValue({ state: 'not_recorded' });
     render(<LastChange entry={page} />);
-    expect((await line()).textContent).toBe('Who changed this page was not recorded');
+    expect((await line()).textContent).toBe('Not recorded');
+    expect((await line()).title).toBe('Who changed this page was not recorded');
     cleanup();
     pageAttribution.mockResolvedValue({ state: 'knowledge' });
     render(<LastChange entry={page} />);
-    expect((await line()).textContent).toBe('Changed through Knowledge');
+    expect((await line()).textContent).toBe('Knowledge');
+    expect((await line()).title).toBe('Changed through Knowledge');
   });
 
   it('reads again when the page bytes change', async () => {
@@ -110,9 +117,7 @@ describe('LastChange (M58.1b)', () => {
     });
     rerender(<LastChange entry={{ ...page, hash: 'b'.repeat(64) }} />);
     await waitFor(() =>
-      expect(screen.getByTestId('last-change-line').textContent).toBe(
-        'Last changed by You · 2 hours ago',
-      ),
+      expect(screen.getByTestId('last-change-line').textContent).toBe('You · 2 hours ago'),
     );
     expect(pageAttribution).toHaveBeenCalledTimes(2);
   });

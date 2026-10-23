@@ -1,3 +1,4 @@
+import { StateMessage } from '@/components/ui/StateMessage';
 import { useEffect, useState } from 'react';
 import { fileUrl } from '@/lib/rootsIpc';
 import { VAULT_ROOT, type FileProbe } from '@/engine/fileBytes';
@@ -42,7 +43,11 @@ export function MediaViewer({
   return (
     <div className="media-viewer" data-testid="media-viewer">
       {error !== null ? (
-        <p role="status">{error}</p>
+        <div role="status">
+          <StateMessage state="unavailable" title="Media unavailable">
+            {error}
+          </StateMessage>
+        </div>
       ) : source !== null ? (
         <Tag
           key={source}
@@ -53,7 +58,7 @@ export function MediaViewer({
           onError={(event) => setError(ERRORS[event.currentTarget.error?.code ?? 4] ?? ERRORS[4])}
         />
       ) : (
-        <span>Loading media…</span>
+        <StateMessage state="loading" title="Loading media…" compact />
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { addPropertyToEntry, moveFieldOnType } from '@/app/typeActions';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
@@ -6,7 +6,12 @@ import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
 import { GroupLabel } from '@/detail/GroupLabel';
 import { PropertyMenu } from '@/detail/PropertyMenu';
-import { PropertyRow, ROW_ACTION } from '@/detail/PropertyRow';
+import {
+  PropertyRow,
+  PROPERTY_GHOST_ICON,
+  PROPERTY_GHOST_ROW,
+  ROW_ACTION,
+} from '@/detail/PropertyRow';
 import {
   foldsWhenUnset,
   inferKindFromValue,
@@ -19,17 +24,19 @@ import { useSortableList } from '@/hooks/useSortableList';
 import { LAYOUT_DEFAULTS } from '@/engine/types';
 import type { Entry, FieldDef, FieldKind, Schema } from '@/engine/types';
 import { useVaultStore } from '@/stores/vaultStore';
+import { isStructured, StructuredValue } from '@/detail/StructuredValue';
 
 /** Readable text for a key the type does not declare. `properties` holds
- * `Scalar | Scalar[]` and, after a field is dropped from a type, can hold
- * object-shaped leftovers (a daterange's {start, end}) — `String(value)`
- * turned those into "[object Object]". */
-function undeclaredDisplay(entry: Entry, name: string): string {
+ * `Scalar | Scalar[]` and, after a field is dropped from a type or written by
+ * hand, can hold maps (a daterange's {start, end}, a `generated:` stamp) —
+ * `String(value)` turned those into "[object Object]", so they draw as
+ * `StructuredValue`'s lines. */
+function undeclaredDisplay(entry: Entry, name: string): React.ReactNode {
   if (name in entry.relationships) return entry.relationships[name].join(', ');
   const value = entry.properties[name];
   if (value === null || value === undefined) return '—';
+  if (isStructured(value)) return <StructuredValue value={value} />;
   if (Array.isArray(value)) return value.map(String).join(', ');
-  if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
 }
 
@@ -46,11 +53,28 @@ function undeclaredKind(entry: Entry, name: string): FieldKind {
  * share one code path.
  *
  * It takes no tab and knows of none (M46.1). A section belongs to the RECORD:
- * every host renders this whole stack ABOVE its tab strip, on every tab, so
- * there is nothing here to narrow and no host that could ask for less.
+ * when revealed, this whole manager stays ABOVE the tab strip on every tab.
+ * The host may collapse its presentation but never narrows its fields by tab.
  */
-export function RecordProperties({ entry, schema }: { entry: Entry; schema: Schema }) {
+export function RecordProperties({
+  entry,
+  schema,
+  onEditingChange,
+}: {
+  entry: Entry;
+  schema: Schema;
+  onEditingChange?: (editing: boolean) => void;
+}) {
+  const editingFields = useRef(new Set<string>());
+  const fieldEditing = (name: string, editing: boolean) => {
+    if (editing) editingFields.current.add(name);
+    else editingFields.current.delete(name);
+    onEditingChange?.(addingProp || editingFields.current.size > 0);
+  };
   const [addingProp, setAddingProp] = useState(false);
+  useEffect(() => {
+    onEditingChange?.(addingProp || editingFields.current.size > 0);
+  }, [addingProp, onEditingChange]);
   const addRef = useRef<HTMLButtonElement | null>(null);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   // The property menu edits the TYPE, so it owes the user the blast radius.
@@ -145,20 +169,26 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
             )
       }
     >
-      <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
+      <FieldEditor
+        entry={entry}
+        def={f}
+        schema={schema}
+        chrome="panel"
+        onEditingChange={(editing) => fieldEditing(f.name, editing)}
+      />
     </PropertyRow>
   );
   const restRows = containerRows(layout.rest);
 
   return (
-    <div className="mb-4 flex flex-col gap-1">
+    <div className="cb-record-properties mb-4 flex flex-col gap-1">
       {layout.flat ? (
         /* Declared fields get their own container: the sortable measures its
            children as the rows, and undeclared keys are not part of the type's
            order — they are not in `fields:` at all. */
         <div
           ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
-          className="flex flex-col gap-1"
+          className="cb-record-property-rows flex flex-col gap-1"
           style={sortable.containerStyle}
         >
           {declared.map((f, index) => (
@@ -184,7 +214,13 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
                     )
               }
             >
-              <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
+              <FieldEditor
+                entry={entry}
+                def={f}
+                schema={schema}
+                chrome="panel"
+                onEditingChange={(editing) => fieldEditing(f.name, editing)}
+              />
             </PropertyRow>
           ))}
         </div>
@@ -226,12 +262,16 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
           data-testid="hidden-properties-toggle"
           aria-expanded={revealed}
           onClick={() => setRevealed((v) => !v)}
-          className="-mx-1 mt-0.5 flex items-center gap-1 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
+          className={PROPERTY_GHOST_ROW}
         >
-          <Icon name={revealed ? 'chevron-down' : 'chevron-right'} size={12} />
-          {revealed
-            ? `Hide ${hidden.length} ${hidden.length === 1 ? 'property' : 'properties'}`
-            : `${hidden.length} hidden ${hidden.length === 1 ? 'property' : 'properties'}`}
+          <span className={PROPERTY_GHOST_ICON}>
+            <Icon name={revealed ? 'chevron-down' : 'chevron-right'} size={14} />
+          </span>
+          <span className="truncate">
+            {revealed
+              ? `Hide ${hidden.length} ${hidden.length === 1 ? 'property' : 'properties'}`
+              : `${hidden.length} hidden ${hidden.length === 1 ? 'property' : 'properties'}`}
+          </span>
         </button>
       )}
       {undeclared.map((name) => (
@@ -254,9 +294,9 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
             </span>
           }
         >
-          <span className="block p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">
+          <div className="p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">
             {undeclaredDisplay(entry, name)}
-          </span>
+          </div>
         </PropertyRow>
       ))}
       {/* The trigger stays mounted: the surface is anchored to it now, and it
@@ -268,9 +308,12 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
         aria-haspopup="dialog"
         aria-expanded={addingProp}
         onClick={() => setAddingProp((v) => !v)}
-        className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
+        className={PROPERTY_GHOST_ROW}
       >
-        + Add property
+        <span className={PROPERTY_GHOST_ICON}>
+          <Icon name="plus" size={14} />
+        </span>
+        <span className="truncate">Add property</span>
       </button>
       {addingProp && (
         <AddPropertyPanel

@@ -4,7 +4,7 @@ import { boot, readMockFile, seedBeforeBoot, type E2eSeedCommit, openAssistantPa
 /**
  * A page's history, as prose, with Restore (M58.4), in the browser.
  *
- * History is the side panel's History tab (D18). Each row names who made the
+ * History is the page's History panel (D18). Each row names who made the
  * commit from runtime.db's commit record alone (CV-35): a run's commit names
  * its agent, and a commit whose message merely carries a `Cerebro-Run:`
  * trailer reads "unattributed". A row opens the version lens: Changes reads

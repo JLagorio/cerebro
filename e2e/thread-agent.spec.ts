@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showPagePanel } from './boot';
 
 /**
  * An @agent in a page's comment thread (M70.4), on the mock backend: a
@@ -26,17 +26,14 @@ async function sidecar(page: Page): Promise<Sidecar> {
   return JSON.parse(await readMockFile(page, SIDECAR)) as Sidecar;
 }
 
-/** The decision, found by its title, opened as a page, on its Comments tab. */
+/** The decision, found by its title, opened as a page, showing its Comments. */
 async function openDecisionComments(page: Page): Promise<void> {
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByTestId('quick-open-input').fill(TITLE.toLowerCase());
   await page.getByTestId('quick-open-result').filter({ hasText: TITLE }).first().click();
   await page.getByRole('button', { name: 'Open in full page' }).click();
   await expect(page.getByTestId('markdown-editor')).toBeVisible();
-  if (!(await page.getByTestId('doc-side-panel').isVisible())) {
-    await page.getByRole('button', { name: 'Show panel' }).click();
-  }
-  await page.getByTestId('doc-panel-tab-comments').click();
+  await showPagePanel(page, 'Comments');
 }
 
 /** Start a discussion about the whole page; answers its thread card. */
@@ -101,6 +98,7 @@ test('a deleted placeholder drops the answer', async ({ page }) => {
   await expect(pending).toHaveCount(1);
   const id = await pending.getAttribute('data-comment-id');
 
+  await pending.getByLabel('Comment actions').click();
   await pending.getByTestId('comment-delete').click();
   await thread.getByTestId('comment-delete-confirm').click();
   await expect(thread.getByTestId('comment-tombstone')).toHaveCount(1);
@@ -143,6 +141,8 @@ test("an agent's reply naming @release-scout, and a plain human reply, start no 
   const threadId = (await sidecar(page)).threads[0].comments[0].id;
 
   // The person replies with no mention.
+  if (await thread.getByRole('button', { name: 'Reply…', exact: true }).isVisible())
+    await thread.getByRole('button', { name: 'Reply…', exact: true }).click();
   await thread.getByTestId('comment-reply-submit-input').fill('Thanks, that settles it.');
   await thread.getByTestId('comment-reply-submit').click();
   await expect(thread.getByText('Thanks, that settles it.')).toBeVisible();

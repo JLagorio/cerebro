@@ -104,6 +104,7 @@ export function SettingsNavigation({
           )}
           <button
             type="button"
+            className="cb-nav-row"
             data-page-navigation-item
             data-settings-section={section.id}
             aria-current={selected === section.id ? 'page' : undefined}

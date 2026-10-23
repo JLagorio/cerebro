@@ -21,8 +21,11 @@ export function CreateMenu() {
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={openLauncher}
-        className="flex h-8 w-full items-center gap-[9px] rounded-md border border-n-200 bg-n-0 px-2 text-left text-sm font-medium text-n-800 hover:bg-n-100"
+        onClick={(event) => {
+          event.currentTarget.focus();
+          openLauncher();
+        }}
+        className="cb-context-create flex h-8 w-full items-center gap-[9px] rounded-md border border-n-200 bg-n-0 px-2 text-left text-sm font-medium text-n-800 hover:bg-n-100"
       >
         <Icon name="plus" size={15} color="var(--n-500)" />
         New

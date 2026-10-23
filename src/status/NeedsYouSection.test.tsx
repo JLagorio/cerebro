@@ -73,6 +73,13 @@ describe('NeedsYouSection (M57.4c)', () => {
     await screen.findByTestId('pending-write-card');
     const kinds = [...grid.children].map((child) => child.getAttribute('data-testid'));
     expect(kinds).toEqual(['review-card', 'pending-write-card']);
+    // M91.14 — both are Confirmations, each a cell the grid lays out
+    // (review.css), so a row's answers line up.
+    expect(grid.classList.contains('cb-review-cards')).toBe(true);
+    expect([...grid.children].map((child) => child.getAttribute('data-slot'))).toEqual([
+      'confirmation',
+      'confirmation',
+    ]);
   });
 
   it('says a failed writes read beside the proposals, and never that nothing waits', async () => {

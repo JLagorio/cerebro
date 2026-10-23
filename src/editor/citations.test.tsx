@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { HOVER_OPEN_MS, resetHoverCards } from '@/components/ui/HoverCard';
 import { makeEntry } from '@/engine/testHelpers';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -167,13 +168,25 @@ const chips = (kind: 'ref' | 'def') =>
   [...document.querySelectorAll<HTMLElement>(`[data-citation="${kind}"]`)].map((el) => ({
     id: el.dataset.id,
     label: el.textContent,
+    name: el.getAttribute('aria-label'),
     title: el.getAttribute('title'),
     tag: el.tagName,
   }));
+const refs = () => [...document.querySelectorAll<HTMLElement>('[data-citation="ref"]')];
+
+/** A real pointer move onto a chip (HoverCard opens only on one). */
+let at = 0;
+function hover(el: Element) {
+  at += 7;
+  act(() => {
+    el.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, screenX: at, screenY: at }));
+  });
+}
 
 describe('the citation chip', () => {
   beforeEach(() => {
     resetMockFs();
+    resetHoverCards();
     open.mockReset();
     fs().set(
       CONCEPT,
@@ -211,17 +224,80 @@ describe('the citation chip', () => {
       ['first', '2'],
       ['second', '1'],
     ]);
-    // Named as the Sources list names it, over the marker the number stands in for.
-    // An outside source's link is its own line, one hover from its name (M69.2).
-    expect(chips('ref').map((c) => c.title)).toEqual([
-      'The first source\n[^first]',
-      'The second source\nhttps://example.com/second\n[^second]',
-      'No source "loose"\n[^loose]',
+    // Named as the Sources list names it. A listed source's card says the
+    // rest (M91.14), so it draws no tooltip of its own; one nothing lists
+    // keeps its words there, over the marker the number stands in for.
+    expect(chips('ref').map((c) => c.name)).toEqual([
+      'Source 2: The first source',
+      'Source 1: The second source',
+      'Source 3: No source "loose"',
     ]);
-    expect(chips('def').map((c) => c.title)).toEqual([
-      'The first source\n[^first]:',
-      'The second source\nhttps://example.com/second\n[^second]:',
-    ]);
+    expect(chips('ref').map((c) => c.title)).toEqual([null, null, 'No source "loose"\n[^loose]']);
+    expect(chips('def').map((c) => c.title)).toEqual([null, null]);
+  });
+
+  /* M91.14: the number is an Inline Citation's trigger, its name and role
+     unchanged; hovering it, or focusing it from the keyboard, opens the card
+     of the source it stands for. A vault page opens through the app and an
+     outside source links out in a new tab (CV-16). */
+  it('opens the source a listed citation stands for, on hover and on keyboard focus', async () => {
+    render(<NoteBodyEditor path={CONCEPT} />);
+    await waitFor(() => expect(chips('ref')).toHaveLength(3));
+    const [first, second, loose] = refs();
+    hover(first);
+    const card = await screen.findByRole('group', { name: 'Source' });
+    expect(first.getAttribute('aria-describedby')).toBe(card.id);
+    expect(card.textContent).toContain('The first source');
+    expect(card.textContent).toContain('First, as the page puts it');
+    fireEvent.click(within(card).getByRole('button', { name: 'Open records/first.md' }));
+    expect(open).toHaveBeenCalledWith('records/first.md');
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Source' })).toBeNull());
+
+    // The keyboard reaches it too: focus that shows opens the same card.
+    vi.spyOn(second, 'matches').mockReturnValue(true);
+    act(() => second.focus());
+    const outside = await screen.findByRole('group', { name: 'Source' });
+    expect(outside.textContent).toContain('The second source');
+    const link = within(outside).getByRole('link', { name: 'example.com (opens in a new tab)' });
+    expect(link.getAttribute('href')).toBe('https://example.com/second');
+    expect(link.getAttribute('target')).toBe('_blank');
+    act(() => second.blur());
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Source' })).toBeNull());
+
+    // Nothing lists `loose`: no card, and its words stay on the chip.
+    hover(loose);
+    await new Promise((resolve) => setTimeout(resolve, HOVER_OPEN_MS + 50));
+    expect(screen.queryByRole('group', { name: 'Source' })).toBeNull();
+    for (const a of document.querySelectorAll('a')) {
+      expect(a.getAttribute('href') ?? '').toMatch(/^https?:\/\//);
+    }
+  });
+
+  it('links only an http(s) source, and shows any other address as text', async () => {
+    const FTP = 'ftp://files.example.com/report.csv';
+    fs().set(
+      CONCEPT,
+      `---\ntype: Metric\ntitle: Sample\nsources:\n  - id: dump\n    resource: ${FTP}\n    title: The dump\n---\n\nAlpha.[^dump]\n`,
+    );
+    useVaultStore.setState({
+      entries: [
+        makeEntry({
+          path: CONCEPT,
+          filename: 'sample.md',
+          type: 'Metric',
+          properties: { sources: [{ id: 'dump', resource: FTP, title: 'The dump' }] },
+        }),
+      ],
+    });
+    render(<NoteBodyEditor path={CONCEPT} />);
+    await waitFor(() => expect(chips('ref')).toHaveLength(1));
+    const [chip] = refs();
+    expect(chip.tagName).toBe('SPAN');
+    expect(chip.getAttribute('aria-label')).toBe('Source 1: The dump');
+    hover(chip);
+    const card = await screen.findByRole('group', { name: 'Source' });
+    expect(card.textContent).toContain(FTP);
+    expect(document.querySelector('a')).toBeNull();
   });
 
   // editor.css reads a paragraph that opens with one as the sources list.
@@ -249,7 +325,7 @@ describe('the citation chip', () => {
     expect(loose.className).toContain('bg-n-100');
   });
 
-  it('names an untitled outside link by its URL, and keeps the URL in the tooltip (M69.2)', async () => {
+  it('names an untitled outside link by its URL, and keeps the URL one hover away (M69.2)', async () => {
     const LINEAR = 'https://linear.app/acme/issue/ENG-142/fix-login';
     fs().set(
       CONCEPT,
@@ -269,8 +345,12 @@ describe('the citation chip', () => {
     await waitFor(() => expect(chips('ref')).toHaveLength(1));
     const chip = document.querySelector<HTMLElement>('[data-citation="ref"]')!;
     expect(chip.getAttribute('aria-label')).toBe('Source 1: ENG-142 Fix login');
-    expect(chip.getAttribute('title')).toBe(`ENG-142 Fix login\n${LINEAR}\n[^issue]`);
     expect(chip.getAttribute('href')).toBe(LINEAR);
+    // The card names it, and its link is the URL the name was read from.
+    hover(chip);
+    const card = await screen.findByRole('group', { name: 'Source' });
+    expect(card.querySelector('.cb-ai-citation-title')?.textContent).toBe('ENG-142 Fix login');
+    expect(within(card).getByRole('link').getAttribute('href')).toBe(LINEAR);
   });
 
   it('numbers by the page itself where there is no note to read sources from', async () => {

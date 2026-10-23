@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { boot, readMockFile, showDatabases, openAgents } from './boot';
+import { chooseOption } from './select';
 
 test('a Work item links an existing Agent and opens its page', async ({ page }, testInfo) => {
   await boot(page);
@@ -63,9 +64,9 @@ test('an assigned trigger drains three bulk-linked pages and a re-add wakes agai
   await page.getByTestId('nav-agent').filter({ hasText: 'Release scout' }).click();
   await page.getByTestId('agent-add-trigger').click();
   const editor = page.getByTestId('agent-editor-trigger-new');
-  await editor.getByLabel('Trigger 1 event').selectOption('assigned');
+  await chooseOption(editor.getByLabel('Trigger 1 event'), 'assigned to it');
   await expect(editor.getByLabel('Trigger 1 value')).toHaveCount(0);
-  await editor.getByLabel('Trigger 1 field').selectOption('agent');
+  await chooseOption(editor.getByLabel('Trigger 1 field'), { value: 'agent' });
   await expect(editor).toContainText('Only links made while Cerebro is open wake it.');
   expect(await readMockFile(page, scout)).not.toContain('event: assigned');
   await editor.getByRole('button', { name: 'Done', exact: true }).click();

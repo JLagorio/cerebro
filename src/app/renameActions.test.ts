@@ -4,6 +4,8 @@ import * as pointers from './pointers';
 import { navSeed } from '@/test/navSeed';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/react';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 
 vi.mock('@/lib/ipc', { spy: true });
 
@@ -419,12 +421,16 @@ describe('link-keeping rename Undo (M60.10b)', () => {
 });
 
 describe('rename rails (CV-41)', () => {
-  const sources = import.meta.glob('../**/*.{ts,tsx}', {
-    query: '?raw',
-    import: 'default',
-    eager: true,
-  }) as Record<string, string>;
-  const appSources = Object.entries(sources).filter(([path]) => !/\.(test|spec)\./.test(path));
+  // Read source bytes without a ?raw module: Vitest's coverage cache strips
+  // query strings, so a raw transform can replace the executable source map.
+  const root = join(__dirname, '..');
+  const appSources = readdirSync(root, { recursive: true, encoding: 'utf8' })
+    .filter((path) => /\.tsx?$/.test(path) && !/\.(test|spec)\./.test(path))
+    .map((path) => {
+      const file = join(root, path);
+      const local = relative(__dirname, file).replaceAll('\\', '/');
+      return [local.startsWith('.') ? local : `./${local}`, readFileSync(file, 'utf8')] as const;
+    });
 
   it('only renameActions renames a file', () => {
     for (const [path, source] of appSources) {

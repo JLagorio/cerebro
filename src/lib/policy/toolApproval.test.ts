@@ -2,7 +2,8 @@
  * The tool-approval table, TS side (M57.2) — byte identity with Rust, the
  * same strict load refusals, and the shared goldens, the ask-first cases
  * (M57.4), the question ones (M57.3), the queue (M57.4c), the web ceiling
- * (M57.7) and the hidden folders (M60.8b) among them.
+ * (M57.7), the hidden folders (M60.8b) and the Subagents switch, its
+ * narrowing and its agent types (M91.2a) among them.
  *
  * @see src-tauri/src/policy/tool_approval.rs
  */
@@ -16,12 +17,16 @@ import { sha256Hex } from '../sha256';
 import {
   askFirstOf,
   confirmableDecision,
+  DELEGATE_CEILINGS,
+  delegateCeilingOf,
   effectiveCeiling,
   familyCard,
   hiddenPathRules,
   hostAnswer,
+  isAgentType,
   offersConversation,
   matcherOf,
+  parseDelegateCeiling,
   parseShellCeiling,
   parseToolApproval,
   parseWebCeiling,
@@ -37,10 +42,14 @@ import {
   TOOL_APPROVAL_PATH,
   WEB_CEILINGS,
   writeDeclined,
+  type ApprovalInput,
+  type DelegateCeiling,
+  type RunApproval,
   type RunKind,
   type ShellCeiling,
+  type ToolApproval,
 } from './toolApproval';
-import { parseToolsManifest, TOOLS } from './tools';
+import { cliTool, parseToolsManifest, TOOLS, type CliTool } from './tools';
 
 const REPO = join(__dirname, '../../..');
 const RAW = readFileSync(join(REPO, TOOL_APPROVAL_PATH), 'utf8');
@@ -74,6 +83,11 @@ const family = (v: Json, id: string) => {
   if (row === undefined) throw new Error(`no family ${id}`);
   return row as Record<string, unknown> & { grid: Record<string, Record<string, unknown>> };
 };
+
+/** Does `tool` sit in a family that only loads other tools (M91.1)? */
+function loadsTools(tool: CliTool): boolean {
+  return TOOL_APPROVAL.families.find((row) => row.id === tool.family)?.loads_tools === true;
+}
 
 function refused(mutate: (v: Json) => void): string {
   const copy = JSON.parse(RAW) as Json;
@@ -294,6 +308,27 @@ const CASES: [string, (v: Json) => void, string[]][] = [
     (v) => (family(v, 'web').grid.internal.on = 'allow'),
     ['family web', '`grid.internal`'],
   ],
+  // M91.2a: the Subagents switch is off and on, and its family reads it.
+  [
+    'no delegate ceiling',
+    (v) => delete (v.ceilings as Record<string, unknown>).delegate,
+    ['table', '`ceilings`', 'delegate: [off, on]'],
+  ],
+  [
+    'a delegate ceiling of three',
+    (v) => ((v.ceilings as Record<string, unknown>).delegate = ['off', 'ask', 'on']),
+    ['table', '`ceilings`', 'delegate: [off, on]'],
+  ],
+  [
+    'a delegate cell missing its value',
+    (v) => delete family(v, 'delegate').grid.attended.on,
+    ['family delegate', '`grid.attended`', 'delegate value'],
+  ],
+  [
+    'an internal run given subagents',
+    (v) => (family(v, 'delegate').grid.internal.on = 'cli'),
+    ['family delegate', '`grid.internal`'],
+  ],
 ];
 
 describe('the same refusals in the same words', () => {
@@ -325,7 +360,7 @@ describe('the same refusals in the same words', () => {
 
   it('keeps a CLI row out of the ask-first family', () => {
     const manifest = JSON.parse(readFileSync(join(REPO, 'shared/policy/tools.v1.json'), 'utf8'));
-    for (const row of manifest.cli_tools) if (row.name === 'Task') row.family = 'confirmable';
+    for (const row of manifest.cli_tools) if (row.name === 'Agent') row.family = 'confirmable';
     expect(() => parseToolApproval(JSON.parse(RAW), parseToolsManifest(manifest))).toThrow(
       /family/,
     );
@@ -383,24 +418,19 @@ describe('the hidden folders (M60.8b)', () => {
   it('closes the Trash to Read and Edit on every attended and unattended run', () => {
     const rules = hiddenPathRules();
     expect(rules).toEqual(['Read(./.trash/**)', 'Edit(./.trash/**)']);
-    const cli = TOOLS.cli_tools.map((row) => row.name);
+    // Every CLI row an internal run is denied: all but the loaders (M91.1).
+    const cli = TOOLS.cli_tools.filter((row) => !loadsTools(row)).map((row) => row.name);
     for (const kind of ['attended', 'unattended', 'internal'] as const) {
-      for (const shell of SHELL_CEILINGS) {
-        for (const web of WEB_CEILINGS) {
-          for (const askFirst of [false, true]) {
-            for (const readScoped of [false, true]) {
-              for (const narrowing of [null, (tool: string) => tool === 'Read']) {
-                const approval = plan({ kind, shell, web, askFirst, readScoped, narrowing });
-                const label = `${kind} ${shell} ${web} ${askFirst} ${readScoped} ${narrowing !== null}`;
-                if (kind === 'internal') expect(approval.disallowed, label).toEqual(cli);
-                else expect(approval.disallowed.slice(-rules.length), label).toEqual(rules);
-                for (const rule of rules) {
-                  expect(approval.allowed, label).not.toContain(rule);
-                  expect(matcherOf(approval), label).not.toContain(rule);
-                  expect(approval.decisions.some((d) => d.tool === rule)).toBe(false);
-                }
-              }
-            }
+      for (const input of everyInput(kind)) {
+        for (const narrowing of [null, (tool: string) => tool === 'Read']) {
+          const approval = plan({ ...input, narrowing });
+          const label = `${JSON.stringify(input)} ${narrowing !== null}`;
+          if (kind === 'internal') expect(approval.disallowed, label).toEqual(cli);
+          else expect(approval.disallowed.slice(-rules.length), label).toEqual(rules);
+          for (const rule of rules) {
+            expect(approval.allowed, label).not.toContain(rule);
+            expect(matcherOf(approval), label).not.toContain(rule);
+            expect(approval.decisions.some((d) => d.tool === rule)).toBe(false);
           }
         }
       }
@@ -408,23 +438,433 @@ describe('the hidden folders (M60.8b)', () => {
   });
 });
 
+// --- The built-ins a run holds (M91.1) -------------------------------------------
+//
+// The same promises tool_approval.rs's tests hold the plan to.
+
+const KINDS = ['attended', 'unattended', 'internal'] as const;
+
+/** Every input shape a run can be planned with, by kind. */
+function everyInput(kind: RunKind): ApprovalInput[] {
+  const inputs: ApprovalInput[] = [];
+  for (const shell of SHELL_CEILINGS) {
+    for (const web of WEB_CEILINGS) {
+      for (const delegate of DELEGATE_CEILINGS) {
+        for (const askFirst of [false, true]) {
+          for (const readScoped of [false, true]) {
+            inputs.push({ kind, shell, web, delegate, askFirst, readScoped, narrowing: null });
+          }
+        }
+      }
+    }
+  }
+  return inputs;
+}
+
+/** A run of `kind` at `shell`, the web off and the Subagents switch on, as
+ * tool_approval.rs's `input`. */
+function onAt(kind: RunKind, shell: ShellCeiling): ApprovalInput {
+  return {
+    kind,
+    shell,
+    web: 'off',
+    delegate: 'on',
+    askFirst: false,
+    readScoped: false,
+    narrowing: null,
+  };
+}
+
+/** The subagent tool's decision in a plan. */
+function agentDecision(approval: RunApproval): string | undefined {
+  return approval.decisions.find((d) => d.tool === 'Agent')?.decision;
+}
+
+describe('the built-ins a run holds (M91.1)', () => {
+  it('holds exactly the rows its plan allows, asks for or leaves to the CLI', () => {
+    for (const kind of KINDS) {
+      const inputs = [
+        ...everyInput(kind),
+        {
+          kind,
+          shell: 'on' as const,
+          readScoped: false,
+          narrowing: (tool: string) => ['Task', 'get_note'].some((e) => namesTool(e, tool)),
+        },
+        {
+          kind,
+          shell: 'on' as const,
+          readScoped: false,
+          narrowing: (tool: string) => tool === 'Read',
+        },
+      ];
+      for (const input of inputs) {
+        const approval = plan(input);
+        const admitted = approval.decisions
+          .filter((d) => cliTool(d.tool) !== null)
+          .filter((d) => d.decision === 'allow' || d.decision === 'ask' || d.decision === 'cli')
+          .map((d) => d.tool);
+        expect(approval.tools, `${kind} ${input.shell}`).toEqual(admitted);
+        for (const tool of approval.tools) {
+          expect(approval.disallowed).not.toContain(tool);
+          expect(cliTool(tool)).not.toBeNull();
+        }
+        expect(approval.tools).not.toContain('Task');
+        expect(approval.tools).toContain('ToolSearch');
+      }
+    }
+  });
+
+  it('denies the outward, cross-session, task-list, background, schedule and skill families everywhere', () => {
+    const denied = ['task_list', 'background', 'cross_session', 'schedule', 'outside', 'skill'];
+    const members = TOOLS.cli_tools
+      .filter((row) => row.family !== null && denied.includes(row.family))
+      .map((row) => row.name);
+    expect(members).toHaveLength(28);
+    for (const tool of ['SendMessage', 'ListAgents', 'Artifact', 'Monitor', 'Skill']) {
+      expect(members).toContain(tool);
+    }
+    for (const kind of KINDS) {
+      for (const input of everyInput(kind)) {
+        const approval = plan(input);
+        for (const tool of members) {
+          expect(approval.disallowed, `${kind} ${tool}`).toContain(tool);
+          expect(approval.tools).not.toContain(tool);
+          expect(matcherOf(approval)).not.toContain(tool);
+        }
+      }
+    }
+  });
+
+  it('holds the subagent tool only where a gate sits, under either spelling', () => {
+    const delegate = TOOL_APPROVAL.families.find((row) => row.id === 'delegate');
+    expect(delegate?.needs_gate).toBe(true);
+    expect(delegate?.loads_tools).toBeUndefined();
+    expect(delegate?.ceiling).toBe('delegate');
+    for (const input of everyInput('attended')) {
+      const approval = plan(input);
+      const held = input.delegate === 'on';
+      expect(agentDecision(approval), JSON.stringify(input)).toBe(held ? 'cli' : 'deny');
+      expect(approval.tools.includes('Agent')).toBe(held);
+      expect(approval.disallowed.includes('Agent')).toBe(!held);
+    }
+    for (const kind of ['unattended', 'internal'] as const) {
+      for (const input of everyInput(kind)) {
+        const approval = plan(input);
+        expect(agentDecision(approval)).toBe('deny');
+        expect(approval.disallowed).toContain('Agent');
+        expect(approval.tools).not.toContain('Agent');
+        expect(approval.withheld).not.toContain('Agent');
+      }
+    }
+    // The alias answers with the row's decision, and the host passes it where
+    // a gate sits and denies it where none does.
+    const attended = plan(onAt('attended', 'off'));
+    expect(hostAnswer(attended, () => false, 'Task', {})).toEqual({ kind: 'pass' });
+    expect(hostAnswer(plan(onAt('unattended', 'off')), () => false, 'Task', {})).toEqual({
+      kind: 'deny',
+      message: TOOL_APPROVAL.messages.denied,
+    });
+    expect(subjectOf('Task', { description: 'Read the notes' })).toBe('Read the notes');
+    // The flag, not the cell, keeps it from a run without a gate: a table
+    // whose unattended cell leaves it to the CLI still denies it, and holds
+    // it once the flag is dropped.
+    const flagged = JSON.parse(RAW) as Json;
+    family(flagged, 'delegate').grid.unattended.on = 'cli';
+    const flagless = JSON.parse(JSON.stringify(flagged)) as Json;
+    delete family(flagless, 'delegate').needs_gate;
+    for (const [table, decision] of [
+      [parseToolApproval(flagged), 'deny'],
+      [parseToolApproval(flagless), 'cli'],
+    ] as const) {
+      expect(agentDecision(plan(onAt('unattended', 'off'), table))).toBe(decision);
+    }
+  });
+
+  it('keeps a todo list only where someone watches', () => {
+    for (const input of everyInput('attended')) {
+      expect(plan(input).allowed).toContain('TodoWrite');
+    }
+    for (const kind of ['unattended', 'internal'] as const) {
+      for (const input of everyInput(kind)) {
+        expect(plan(input).disallowed).toContain('TodoWrite');
+        expect(plan(input).tools).not.toContain('TodoWrite');
+      }
+    }
+  });
+
+  it('leaves the loaders with every run, and they run nothing', () => {
+    const loaders = TOOLS.cli_tools.filter(loadsTools).map((row) => row.name);
+    expect(loaders).toEqual(['ToolSearch']);
+    for (const kind of KINDS) {
+      const inputs = [
+        ...everyInput(kind),
+        { kind, shell: 'off' as const, readScoped: false, narrowing: () => false },
+      ];
+      for (const input of inputs) {
+        const approval = plan(input);
+        expect(approval.decisions.find((d) => d.tool === 'ToolSearch')?.decision).toBe('cli');
+      }
+    }
+  });
+
+  it('refuses a loader that is not the CLI’s on every run, and a flag of the wrong type', () => {
+    expect(refused((v) => (family(v, 'meta').grid.unattended.any = 'deny'))).toContain(
+      'family meta: `grid` must leave every run kind to the CLI: its tools only load other tools',
+    );
+    expect(refused((v) => delete family(v, 'meta').loads_tools)).toContain(
+      'family meta: `grid.internal` may only deny or refuse',
+    );
+    expect(refused((v) => (family(v, 'delegate').needs_gate = 'yes'))).toContain('invalid type');
+    expect(refused((v) => (family(v, 'delegate').loads_tools = 1))).toContain('invalid type');
+    expect(refused((v) => (family(v, 'delegate').needs_seat = true))).toContain('unknown field');
+    // A loader that needs a gate would be denied wherever none sits.
+    expect(refused((v) => (family(v, 'meta').needs_gate = true))).toContain(
+      'family meta: `needs_gate` must be false: a family that loads tools stays with every run',
+    );
+  });
+
+  it('words the init gate’s stop for an unknown built-in once, naming it', () => {
+    const words = TOOL_APPROVAL.messages.unknown_tool;
+    expect(words.split('{tool}')).toHaveLength(2);
+    expect(words.startsWith("Claude Code offered a tool Cerebro doesn't know: {tool}.")).toBe(true);
+  });
+});
+
+// --- The Subagents switch (M91.2a) ---------------------------------------------
+//
+// The same promises tool_approval.rs's tests hold the switch, the narrowing
+// and the agent types to.
+
+describe('the Subagents switch (M91.2a)', () => {
+  it('follows its own ceiling, whatever the shell and the read limit', () => {
+    for (const shell of SHELL_CEILINGS) {
+      for (const readScoped of [false, true]) {
+        const at = (delegate: DelegateCeiling) =>
+          plan({ ...onAt('attended', shell), delegate, readScoped });
+        const [off, on] = [at('off'), at('on')];
+        const label = `${shell} readScoped=${readScoped}`;
+        expect(off.disallowed, label).toContain('Agent');
+        expect(off.tools, label).not.toContain('Agent');
+        expect(on.tools, label).toContain('Agent');
+        expect(on.disallowed, label).not.toContain('Agent');
+        // It never asks, so it moves neither the mode nor the gate.
+        expect(off.permission_mode, label).toBe(on.permission_mode);
+        expect(matcherOf(off), label).toEqual(matcherOf(on));
+        expect(on.allowed, label).not.toContain('Agent');
+        for (const spelling of ['Agent', 'Task']) {
+          expect(
+            hostAnswer(off, () => false, spelling, {}),
+            label,
+          ).toEqual({
+            kind: 'deny',
+            message: TOOL_APPROVAL.messages.denied,
+          });
+          expect(
+            hostAnswer(on, () => false, spelling, {}),
+            label,
+          ).toEqual({ kind: 'pass' });
+        }
+        // Only the subagent tool moves with it.
+        const others = (approval: RunApproval) =>
+          approval.decisions.filter((d) => d.family !== 'delegate');
+        expect(others(off), label).toEqual(others(on));
+      }
+    }
+  });
+
+  it('reads on exactly, and an absent switch as its default where a person watches', () => {
+    expect(TOOL_APPROVAL.ceilings.delegate).toEqual(DELEGATE_CEILINGS);
+    for (const ceiling of DELEGATE_CEILINGS) expect(parseDelegateCeiling(ceiling)).toBe(ceiling);
+    for (const value of [true, 'ON', 'ask', 1, null, undefined, {}]) {
+      expect(parseDelegateCeiling(value), String(value)).toBe('off');
+    }
+    expect(delegateCeilingOf(undefined, true)).toBe('on');
+    expect(delegateCeilingOf(null, false)).toBe('off');
+    for (const attended of [true, false]) {
+      for (const ceiling of DELEGATE_CEILINGS) {
+        expect(delegateCeilingOf(ceiling, attended)).toBe(ceiling);
+      }
+    }
+    // A plan given no switch reads it the same way.
+    const absent = (kind: RunKind) =>
+      agentDecision(plan({ kind, shell: 'off', readScoped: false, narrowing: null }));
+    expect(absent('attended')).toBe('cli');
+    expect(absent('unattended')).toBe('deny');
+    expect(absent('internal')).toBe('deny');
+  });
+
+  it('denies the subagent tool to a record that narrows it out, under either spelling', () => {
+    const planWith = (names: string[]) =>
+      plan({
+        ...onAt('attended', 'on'),
+        narrowing: (tool) => names.some((entry) => namesTool(entry, tool)),
+      });
+    for (const names of [['get_note'], ['Read', 'Bash'], [], ['Tasks', 'agents']]) {
+      const approval = planWith(names);
+      expect(agentDecision(approval), names.join()).toBe('deny');
+      expect(approval.disallowed).toContain('Agent');
+      expect(approval.denied_agent_types).toEqual([]);
+      expect(approval.allowed_agent_types).toEqual([]);
+    }
+    for (const names of [['Agent'], ['Task'], [' task ', 'get_note'], ['AGENT']]) {
+      const approval = planWith(names);
+      expect(agentDecision(approval), names.join()).toBe('cli');
+      expect(approval.tools).toContain('Agent');
+    }
+    // Naming it never lifts the switch.
+    const named = plan({
+      ...onAt('attended', 'on'),
+      delegate: 'off',
+      narrowing: (tool) => namesTool('Task', tool),
+    });
+    expect(agentDecision(named)).toBe('deny');
+    // The family's `narrowed_out`, not a branch on its name, denies it: a
+    // table without the field leaves a narrowed-out cli to the CLI.
+    const unflagged = JSON.parse(RAW) as Json;
+    delete family(unflagged, 'delegate').narrowed_out;
+    const table = parseToolApproval(unflagged);
+    expect(table.families.find((row) => row.id === 'delegate')?.narrowed_out).toBeUndefined();
+    const narrowed = plan(
+      { ...onAt('attended', 'on'), narrowing: (tool) => namesTool('get_note', tool) },
+      table,
+    );
+    expect(agentDecision(narrowed)).toBe('cli');
+  });
+
+  it('reads `narrowed_out` the same way for a page writer', () => {
+    const narrowed = {
+      ...onAt('attended', 'off'),
+      narrowing: (tool: string) => namesTool('get_note', tool),
+    };
+    const create = (table: ToolApproval) =>
+      plan(narrowed, table).decisions.find((d) => d.tool === 'mcp__cerebro__create_note')?.decision;
+    // Without ask-first a page writer is allowed, and a narrowing that leaves
+    // it out leaves it to the CLI...
+    expect(create(TOOL_APPROVAL)).toBe('cli');
+    // ...unless its family says a narrowed-out tool is denied.
+    const denying = JSON.parse(RAW) as Json;
+    family(denying, 'confirmable').narrowed_out = 'deny';
+    expect(create(parseToolApproval(denying))).toBe('deny');
+  });
+
+  it('names the agent types only on a run that holds the subagent tool', () => {
+    const types = TOOL_APPROVAL.agent_types;
+    expect(types.builtin).toEqual([
+      'claude',
+      'claude-code-guide',
+      'Explore',
+      'general-purpose',
+      'Plan',
+      'statusline-setup',
+    ]);
+    expect(types.allowed).toEqual(['cerebro-researcher']);
+    const task = (tool: string) => namesTool('Task', tool);
+    const read = (tool: string) => namesTool('Read', tool);
+    for (const kind of KINDS) {
+      const inputs = [
+        ...everyInput(kind),
+        ...[task, read].map((narrowing) => ({ ...onAt(kind, 'on'), narrowing })),
+      ];
+      for (const input of inputs) {
+        const approval = plan(input);
+        const held = approval.tools.includes('Agent');
+        expect(held, JSON.stringify(input)).toBe(
+          kind === 'attended' && input.delegate === 'on' && input.narrowing !== read,
+        );
+        expect(approval.denied_agent_types).toEqual(held ? types.builtin : []);
+        expect(approval.allowed_agent_types).toEqual(held ? types.allowed : []);
+      }
+    }
+  });
+
+  it('refuses a bad agent type in the words tool_approval.rs uses', () => {
+    const grammar = 'must be one or more letters, digits, colons, dots, dashes or underscores';
+    const types = (v: Json) => v.agent_types as Record<string, unknown>;
+    for (const [list, name] of [
+      ['builtin', ''],
+      ['builtin', 'general purpose'],
+      ['allowed', 'cerebro,researcher'],
+      ['allowed', 'Agent(Plan)'],
+      ['allowed', 'notes/researcher'],
+      ['allowed', 'é'],
+    ] as const) {
+      expect(refused((v) => (types(v)[list] = [name]))).toBe(
+        `${TOOL_APPROVAL_PATH}: agent type ${JSON.stringify(name)}: \`agent_types.${list}\` ${grammar}`,
+      );
+    }
+    expect(refused((v) => (types(v).builtin = ['Plan', 'Explore', 'Plan']))).toBe(
+      `${TOOL_APPROVAL_PATH}: agent type "Plan": \`agent_types.builtin\` is named twice`,
+    );
+    expect(refused((v) => (types(v).allowed = ['cerebro-researcher', 'cerebro-researcher']))).toBe(
+      `${TOOL_APPROVAL_PATH}: agent type "cerebro-researcher": \`agent_types.allowed\` is named twice`,
+    );
+    expect(refused((v) => (types(v).allowed = ['cerebro-researcher', 'Explore']))).toBe(
+      `${TOOL_APPROVAL_PATH}: agent type "Explore": \`agent_types.allowed\` is one of Claude Code's built-in types, which argv denies`,
+    );
+    // The block is required, holds exactly its two lists, and either may be
+    // empty: what an init lists that neither names is the init gate's to
+    // stop.
+    expect(refused((v) => delete v.agent_types)).toContain('missing field `agent_types`');
+    expect(refused((v) => (types(v).denied = []))).toContain('unknown field `denied`');
+    expect(refused((v) => (types(v).builtin = [1]))).toContain('invalid type');
+    const none = JSON.parse(RAW) as Json;
+    none.agent_types = { builtin: [], allowed: [] };
+    const approval = plan(onAt('attended', 'off'), parseToolApproval(none));
+    expect(approval.tools).toContain('Agent');
+    expect([approval.denied_agent_types, approval.allowed_agent_types]).toEqual([[], []]);
+    // The grammar, as argv needs it.
+    for (const name of ['claude-code-guide', 'plugin:sub:name', 'a.b_c-1']) {
+      expect(isAgentType(name), name).toBe(true);
+    }
+    for (const name of ['', ' a', 'a b', 'a,b', 'a(b)', 'a/b', 'a\nb', 'ä']) {
+      expect(isAgentType(name), name).toBe(false);
+    }
+  });
+
+  it('reads `narrowed_out` as a closed word, and a loader keeps the default', () => {
+    expect(refused((v) => (family(v, 'delegate').narrowed_out = 'cli'))).toContain(
+      'unknown variant',
+    );
+    // serde_json reads a word from a string alone: a boolean is no value it
+    // expects.
+    expect(refused((v) => (family(v, 'delegate').narrowed_out = true))).toContain('expected value');
+    expect(refused((v) => (family(v, 'meta').narrowed_out = 'deny'))).toBe(
+      `${TOOL_APPROVAL_PATH}: family meta: \`narrowed_out\` must be default: a family that loads tools stays with every run`,
+    );
+    // Default is a word too, and reads as absent.
+    const spelled = JSON.parse(RAW) as Json;
+    family(spelled, 'meta').narrowed_out = 'default';
+    expect(parseToolApproval(spelled).families.find((row) => row.id === 'meta')?.narrowed_out).toBe(
+      'default',
+    );
+  });
+});
+
 // --- The goldens ---------------------------------------------------------------
 
+/** A golden's decision input, `ask_first` among it since M57.4 and
+ * `delegate` since M91.2a. */
 interface GoldenInput {
   kind: RunKind;
   shell: string;
   web: string;
+  delegate: string;
   ask_first: boolean;
   read_scoped: boolean;
   narrowing: string[] | null;
 }
 
-const inputOf = (input: GoldenInput) => {
+const inputOf = (input: GoldenInput): ApprovalInput => {
+  // Every golden names its switch, as tool_approval.rs's `golden_input`
+  // requires: an absent one would read as the default and hide a change.
+  if (typeof input.delegate !== 'string') throw new Error('a golden input names no delegate');
   const narrowing = input.narrowing;
   return {
     kind: input.kind,
     shell: parseShellCeiling(input.shell),
     web: parseWebCeiling(input.web),
+    delegate: parseDelegateCeiling(input.delegate),
     askFirst: input.ask_first,
     readScoped: input.read_scoped,
     narrowing:
@@ -463,17 +903,20 @@ describe('the tool-approval goldens', () => {
       expect(
         {
           permission_mode: approval.permission_mode,
+          tools: approval.tools,
           allowed: approval.allowed,
           disallowed: approval.disallowed,
           matcher: matcherOf(approval),
           withheld: approval.withheld,
+          denied_agent_types: approval.denied_agent_types,
+          allowed_agent_types: approval.allowed_agent_types,
           decisions: Object.fromEntries(approval.decisions.map((d) => [d.tool, d.decision])),
         },
         name,
       ).toEqual(golden.expected);
       plans += 1;
     }
-    expect(plans).toBeGreaterThanOrEqual(22);
+    expect(plans).toBeGreaterThanOrEqual(27);
     expect(answers).toBeGreaterThan(0);
   });
 
@@ -514,6 +957,39 @@ describe('the tool-approval goldens', () => {
         expect(found, `${kind} with ask_first ${askFirst}`).toBe(true);
       }
     }
+    // Every run kind at each Subagents switch (M91.2a), and on the run that
+    // could hold the subagent tool, a narrowing that leaves it out and one
+    // that names it by its alias.
+    for (const kind of ['attended', 'unattended', 'internal']) {
+      for (const delegate of DELEGATE_CEILINGS) {
+        const found = goldens.some(
+          ([, g]) =>
+            g.input !== undefined &&
+            g.input.kind === kind &&
+            g.input.delegate === delegate &&
+            g.input.narrowing === null,
+        );
+        expect(found, `${kind} with delegate ${delegate}`).toBe(true);
+      }
+    }
+    const narrowed = (names: (narrowing: string[]) => boolean, decision: string) =>
+      goldens.some(
+        ([, g]) =>
+          g.input !== undefined &&
+          g.input.kind === 'attended' &&
+          g.input.delegate === 'on' &&
+          Array.isArray(g.input.narrowing) &&
+          names(g.input.narrowing) &&
+          g.expected.decisions.Agent === decision,
+      );
+    expect(
+      narrowed((n) => !n.includes('Agent') && !n.includes('Task'), 'deny'),
+      'a golden narrows the subagent tool out',
+    ).toBe(true);
+    expect(
+      narrowed((n) => n.includes('Task'), 'cli'),
+      'a golden keeps it by its alias',
+    ).toBe(true);
     // Every decision a cell can reach has a plan golden holding it, queue
     // included (M57.4c).
     const reached = new Set(

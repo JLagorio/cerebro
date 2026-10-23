@@ -1,0 +1,255 @@
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   The AI elements' foundation (M91.7): Collapsible, Badge and Item, on the DS
+   tokens (shadcn's palette classes compile to nothing here, index.css).
+   Unlayered like the app's other surface stylesheets, so a rule of the
+   surface that uses one (its own class, scoped) restyles it; motion spends
+   the tokens only, so reduced motion stills it with everything else. */
+
+/* What a collapsible reveals drops in from under its trigger as it opens —
+   marked `data-reveal` for that one play (Collapsible.tsx) — and fades where
+   it was as it closes, held there by Presence until the fade has played. */
+.cb-ai-collapsible-content[data-reveal]:not([hidden]) {
+  --rise: -4px;
+  animation: cb-rise-in var(--motion-enter) backwards;
+}
+.cb-ai-collapsible-content[data-state='closed'] {
+  animation: cb-fade-out var(--motion-exit) forwards;
+  pointer-events: none;
+}
+
+/* Badge: a short label beside a title — a model, a count, a kind. Each
+   variant names its ink once, so the one drawn as a link keeps it over the
+   app's own link ink (tokens/base.css styles every `a`). */
+.cb-ai-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  width: fit-content;
+  height: 20px;
+  padding: 0 var(--sp-2);
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  color: var(--ai-badge-ink);
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+  line-height: var(--lh-xs);
+  white-space: nowrap;
+  outline: none;
+  transition:
+    background-color var(--motion-hover),
+    border-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.cb-ai-badge:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-badge[aria-invalid='true'] {
+  border-color: var(--danger-500);
+}
+.cb-ai-badge > svg {
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
+a.cb-ai-badge,
+a.cb-ai-badge:hover {
+  color: var(--ai-badge-ink);
+  text-decoration: none;
+}
+.cb-ai-badge-default {
+  --ai-badge-ink: var(--on-action-primary);
+  background: var(--action-primary);
+}
+a.cb-ai-badge-default:hover {
+  background: var(--action-primary-hover);
+}
+.cb-ai-badge-secondary {
+  --ai-badge-ink: var(--n-800);
+  background: var(--n-100);
+}
+a.cb-ai-badge-secondary:hover {
+  background: var(--n-200);
+}
+.cb-ai-badge-destructive {
+  --ai-badge-ink: var(--danger-700);
+  background: var(--danger-50);
+}
+a.cb-ai-badge-destructive:hover {
+  background: var(--danger-200);
+}
+.cb-ai-badge-outline {
+  --ai-badge-ink: var(--n-800);
+  border-color: var(--border-subtle);
+}
+a.cb-ai-badge-outline:hover {
+  background: var(--n-50);
+}
+.cb-ai-badge-ghost {
+  --ai-badge-ink: var(--n-700);
+}
+.cb-ai-badge-ghost:hover {
+  background: var(--n-100);
+}
+.cb-ai-badge-link {
+  --ai-badge-ink: var(--text-link);
+  text-underline-offset: 4px;
+}
+.cb-ai-badge-link:hover,
+a.cb-ai-badge-link:hover {
+  text-decoration: underline;
+}
+
+/* Item: a row of media, content and actions — a source, a file, a step. */
+.cb-ai-item-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  width: 100%;
+}
+.cb-ai-item-group:has(> .cb-ai-item-sm) {
+  gap: 10px;
+}
+.cb-ai-item-group:has(> .cb-ai-item-xs) {
+  gap: var(--sp-2);
+}
+.cb-ai-item-separator {
+  height: 1px;
+  margin-block: var(--sp-2);
+  background: var(--border-subtle);
+}
+.cb-ai-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px var(--sp-4);
+  border: 1px solid transparent;
+  border-radius: var(--r-xl);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  outline: none;
+  transition:
+    background-color var(--motion-hover),
+    border-color var(--motion-hover);
+}
+.cb-ai-item:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-item-outline {
+  border-color: var(--border-subtle);
+}
+.cb-ai-item-muted {
+  background: var(--n-25);
+}
+.cb-ai-item-sm {
+  padding: var(--sp-3) 14px;
+}
+.cb-ai-item-xs {
+  gap: var(--sp-2);
+  padding: var(--sp-2) 10px;
+}
+a.cb-ai-item,
+a.cb-ai-item:hover {
+  color: inherit;
+  text-decoration: none;
+}
+a.cb-ai-item:hover {
+  background: var(--n-50);
+}
+.cb-ai-item-media {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+.cb-ai-item-media svg {
+  pointer-events: none;
+}
+.cb-ai-item:has(.cb-ai-item-description) > .cb-ai-item-media {
+  align-self: flex-start;
+  translate: 0 2px;
+}
+/* An icon's media (shadcn's `icon` variant): an icon that names no size of
+   its own draws at 16px; the DS Icon always names one. */
+.cb-ai-item-media-icon svg:not([width]) {
+  width: 16px;
+  height: 16px;
+}
+.cb-ai-item-media-image {
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+}
+.cb-ai-item-sm .cb-ai-item-media-image {
+  width: 32px;
+  height: 32px;
+}
+.cb-ai-item-xs .cb-ai-item-media-image {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-md);
+}
+.cb-ai-item-media-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cb-ai-item-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.cb-ai-item-xs .cb-ai-item-content {
+  gap: 2px;
+}
+.cb-ai-item-content + .cb-ai-item-content {
+  flex: none;
+}
+.cb-ai-item-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: fit-content;
+  max-width: 100%;
+  font-weight: var(--w-medium);
+  line-height: 1.375;
+  text-underline-offset: 4px;
+}
+.cb-ai-item-description {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-meta);
+  font-weight: var(--w-regular);
+  text-align: left;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.cb-ai-item-description > a {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.cb-ai-item-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.cb-ai-item-header,
+.cb-ai-item-footer {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}

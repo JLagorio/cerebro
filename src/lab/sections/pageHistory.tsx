@@ -5,7 +5,7 @@ import { __seedActivity } from '@/lib/mockIpc';
 import type { LabSection } from '../presets';
 
 /**
- * A page's History tab (M64.2b) in its five states, on the rollback risk:
+ * A page's History panel (M64.2b) in its five states, on the rollback risk:
  * the demo's own session on it (2026-07-27), merged with versions staged in
  * the mock repository. Recording began on 2026-07-21 (the demo's first
  * write), so a version before that draws the seam.
@@ -38,7 +38,7 @@ const UNAVAILABLE = '[data-testid="section-unavailable"]';
 export const section: LabSection = {
   id: 'page-history',
   title: "A page's History",
-  surface: 'A page · History tab',
+  surface: 'A page · History panel',
   render: () => <PageHistory path={PAGE} />,
   states: {
     ready: {

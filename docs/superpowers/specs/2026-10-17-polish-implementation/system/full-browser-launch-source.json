@@ -1,0 +1,17 @@
+{
+  "started_utc": "2026-10-17T18:56:57.377600+00:00",
+  "base_commit": "23479518c2827d361c9c970abfac8245f9d84600",
+  "algorithm": "SHA-256 of lexically sorted repository-relative POSIX UTF-8 path + NUL + exact file bytes + NUL, for every regular file recursively in each named tree; no exclusions.",
+  "src": {
+    "sha256": "e0212e5feef0d4f44d88134fdba0f01e22a80930fb9cb2b4dcaba6cdf52a1435",
+    "file_count": 1580
+  },
+  "e2e": {
+    "sha256": "0d1da6e6126108e3583989d8157359e52cc3936d0035cf3c8b771ddc04e51974",
+    "file_count": 169
+  },
+  "port": 5384,
+  "workers": 2,
+  "output": "/private/tmp/cerebro-m90/full-e2e-fresh-final",
+  "log": "/private/tmp/cerebro-m90/full-e2e-fresh-final.log"
+}

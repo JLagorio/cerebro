@@ -1,0 +1,90 @@
+{
+  "status": "Automated gates passed; large-table performance target missed; native interaction outstanding",
+  "toolchain": {
+    "node": "26.3.1",
+    "pnpm": "10.34.7",
+    "rust": "1.95.0"
+  },
+  "coverage": {
+    "command": "pnpm test:coverage --maxWorkers=4 --coverage.processingConcurrency=1 --coverage.reportOnFailure=true",
+    "exit_code": 0,
+    "files_passed": 728,
+    "tests_passed": 14264,
+    "tests_skipped": 15,
+    "source_files": 848,
+    "percent": {
+      "statements": 91.96,
+      "lines": 91.96,
+      "branches": 89.42,
+      "functions": 87.92
+    },
+    "thresholds_unchanged": {
+      "statements": 82.87,
+      "lines": 82.87,
+      "branches": 84.91,
+      "functions": 77.39
+    },
+    "source_mapping_validation": {
+      "MarkdownEditor.tsx_measured_lines": 1325,
+      "renameActions.ts_measured_lines": 389,
+      "undoStore.ts_measured_lines": 250
+    },
+    "result": "coverage-result.txt",
+    "post_run_test_only_change": "Explicit encoding:utf8 on two recursive readdirSync calls; runtime-default-equivalent. Full typecheck passes after this correction."
+  },
+  "lint": {
+    "command": "pnpm lint",
+    "exit_code": 0,
+    "original_log": "/private/tmp/cerebro-m90/gate-lint-final.log",
+    "log_sha256": "822d4c82fd6d4d84ab8a93562916ba82f53e2240295127cdf4d59ed9c63d7815",
+    "result": "lint-result.txt"
+  },
+  "format": {
+    "command": "pnpm format:check",
+    "exit_code": 0,
+    "original_log": "/private/tmp/cerebro-m90/gate-format-final.log",
+    "log_sha256": "3efe63cc5637cbdc7ed24a8ef4ba32457cfe248f531db616d72e8f2612084b94",
+    "result": "format-result.txt"
+  },
+  "typecheck": {
+    "command": "pnpm typecheck",
+    "configurations": [
+      "tsconfig.json",
+      "tsconfig.tools.json",
+      "tsconfig.engine.json"
+    ],
+    "exit_code": 0,
+    "original_log": "/private/tmp/cerebro-m90/gate-typecheck-source-audits.log",
+    "log_sha256": "1d7f4d66eed29fec880f0ff2d9894ee10e2140661b2edb75fbde8ed1b57a502b",
+    "result": "typecheck-result.txt"
+  },
+  "native_build": {
+    "metadata": "native-build.json",
+    "exit_code": 0,
+    "interaction": "Outstanding; see native-evidence.md"
+  },
+  "browser": {
+    "command": "PORT=5384 CEREBRO_E2E_REUSE=1 pnpm e2e --workers=2 --output=/private/tmp/cerebro-m90/full-e2e-fresh-final",
+    "exit_code": 0,
+    "tests_passed": 687,
+    "files": 158,
+    "duration": "14.8m",
+    "retries": 0,
+    "snapshots_updated": false,
+    "engines": [
+      "Chromium",
+      "WebKit"
+    ],
+    "coverage_note": "Chromium runs the complete configured suite; WebKit runs the configured carrier and surface subset, including all new polish suites. The 687 total counts engine/case combinations.",
+    "result": "system/full-browser-result.txt",
+    "source": "system/full-browser-source.json"
+  },
+  "performance": {
+    "report": "data/performance/production-report.md",
+    "status": "Target missed at 1,000 rows; bounded run stopped during 5,000-row navigation",
+    "completed_fixtures": 4,
+    "samples_per_completed_fixture": 20,
+    "production_bundle_unchanged": true,
+    "native_input_timing": false
+  }
+}

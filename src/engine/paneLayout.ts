@@ -18,6 +18,7 @@ export const PANE_HISTORY_LIMIT = 30;
  * the Inbox's local row selection belong only to the current session. */
 const STORED_FIELDS = {
   home: [],
+  pages: [],
   inbox: [],
   mywork: [],
   changes: [],

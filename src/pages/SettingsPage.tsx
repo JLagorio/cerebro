@@ -60,8 +60,8 @@ function SettingRow({
   return (
     <div className={`cb-setting-row flex items-start gap-3 py-2 ${disabled ? 'opacity-50' : ''}`}>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-n-800">{label}</div>
-        <div className="mt-0.5 text-xs leading-[16px] text-n-500">{hint}</div>
+        <div className="text-ui font-medium text-n-800">{label}</div>
+        <div className="mt-0.5 cb-setting-help text-ui text-(--text-meta)">{hint}</div>
       </div>
       <Switch ariaLabel={label} checked={checked} onChange={onChange} disabled={disabled} />
     </div>
@@ -84,6 +84,11 @@ export const SHELL_HINTS: Record<ShellCeiling, string> = {
 /** The Web access hint (M57.7, Appendix C): a second ceiling, two states. */
 export const WEB_HINT =
   "Let the assistant search the web and fetch pages with Claude Code's WebSearch and WebFetch. Pages it fetches are written down under sources/. Off — no web, even if your own Claude Code settings allow it. Cerebro's background upkeep never gets it.";
+
+/** The Subagents hint (M91.2d): the delegate ceiling, which only a
+ * conversation a person is in reads. */
+export const SUBAGENTS_HINT =
+  'Let the assistant hand reading to a researcher that reports back, only in a conversation you are in; the researcher changes nothing.';
 
 /** What the person's own settings act with, as a sentence (M57.2). Never a
  * promise that every command asks: their rules and hooks act first. */
@@ -150,8 +155,11 @@ function ShellAccessRow({ vaultPath }: { vaultPath: string | null }) {
     <div className="cb-setting-row py-2">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-n-800">Shell access</div>
-          <div data-testid="shell-hint" className="mt-0.5 text-xs leading-[16px] text-n-500">
+          <div className="text-ui font-medium text-n-800">Shell access</div>
+          <div
+            data-testid="shell-hint"
+            className="mt-0.5 cb-setting-help text-ui text-(--text-meta)"
+          >
             {SHELL_HINTS[shell]}
           </div>
         </div>
@@ -167,7 +175,7 @@ function ShellAccessRow({ vaultPath }: { vaultPath: string | null }) {
         <div
           data-testid="shell-user-rules"
           data-state={settings.state}
-          className="mt-1.5 text-xs leading-[16px] text-n-500"
+          className="mt-1.5 cb-setting-help text-ui text-(--text-meta)"
         >
           {userRulesSentence(settings)}
         </div>
@@ -211,8 +219,8 @@ function PanelAgentRow({ vaultPath, entries }: { vaultPath: string; entries: Ent
     <div className="cb-setting-row py-2">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-n-800">Panel assistant</div>
-          <div className="mt-0.5 text-xs leading-[16px] text-n-500">
+          <div className="text-ui font-medium text-n-800">Panel assistant</div>
+          <div className="mt-0.5 cb-setting-help text-ui text-(--text-meta)">
             Who answers in the assistant panel. An agent answers with its own instructions,
             preferences and limits, and its writes are attributed to it. A turn that names someone
             with @ still goes to them.
@@ -224,16 +232,14 @@ function PanelAgentRow({ vaultPath, entries }: { vaultPath: string; entries: Ent
           size="sm"
           options={options}
           value={bound ?? NO_AGENT}
-          onChange={(e) =>
-            void setPanelAgent(vaultPath, e.target.value === NO_AGENT ? null : e.target.value)
-          }
+          onChange={(handle) => void setPanelAgent(vaultPath, handle === NO_AGENT ? null : handle)}
           className="w-[220px] max-w-full flex-none"
         />
       </div>
       {dangling && (
         <div
           data-testid="panel-agent-dangling"
-          className="mt-1 flex items-center gap-2 text-xs leading-[16px] text-warn-600"
+          className="mt-1 flex items-center gap-2 cb-setting-help text-ui text-warn-700"
         >
           <span className="min-w-0 flex-1">
             @{bound} — no agent answers to this name, so the assistant answers
@@ -300,6 +306,8 @@ export function SettingsPage() {
   const setActorId = useUiStore((s) => s.setActorId);
   const webAccess = useUiStore((s) => s.agentWebAccess);
   const setWebAccess = useUiStore((s) => s.setAgentWebAccess);
+  const delegate = useUiStore((s) => s.agentDelegate);
+  const setDelegate = useUiStore((s) => s.setAgentDelegate);
   const connectors = useUiStore((s) => s.agentConnectors);
   const setConnectors = useUiStore((s) => s.setAgentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
@@ -381,13 +389,13 @@ export function SettingsPage() {
           <>
             <section className="mb-6 rounded-xl border border-n-200 p-5">
               <h2 className="mb-1 text-md font-semibold text-n-900">Appearance</h2>
-              <p className="mb-4 text-sm text-n-500">
+              <p className="mb-4 text-sm text-(--text-meta)">
                 How cerebro looks. The choice is remembered on this machine.
               </p>
               <div className="cb-setting-row flex items-start gap-3 py-2">
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-n-800">Theme</div>
-                  <div className="mt-0.5 text-xs leading-[16px] text-n-500">
+                  <div className="text-ui font-medium text-n-800">Theme</div>
+                  <div className="mt-0.5 cb-setting-help text-ui text-(--text-meta)">
                     System follows your operating system and changes with it — including when it
                     switches on its own at sunset.
                   </div>
@@ -406,7 +414,7 @@ export function SettingsPage() {
             </section>
             <section className="mb-6 rounded-xl border border-n-200 p-5">
               <h2 className="mb-1 text-md font-semibold text-n-900">Workflow</h2>
-              <p className="mb-4 text-sm text-n-500">
+              <p className="mb-4 text-sm text-(--text-meta)">
                 Capture fast, organize deliberately. A note stays in the Inbox until it has a type.
               </p>
               <SettingRow
@@ -430,7 +438,7 @@ export function SettingsPage() {
           'vault',
           <section className="mb-6 rounded-xl border border-n-200 p-5">
             <h2 className="mb-1 text-md font-semibold text-n-900">Vault</h2>
-            <p className="mb-3 text-sm text-n-500">
+            <p className="mb-3 text-sm text-(--text-meta)">
               Cerebro reads and writes plain markdown files in this folder.
             </p>
             <div className="mb-4 rounded-lg border border-n-200 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-xs text-n-700">
@@ -440,7 +448,7 @@ export function SettingsPage() {
               // Deviation from the plan's verbatim body (execution-log note 15a,
               // reported): vaultStore.status === 'error' was displayed nowhere —
               // surface it beside the recovery action.
-              <p className="mb-4 text-xs text-danger-500">{error}</p>
+              <p className="mb-4 text-xs text-danger-700">{error}</p>
             ) : null}
             <Button
               variant="secondary"
@@ -458,7 +466,7 @@ export function SettingsPage() {
           'assistant',
           <section className="mb-6 rounded-xl border border-n-200 p-5">
             <h2 className="mb-1 text-md font-semibold text-n-900">Assistant</h2>
-            <p className="mb-4 text-sm leading-[18px] text-n-500">
+            <p className="mb-4 text-sm leading-[18px] text-(--text-meta)">
               What the assistant may change follows from where it is writing, not from a mode you
               pick each time: it owns{' '}
               <span className="[font-family:var(--font-mono)]">knowledge/</span> and writes there
@@ -476,6 +484,12 @@ export function SettingsPage() {
               onChange={setWebAccess}
             />
             <SettingRow
+              label="Subagents"
+              hint={SUBAGENTS_HINT}
+              checked={delegate}
+              onChange={setDelegate}
+            />
+            <SettingRow
               label="Connectors"
               hint="Let the assistant use MCP servers — Jira, Confluence — to fetch what a note refers to. Tickets and pages it fetches are written down under sources/, so the same ticket is only ever fetched once. A cached copy past its refresh date is marked stale; ask for a fresh one when you need it. Mail is never cached as a web page."
               checked={connectors}
@@ -487,8 +501,8 @@ export function SettingsPage() {
               className={`cb-setting-row flex items-start gap-3 py-2 ${connectors ? '' : 'opacity-50'}`}
             >
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-n-800">Issue keys</div>
-                <div className="mt-0.5 text-xs leading-[16px] text-n-500">
+                <div className="text-ui font-medium text-n-800">Issue keys</div>
+                <div className="mt-0.5 cb-setting-help text-ui text-(--text-meta)">
                   Your tracker's project keys, comma separated —{' '}
                   <span className="[font-family:var(--font-mono)]">PHX, SYN</span>. These cannot be
                   guessed: <span className="[font-family:var(--font-mono)]">PHX-421</span> and{' '}
@@ -513,7 +527,7 @@ export function SettingsPage() {
           'knowledge',
           <section className="mb-6 rounded-xl border border-n-200 p-5">
             <h2 className="mb-1 text-md font-semibold text-n-900">Knowledge</h2>
-            <p className="mb-4 text-sm text-n-500">
+            <p className="mb-4 text-sm text-(--text-meta)">
               The AI knowledge base in{' '}
               <span className="[font-family:var(--font-mono)]">knowledge/</span> is written by the
               agent and recorded in its history. Your edits are recorded as edits, and verifying a
@@ -526,7 +540,7 @@ export function SettingsPage() {
               onChange={setAutoLearn}
             />
             {pending > 0 && (
-              <p className="m-0 mb-2 text-xs leading-[16px] text-n-500">
+              <p className="m-0 mb-2 cb-setting-help text-ui text-(--text-meta)">
                 {reading !== null
                   ? `Reading ${reading} now.`
                   : `${pending} background job${pending === 1 ? '' : 's'} waiting.`}
@@ -534,8 +548,8 @@ export function SettingsPage() {
             )}
             <div className="cb-setting-row flex items-start gap-3 py-2">
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-n-800">Your identity</div>
-                <div className="mt-0.5 text-xs leading-[16px] text-n-500">
+                <div className="text-ui font-medium text-n-800">Your identity</div>
+                <div className="mt-0.5 cb-setting-help text-ui text-(--text-meta)">
                   Stamped as{' '}
                   <span className="[font-family:var(--font-mono)]">human:{actorId || 'me'}</span>{' '}
                   when you verify. The{' '}
@@ -563,7 +577,7 @@ export function SettingsPage() {
           'about',
           <section className="rounded-xl border border-n-200 p-5">
             <h2 className="mb-1 text-md font-semibold text-n-900">About</h2>
-            <p className="text-sm text-n-500">
+            <p className="text-sm text-(--text-meta)">
               Cerebro <span className="[font-family:var(--font-mono)]">{APP_VERSION}</span>
             </p>
           </section>,

@@ -1,3 +1,4 @@
+import { StateMessage } from '@/components/ui/StateMessage';
 import { useMemo, type CSSProperties } from 'react';
 import { Button } from '@/components/ui/Button';
 import {
@@ -85,12 +86,17 @@ export function ActivityHeatmap({ read, reload }: { read: ActivityRead; reload: 
     [data, today],
   );
 
-  if (read.kind === 'loading') return null;
+  if (read.kind === 'loading')
+    return <StateMessage state="loading" title="Reading the activity calendar…" compact />;
 
   if (read.kind === 'unavailable' || data === null) {
     return (
       <section data-testid="history-heatmap" className="flex flex-col items-start gap-2">
-        <p data-testid="section-unavailable" data-lane="all" className="m-0 text-xs text-n-500">
+        <p
+          data-testid="section-unavailable"
+          data-lane="all"
+          className="m-0 text-xs text-(--text-meta)"
+        >
           What happened in this vault could not be read, so no day here is a statement about it.
         </p>
         <Button size="sm" testId="activity-retry" onClick={reload}>
@@ -111,7 +117,7 @@ export function ActivityHeatmap({ read, reload }: { read: ActivityRead; reload: 
             key={lane}
             data-testid="section-unavailable"
             data-lane={lane}
-            className="m-0 text-xs text-n-500"
+            className="m-0 text-xs text-(--text-meta)"
           >
             {LANE_WORDS[lane]}
           </p>
@@ -150,7 +156,7 @@ export function ActivityHeatmap({ read, reload }: { read: ActivityRead; reload: 
           </div>
         </div>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-2xs text-n-500">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-2xs text-(--text-meta)">
         <p data-testid="heatmap-seam" className="m-0">
           {since === null
             ? "Cerebro hasn't recorded an edit in this vault yet."

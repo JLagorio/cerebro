@@ -1,0 +1,260 @@
+[
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "synthetic": "hand-shaped from Claude Code 2.1.250's measured shapes (M91.3a), not recorded: synthetic ids, and M91.R's live recording replaces it",
+    "timestamp": "2026-10-22T12:00:00.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000009300",
+    "content": "Find the Trace docs and sum the component up in one sentence."
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-10-22T12:00:00.002Z",
+    "sessionId": "00000000-0000-4000-8000-000000009300"
+  },
+  {
+    "parentUuid": null,
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000009300003",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "Find the Trace docs and sum the component up in one sentence."
+    },
+    "permissionMode": "default",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000009300002",
+    "timestamp": "2026-10-22T12:00:00.005Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009300",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009300002",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009301",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "signature": "sig-9301"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009301",
+    "uuid": "00000000-0000-4000-8000-000009300101",
+    "timestamp": "2026-10-22T12:00:02.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009300",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009300101",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009301",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009301",
+          "name": "WebSearch",
+          "input": {
+            "query": "example docs trace component"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009301",
+    "uuid": "00000000-0000-4000-8000-000009300102",
+    "timestamp": "2026-10-22T12:00:02.200Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009300",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009300102",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009301",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000009302",
+          "name": "WebFetch",
+          "input": {
+            "url": "https://example.com/docs/components/trace",
+            "prompt": "What is the Trace component? Describe it in one sentence."
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009301",
+    "uuid": "00000000-0000-4000-8000-000009300103",
+    "timestamp": "2026-10-22T12:00:02.600Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009300",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009300103",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009302",
+          "type": "tool_result",
+          "content": "The Trace component is a list of lines, each with an icon, a title and an optional description."
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000009300104",
+    "timestamp": "2026-10-22T12:00:05.800Z",
+    "toolUseResult": {
+      "bytes": 55102,
+      "code": 200,
+      "codeText": "OK",
+      "result": "The Trace component is a list of lines, each with an icon, a title and an optional description.",
+      "durationMs": 3151,
+      "url": "https://example.com/docs/components/trace"
+    },
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009300",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009300104",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000009301",
+          "type": "tool_result",
+          "content": "Web search results for query: \"example docs trace component\"\n\nLinks: [{\"title\":\"Trace - Example Docs\",\"url\":\"https://example.com/docs/components/trace\"},{\"title\":\"Changelog - Example Docs\",\"url\":\"https://example.com/docs/changelog\"}]\n\nBased on the search results, the Trace component draws a list of lines."
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000009300105",
+    "timestamp": "2026-10-22T12:00:08.500Z",
+    "toolUseResult": {
+      "query": "example docs trace component",
+      "results": [
+        {
+          "tool_use_id": "srvtoolu_000000000000000000009301",
+          "content": [
+            {
+              "title": "Trace - Example Docs",
+              "url": "https://example.com/docs/components/trace"
+            },
+            {
+              "title": "Changelog - Example Docs",
+              "url": "https://example.com/docs/changelog"
+            }
+          ]
+        },
+        "Based on the search results, the Trace component draws a list of lines."
+      ],
+      "durationSeconds": 6.2,
+      "searchCount": 1
+    },
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009300",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009300105",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009302",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "signature": "sig-9302"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009302",
+    "uuid": "00000000-0000-4000-8000-000009300106",
+    "timestamp": "2026-10-22T12:00:10.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009300",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000009300106",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000009302",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "The Trace component is a list of lines, each with an icon, a title and an optional description."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null
+    },
+    "requestId": "req_000000000000000000009302",
+    "uuid": "00000000-0000-4000-8000-000009300107",
+    "timestamp": "2026-10-22T12:00:10.400Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000009300",
+    "version": "2.1.250"
+  },
+  {
+    "type": "last-prompt",
+    "lastPrompt": "Find the Trace docs and sum the component up in one sentence.",
+    "leafUuid": "00000000-0000-4000-8000-000009300107",
+    "sessionId": "00000000-0000-4000-8000-000000009300"
+  }
+]

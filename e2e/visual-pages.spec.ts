@@ -1,6 +1,51 @@
 import { expect, test } from '@playwright/test';
 import { boot, openDatabase, openDestination, seedFileBeforeBoot } from './boot';
 
+test('record metadata reads as an editable byline beneath one page title', async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await boot(page);
+  const path = 'projects/field-app-launch-campaign/items/lnc-3.md';
+  const before = await page.evaluate((file) => window.__cerebroMockFs.get(file), path);
+  await page.getByTestId('app-rail').getByRole('button', { name: 'Search', exact: true }).click();
+  await page.getByTestId('quick-open-input').fill('Launch email sequence');
+  await page
+    .getByTestId('quick-open-result')
+    .filter({ hasText: 'Launch email sequence' })
+    .first()
+    .click();
+  await page.getByTestId('detail-panel').getByRole('button', { name: 'Open in full page' }).click();
+  const title = page.getByTestId('markdown-editor').locator('[data-page-title] h1');
+  await expect(title).toHaveText('Launch email sequence (3 touches)');
+  await expect(title).toHaveCSS('font-size', '40px');
+  const strip = page.getByTestId('heading-strip');
+  const status = strip.locator('[data-field="status"]');
+  const label = status.locator('.cb-heading-property-label');
+  const value = status.locator('[data-cell-primary]');
+  await expect(value).toBeVisible();
+  const headingBox = (await title.boundingBox())!;
+  const stripBox = (await strip.boundingBox())!;
+  const labelBox = (await label.boundingBox())!;
+  const valueBox = (await value.boundingBox())!;
+  expect(stripBox.y).toBeGreaterThan(headingBox.y + headingBox.height);
+  expect(Math.abs(stripBox.x - headingBox.x)).toBeLessThanOrEqual(4);
+  expect(
+    Math.abs(labelBox.y + labelBox.height / 2 - valueBox.y - valueBox.height / 2),
+  ).toBeLessThanOrEqual(2);
+  expect(valueBox.x).toBeGreaterThan(labelBox.x + labelBox.width);
+  expect(stripBox.height).toBeLessThanOrEqual(36);
+  await value.click();
+  await expect(page.getByRole('listbox')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.screenshot({ path: info.outputPath('record-byline.png'), animations: 'disabled' });
+  await page.setViewportSize({ width: 900, height: 700 });
+  await expect(page.getByRole('button', { name: 'Page options', exact: true })).toBeVisible();
+  await expect(page.getByTestId('view-details-toggle')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(900);
+  expect(await page.evaluate((file) => window.__cerebroMockFs.get(file), path)).toBe(before);
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test(`document canvas keeps readable space across desktop widths in ${theme}`, async ({
     page,
@@ -20,6 +65,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(
       page.getByTestId('markdown-editor').getByText('Windows, not deadlines'),
     ).toBeVisible();
+    await page.mouse.move(700, 80);
     for (const width of [1440, 1280, 1024, 900, 1920]) {
       await page.setViewportSize({ width, height: 900 });
       await expect
@@ -29,7 +75,7 @@ for (const theme of ['light', 'dark'] as const) {
       const content = await page.getByTestId('doc-content').boundingBox();
       const rail = await page.getByTestId('app-rail').boundingBox();
       expect(column!.width).toBeGreaterThanOrEqual(400);
-      expect(content!.width).toBeLessThanOrEqual(900);
+      expect(content!.width).toBeLessThanOrEqual(880);
       expect(rail!.width).toBe(54);
       expect(rail!.x).toBe(0);
       expect(content!.x + content!.width).toBeLessThanOrEqual(width);
@@ -60,7 +106,9 @@ for (const theme of ['light', 'dark'] as const) {
     await page.getByTestId('app-rail').getByRole('button', { name: 'Search', exact: true }).click();
     await page.getByTestId('quick-open-input').fill('Workspace visual review');
     await page.getByTestId('quick-open-result').filter({ hasText: title }).first().click();
-    await expect(page.getByTestId('doc-title')).toHaveText(title);
+    await expect(page.getByTestId('markdown-editor').locator('[data-page-title] h1')).toHaveText(
+      title,
+    );
     await expect(
       page.getByTestId('markdown-editor').getByText('Working notes', { exact: true }),
     ).toBeVisible();
@@ -73,7 +121,7 @@ for (const theme of ['light', 'dark'] as const) {
         .getByTestId('markdown-editor')
         .getByRole('heading', { name: title, level: 1 });
       await expect(titleHeading).toBeVisible();
-      await expect(titleHeading).toHaveCSS('font-size', '32px');
+      await expect(titleHeading).toHaveCSS('font-size', '40px');
       const code = page
         .getByTestId('markdown-editor')
         .locator('[data-content-type="codeBlock"] code');
@@ -207,7 +255,8 @@ test('Library keeps a bounded shelf and usable controls from wide to compact win
     expect(shelf!.width).toBeLessThanOrEqual(1120);
     expect(card!.width).toBeGreaterThanOrEqual(260);
     if (width === 1920) expect(card!.width).toBeLessThanOrEqual(400);
-    expect(newSkill!.height).toBeGreaterThanOrEqual(32);
+    // This action explicitly chooses the shared compact control role.
+    expect(newSkill!.height).toBe(28);
     expect(newSkill!.x + newSkill!.width).toBeLessThanOrEqual(width);
     await expect(library.getByRole('textbox', { name: 'Search the library' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(

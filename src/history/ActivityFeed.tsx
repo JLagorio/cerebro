@@ -1,5 +1,9 @@
+import { StateMessage } from '@/components/ui/StateMessage';
 import { useMemo, useState } from 'react';
+import { runStatus } from '@/agent/elements/runs';
 import { useOpenPath } from '@/app/useOpenPath';
+import { StepIcon } from '@/components/ai/StepLine';
+import { TraceLine, TraceTitle } from '@/components/ai/Trace';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { dayKeyOf, dayWords, feedOf, revealed, runText, type FeedItem } from '@/engine/activity';
@@ -13,6 +17,7 @@ import { RunWhy, runWhyText } from '@/status/RunWhy';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { ActivityRead } from './vaultActivityStore';
 import { useVaultActivity } from './vaultActivityStore';
+import '@/status/runs.css';
 
 /**
  * What happened in the vault, day by day (M64.2): editing sessions, agent
@@ -26,7 +31,7 @@ import { useVaultActivity } from './vaultActivityStore';
  * a lane that failed is a day nobody looked at (CV-05). Each lane that
  * failed says so on its own line; checkpoints and activity fail apart.
  *
- * Who made each commit is the page's History tab's reading (M58.4,
+ * Who made each commit is the page's History panel's reading (M58.4,
  * `CommitAuthor`): a run only from runtime.db's commit record, else
  * "unattributed", and "attribution unknown" when the record could not be
  * read. The git author stays in the hover.
@@ -71,7 +76,8 @@ export function ActivityFeed({ read, reload, pulse, reloadPulse }: ActivityFeedP
     [activity, commits, today, entries],
   );
 
-  if (read.kind === 'loading' || pulse.kind === 'loading') return null;
+  if (read.kind === 'loading' || pulse.kind === 'loading')
+    return <StateMessage state="loading" title="Reading recent activity…" compact />;
 
   const shown = revealed(groups, days);
   const failedLanes = activity === null ? [] : LANES.filter((l) => activity[l].state !== 'read');
@@ -80,7 +86,11 @@ export function ActivityFeed({ read, reload, pulse, reloadPulse }: ActivityFeedP
     <section data-testid="history-feed" className="flex flex-col gap-3">
       {read.kind === 'unavailable' && (
         <div className="flex flex-col items-start gap-2">
-          <p data-testid="section-unavailable" data-lane="all" className="m-0 text-xs text-n-500">
+          <p
+            data-testid="section-unavailable"
+            data-lane="all"
+            className="m-0 text-xs text-(--text-meta)"
+          >
             Edits, agent runs and when Cerebro was open could not be read, so nothing here is a
             statement about them.
           </p>
@@ -94,7 +104,7 @@ export function ActivityFeed({ read, reload, pulse, reloadPulse }: ActivityFeedP
           key={lane}
           data-testid="section-unavailable"
           data-lane={lane}
-          className="m-0 text-xs text-n-500"
+          className="m-0 text-xs text-(--text-meta)"
         >
           {LANE_WORDS[lane]}
         </p>
@@ -104,7 +114,7 @@ export function ActivityFeed({ read, reload, pulse, reloadPulse }: ActivityFeedP
           <p
             data-testid="section-unavailable"
             data-lane="checkpoints"
-            className="m-0 text-xs text-n-500"
+            className="m-0 text-xs text-(--text-meta)"
           >
             Checkpoints could not be read.
           </p>
@@ -114,7 +124,7 @@ export function ActivityFeed({ read, reload, pulse, reloadPulse }: ActivityFeedP
         </div>
       )}
       {pulse.kind === 'ready' && !pulse.data.tracked && (
-        <p data-testid="history-untracked" className="m-0 text-xs text-n-500">
+        <p data-testid="history-untracked" className="m-0 text-xs text-(--text-meta)">
           This vault keeps no checkpoints. Turn history on in Settings to keep every version of
           every page.
         </p>
@@ -137,7 +147,7 @@ export function ActivityFeed({ read, reload, pulse, reloadPulse }: ActivityFeedP
             data-day={group.day}
             className="flex flex-col gap-2"
           >
-            <h2 className="m-0 text-2xs font-medium uppercase tracking-[0.04em] text-n-500">
+            <h2 className="m-0 text-2xs font-medium uppercase tracking-[0.04em] text-(--text-meta)">
               {dayWords(group.day)}
             </h2>
             {group.items.map((item) => (
@@ -182,7 +192,10 @@ export function ActivityFeed({ read, reload, pulse, reloadPulse }: ActivityFeedP
               for a read that failed: that would describe a commit nobody
               looked at. */}
           {diff.kind === 'unavailable' && (
-            <p data-testid="section-unavailable" className="m-0 px-1 py-3 text-sm text-n-500">
+            <p
+              data-testid="section-unavailable"
+              className="m-0 px-1 py-3 text-sm text-(--text-meta)"
+            >
               What this commit changed could not be read, so nothing here is a statement about it.
             </p>
           )}
@@ -232,21 +245,35 @@ function Item({
     case 'run': {
       const why = runWhyText(item.run.cause, item.run.started_at);
       const turns = item.runs.length > 1 ? ` · ${item.runs.length} turns` : '';
+      // A trace line (M91.14) in the state of the row's latest run, or of a
+      // turn of it still going.
+      const status = runStatus(
+        item.runs.some((run) => run.outcome === 'running')
+          ? 'running'
+          : (item.runs.at(-1) ?? item.run).outcome,
+      );
       return (
         <div
           data-testid="history-run"
           data-run={item.run.run_id}
           title={runText(item, why)}
-          className="flex min-w-0 items-baseline gap-1 text-sm text-n-800"
+          className="flex min-w-0 text-sm text-n-800"
         >
-          <span className="flex-none">
-            {item.who} ran{turns} ·
-          </span>
-          <RunWhy cause={item.run.cause} startedAt={item.run.started_at} />
-          <span className="min-w-0 flex-1 truncate text-2xs text-n-500">
-            · {item.wrote}
-            {item.approved ? ' · you allowed it' : ''}
-          </span>
+          <TraceLine
+            status={status.trace}
+            statusText={status.statusText}
+            className="cb-run-line cb-run-line-sm"
+          >
+            <StepIcon state={status.state} icon={status.icon} />
+            <TraceTitle className="flex-none text-n-800">
+              {item.who} ran{turns} ·
+            </TraceTitle>
+            <RunWhy cause={item.run.cause} startedAt={item.run.started_at} />
+            <span className="min-w-0 flex-1 truncate text-2xs text-(--text-meta)">
+              · {item.wrote}
+              {item.approved ? ' · you allowed it' : ''}
+            </span>
+          </TraceLine>
         </div>
       );
     }
@@ -296,7 +323,7 @@ function CommitCard({
           {c.shortHash}
         </span>
       </div>
-      <div className="mt-0.5 flex items-center gap-2 text-2xs text-n-500">
+      <div className="mt-0.5 flex items-center gap-2 text-2xs text-(--text-meta)">
         <CommitAuthor commit={c} runs={runs} />
         {runs.kind !== 'loading' && <span>·</span>}
         <span>{relativeDate(c.date)}</span>
@@ -355,7 +382,7 @@ function ChangeCounts({ changes }: { changes: PulseChanges }) {
       )}
       {modified > 0 && (
         <span
-          className="text-warn-600"
+          className="text-warn-700"
           title={`${modified} file${modified === 1 ? '' : 's'} changed`}
           aria-label={`${modified} file${modified === 1 ? '' : 's'} changed`}
         >
@@ -364,7 +391,7 @@ function ChangeCounts({ changes }: { changes: PulseChanges }) {
       )}
       {deleted > 0 && (
         <span
-          className="text-danger-500"
+          className="text-danger-700"
           title={`${deleted} file${deleted === 1 ? '' : 's'} deleted`}
           aria-label={`${deleted} file${deleted === 1 ? '' : 's'} deleted`}
         >

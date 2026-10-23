@@ -1,3 +1,5 @@
+import { Select } from '@/components/ui/Select';
+import { StateMessage } from '@/components/ui/StateMessage';
 import { useEffect, useRef, useState } from 'react';
 import { FILE_BYTES, isFileRefusal, type FileProbe } from '@/engine/fileBytes';
 import { fileActionWords } from '@/engine/fileActions';
@@ -22,6 +24,14 @@ const WORDS = {
   'too-large': 'This PDF is over the 64 MiB preview limit.',
   unavailable: 'This PDF could not be read. Try opening it again.',
 };
+/** The zoom presets; '' is a scale none of them names. */
+const PRESETS = [
+  { value: 'page-width', label: 'Page width' },
+  { value: 'page-fit', label: 'Page fit' },
+  { value: '100', label: '100%' },
+];
+const presetOf = (value: PdfScale): string =>
+  value === 1 ? '100' : value === 'page-width' || value === 'page-fit' ? value : '';
 
 export function PdfViewer({
   rootId,
@@ -37,6 +47,9 @@ export function PdfViewer({
   const [page, setPage] = useState(1);
   const [pageDraft, setPageDraft] = useState('1');
   const [scale, setScale] = useState(1);
+  // The preset the scale was last set by. Not read off `scale`: a page-width
+  // view changes its number with the window and is still page width.
+  const [preset, setPreset] = useState('page-width');
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outline, setOutline] = useState<OutlineItem[] | null>(null);
   const [outlineFailed, setOutlineFailed] = useState(false);
@@ -142,7 +155,11 @@ export function PdfViewer({
   useEffect(() => {
     if (findOpen) findInput.current?.focus();
   }, [findOpen]);
-  const zoom = (value: PdfScale) => view.current?.scale(value);
+  const zoom = (value: PdfScale) => {
+    if (!view.current) return;
+    view.current.scale(value);
+    setPreset(presetOf(value));
+  };
   const find = (again = false, previous = false) => {
     if (query && text !== 'no') view.current?.find(query, again, previous);
   };
@@ -198,6 +215,7 @@ export function PdfViewer({
       if (!event.ctrlKey || !view.current) return;
       event.preventDefault();
       view.current.scale(clampZoom(scaleRef.current * Math.exp(-event.deltaY / 100)));
+      setPreset('');
     };
     let gestureStart = 1;
     const start = (event: Event) => {
@@ -207,7 +225,10 @@ export function PdfViewer({
     const change = (event: Event) => {
       event.preventDefault();
       const value = (event as Event & { scale: number }).scale;
-      if (Number.isFinite(value)) view.current?.scale(clampZoom(gestureStart * value));
+      if (Number.isFinite(value) && view.current) {
+        view.current.scale(clampZoom(gestureStart * value));
+        setPreset('');
+      }
     };
     element.addEventListener('wheel', wheel, { passive: false });
     element.addEventListener('gesturestart', start);
@@ -236,9 +257,11 @@ export function PdfViewer({
         aria-label="PDF document"
       >
         {!ready && (
-          <p role="status" data-testid={`pdf-${state.state}`}>
-            {WORDS[state.state]}
-          </p>
+          <StateMessage
+            state={state.state === 'loading' ? 'loading' : 'unavailable'}
+            title={WORDS[state.state]}
+            testId={`pdf-${state.state}`}
+          />
         )}
         {ready && (
           <>
@@ -288,17 +311,15 @@ export function PdfViewer({
               >
                 +
               </button>
-              <select
-                aria-label="PDF zoom preset"
-                defaultValue="page-width"
-                onChange={(event) =>
-                  zoom(event.target.value === '100' ? 1 : (event.target.value as PdfScale))
-                }
-              >
-                <option value="page-width">Page width</option>
-                <option value="page-fit">Page fit</option>
-                <option value="100">100%</option>
-              </select>
+              <Select
+                size="sm"
+                variant="ghost"
+                ariaLabel="PDF zoom preset"
+                value={preset}
+                placeholder="Custom"
+                options={PRESETS}
+                onChange={(next) => zoom(next === '100' ? 1 : (next as PdfScale))}
+              />
               <button
                 type="button"
                 className="cb-btn cb-btn-sm cb-btn-ghost"

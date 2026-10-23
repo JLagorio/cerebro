@@ -227,7 +227,7 @@ export function Calendar({
               className={[
                 'flex h-8 w-full items-center justify-center border-0 text-sm',
                 isEndpoint
-                  ? 'rounded-lg bg-cortex-500 font-medium text-n-0'
+                  ? 'rounded-lg bg-action-primary font-medium text-on-action-primary'
                   : inRange
                     ? 'rounded-none bg-cortex-100 text-n-800'
                     : `rounded-lg bg-transparent hover:bg-n-50 ${

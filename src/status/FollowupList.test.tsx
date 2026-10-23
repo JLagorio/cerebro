@@ -44,12 +44,12 @@ it('a failed read is never the empty state', () => {
   );
   expect(screen.queryByTestId('followup-row')).toBeNull();
 });
-it('empty and loading render nothing', () => {
+it('keeps a measured empty read quiet and identifies an unfinished read', () => {
   const { container, rerender } = render(<FollowupList />);
   expect(container.textContent).toBe('');
   act(() => useFollowupStore.setState({ read: { state: 'loading' } }));
   rerender(<FollowupList />);
-  expect(container.textContent).toBe('');
+  expect(screen.getByRole('status').textContent).toBe('Reading follow-ups…');
 });
 it('sorts due rows and quotes notes literally, showing claimed and missing agents honestly', () => {
   useFollowupStore.setState({
@@ -82,6 +82,31 @@ it('filters an agent page and cancels only its pending row', async () => {
   await waitFor(() => expect(cancel).toHaveBeenCalledWith('id'));
   cancel.mockRestore();
 });
+it('queues follow-ups under one heading, each saying its state before its agent (M91.14)', () => {
+  useFollowupStore.setState({
+    read: {
+      state: 'ready',
+      rows: [
+        row({ followupId: 'later', dueAt: '2026-10-15T13:00:00Z' }),
+        row({ followupId: 'first', state: 'claimed' }),
+        row({ followupId: 'gone', state: 'cancelled', cancelReason: 'agent_gone' }),
+      ],
+    },
+  });
+  render(<FollowupList now={now} />);
+  expect(screen.getByRole('heading', { level: 3 }).textContent).toBe('Follow-ups');
+  const rows = screen.getAllByTestId('followup-row');
+  expect(rows.map((item) => item.textContent?.match(/^(\w+): Scout/)?.[1])).toEqual([
+    'Starting',
+    'Cancelled',
+    'Waiting',
+  ]);
+  // Cancel sits beside the waiting row's line, never inside it.
+  const waiting = rows[2];
+  const action = within(waiting).getByRole('button', { name: 'Cancel' });
+  expect(action.closest('[data-slot="queue-item-actions"]')).toBeTruthy();
+  expect(action.closest('[data-slot="trace-line"]')).toBeNull();
+});
 it('Cerebro cancellations are muted and keep the shared reasons', () => {
   for (const [cancelReason, words] of Object.entries(CASES.cancelWords))
     expect(
@@ -94,6 +119,8 @@ it('Cerebro cancellations are muted and keep the shared reasons', () => {
     read: { state: 'ready', rows: [row({ state: 'cancelled', cancelReason: 'paused' })] },
   });
   render(<FollowupList now={now} />);
-  expect(screen.getByTestId('followup-row').className).toContain('text-n-400');
+  expect(screen.getByTestId('followup-row').className).toContain('text-(--text-meta)');
+  // The line sets its own ink, so the agent's name carries the muting itself.
+  expect(screen.getByTestId('followup-agent').className).toContain('text-(--text-meta)');
   expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
 });

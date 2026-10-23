@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
+import { Queue, QueueItem, QueueItemAction, QueueList, QueueSection } from '@/components/ai/Queue';
 import { Icon } from '@/components/ui/Icon';
+import { Arrival, useDrawn } from '@/components/ui/motion';
 import {
   MAX_QUEUED_NOTES,
   notesPrompt,
@@ -7,18 +9,17 @@ import {
   sendable,
   type ReviewNote,
 } from '@/engine/reviewNotes';
+import { statusWords } from '@/git/DiffNotes';
 import { statusOf, useReviewNotesStore } from '@/stores/reviewNotesStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useUpNextStore } from '@/stores/upNextStore';
 import type { UpNextInput } from './useUpNext';
+import './review-notes.css';
 
 /** What a full Up next says to a Send (M58.5). */
 export const NOTES_FULL = 'Up next is full. Send these notes when a place opens.';
 /** What a thread that cannot continue says in place of Send (M56.3). */
 export const NOTES_BLOCKED = "This conversation can't continue, so these notes can't be sent here.";
-
-const BUTTON =
-  'flex-none rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs text-n-600 hover:border-n-400 hover:text-n-900 disabled:cursor-default disabled:opacity-50';
 
 const linesLabel = (note: ReviewNote) =>
   note.start === note.end && note.startSide === undefined
@@ -27,10 +28,13 @@ const linesLabel = (note: ReviewNote) =>
 
 /**
  * The review notes this conversation holds for the agent (M58.5), between Up
- * next and the composer, and only while some are queued. Send turns them into
- * one numbered prompt, in path and line order, and submits it as the person's
- * own message: sent now when the conversation is idle, else one Up next entry.
- * Each note can be reopened on its diff, edited or removed until it goes.
+ * next and the composer, and only while some are queued: a Queue (M91.14)
+ * whose one line counts them, opening onto the notes, with Send beside it.
+ * Send turns them into one numbered prompt, in path and line order, and
+ * submits it as the person's own message: sent now when the conversation is
+ * idle, else one Up next entry. Each note is an item naming the file and
+ * lines it is on, its status said in the diff's own words; it can be opened
+ * on its diff, edited or removed (an ×, as Up next's) until it goes.
  */
 export function ReviewNotesDock({
   vault,
@@ -54,6 +58,9 @@ export function ReviewNotesDock({
   useUpNextStore((s) => s.queues);
   const toast = useUiStore((s) => s.toast);
   const [open, setOpen] = useState(false);
+  // Drawn with its conversation (AiPanel keys it by the thread): notes that
+  // come to be queued after that bring the dock in (chat.css).
+  const drawn = useDrawn();
 
   const mine = useMemo(
     () => all.filter((n) => n.vault === vault && n.conversationId === conversationId),
@@ -73,87 +80,94 @@ export function ReviewNotesDock({
   };
 
   return (
-    <section
-      data-testid="review-notes-dock"
-      aria-label="Review notes"
-      className="mb-1.5 flex flex-col gap-1 rounded-lg border border-n-200 bg-n-25 px-2 py-1.5"
-    >
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          data-testid="review-notes-toggle"
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-          className="flex min-w-0 flex-1 items-center gap-1 border-0 bg-transparent p-0 text-left text-2xs font-medium text-n-600 hover:text-n-900"
+    <Arrival when={drawn}>
+      <Queue
+        className="cb-review-notes"
+        render={<section data-testid="review-notes-dock" aria-label="Review notes" />}
+      >
+        <QueueSection
+          label={`review note${count === 1 ? '' : 's'} ready`}
+          count={count}
+          icon="message-square-quote"
+          labelProps={{ 'data-testid': 'review-notes-count' }}
+          triggerTestId="review-notes-toggle"
+          open={open}
+          onOpenChange={setOpen}
+          actions={
+            !blocked && (
+              <QueueItemAction
+                data-testid="review-notes-send"
+                disabled={ready.length === 0}
+                onClick={send}
+              >
+                Send to the agent
+              </QueueItemAction>
+            )
+          }
         >
-          <Icon name={open ? 'chevron-down' : 'chevron-right'} size={11} />
-          <span data-testid="review-notes-count">
-            {count} review note{count === 1 ? '' : 's'} ready
-          </span>
-        </button>
-        {!blocked && (
-          <button
-            type="button"
-            data-testid="review-notes-send"
-            disabled={ready.length === 0}
-            onClick={send}
-            className={BUTTON}
-          >
-            Send to the agent
-          </button>
-        )}
-      </div>
-      {blocked && (
-        <p data-testid="review-notes-blocked" className="m-0 text-2xs leading-[15px] text-n-600">
-          {NOTES_BLOCKED}
-        </p>
-      )}
-      {open && (
-        <ol className="m-0 flex list-none flex-col gap-1.5 p-0">
-          {queued.map((note) => (
-            <li key={note.id} data-testid="review-note" className="flex flex-col gap-1">
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  data-testid="review-note-open"
+          <QueueList>
+            {queued.map((note) => {
+              const where = `${note.path}, ${linesLabel(note)}`;
+              return (
+                <QueueItem
+                  key={note.id}
+                  data-testid="review-note"
+                  icon="message-square-text"
+                  statusText={statusWords(note)}
+                  // The path gives way in a narrow dock, whole on hover; the
+                  // lines it is on never do.
                   title={note.path}
-                  onClick={() => onOpenNote(note)}
-                  className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left [font-family:var(--font-mono)] text-2xs text-cortex-600 hover:underline"
+                  titleProps={{ title: note.path }}
+                  description={`· ${linesLabel(note)}`}
+                  actions={
+                    <>
+                      <QueueItemAction
+                        data-testid="review-note-open"
+                        aria-label={`View diff of ${where}`}
+                        onClick={() => onOpenNote(note)}
+                      >
+                        View diff
+                      </QueueItemAction>
+                      <QueueItemAction
+                        data-testid="review-note-remove"
+                        aria-label={`Remove the note on ${where}`}
+                        onClick={() => remove(note.id)}
+                      >
+                        <Icon name="x" size={10} />
+                      </QueueItemAction>
+                    </>
+                  }
                 >
-                  {note.path} · {linesLabel(note)}
-                </button>
-                <button
-                  type="button"
-                  data-testid="review-note-remove"
-                  onClick={() => remove(note.id)}
-                  className={BUTTON}
-                >
-                  Remove
-                </button>
-              </div>
-              <textarea
-                data-testid="review-note-edit"
-                aria-label={`Note on ${note.path}, ${linesLabel(note)}`}
-                rows={2}
-                maxLength={2000}
-                value={note.text}
-                onChange={(e) => update(note.id, e.target.value)}
-                className="w-full resize-y rounded-md border border-n-300 bg-n-0 px-1.5 py-1 text-xs leading-[16px] text-n-800 outline-none focus:border-cortex-500"
-              />
-              {note.text.trim() === '' && (
-                <span data-testid="review-note-empty" className="text-2xs text-n-500">
-                  An empty note isn't sent.
-                </span>
-              )}
-            </li>
-          ))}
-        </ol>
-      )}
-      {unsent >= MAX_QUEUED_NOTES && (
-        <p data-testid="review-notes-cap" className="m-0 text-2xs leading-[15px] text-n-500">
-          Up to {MAX_QUEUED_NOTES} notes per conversation.
-        </p>
-      )}
-    </section>
+                  <textarea
+                    data-testid="review-note-edit"
+                    aria-label={`Note on ${where}`}
+                    rows={2}
+                    maxLength={2000}
+                    value={note.text}
+                    onChange={(e) => update(note.id, e.target.value)}
+                    className="w-full resize-y rounded-md border border-n-300 bg-n-0 px-1.5 py-1 text-xs leading-[16px] text-n-800 outline-none focus:border-cortex-500"
+                  />
+                  {note.text.trim() === '' && (
+                    <span data-testid="review-note-empty" className="text-2xs text-n-500">
+                      An empty note isn't sent.
+                    </span>
+                  )}
+                </QueueItem>
+              );
+            })}
+          </QueueList>
+        </QueueSection>
+        {blocked && (
+          <p data-testid="review-notes-blocked" className="m-0 text-2xs leading-[15px] text-n-600">
+            {NOTES_BLOCKED}
+          </p>
+        )}
+        {unsent >= MAX_QUEUED_NOTES && (
+          <p data-testid="review-notes-cap" className="m-0 text-2xs leading-[15px] text-n-500">
+            Up to {MAX_QUEUED_NOTES} notes per conversation.
+          </p>
+        )}
+      </Queue>
+    </Arrival>
   );
 }

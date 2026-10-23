@@ -1,3 +1,7 @@
+import { ViewControlIcons, SearchBox } from '@/views/ViewControlIcons';
+import { ViewSettingsPanel } from '@/views/ViewSettingsPanel';
+import { ViewToolbar } from '@/views/ViewToolbar';
+import { searchEntries } from '@/engine/viewFilters';
 import type { TimeSlot } from '@/engine/timeGrid';
 import { useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
@@ -149,6 +153,9 @@ export function DatabaseBlockView({
    */
   onOpenFullPage?: (database: string, view: string) => void;
 }) {
+  const [search, setSearch] = useState('');
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const resolved = useMemo(
     () =>
       database === ''
@@ -243,6 +250,13 @@ export function DatabaseBlockView({
     await setTypeViews({ name: resolved.database, docPath: null }, views);
   };
 
+  const changeView = (next: ViewDefinition) => {
+    void setTypeViews(
+      { name: resolved.database, docPath: null },
+      typeViews(resolved.database, schema).map((v) => (v.id === next.id ? next : v)),
+    );
+  };
+
   return (
     <Shell tone="ok" testid="database-block">
       <span className="flex min-w-0 items-center gap-1.5">
@@ -274,6 +288,60 @@ export function DatabaseBlockView({
           </button>
         )}
       </span>
+      <div className="flex min-w-0 flex-wrap items-center gap-1 border-b border-n-100 py-1.5">
+        {onChange !== undefined && shown !== null && surface !== null ? (
+          <>
+            <span className="mr-auto min-w-0 text-metadata text-n-500">
+              Shared view · edits apply everywhere
+            </span>
+            <ViewControlIcons
+              presentation={surface.presentation}
+              filters={shown.filters}
+              fields={fields}
+              onChange={(presentation) => changeView({ ...shown, presentation })}
+              onFiltersChange={(filters) => changeView({ ...shown, filters })}
+              barOpen={controlsOpen}
+              onBarOpenChange={setControlsOpen}
+              search={search}
+              onSearchChange={setSearch}
+              settingsOpen={settingsOpen}
+              onSettingsOpenChange={setSettingsOpen}
+              settingsPanel={
+                <ViewSettingsPanel
+                  surface="type"
+                  list={{
+                    name: resolved.database,
+                    icon: null,
+                    color: null,
+                    order: null,
+                    source: { type: resolved.database, project: null },
+                    views: typeViews(resolved.database, schema),
+                  }}
+                  viewId={shown.id}
+                  fields={fields}
+                  schema={schema}
+                  onClose={() => setSettingsOpen(false)}
+                  onChange={(next) => {
+                    void setTypeViews({ name: resolved.database, docPath: null }, next.views);
+                  }}
+                />
+              }
+            />
+          </>
+        ) : (
+          <SearchBox query={search} onChange={setSearch} />
+        )}
+      </div>
+      {controlsOpen && shown !== null && surface !== null && (
+        <ViewToolbar
+          presentation={surface.presentation}
+          fields={fields}
+          schema={schema}
+          filters={shown.filters}
+          onChange={(presentation) => changeView({ ...shown, presentation })}
+          onFiltersChange={(filters) => changeView({ ...shown, filters })}
+        />
+      )}
       {/* The database is here and the named view is not. Showing the fallback
           silently would be confidently showing the wrong data, so the block
           renders what it CAN and says what it could not. */}
@@ -287,7 +355,7 @@ export function DatabaseBlockView({
           <ViewProblems problems={problems} source={resolved.database} />
           <ViewCanvas
             embedded
-            entries={surface.entries}
+            entries={searchEntries(surface.entries, search)}
             allEntries={entries}
             presentation={surface.presentation}
             schema={schema}
@@ -299,7 +367,7 @@ export function DatabaseBlockView({
             // declared `folder:` — which is the whole point of embedding one
             // in the page you are writing.
             createType={resolved.database}
-            filtered={shown?.filters != null}
+            filtered={shown?.filters != null || search.trim() !== ''}
             onCreate={onCreate}
             onCreateOn={
               onCreateOn === undefined || dateField === null

@@ -1,5 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot, openKnowledgeTab, readMockFile, showConceptDetails, openDestination } from './boot';
+import {
+  boot,
+  openKnowledgeTab,
+  readMockFile,
+  showConceptDetails,
+  openDestination,
+  showPagePanel,
+} from './boot';
 
 /**
  * The M8.2/M8.3 pipeline: ingest → distil → augment.
@@ -97,8 +104,10 @@ test('meeting: a transcript files as a record with its matched speakers, only on
   await openDestination(page, 'Inbox');
   await page.locator(`[data-testid="inbox-row"][data-path="${TRANSCRIPT}"]`).click();
 
-  // The three speakers are the demo's people, each matched to one page.
-  const speakers = page.getByLabel('Organize').getByTestId('transcript-speakers');
+  // The three speakers are the demo's people, each matched to one page, in
+  // the Organize section of the capture's inspector.
+  const panel = page.getByTestId('doc-side-panel');
+  const speakers = panel.getByTestId('transcript-speakers');
   await expect(speakers).toHaveAttribute('data-state', 'ready');
   await expect(speakers.getByTestId('speaker-row')).toHaveCount(3);
   for (const name of ['Marcus Webb', 'Priya Nair', 'Tom Keller']) {
@@ -106,8 +115,9 @@ test('meeting: a transcript files as a record with its matched speakers, only on
   }
 
   const before = await readMockFile(page, TRANSCRIPT);
-  await page.getByRole('button', { name: 'Ask the Assistant to file it' }).click();
-  const card = page.getByTestId('proposal-card');
+  await panel.getByRole('button', { name: 'Ask the Assistant to file it' }).click();
+  const card = panel.getByTestId('proposal-card');
+  await expect(card).toHaveCount(1);
   await expect(card).toBeVisible();
   await expect(card.getByTestId('proposal-summary')).toContainText('rollback');
   await expect(card).toContainText('Attendees');
@@ -115,6 +125,11 @@ test('meeting: a transcript files as a record with its matched speakers, only on
   // A suggestion until applied: the file has not moved.
   expect(await readMockFile(page, TRANSCRIPT)).toBe(before);
 
+  // The conversation floats over the inspector; minimized to its button, it
+  // leaves the card to be applied.
+  const assistant = page.getByTestId('ai-panel');
+  await assistant.getByRole('button', { name: 'Minimize conversation' }).click();
+  await expect(assistant).toHaveAttribute('data-minimized', 'true');
   await card.getByRole('button', { name: 'Apply' }).click();
   await expect(card).toBeHidden();
   await expect.poll(() => readMockFile(page, TRANSCRIPT)).toContain('type: Meeting');
@@ -182,9 +197,14 @@ test('commit: any note says what the base took from it, not just Inbox captures'
   // And a capture nothing has been learned from says that plainly, with the
   // action that would change it — no queue, no badge, no nagging.
   await page.locator('[data-testid="inbox-row"]').filter({ hasText: 'Warehouse cutover' }).click();
-  const organize = page.getByLabel('Organize').getByTestId('knowledge-commit');
-  await expect(organize).toHaveAttribute('data-state', 'uncommitted');
-  await expect(organize.getByRole('button', { name: 'Learn from this page' })).toBeVisible();
+  // The capture's inspector holds what Knowledge took from it, the section
+  // every page has, with its one Learn button.
+  const knowledge = page.getByTestId('doc-side-panel').getByTestId('page-knowledge');
+  await expect(knowledge.getByTestId('knowledge-commit')).toHaveAttribute(
+    'data-state',
+    'uncommitted',
+  );
+  await expect(knowledge.getByRole('button', { name: 'Learn from this page' })).toBeVisible();
 });
 
 test('augment: knowledge surfaces beside the PRD, and only when asked', async ({ page }) => {
@@ -286,13 +306,17 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
   await openDestination(page, 'Inbox');
   await page.locator('[data-testid="inbox-row"]').filter({ hasText: 'Warehouse cutover' }).click();
 
-  const organize = page.getByLabel('Organize').getByTestId('knowledge-commit');
-  await expect(organize).toHaveAttribute('data-state', 'uncommitted');
-  await expect(organize.getByTestId('learn-queued')).toHaveCount(0);
+  const commit = page.getByTestId('doc-side-panel').getByTestId('knowledge-commit');
+  await expect(commit).toHaveAttribute('data-state', 'uncommitted');
+  await expect(commit.getByTestId('learn-queued')).toHaveCount(0);
 
-  // Filing it is the trigger. No dialog, no prompt, no panel opening.
-  await page.getByRole('button', { name: /Mark organized/i }).click();
-  await expect(page.getByTestId('ai-panel')).toHaveCount(0);
+  // Filing it is the trigger. No dialog, no prompt, no panel opening: the
+  // assistant stays the button it rests as.
+  await page
+    .getByTestId('doc-side-panel')
+    .getByRole('button', { name: 'Mark organized', exact: true })
+    .click();
+  await expect(page.getByTestId('ai-panel')).toHaveAttribute('data-minimized', 'true');
 
   // The capture left the queue, so it is reached the way any filed note is —
   // and the write that organized it is on disk, which is the whole handover.
@@ -305,7 +329,8 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
     .filter({ hasText: 'rollback rehearsal' })
     .first()
     .click();
-  await page.getByTestId('doc-side-panel').getByTestId('doc-panel-tab-knowledge').click();
+  // What Knowledge holds about the page is a section of the panel's Details.
+  await showPagePanel(page, 'Details', page.getByTestId('doc-page'));
   const panel = page.getByTestId('doc-side-panel').getByTestId('page-knowledge');
   await expect(panel).toBeVisible();
   // Nothing has been distilled from it yet, and the panel says so plainly

@@ -96,7 +96,10 @@ describe('Dropdown', () => {
     expect(list.getAttribute('aria-activedescendant')).toBe(priority.id);
 
     // The pointer drives the same cursor, so the announcement follows it too.
-    fireEvent.mouseEnter(screen.getByRole('option', { name: 'No grouping' }));
+    fireEvent.mouseMove(screen.getByRole('option', { name: 'No grouping' }), {
+      clientX: 10,
+      clientY: 10,
+    });
     expect(list.getAttribute('aria-activedescendant')).toBe(
       screen.getByRole('option', { name: 'No grouping' }).id,
     );
@@ -133,5 +136,22 @@ describe('Dropdown', () => {
     const list = screen.getByRole('listbox', { name: 'Nested' });
     expect(screen.getByTestId('scroller').contains(list)).toBe(false);
     expect(document.body.contains(list)).toBe(true);
+  });
+
+  it('shows its prompt for a value no option holds, and nothing without one', () => {
+    const { rerender } = render(
+      <Dropdown
+        options={options}
+        value="gone"
+        onChange={vi.fn()}
+        label="Of property"
+        placeholder="Pick a property…"
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Of property' }).textContent).toBe(
+      'Pick a property…',
+    );
+    rerender(<Dropdown options={options} value="gone" onChange={vi.fn()} label="Of property" />);
+    expect(screen.getByRole('button', { name: 'Of property' }).textContent).toBe('');
   });
 });

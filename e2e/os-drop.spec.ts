@@ -34,7 +34,7 @@ test('OS paths show hover, capture text, name skipped folders, and refuse unsupp
   expect(saved).not.toContain('/outside/');
   await page.screenshot({ path: '/private/tmp/cerebro-os-drop-inbox.png', animations: 'disabled' });
   const before = await page.evaluate(() => window.__cerebroMockWrites.length);
-  await drop(page, page.getByTestId('nav-surfaces').first(), [
+  await drop(page, page.getByTestId('app-rail'), [
     { path: '/outside/no-zone.txt', content: 'No write' },
   ]);
   await expect(page.getByTestId('toast-host')).toContainText(

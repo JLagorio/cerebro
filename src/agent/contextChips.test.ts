@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   chipId,
+  fileChip,
   placeChip,
   recordChip,
   resolveChips,
@@ -78,5 +79,41 @@ describe('resolveChips', () => {
   it('never lists the same chip twice', () => {
     const chips: ContextChip[] = resolveChips([place, record], [], [record, place]);
     expect(chips.map(chipId)).toEqual([...new Set(chips.map(chipId))]);
+  });
+
+  it('keeps an attached file, which no place makes redundant (M91.17)', () => {
+    const page = placeChip({ kind: 'doc', path: 'docs/spec.md' }, { entries });
+    const report = fileChip('attachments/report.pdf');
+    expect(resolveChips([page], [], [report])).toEqual([page, report]);
+    expect(resolveChips([page], [chipId(report)], [])).toEqual([page]);
+  });
+});
+
+/**
+ * A file the person attached (M91.17): by its vault path, with its name and
+ * its kind from the file-kinds table, under an identity of its own.
+ */
+describe('fileChip', () => {
+  it('names the file and says its kind by the file-kinds table', () => {
+    expect(fileChip('attachments/Q3 report.pdf')).toEqual({
+      kind: 'file',
+      path: 'attachments/Q3 report.pdf',
+      label: 'Q3 report.pdf',
+      fileKind: 'pdf',
+    });
+    expect(fileChip('attachments/brief.docx')).toMatchObject({ fileKind: 'document' });
+    expect(fileChip('attachments/mystery')).toMatchObject({ fileKind: 'unknown' });
+  });
+
+  it('is `file:<path>`, apart from a record or a doc place at the same path', () => {
+    const asFile = chipId(fileChip('docs/spec.md'));
+    expect(asFile).toBe('file:docs/spec.md');
+    expect(asFile).not.toBe(chipId(recordChip('docs/spec.md', entries)!));
+    expect(asFile).not.toBe(chipId(placeChip({ kind: 'doc', path: 'docs/spec.md' }, { entries })));
+  });
+
+  it('leaves the other kinds’ identities as they were', () => {
+    expect(chipId(recordChip('docs/spec.md', entries)!)).toBe('record:docs/spec.md');
+    expect(chipId(placeChip({ kind: 'inbox' }))).toMatch(/^place:/);
   });
 });

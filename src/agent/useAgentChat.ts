@@ -12,10 +12,17 @@ import {
   type RunHandle,
 } from './agentIpc';
 import { newRunId } from './runs';
-import { applyEvent, endLiveTurn, replaceLastTurn, replayTranscript } from './transcript';
+import {
+  applyEvent,
+  endLiveTurn,
+  replaceLastTurn,
+  replayTranscript,
+  stopStreaming,
+} from './transcript';
 import type {
   AgentEvent,
   ChatMessage,
+  ForkPoint,
   LiveTurn,
   PendingInteraction,
   PersonAnswer,
@@ -25,7 +32,13 @@ import { flushOpenPages } from '@/editor/openPages';
 import { listAgents, narrowTools, readAddress } from '@/engine/agents';
 import type { Place } from '@/engine/place';
 import type { SkillNarrowing } from '@/engine/skills';
-import { grantedTools, holdsShell, holdsWeb, type PromptGrant } from '@/engine/toolGrant';
+import {
+  grantedTools,
+  holdsRead,
+  holdsShell,
+  holdsWeb,
+  type PromptGrant,
+} from '@/engine/toolGrant';
 import { readNote } from '@/lib/ipc';
 import { effectiveCeiling, type ShellCeiling } from '@/lib/policy/toolApproval';
 import { addressedAgentPrompt, panelAgentPrompt, standingInstructionsBlock } from '@/lib/prompts';
@@ -185,12 +198,16 @@ export interface AgentChat {
    * transcript says about it when it was read back (M56.3); without facts,
    * the model and the links clear. The turn this conversation was running
    * is detached first, never stopped (M57.6). Given the restored thread's
-   * `live` turn, it re-attaches to it, from its reply's `seq`. */
+   * `live` turn, it re-attaches to it, from its reply's `seq`. Given a
+   * branch's `fork` (M91.6), every send carries it while the conversation
+   * has no session of its own: until the stream names the one Rust minted,
+   * and again after a send that failed or a turn that ended before then. */
   restore(
     messages: ChatMessage[],
     sessionId: string | null,
     facts?: { model: string | null; prLinks: PrLink[] },
     live?: LiveTurn | null,
+    fork?: ForkPoint | null,
   ): void;
 }
 
@@ -243,11 +260,16 @@ export function useAgentChat(
   {
     shell,
     web = false,
+    delegate = false,
     connectors,
   }: {
     shell: ShellCeiling;
     /** Web access in Settings (M57.7); absent is off. */
     web?: boolean;
+    /** The Subagents switch in Settings (M91.2d); absent is off. Every send
+     * names it, so Rust's default for a request that names none (on, for a
+     * watched run) never decides a panel turn. */
+    delegate?: boolean;
     connectors: boolean;
   },
 ): AgentChat {
@@ -278,6 +300,9 @@ export function useAgentChat(
   // named yet, with the one it replaced. Until Init or Result names it no
   // session file exists, so a turn that ends first puts the old one back.
   const provisional = useRef<{ previous: string | null } | null>(null);
+  // M91.6: the branch this conversation starts as, sent while it has no
+  // session of its own (`restore`).
+  const forkRef = useRef<ForkPoint | null>(null);
   const [reportedModel, setReportedModel] = useState<string | null>(null);
   const [prLinks, setPrLinks] = useState<PrLink[]>([]);
   const [turnEndedAt, setTurnEndedAt] = useState<string | null>(null);
@@ -304,6 +329,10 @@ export function useAgentChat(
   // attached, so only Cancelled, Error and Done change the reply, and Done
   // rebuilds it from the session file.
   const gapRef = useRef(false);
+  // M91.4: the reply was re-attached from a stored copy, which keeps no
+  // reasoning, payloads or subagent steps, and the events after its cursor
+  // bring back none from before it: its Done rebuilds it from the file.
+  const restoredRef = useRef(false);
   const [live, setLiveState] = useState<LiveTurn | null>(null);
   const liveRef = useRef<LiveTurn | null>(null);
   const setLive = useCallback((next: LiveTurn | null) => {
@@ -415,6 +444,7 @@ export function useAgentChat(
     }
     turnInFlight.current = false;
     gapRef.current = false;
+    restoredRef.current = false;
     setLive(null);
     setStreaming(false);
     releaseTask();
@@ -429,6 +459,7 @@ export function useAgentChat(
     clearStopping();
     turnInFlight.current = false;
     gapRef.current = false;
+    restoredRef.current = false;
     setStreaming(false);
     releaseTask();
   }, [clearStopping, releaseRun, releaseTask]);
@@ -445,25 +476,26 @@ export function useAgentChat(
    * Put a reply back as the session file says its turn went (M57.6): after a
    * gap, at Done, or when the journal no longer knows the run. A file that
    * cannot be read keeps the cached reply, marked interrupted, so a cut
-   * reply never reads as final.
+   * reply never reads as final; with `whole`, the reply streamed to its end
+   * and is kept as it stands.
    */
   const rebuildFromFile = useCallback(
-    (assistantId: string) => {
+    (assistantId: string, whole = false) => {
       const session = sessionRef.current;
       const epoch = sendEpoch.current;
       const interrupted = () =>
         patchMessage(assistantId, (m) => {
           const { gap: _gap, ...rest } = m;
-          return { ...rest, streaming: false, interrupted: true };
+          return { ...stopStreaming(rest), interrupted: true };
         });
       if (session === null || vaultPath === null) {
-        interrupted();
+        if (!whole) interrupted();
         return;
       }
       void readCliTranscript(vaultPath, session, null).then((read) => {
         if (sendEpoch.current !== epoch) return;
         if (read.state !== 'read') {
-          interrupted();
+          if (!whole) interrupted();
           return;
         }
         const replayed = replayTranscript(read.events, session);
@@ -473,11 +505,12 @@ export function useAgentChat(
     [patchMessage, vaultPath],
   );
 
-  /** The turn ended at its run's Done: after a gap, its reply rebuilds from
-   * the session file first. */
+  /** The turn ended at its run's Done: after a gap, or a re-attach from a
+   * stored copy, its reply rebuilds from the session file first. */
   const settleTurn = useCallback(
     (assistantId: string) => {
       if (gapRef.current) rebuildFromFile(assistantId);
+      else if (restoredRef.current) rebuildFromFile(assistantId, true);
       finishTurn();
     },
     [finishTurn, rebuildFromFile],
@@ -598,7 +631,10 @@ export function useAgentChat(
         touch();
         return;
       }
-      patchMessage(assistantId, (m) => stamped(applyEvent(m, event, 'live'), event));
+      // M91.4: the turn's session, as the event found it, names the anchor a
+      // branch starts from.
+      const session = sessionRef.current;
+      patchMessage(assistantId, (m) => stamped(applyEvent(m, event, 'live', session), event));
     },
     [patchMessage, releaseRun, settleTurn, showInteraction, vaultPath],
   );
@@ -676,6 +712,7 @@ export function useAgentChat(
       showInteraction(null);
       deferredIds.current.clear();
       gapRef.current = false;
+      restoredRef.current = false;
       // Frozen here, before anything can await: this turn's context is the
       // context the question was asked in. A queued turn's was frozen when it
       // was queued (M57.5); only the panel's binding (M56.6) is read now.
@@ -836,6 +873,14 @@ export function useAgentChat(
               readScoped: recipient?.readScope != null,
               narrowing: allowed,
             }),
+            // M91.17 — Claude Code's Read, which opens an attached PDF or
+            // picture; a read-scoped recipient's limit withdraws it.
+            read: holdsRead({
+              shell: ceiling,
+              attended: true,
+              readScoped: recipient?.readScope != null,
+              narrowing: allowed,
+            }),
             attended: true,
           };
           // An addressed recipient's block LEADS the message, like
@@ -865,6 +910,9 @@ export function useAgentChat(
               message: outgoing,
               systemPrompt: turn.systemPrompt(grant) + closing,
               sessionId: sessionRef.current,
+              // M91.6: a branch with no session of its own yet forks again,
+              // until the stream names the session Rust minted for it.
+              fork: sessionRef.current === null ? forkRef.current : null,
               // M56.5 — the conversation's pick, else the addressed agent's
               // record, else Claude Code's default. Rust checks both.
               model: turn.model ?? recipient?.model ?? null,
@@ -874,6 +922,11 @@ export function useAgentChat(
               // ceiling worked out above.
               shell: ceiling,
               web: webCeiling,
+              // M91.2d — the Subagents switch as it stands, for an addressed
+              // or bound agent too: Rust denies the subagent tool to a record
+              // whose narrowing names neither Agent nor Task, whatever this
+              // says.
+              delegate: delegate ? 'on' : 'off',
               connectors,
               connectorNames,
               // A person typed this turn and is watching it stream — the one
@@ -960,6 +1013,7 @@ export function useAgentChat(
     [
       attachTask,
       connectors,
+      delegate,
       endTurn,
       follow,
       getTurn,
@@ -1012,9 +1066,7 @@ export function useAgentChat(
         sendEpoch.current += 1;
         setMessages((prev) =>
           prev.map((m) =>
-            m.streaming === true
-              ? { ...m, streaming: false, interrupted: true, cancelled: true }
-              : m,
+            m.streaming === true ? { ...stopStreaming(m), interrupted: true, cancelled: true } : m,
           ),
         );
         if (taskRef.current !== null) endRun(taskRef.current);
@@ -1063,7 +1115,7 @@ export function useAgentChat(
     // already said Done, so its record ends here too.
     setMessages((prev) =>
       prev.map((m) =>
-        m.streaming === true ? { ...m, streaming: false, interrupted: true, cancelled: true } : m,
+        m.streaming === true ? { ...stopStreaming(m), interrupted: true, cancelled: true } : m,
       ),
     );
     if (taskRef.current !== null) endRun(taskRef.current);
@@ -1261,6 +1313,7 @@ export function useAgentChat(
     showInteraction(null);
     deferredIds.current.clear();
     provisional.current = null;
+    forkRef.current = null;
     sessionRef.current = null;
     setSessionId(null);
     setReportedModel(null);
@@ -1378,12 +1431,14 @@ export function useAgentChat(
       restoredSession: string | null,
       facts?: { model: string | null; prLinks: PrLink[] },
       liveTurn?: LiveTurn | null,
+      fork?: ForkPoint | null,
     ) => {
       detachTurn();
       sendEpoch.current += 1;
       showInteraction(null);
       deferredIds.current.clear();
       provisional.current = null;
+      forkRef.current = fork ?? null;
       sessionRef.current = restoredSession;
       setSessionId(restoredSession);
       setReportedModel(facts?.model ?? null);
@@ -1401,6 +1456,7 @@ export function useAgentChat(
         messagesRef.current = marked;
         setMessages(marked);
         turnInFlight.current = true;
+        restoredRef.current = true;
         setStreaming(true);
         const reply = marked.find((m) => m.id === turn.assistantId);
         reattach(turn, reply?.seq ?? 0);

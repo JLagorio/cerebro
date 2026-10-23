@@ -164,7 +164,7 @@ describe('GalleryView', () => {
     expect(screen.getAllByTestId('gallery-cover')[0].getAttribute('data-fit')).toBe('contain');
   });
 
-  it('defaults to medium cards when the view says nothing about size', () => {
+  it('uses the readable auto size only when no size is saved', () => {
     const entries = vault();
     const schema = buildSchema(entries);
     render(
@@ -175,7 +175,7 @@ describe('GalleryView', () => {
         schema={schema}
       />,
     );
-    expect(screen.getByTestId('gallery-view').getAttribute('data-card-size')).toBe('medium');
+    expect(screen.getByTestId('gallery-view').getAttribute('data-card-size')).toBe('auto');
   });
 
   // Grouping is not a layout's business — the cards band through the same

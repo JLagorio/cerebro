@@ -218,3 +218,57 @@ it('refuses an unknown command before showing a tooltip', () => {
     ),
   ).toThrow('unknown command');
 });
+
+/**
+ * A warm toolbar (tooltipWarmth.ts): once one tooltip has been read, the
+ * next one the pointer brings up opens at once; one that comes with focus
+ * still waits, or tabbing along a toolbar would raise a tooltip at every
+ * stop, each holding the next Escape.
+ */
+describe('a warm toolbar', () => {
+  function Toolbar() {
+    return (
+      <>
+        <Tooltip label="First" delayMs={0}>
+          <button type="button">first</button>
+        </Tooltip>
+        <Tooltip label="Second" delayMs={60_000}>
+          <button type="button">second</button>
+        </Tooltip>
+        <Tooltip label="Third" delayMs={60_000}>
+          <button type="button">third</button>
+        </Tooltip>
+      </>
+    );
+  }
+
+  it('opens the next tooltip the pointer finds at once', async () => {
+    const user = userEvent.setup();
+    render(<Toolbar />);
+    await user.hover(screen.getByRole('button', { name: 'first' }));
+    expect((await screen.findByRole('tooltip')).textContent).toBe('First');
+    await user.unhover(screen.getByRole('button', { name: 'first' }));
+    await user.hover(screen.getByRole('button', { name: 'second' }));
+    // A minute's delay, skipped: it was warm.
+    expect((await screen.findByRole('tooltip', {}, { timeout: 1000 })).textContent).toBe('Second');
+  });
+
+  it('keeps focus waiting its own delay, warm or not', async () => {
+    const user = userEvent.setup();
+    render(<Toolbar />);
+    await user.hover(screen.getByRole('button', { name: 'first' }));
+    await screen.findByRole('tooltip');
+    await user.unhover(screen.getByRole('button', { name: 'first' }));
+    screen.getByRole('button', { name: 'third' }).focus();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
+  it('is cool when nothing was read', async () => {
+    const user = userEvent.setup();
+    render(<Toolbar />);
+    await user.hover(screen.getByRole('button', { name: 'second' }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+});

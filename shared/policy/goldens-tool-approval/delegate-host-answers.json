@@ -1,0 +1,96 @@
+{
+  "why": "The gate's answer for the subagent tool under the Subagents switch (M91.2a): off denies it in Cerebro's words under either spelling, on passes it where a gate sits, and a record must name it, by either spelling, to keep it.",
+  "host_answers": [
+    {
+      "why": "With the switch off, the subagent tool is denied where a gate sits too.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "web": "off",
+        "delegate": "off",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Agent",
+      "tool_input": {
+        "description": "Read the release notes",
+        "subagent_type": "cerebro-researcher",
+        "prompt": "Summarize them."
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Cerebro's settings don't allow this tool in this run."
+      }
+    },
+    {
+      "why": "Task, the name an init lists it by, is denied with its row.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "web": "off",
+        "delegate": "off",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Task",
+      "tool_input": {
+        "description": "Read the release notes"
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Cerebro's settings don't allow this tool in this run."
+      }
+    },
+    {
+      "why": "With the switch on, a record that names it by Task keeps it, and the host passes it.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "web": "off",
+        "delegate": "on",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": [
+          "task"
+        ]
+      },
+      "granted": [],
+      "tool": "Agent",
+      "tool_input": {
+        "description": "Read the release notes",
+        "subagent_type": "cerebro-researcher",
+        "prompt": "Summarize them."
+      },
+      "answer": {
+        "kind": "pass"
+      }
+    },
+    {
+      "why": "A record that leaves it out is denied it, whatever the switch says.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "web": "off",
+        "delegate": "on",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": [
+          "get_note"
+        ]
+      },
+      "granted": [],
+      "tool": "Task",
+      "tool_input": {
+        "description": "Read the release notes"
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Cerebro's settings don't allow this tool in this run."
+      }
+    }
+  ]
+}

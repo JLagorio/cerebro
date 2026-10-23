@@ -40,7 +40,7 @@ export interface PageCommentsController {
   /** The page, or null when the page takes no comments. */
   path: string | null;
   slot: CommentsSlot | null;
-  /** The tab's sections, when the slot is ready. */
+  /** The Comments panel's sections, when the slot is ready. */
   sections: CommentSections | null;
   /** The thread in focus. */
   focused: string | null;
@@ -55,6 +55,8 @@ export interface PageCommentsController {
   deleteComment(thread: string, comment: string): Promise<boolean>;
   deleteThread(thread: string): Promise<boolean>;
   focus(id: string): void;
+  /** Session drafts belong to the page/thread, not the inspector's mount. */
+  composerDrafts?: { read(key: string): string; write(key: string, value: string): void };
 }
 
 const highlightsOf = (editor: CerebroEditor) => editor.getExtension(CommentHighlights) ?? null;
@@ -79,6 +81,9 @@ export function usePageComments(
   options: { openPanel: () => void; deepLink: string | null },
 ): PageCommentsController {
   const slot = useCommentsSlot(path);
+  const vault = useVaultStore((state) => state.vaultPath);
+  const composerDrafts = useRef(new Map<string, string>());
+  const draftKey = (key: string) => JSON.stringify([vault, path, key]);
   const toast = useUiStore((s) => s.toast);
   const openPanel = useRef(options.openPanel);
   openPanel.current = options.openPanel;
@@ -196,6 +201,13 @@ export function usePageComments(
     focused,
     draft,
     focus,
+    composerDrafts: {
+      read: (key) => composerDrafts.current.get(draftKey(key)) ?? '',
+      write: (key, value) => {
+        if (value === '') composerDrafts.current.delete(draftKey(key));
+        else composerDrafts.current.set(draftKey(key), value);
+      },
+    },
     start() {
       if (path === null || highlights === null) return;
       if (slot?.kind === 'unavailable') {

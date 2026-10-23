@@ -42,7 +42,7 @@ describe('DocPage', () => {
       history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
-    useUiStore.setState({ docPanelOpen: true, docPanelTab: 'outline' });
+    useUiStore.setState({ docPanelOpen: true, docPanel: 'details' });
   });
   afterEach(cleanup);
 
@@ -71,21 +71,21 @@ describe('DocPage', () => {
     expect(screen.queryByText('Import hash')).toBeNull();
   });
 
-  // M58.4 (D18): the page's history is the side panel's History tab, not a
-  // list under the editor.
+  // M58.4 (D18): the page's history is its History panel, not a list under
+  // the editor.
   it('keeps history out from under the editor, in the side panel', async () => {
     render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
     await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
       timeout: 5_000,
     });
     expect(screen.queryByTestId('git-history')).toBeNull();
-    fireEvent.click(screen.getByTestId('doc-panel-tab-history'));
+    fireEvent.click(screen.getByRole('button', { name: 'History' }));
     const panel = screen.getByTestId('doc-side-panel');
     expect(await within(panel).findByTestId('git-history')).toBeTruthy();
     expect(within(screen.getByTestId('doc-content')).queryByTestId('git-history')).toBeNull();
   });
 
-  it('shows the breadcrumb bar, title, editor, and outline panel', async () => {
+  it('shows the breadcrumb bar, title and editor', async () => {
     render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
     const entry = useVaultStore.getState().entries.find((e) => e.path === DOC);
     expect(screen.getByTestId('doc-title').textContent).toBe(entry?.title);
@@ -99,10 +99,37 @@ describe('DocPage', () => {
     await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
       timeout: 5_000,
     });
-    // The side panel's Outline tab fills once the editor is ready.
-    await waitFor(() => expect(screen.getByTestId('doc-outline')).toBeTruthy(), {
-      timeout: 5_000,
+  });
+
+  // Owner, 2026-10-19: the outline is on the page, as Notion's is — over the
+  // reading column, never in the side panel, once the live editor is ready.
+  it('draws the outline on the page once the editor is ready, its headings under the title', async () => {
+    render(<DocPage selection={{ kind: 'doc', path: 'delivery/how-we-schedule.md' }} />);
+    const outline = await screen.findByTestId('doc-outline', undefined, { timeout: 5_000 });
+    expect(screen.getByTestId('doc-column').contains(outline)).toBe(true);
+    expect(screen.getByTestId('doc-side-panel').contains(outline)).toBe(false);
+    expect(
+      within(outline)
+        .getAllByRole('button')
+        .map((b) => b.textContent),
+    ).toEqual(['Windows, not deadlines', 'Blocking is a relation', 'Nesting is grouping']);
+  });
+
+  it('draws no outline for a page whose only heading is its title', async () => {
+    // This render's own editor, not the one an earlier case left behind.
+    lastEditor.info = null;
+    render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
+    await waitFor(() => expect(lastEditor.info).not.toBeNull(), { timeout: 5_000 });
+    const live = lastEditor.info!.editor;
+    // The page holds that editor now: its title is a heading the outline could
+    // list, and it lists nothing.
+    expect(live.document.some((block) => block.type === 'heading')).toBe(true);
+    await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy());
+    // Past the render that hands the page its editor.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
+    expect(screen.queryByTestId('doc-outline')).toBeNull();
   });
 
   it('a project page offers Overview, Tasks, Docs, Agents and Runs and lists its twelve work items', () => {
@@ -260,20 +287,21 @@ describe('DocPage', () => {
       await useVaultStore.getState().rescan();
       const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
       if (record === undefined) throw new Error('fixture vault has no Work item');
+      // Two headings under the title, so the page draws its outline.
+      fs().set(record.path, `${fs().get(record.path)}\n## First\n\nOne.\n\n## Second\n\nTwo.\n`);
+      await useVaultStore.getState().rescan();
       const { rerender } = render(
         <DocPage selection={{ kind: 'doc', path: record.path, tab: 'brief' }} />,
       );
-      // The side panel's outline placeholder renders exactly while the live
-      // editor is null — wait for onReady to clear it.
-      await waitFor(() => expect(screen.queryByTestId('outline-loading')).toBeNull(), {
-        timeout: 5_000,
-      });
+      // The page's outline draws exactly while the page holds a live editor
+      // — wait for onReady to bring it.
+      await screen.findByTestId('doc-outline', undefined, { timeout: 5_000 });
       // Both tabs render the same MOUNTED editor (one key), so the switch
       // re-fires no onReady — a reset keyed on the tab id would null the
-      // editor here and strand the outline on its placeholder for good.
+      // editor here and take the outline away for good.
       rerender(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'build' }} />);
       expect(screen.getByTestId('record-tab-build').getAttribute('aria-selected')).toBe('true');
-      expect(screen.queryByTestId('outline-loading')).toBeNull();
+      expect(screen.getByTestId('doc-outline')).toBeTruthy();
     });
 
     it('a stale selection.tab falls back to the first tab (M44.5)', async () => {
@@ -299,9 +327,8 @@ describe('DocPage', () => {
     const TYPE_DOC = 'types/work-item.md';
 
     // The record-tabs idiom above: splice frontmatter into the Type doc at the
-    // closing fence, rescan, pick a Work item. The splice lands right after
-    // the `fields:` mapping, so a two-space-indented first line can grow the
-    // roster before the top-level keys start.
+    // closing fence, rescan, pick a Work item. Only top-level keys belong
+    // in this splice; field additions must target the fields mapping itself.
     //
     // M45.2 Task 6 (2026-08-28 plan): the golden corpus gave Work item a real
     // `layout:`, and these cases stage their OWN — so the corpus block is
@@ -335,9 +362,11 @@ describe('DocPage', () => {
       expect(screen.getByTestId('heading-strip')).toBeTruthy();
       expect(screen.queryByTestId('page-properties')).toBeNull();
       fireEvent.click(screen.getByTestId('view-details-toggle'));
-      expect(screen.getByTestId('page-properties')).toBeTruthy();
+      const manager = screen.getByTestId('page-properties');
+      expect(manager.hidden).toBe(false);
       fireEvent.click(screen.getByTestId('view-details-toggle'));
-      expect(screen.queryByTestId('page-properties')).toBeNull();
+      expect(screen.getByTestId('page-properties')).toBe(manager);
+      expect(manager.hidden).toBe(true);
     });
 
     it('the strip and its toggle stand on a sections tab as well', async () => {
@@ -357,12 +386,15 @@ describe('DocPage', () => {
       expect(screen.getByTestId('page-properties')).toBeTruthy();
     });
 
-    it('no layout → no strip, and the stack renders exactly as today', async () => {
+    it('no layout opens on a summary with the full manager one action away', async () => {
       // M45.2 Task 6 (2026-08-28 plan): the corpus doc carries a layout now,
       // so this case stages its no-layout baseline explicitly.
       const record = await setTypeFrontmatter('');
       render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
       expect(screen.queryByTestId('heading-strip')).toBeNull();
+      expect(screen.getByTestId('record-summary')).toBeTruthy();
+      expect(screen.queryByTestId('page-properties')).toBeNull();
+      fireEvent.click(screen.getByTestId('record-properties-toggle'));
       expect(screen.getByTestId('page-properties')).toBeTruthy();
       expect(screen.queryByTestId('view-details-toggle')).toBeNull();
     });
@@ -387,9 +419,13 @@ describe('DocPage', () => {
     // despite `detailsShown` never being touched, or the record's properties
     // are stranded behind a strip that is not on screen.
     it('a strip that folds to nothing shows the stack untoggled', async () => {
-      const record = await setTypeFrontmatter(
-        '  probe: { kind: text, visibility: hide_when_empty }\nlayout:\n  heading: [probe]\n',
+      fs().set(
+        TYPE_DOC,
+        fs()
+          .get(TYPE_DOC)!
+          .replace('fields:\n', 'fields:\n  probe: { kind: text, visibility: hide_when_empty }\n'),
       );
+      const record = await setTypeFrontmatter('layout:\n  heading: [probe]\n');
       render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
       expect(screen.queryByTestId('heading-strip')).toBeNull();
       expect(screen.queryByTestId('view-details-toggle')).toBeNull();
@@ -438,11 +474,11 @@ describe('DocPage', () => {
     };
 
     // Three sections and a loose remainder, none of them a tab's property:
-    // every one has to stand on every tab. No `heading:` here, so the stack
-    // is not folded behind the strip's toggle — that fold is its own case
-    // below, and it is the ONE gate this slice leaves in place.
+    // every one has to stand on every tab. An authored empty heading keeps
+    // the manager open independently of the new automatic summary default.
     const SECTIONS =
       'layout:\n' +
+      '  heading: []\n' +
       '  groups:\n' +
       '    - { id: planning, name: Planning, fields: [assignee, due] }\n' +
       '    - { id: links, name: Links, fields: [epic, blocked_by] }\n' +
@@ -455,10 +491,9 @@ describe('DocPage', () => {
       '  - { id: items, name: Items, content: view, source: { type: Work item } }\n';
     const stageTabs = () => stage(TABS + SECTIONS);
 
-    // Everything is asserted INSIDE the page stack. The doc side panel
-    // renders a second `DocProperties` holding the same groups, and it is
-    // only off screen here because `docPanelTab` happens to default to
-    // 'outline' — a default this file must not depend on.
+    // Everything is asserted INSIDE the page stack. The doc side panel's
+    // Details render a second `DocProperties` holding the same groups, and
+    // this file opens the panel on Details, so both are on screen here.
     const props = () => within(screen.getByTestId('page-properties'));
     const groupIds = () =>
       props()
@@ -499,19 +534,25 @@ describe('DocPage', () => {
       );
     });
 
-    // The other half of the correction: the tab holds only ITS content, so
-    // the body is the Overview tab's and nobody else's.
-    it('the body editor renders on the overview tab and nowhere else', async () => {
+    // Related content hides prose while retaining the native title and its
+    // editor owner, including undo and any unsaved document draft.
+    it('related tabs retain the document owner while only overview presents its body', async () => {
       const record = await stageTabs();
-      const { unmount } = render(
+      lastEditor.info = null;
+      const currentOwner = () => lastEditor.info?.editor;
+      const { rerender } = render(
         <DocPage selection={{ kind: 'doc', path: record.path, tab: 'spec' }} />,
       );
-      expect(screen.queryByTestId('markdown-editor')).toBeNull();
-      unmount();
-      render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
       await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
         timeout: 5_000,
       });
+      await waitFor(() => expect(lastEditor.info).not.toBeNull());
+      const owner = currentOwner();
+      expect(owner).toBeDefined();
+      expect(screen.queryByTestId('page-body-start')).toBeNull();
+      rerender(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+      await waitFor(() => expect(screen.getByTestId('page-body-start')).toBeTruthy());
+      expect(currentOwner()).toBe(owner);
     });
 
     // The strip's expander is the one thing that still hides the stack, and
@@ -520,7 +561,7 @@ describe('DocPage', () => {
     // a strip that has no way to open.
     it('the strip folds the stack behind its toggle on a view tab too', async () => {
       const record = await stage(
-        TABS + SECTIONS.replace('layout:\n', 'layout:\n  heading: [status]\n'),
+        TABS + SECTIONS.replace('  heading: []\n', '  heading: [status]\n'),
       );
       render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'items' }} />);
       expect(screen.getByTestId('heading-strip')).toBeTruthy();
@@ -531,7 +572,7 @@ describe('DocPage', () => {
   });
 
   // M45.4 — the view swap arm: a record tab backed by a database view. The
-  // tab's CONTENT is the database — no body editor — and a dead pointer
+  // tab's content is the database, with prose hidden, and a dead pointer
   // renders the broken card, never an empty database. M46.1: the record's
   // property stack stands above the strip here as on every tab, so these
   // cases assert the embed and the body, never the stack's absence.
@@ -585,18 +626,24 @@ describe('DocPage', () => {
     it('a view tab shows its database scoped to the host — only the related rows', async () => {
       await setTabs(VIEW_TABS);
       render(<DocPage selection={{ kind: 'doc', path: HOST, tab: 'blocked' }} />);
-      expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
-      // The two items blocked BY this host…
-      expect(screen.getByText('Hold both versions instead of discarding')).toBeTruthy();
-      expect(screen.getByText('Instrument conflict rate separately from sync errors')).toBeTruthy();
+      const embed = screen.getByTestId('view-tab-embed');
+      // The two items blocked BY this host… (the side panel's Details list
+      // them too, as backlinks, so the embed is asked)
+      expect(within(embed).getByText('Hold both versions instead of discarding')).toBeTruthy();
+      expect(
+        within(embed).getByText('Instrument conflict rate separately from sync errors'),
+      ).toBeTruthy();
       // …and not the one blocked by a different record.
-      expect(screen.queryByText('Recover gracefully from the first failed sync')).toBeNull();
+      expect(within(embed).queryByText('Recover gracefully from the first failed sync')).toBeNull();
       expect(screen.getAllByTestId('table-row')).toHaveLength(2);
-      // The tab holds the database and nothing else: no body editor —
-      // `showsEditor` stays false, the M44.5 reset key untouched. The
-      // record's own stack stands above the strip (M46.1), unfolded here
-      // because the corpus layout was stripped.
-      expect(screen.queryByTestId('markdown-editor')).toBeNull();
+      // The same editor owns the visible native title while the database
+      // replaces its body presentation. Metadata remains above the strip.
+      await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+        timeout: 5_000,
+      });
+      expect(screen.queryByTestId('page-body-start')).toBeNull();
+      expect(screen.getByTestId('record-summary')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('record-properties-toggle'));
       expect(screen.getByTestId('page-properties')).toBeTruthy();
     });
 
@@ -630,21 +677,49 @@ describe('DocPage', () => {
     });
   });
 
-  it('the panel toggle hides and shows the side panel', async () => {
+  // Owner, 2026-10-19 — Notion's properties, discussions and updates: one
+  // slot, a button per panel, and the open one's button closes it.
+  it("each panel's button opens it in the one slot, and closes it when it is open", async () => {
     render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
-    expect(screen.getByTestId('doc-side-panel')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Hide panel' }));
-    expect(screen.queryByTestId('doc-side-panel')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Show panel' }));
-    expect(screen.getByTestId('doc-side-panel')).toBeTruthy();
+    const side = () => screen.queryByTestId('doc-side-panel');
+    const button = (name: string) => screen.getByRole('button', { name });
+    expect(side()?.dataset.panel).toBe('details');
+    expect(button('Details').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('doc-page').dataset.panel).toBe('docked');
+    fireEvent.click(button('Details'));
+    expect(side()).toBeNull();
+    expect(useUiStore.getState().docPanelOpen).toBe(false);
+    expect(screen.getByTestId('doc-page').dataset.panel).toBeUndefined();
+    expect(screen.queryByRole('button', { name: 'Close panel' })).toBeNull();
+
+    fireEvent.click(button('Comments'));
+    expect(side()?.dataset.panel).toBe('comments');
+    expect(useUiStore.getState()).toMatchObject({ docPanelOpen: true, docPanel: 'comments' });
+    expect(button('Comments').getAttribute('aria-pressed')).toBe('true');
+    expect(button('Details').getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(button('History'));
+    expect(side()?.dataset.panel).toBe('history');
+    expect(await within(side() as HTMLElement).findByTestId('page-history')).toBeTruthy();
+    fireEvent.click(button('History'));
+    expect(side()).toBeNull();
+
+    // Close, at the panel's edge, closes whichever is open.
+    fireEvent.click(button('Details'));
+    expect(side()?.dataset.panel).toBe('details');
+    fireEvent.click(button('Close panel'));
+    expect(side()).toBeNull();
+    expect(useUiStore.getState().docPanelOpen).toBe(false);
   });
 
-  it('the Links tab lists backlinks from other notes', async () => {
-    useUiStore.setState({ docPanelTab: 'links' });
-    render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
-    // Work items in the fixture vault reference people/docs via wikilinks;
-    // the kickoff doc links to people in its body.
-    await waitFor(() => expect(screen.getByTestId('doc-links')).toBeTruthy());
+  it('the Details panel lists backlinks from other notes', async () => {
+    useUiStore.setState({ docPanel: 'details', inspectorCollapsed: [] });
+    // Work items in the fixture vault reference this decision via wikilinks.
+    const path = 'records/decisions/dec-offline-window-72h.md';
+    render(<DocPage selection={{ kind: 'doc', path }} />);
+    const links = await screen.findByTestId('doc-links');
+    const backlinks = links.querySelector<HTMLElement>('[data-section="backlinks"]');
+    if (backlinks === null) throw new Error('no Backlinks section');
+    expect(within(backlinks).getAllByTestId('doc-link-row').length).toBeGreaterThan(0);
   });
 
   it('falls back gracefully when the doc no longer exists', () => {
@@ -968,7 +1043,7 @@ describe('a page icon and cover (M55.11)', () => {
       history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
-    useUiStore.setState({ docPanelOpen: false, docPanelTab: 'outline' });
+    useUiStore.setState({ docPanelOpen: false, docPanel: 'details' });
   });
   afterEach(cleanup);
 
@@ -1050,18 +1125,25 @@ describe('a comment thread is a place (M70.2b)', () => {
         2,
       ) + '\n',
     );
-    useUiStore.setState({ docPanelOpen: false, docPanelTab: 'outline', toasts: [] });
+    useUiStore.setState({ docPanelOpen: false, docPanel: 'details', toasts: [] });
   });
   afterEach(cleanup);
 
-  it('a deep link opens the panel on Comments and focuses its thread', async () => {
+  it('a deep link opens the Comments panel and focuses its thread', async () => {
     render(<DocPage selection={{ kind: 'doc', path: DOC, thread: THREAD }} />);
     const card = await screen.findByTestId('comment-thread');
     expect(card.dataset.threadId).toBe(THREAD);
     await waitFor(() => expect(card.dataset.focused).toBe('true'));
     expect(useUiStore.getState().docPanelOpen).toBe(true);
-    expect(useUiStore.getState().docPanelTab).toBe('comments');
+    expect(useUiStore.getState().docPanel).toBe('comments');
+    expect(screen.getByTestId('doc-side-panel').dataset.panel).toBe('comments');
+    // The count rides the Comments button in the toolbar.
     expect(screen.getByTestId('doc-panel-comment-count').textContent).toBe('1');
+    expect(
+      screen
+        .getByRole('button', { name: 'Comments' })
+        .contains(screen.getByTestId('doc-panel-comment-count')),
+    ).toBe(true);
   });
 
   // The editor on screen, once the page's mount has said it is ready, with
@@ -1114,7 +1196,7 @@ describe('a comment thread is a place (M70.2b)', () => {
         'That comment is no longer on this page.',
       ]),
     );
-    expect(useUiStore.getState().docPanelTab).toBe('comments');
+    expect(useUiStore.getState().docPanel).toBe('comments');
   });
 });
 
@@ -1132,7 +1214,7 @@ describe('a concept is a page (M50.1)', () => {
     useUiStore.setState({
       docPanelOpen: true,
       conceptPanelOpen: false,
-      conceptPanelTab: 'details',
+      conceptPanel: 'details',
       actorId: 'josef',
     });
   });
@@ -1152,10 +1234,12 @@ describe('a concept is a page (M50.1)', () => {
     const author = screen.getByTestId('review-bar-author');
     expect(author.dataset.author).toBe('agent');
     expect(author.textContent).toContain('Knowledge agent');
-    // The panel opens on the concept's details, with no Info tab.
-    fireEvent.click(screen.getByRole('button', { name: 'Show panel' }));
+    // The panel opens on the concept's details: its provenance, never the
+    // property editor a page's Details hold.
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     expect(screen.getByTestId('knowledge-panel')).toBeTruthy();
-    expect(screen.queryByTestId('doc-panel-tab-info')).toBeNull();
+    expect(screen.getByTestId('doc-side-panel').dataset.panel).toBe('details');
+    expect(screen.queryByTestId('doc-properties')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Playbooks' }));
     expect(useNavStore.getState().selection).toEqual({
       kind: 'knowledge',
@@ -1187,6 +1271,27 @@ describe('a concept is a page (M50.1)', () => {
     expect(items).toEqual(['Ask to revise', 'Show in Knowledge']);
   });
 
+  // M91.14 — the menu's ask is the bar's one Ask: its label shown, its
+  // prompt sent, the concept its subject and its bubble.
+  it('sends the same ask from the page menu as from the review bar', () => {
+    useUiStore.setState({ handoffs: [] });
+    render(<DocPage selection={{ kind: 'doc', path: CONCEPT }} />);
+    fireEvent.click(screen.getByTestId('revise-concept'));
+    const fromBar = useUiStore.getState().handoffs.at(-1);
+    fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Ask to revise' }));
+    const fromMenu = useUiStore.getState().handoffs.at(-1);
+    expect(useUiStore.getState().handoffs).toHaveLength(2);
+    expect(fromMenu).toMatchObject({
+      text: fromBar?.text,
+      subject: CONCEPT,
+      label: 'Ask to revise · Warehouse cutover: go-live and rollback',
+    });
+    expect(fromMenu?.text.split('\n')[0]).toBe(
+      `Revise the knowledge concept at ${CONCEPT} ("Warehouse cutover: go-live and rollback").`,
+    );
+  });
+
   // M55.9, Q17 — a concept is edited in the app or not at all.
   it('offers Open with, but no default editor', () => {
     render(<DocPage selection={{ kind: 'doc', path: CONCEPT }} />);
@@ -1211,9 +1316,9 @@ describe('a concept is a page (M50.1)', () => {
   it("offers Comments in its panel, and the concept's file is untouched", async () => {
     const before = fs().get(CONCEPT);
     render(<DocPage selection={{ kind: 'doc', path: CONCEPT }} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Show panel' }));
-    fireEvent.click(screen.getByTestId('doc-panel-tab-comments'));
-    expect(useUiStore.getState().conceptPanelTab).toBe('comments');
+    fireEvent.click(screen.getByRole('button', { name: 'Comments' }));
+    expect(useUiStore.getState().conceptPanel).toBe('comments');
+    expect(useUiStore.getState().conceptPanelOpen).toBe(true);
     fireEvent.change(await screen.findByTestId('discussion-submit-input'), {
       target: { value: 'Is the rollback rehearsed?' },
     });
@@ -1244,7 +1349,7 @@ describe('an agent is a page (M55.12)', () => {
       history: [navSeed({ kind: 'home' }), navSeed({ kind: 'doc', path: AGENT })],
       historyIndex: 1,
     });
-    useUiStore.setState({ docPanelOpen: false, docPanelTab: 'outline' });
+    useUiStore.setState({ docPanelOpen: false, docPanel: 'details' });
   });
   afterEach(cleanup);
 
@@ -1264,7 +1369,7 @@ describe('an agent is a page (M55.12)', () => {
     expect(screen.getByTestId('agent-dossier')).toBeTruthy();
   });
 
-  it('opens its Runs tab through the selection, and the editor leaves', async () => {
+  it('opens its Runs tab through the selection and retains the document owner', async () => {
     const { rerender } = render(<DocPage selection={{ kind: 'doc', path: AGENT }} />);
     await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
       timeout: 5_000,
@@ -1272,7 +1377,8 @@ describe('an agent is a page (M55.12)', () => {
     fireEvent.click(screen.getByTestId('record-tab-runs'));
     expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: AGENT, tab: 'runs' });
     rerender(<DocPage selection={{ kind: 'doc', path: AGENT, tab: 'runs' }} />);
-    expect(screen.queryByTestId('markdown-editor')).toBeNull();
+    expect(screen.getByTestId('markdown-editor')).toBeTruthy();
+    expect(screen.queryByTestId('page-body-start')).toBeNull();
     expect(await screen.findByTestId('agent-runs')).toBeTruthy();
     // The strip is the app's: nothing to add, rename or delete.
     expect(screen.queryByTestId('new-record-tab')).toBeNull();
@@ -1294,14 +1400,13 @@ describe('an agent is a page (M55.12)', () => {
     expect(screen.getByTestId('open-with-default-editor')).toBeTruthy();
   });
 
-  it('Info is a read-only note, never the generic property editor', () => {
-    useUiStore.setState({ docPanelOpen: true, docPanelTab: 'info' });
+  it('Details hold a read-only note, never the generic property editor', () => {
+    useUiStore.setState({ docPanelOpen: true, docPanel: 'details', inspectorCollapsed: [] });
     render(<DocPage selection={{ kind: 'doc', path: AGENT }} />);
     const info = screen.getByTestId('agent-info');
-    expect(info.textContent).toContain(
-      'Answers to @release-scout; writes as process:release-scout',
-    );
-    expect(info.textContent).toContain('Its settings are this page’s properties');
+    expect(info.textContent).toContain('Handle@release-scout');
+    expect(info.textContent).toContain('Writes asprocess:release-scout');
+    expect(info.title).toBe('Its settings are this page’s properties');
     expect(screen.queryByTestId('doc-properties')).toBeNull();
   });
 

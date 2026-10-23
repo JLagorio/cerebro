@@ -107,6 +107,29 @@ describe('buildSnapshot', () => {
     expect(snap.attachedNotes?.[0].body).toBe('Two tiers, annual only.');
   });
 
+  // M91.17 — a file the person attached is a copy under attachments/, which
+  // the scan never lists: it travels by its vault path and its kind, and
+  // nothing of it is inlined.
+  it('lists attached files by vault path and kind, once each', () => {
+    const snap = buildSnapshot({
+      selection: { kind: 'home' },
+      entries,
+      schema,
+      files: ['attachments/report.pdf', 'attachments/brief.docx', 'attachments/report.pdf'],
+    });
+    expect(snap.attachedFiles).toEqual([
+      { path: 'attachments/report.pdf', kind: 'pdf' },
+      { path: 'attachments/brief.docx', kind: 'document' },
+    ]);
+    // Not a record: nothing resolves it to a note, and no body is guessed.
+    expect(snap.attachedNotes).toBeUndefined();
+  });
+
+  it('says nothing of attached files when there are none', () => {
+    expect(buildSnapshot({ entries, schema, files: [] }).attachedFiles).toBeUndefined();
+    expect(buildSnapshot({ entries, schema }).attachedFiles).toBeUndefined();
+  });
+
   it('does not repeat the active note among the attached ones', () => {
     // The open record is already in the snapshot in full, with its links.
     // Repeating it would spend context saying the same thing twice.

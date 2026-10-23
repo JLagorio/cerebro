@@ -1,25 +1,65 @@
-import { useState, type ReactNode } from 'react';
-import { Icon } from '@/components/ui/Icon';
+import { useState, type ReactNode, type Ref } from 'react';
+import { Badge } from '@/components/ai/Badge';
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockContent,
+  CodeBlockCopyButton,
+  CodeBlockFooter,
+  CodeBlockHeader,
+  CodeBlockTitle,
+  type CodeTheme,
+} from '@/components/ai/CodeBlock';
+import {
+  STEP_STATUS_WORDS,
+  StepExtra,
+  StepIcon,
+  stepTraceStatus,
+  stepWords,
+  type StepState,
+} from '@/components/ai/StepLine';
+import {
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceLine,
+  TraceTitle,
+} from '@/components/ai/Trace';
+import {
+  callSubject,
+  callWords,
+  landedPath,
+  laidOut,
+  payloadPart,
+  stepStateOf,
+  toolPath,
+} from '@/agent/elements/turnTitles';
+import { unwrapToolError } from '@/agent/errorText';
 import type { ToolCall } from '@/agent/types';
 import { toolStatus, type ToolStatus } from '@/agent/transcriptRows';
 import { showsAsChange, toolDisplay, toolIconName, toolRenderer } from '@/engine/tools';
 
+export { formatSize, toolPath } from '@/agent/elements/turnTitles';
+
 /**
- * One thing the agent did (M9.5).
+ * One thing the agent did (M9.5), drawn as the AI elements' Tool (M91.13): a
+ * line that says what the call did, in its state's tense and words, and
+ * opens onto its input and its result.
  *
- * Replaces the 20px chip. The agent has write access to this vault, and the
- * panel's job is to make that legible — `create note · knowledge/x.md` in a
- * pill tells you something happened, not what.
+ * The agent has write access to this vault, and the panel's job is to make
+ * that legible. Consecutive reads fold into one row before they reach a call
+ * (transcriptRows.ts, M56.8); a WRITE keeps its path in view on its line,
+ * because that is the thing you might want to undo. Undo needs git history:
+ * a turn that wrote becomes its own commit (M9.4), which View diff reads. A
+ * vault with no git history has no revert for an agent's write, and an open
+ * write says so (M55.5) rather than leave it implied.
  *
- * Consecutive reads fold into one row before they reach a card
- * (transcriptRows.ts, M56.8); a WRITE card keeps its path visible while
- * collapsed, because that is the thing you might want to undo. Undo needs git
- * history: a turn that wrote becomes its own commit (M9.4), which View diff
- * reads. A vault with no git history has no revert for an agent's write, and
- * an expanded write card says so (M55.5) rather than leave it implied.
+ * Every row keeps the card's test ids and `data-*`, whichever element draws
+ * it (`actionAttributes`): the conversation's specs and its run detail read
+ * them.
  */
 
-/** What an expanded write card says when the vault keeps no git history. */
+/** What an opened write says when the vault keeps no git history. */
 export const NO_REVERT =
   "Cerebro found no git history for this vault, so it can't revert this change.";
 
@@ -40,44 +80,22 @@ export function toolLabel(name: string): string {
   return server === null ? label : `${server} · ${label}`;
 }
 
+/** A state's words, as StepLine says them: the one vocabulary. */
+const said = (state: StepState): string => STEP_STATUS_WORDS[state] ?? '';
+
 /** What an unfinished call on a stopped turn says (M56.8): the turn ended
  * before its result came back, so it may have run all the same. A call a
  * hook deferred (M57.1) is never that: it did not run, and says why
  * (`DEFERRED`). */
-export const INTERRUPTED = 'Interrupted, may have completed';
+export const INTERRUPTED = said('interrupted');
 
 /** What a deferred call says, by its status (M57.1). */
 export const DEFERRED: Readonly<Record<'waiting' | 'cancelled' | 'not_run' | 'paused', string>> = {
-  waiting: 'Waiting for your answer',
-  cancelled: 'Cancelled: it did not run',
-  not_run: 'Not run: it waited for an answer that never came',
-  paused: 'Paused by a hook outside Cerebro; your next message refuses it',
+  waiting: said('waiting'),
+  cancelled: said('cancelled'),
+  not_run: said('not_run'),
+  paused: said('paused'),
 };
-
-/** A whole payload's size, as the cut note names it. */
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} bytes`;
-  const [value, unit] = bytes < 1024 * 1024 ? [bytes / 1024, 'KB'] : [bytes / 1024 / 1024, 'MB'];
-  return `${Number(value.toFixed(1))} ${unit}`;
-}
-
-/** What a card shows of one part: the whole when a payload carried it, else
- * the preview; and the note when the 256 KiB cap cut even the whole. */
-function partOf(
-  preview: string | null,
-  whole: string | undefined,
-  truncated: boolean | undefined,
-  bytes: number | undefined,
-): { text: string | null; cut: string | null } {
-  if (whole === undefined) return { text: preview, cut: null };
-  return {
-    text: whole,
-    cut:
-      truncated === true && bytes !== undefined
-        ? `Showing the first 256 KB of ${formatSize(bytes)}.`
-        : null,
-  };
-}
 
 /** Manifest icons for local calls, a connector plug for foreign calls. */
 export const toolIcon = toolIconName;
@@ -86,61 +104,115 @@ export const toolIcon = toolIconName;
  * its path stays visible while collapsed and it offers a diff. */
 export const isWrite = showsAsChange;
 
-/** The path a tool touched, for the collapsed line. */
-export function toolPath(input: string | null): string | null {
-  if (input === null || input.trim() === '') return null;
-  try {
-    const parsed: unknown = JSON.parse(input);
-    if (typeof parsed !== 'object' || parsed === null) return null;
-    const record = parsed as Record<string, unknown>;
-    for (const key of ['path', 'file_path', 'slug', 'to', 'folder', 'query', 'pattern']) {
-      const value = record[key];
-      if (typeof value === 'string' && value !== '') return value;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-/** A successful checked change can land beside a taken name. Its structured
- * reply is authoritative for Open; a failed or pending call has no landing. */
-function landedPath(tool: ToolCall): string | null {
-  if (!tool.done || tool.failed || toolRenderer(tool.name) !== 'change') return null;
-  try {
-    const value: unknown = JSON.parse(tool.payload?.output ?? tool.output ?? 'null');
-    if (
-      typeof value === 'object' &&
-      value !== null &&
-      'path' in value &&
-      typeof value.path === 'string' &&
-      value.path !== ''
-    )
-      return value.path;
-  } catch {
-    /* Older text replies keep the input target. */
-  }
-  return null;
+/**
+ * The card's test ids and facts, on the root of whichever element draws a
+ * call: `action-card`, its tool and its call's id (what a rail row jumps to,
+ * M92.4), whether it is a connector's, whether it writes, whether it failed,
+ * its renderer and its status.
+ */
+export function actionAttributes(tool: ToolCall, status: ToolStatus) {
+  const { server } = toolDisplay(tool.name);
+  return {
+    'data-testid': 'action-card',
+    'data-tool': tool.name,
+    'data-tool-id': tool.id,
+    'data-external': server !== null ? 'true' : undefined,
+    'data-server': server ?? undefined,
+    'data-write': isWrite(tool.name) ? 'true' : 'false',
+    'data-failed': tool.failed ? 'true' : 'false',
+    'data-renderer': toolRenderer(tool.name),
+    'data-status': status,
+  };
 }
 
-/** Pretty-print JSON input; fall back to the raw string when it isn't JSON. */
-function formatInput(input: string): string {
-  try {
-    return JSON.stringify(JSON.parse(input), null, 2);
-  } catch {
-    return input;
-  }
+/** The states whose sentence is drawn under the line as well as read. */
+const NOTED: ReadonlySet<StepState> = new Set<StepState>([
+  'interrupted',
+  'waiting',
+  'cancelled',
+  'not_run',
+  'paused',
+]);
+
+/** What a call was aimed at, on its line: the mono face, a size under the
+ * title's, and a write's in the brand ink, since it is what you might undo. */
+export function CallTarget({ text, write = false }: { text: string; write?: boolean }) {
+  return (
+    <span
+      className={`text-2xs [font-family:var(--font-mono)] ${write ? 'text-cortex-700' : 'text-n-500'}`}
+    >
+      {text}
+    </span>
+  );
 }
 
-const STATUS_ICON: Record<ToolStatus, { name: string; color: string }> = {
-  running: { name: 'loader', color: 'var(--n-400)' },
-  done: { name: 'circle-check', color: 'var(--success-600)' },
-  failed: { name: 'circle-x', color: 'var(--danger-500)' },
-  interrupted: { name: 'circle-alert', color: 'var(--warn-600)' },
-  waiting: { name: 'clock', color: 'var(--cortex-600)' },
-  cancelled: { name: 'circle-x', color: 'var(--n-400)' },
-  not_run: { name: 'circle-minus', color: 'var(--n-400)' },
-  paused: { name: 'circle-alert', color: 'var(--warn-600)' },
-};
+/** A button under an opened call. */
+const ACTION =
+  'motion-hover rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-metadata text-n-600 hover:border-n-400';
+
+/** Past this many characters a block is drawn plain: highlighting a whole
+ * 256 KB payload would hold the panel up for nothing anyone reads (the Tool
+ * element's limit). */
+const HIGHLIGHT_LIMIT = 20_000;
+
+/** A block's code: JSON highlighted for the panel's theme, anything else
+ * plain. */
+function CallCode({ text, theme, testId }: { text: string; theme?: CodeTheme; testId: string }) {
+  const code = laidOut(text);
+  if (code.json && theme !== undefined && code.text.length <= HIGHLIGHT_LIMIT) {
+    return (
+      <CodeBlockContent
+        wrap
+        data-testid={testId}
+        className="cb-ai-step-code"
+        code={code.text}
+        language="json"
+        theme={theme}
+      />
+    );
+  }
+  return (
+    <CodeBlockContent wrap data-testid={testId} className="cb-ai-step-code">
+      {code.text}
+    </CodeBlockContent>
+  );
+}
+
+/** A call's input or its result, its copy button in its header. */
+function CallBlock({
+  kind,
+  text,
+  cut,
+  failed = false,
+  theme,
+}: {
+  kind: 'input' | 'output';
+  text: string;
+  cut: string | null;
+  failed?: boolean;
+  theme?: CodeTheme;
+}) {
+  const title = kind === 'input' ? 'Input' : failed ? 'Error' : 'Result';
+  return (
+    <CodeBlock
+      size="sm"
+      variant={failed ? 'destructive' : 'default'}
+      data-slot={kind === 'input' ? 'tool-input' : 'tool-output'}
+    >
+      <CodeBlockHeader>
+        <CodeBlockTitle>{title}</CodeBlockTitle>
+        <CodeBlockActions>
+          <CodeBlockCopyButton
+            value={laidOut(text).text}
+            label={`Copy the ${title.toLowerCase()}`}
+          />
+        </CodeBlockActions>
+      </CodeBlockHeader>
+      <CallCode text={text} theme={theme} testId={`action-${kind}`} />
+      {cut !== null && <CodeBlockFooter data-testid="action-cut">{cut}</CodeBlockFooter>}
+    </CodeBlock>
+  );
+}
 
 export function AiActionCard({
   tool,
@@ -149,8 +221,12 @@ export function AiActionCard({
   history,
   status,
   summary,
+  theme,
   children,
+  ref,
 }: {
+  /** The card's root, for a renderer that brings its row into view. */
+  ref?: Ref<HTMLDivElement>;
   tool: ToolCall;
   onOpenPath: (path: string) => void;
   /** M9.4 present: review what this write changed. */
@@ -160,20 +236,29 @@ export function AiActionCard({
   /** The row's status (M56.8, transcriptRows.ts). Absent, it is read off the
    * call alone, which cannot tell a running call from an interrupted one. */
   status?: ToolStatus;
-  /** What the collapsed line says in place of the tool's name and path: a
-   * renderer's own words ("Handed to release-scout"). */
+  /** What the line says in place of the call's own words and its target: a
+   * renderer's own words ("Committed 3 proposals"). */
   summary?: ReactNode;
+  /** Highlight a JSON input or result for this theme; left out, plain. */
+  theme?: CodeTheme;
   /** A renderer's own line under the card's, shown collapsed too. */
   children?: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
   const display = toolDisplay(tool.name);
   const path = landedPath(tool) ?? toolPath(tool.input);
+  const subject = callSubject(tool);
   const write = isWrite(tool.name);
   const state = status ?? toolStatus(tool, !tool.done);
+  const step = stepStateOf(tool, state);
   const payload = tool.payload;
-  const input = partOf(tool.input, payload?.input, payload?.inputTruncated, payload?.inputBytes);
-  const output = partOf(
+  const input = payloadPart(
+    tool.input,
+    payload?.input,
+    payload?.inputTruncated,
+    payload?.inputBytes,
+  );
+  const output = payloadPart(
     tool.output,
     payload?.output,
     payload?.outputTruncated,
@@ -181,157 +266,100 @@ export function AiActionCard({
   );
   const hasDetail = input.text !== null || output.text !== null;
   const noRevert = write && history === 'none' && !tool.failed;
-  const icon = STATUS_ICON[state];
+  const words = summary === undefined ? callWords(tool, step) : null;
+  const title = words === null ? summary : words.title;
+  const spoken = stepWords(step, words?.statusText, title);
 
-  return (
-    <div
-      data-testid="action-card"
-      data-tool={tool.name}
-      data-external={display.server !== null ? 'true' : undefined}
-      data-server={display.server ?? undefined}
-      data-write={write ? 'true' : 'false'}
-      data-failed={tool.failed ? 'true' : 'false'}
-      data-renderer={toolRenderer(tool.name)}
-      data-status={state}
-      className={[
-        'overflow-hidden rounded-lg border text-xs',
-        tool.failed
-          ? 'border-danger-200 bg-danger-50'
-          : write
-            ? 'border-cortex-200 bg-cortex-50'
-            : 'border-n-200 bg-n-25',
-      ].join(' ')}
-    >
-      <button
-        type="button"
-        disabled={!hasDetail}
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-1.5 border-0 bg-transparent px-2 py-1.5 text-left disabled:cursor-default"
-      >
-        {/* M15: the loader actually turns. A static partial circle made a
-            running tool indistinguishable from a hung one. M56.8: only while
-            its turn runs; an unfinished call on a stopped turn reads
-            interrupted and stops spinning, live after a stop and after a
-            reload alike. */}
-        <span className={state === 'running' ? 'inline-flex animate-spin' : 'inline-flex'}>
-          <Icon name={icon.name} size={11} color={icon.color} />
-        </span>
-        <Icon name={toolIcon(tool.name)} size={11} color="var(--n-500)" />
-        {summary !== undefined ? (
-          <span className="min-w-0 truncate font-medium text-n-700">{summary}</span>
-        ) : (
-          <span className="flex-none font-medium text-n-700">{display.label}</span>
-        )}
+  const head = (
+    <span data-slot="step-head" data-status={step} className="cb-ai-step-head">
+      <TraceLine status={stepTraceStatus(step)} statusText={spoken}>
+        <StepIcon state={step} icon={toolIcon(tool.name)} />
+        <TraceTitle>
+          {title}
+          {/* A write keeps its path visible on its line — it is the thing
+              you might want to undo. */}
+          {summary === undefined && subject !== null && (
+            <>
+              {' '}
+              <CallTarget text={subject} write={write} />
+            </>
+          )}
+        </TraceTitle>
         {display.server !== null && (
-          <span
+          <Badge
+            variant="outline"
             data-testid="action-server"
             title={`Ran on the ${display.server} connector, outside this vault`}
-            className="min-w-0 truncate rounded-sm border border-n-200 px-1 text-2xs text-n-500"
           >
             {display.server}
-          </span>
+          </Badge>
         )}
-        {/* A write keeps its path visible collapsed — it is the thing you
-            might want to undo. */}
-        {summary === undefined && path !== null && (
-          <span
-            className={[
-              'min-w-0 truncate [font-family:var(--font-mono)] text-2xs',
-              write ? 'text-cortex-700' : 'text-n-400',
-            ].join(' ')}
-          >
-            {path}
-          </span>
-        )}
-        {state === 'interrupted' && (
-          <span data-testid="action-interrupted" className="flex-none text-2xs text-n-500">
-            {INTERRUPTED}
-          </span>
-        )}
-        {(state === 'waiting' ||
-          state === 'cancelled' ||
-          state === 'not_run' ||
-          state === 'paused') && (
-          <span data-testid="action-deferred" className="flex-none text-2xs text-n-500">
-            {DEFERRED[state]}
-          </span>
-        )}
-        <span className="flex-1" />
-        {hasDetail && (
-          <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={11} color="var(--n-400)" />
-        )}
-      </button>
+      </TraceLine>
+      {spoken !== null && NOTED.has(step) && (
+        <span
+          data-testid={step === 'interrupted' ? 'action-interrupted' : 'action-deferred'}
+          aria-hidden="true"
+          className="cb-ai-step-note"
+        >
+          {spoken}
+        </span>
+      )}
+    </span>
+  );
+  const root = { ...actionAttributes(tool, state), className: 'cb-action-card' };
 
-      {children}
-
-      {expanded && (
-        <div className="border-t border-n-200 px-2 py-1.5">
-          {input.text !== null && (
-            <>
-              <div className="pb-0.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
-                Input
-              </div>
-              <pre
-                data-testid="action-input"
-                className="m-0 max-h-[160px] overflow-auto whitespace-pre-wrap break-words [font-family:var(--font-mono)] text-2xs leading-[15px] text-n-600"
-              >
-                {formatInput(input.text)}
-              </pre>
-              {input.cut !== null && (
-                <div data-testid="action-cut" className="pt-0.5 text-2xs text-n-500">
-                  {input.cut}
-                </div>
-              )}
-            </>
-          )}
-          {output.text !== null && (
-            <>
-              <div className="pb-0.5 pt-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
-                {tool.failed ? 'Error' : 'Result'}
-              </div>
-              <pre
-                data-testid="action-output"
-                className="m-0 max-h-[200px] overflow-auto whitespace-pre-wrap break-words [font-family:var(--font-mono)] text-2xs leading-[15px] text-n-700"
-              >
-                {output.text}
-              </pre>
-              {output.cut !== null && (
-                <div data-testid="action-cut" className="pt-0.5 text-2xs text-n-500">
-                  {output.cut}
-                </div>
-              )}
-            </>
-          )}
-          {noRevert && (
-            <div data-testid="action-no-revert" className="pt-1.5 text-2xs text-n-500">
-              {NO_REVERT}
-            </div>
-          )}
-          {path !== null && (
-            <div className="flex gap-1.5 pt-1.5">
+  if (!hasDetail) {
+    return (
+      <div {...root} ref={ref} className="cb-action-card cb-ai-step">
+        {head}
+        <StepExtra>{children}</StepExtra>
+      </div>
+    );
+  }
+  return (
+    <TraceCollapsible {...root} ref={ref} open={open} onOpenChange={setOpen}>
+      <TraceCollapsibleTrigger>{head}</TraceCollapsibleTrigger>
+      <StepExtra>{children}</StepExtra>
+      <TraceCollapsibleContent className="cb-ai-step-detail">
+        {input.text !== null && (
+          <CallBlock kind="input" text={input.text} cut={input.cut} theme={theme} />
+        )}
+        {output.text !== null && (
+          <CallBlock
+            kind="output"
+            // A refused call's words come wrapped in Claude Code's
+            // `<tool_use_error>` tags: the words are the error.
+            text={tool.failed ? unwrapToolError(output.text).trim() : output.text}
+            cut={output.cut}
+            failed={tool.failed}
+            theme={theme}
+          />
+        )}
+        {noRevert && (
+          <p data-testid="action-no-revert" className="cb-ai-step-quiet">
+            {NO_REVERT}
+          </p>
+        )}
+        {path !== null && (
+          <div className="cb-ai-step-actions">
+            <button type="button" onClick={() => onOpenPath(path)} className={ACTION}>
+              Open
+            </button>
+            {/* Only for writes, and only when there is a history to diff
+                against — the payoff for having built M9.4 first. */}
+            {write && onViewDiff !== undefined && history !== 'none' && (
               <button
                 type="button"
-                onClick={() => onOpenPath(path)}
-                className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs text-n-600 hover:border-n-400"
+                data-testid="action-view-diff"
+                onClick={() => onViewDiff(path)}
+                className={ACTION}
               >
-                Open
+                View diff
               </button>
-              {/* Only for writes, and only when there is a history to diff
-                  against — the payoff for having built M9.4 first. */}
-              {write && onViewDiff !== undefined && history !== 'none' && (
-                <button
-                  type="button"
-                  data-testid="action-view-diff"
-                  onClick={() => onViewDiff(path)}
-                  className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs text-n-600 hover:border-n-400"
-                >
-                  View diff
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+            )}
+          </div>
+        )}
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
   );
 }

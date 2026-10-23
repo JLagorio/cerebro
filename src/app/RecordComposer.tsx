@@ -1,5 +1,5 @@
 import { keysText } from '@/components/ui/Keycaps';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
@@ -37,6 +37,9 @@ export function RecordComposer({
     .filter((type) => !isReservedTypeName(type))
     .sort((a, b) => a.localeCompare(b));
   const [type, setType] = useState(types[0] ?? '');
+  // What create() reads, like valuesRef: with the database list open, Mod+Enter
+  // picks a row and reaches create() in the same tick, before `type` re-renders.
+  const typeRef = useRef(type);
   const [title, setTitle] = useState(defaultTitle);
   const [values, setValues] = useState(() => initialValues(type, schema));
   const valuesRef = useRef(values);
@@ -48,6 +51,7 @@ export function RecordComposer({
   const mounted = useRef(true);
   const openedVault = useRef(vault);
   const titleBox = useRef<HTMLLabelElement>(null);
+  const databaseId = useId();
   const refocus = useRef(false);
   const content = useContentSearch(vault, title, type !== '');
   const similar = content.status === 'ready' ? pickSimilar(content.result, type, entries) : [];
@@ -76,6 +80,7 @@ export function RecordComposer({
     setError(null);
   };
   const changeType = (next: string) => {
+    typeRef.current = next;
     setType(next);
     valuesRef.current = initialValues(next, schema);
     setValues(valuesRef.current);
@@ -93,9 +98,10 @@ export function RecordComposer({
       setError('Give it a title');
       return;
     }
-    if (type === '' || !types.includes(type)) return;
-    const target = createTarget(type, { entries, schema });
-    const draft = draftFrontmatter(target.frontmatter, valuesRef.current, type, schema);
+    const chosen = typeRef.current;
+    if (chosen === '' || !types.includes(chosen)) return;
+    const target = createTarget(chosen, { entries, schema });
+    const draft = draftFrontmatter(target.frontmatter, valuesRef.current, chosen, schema);
     if (draft.problems.length > 0) {
       setError(draft.problems.join('. '));
       return;
@@ -180,22 +186,23 @@ export function RecordComposer({
               }}
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-n-600">
-            Database
+          <div className="flex flex-col gap-1 text-xs text-n-600">
+            <label htmlFor={databaseId}>Database</label>
             <Select
+              id={databaseId}
               testId="composer-database"
               value={type}
               disabled={submitting}
               options={types.map((name) => ({ value: name, label: name }))}
               width="100%"
-              onChange={(event) => changeType(event.target.value)}
+              onChange={changeType}
             />
             {types.length === 0 && (
               <span className="text-2xs text-n-500">
                 No databases yet — create one from the Databases section of the sidebar first.
               </span>
             )}
-          </label>
+          </div>
           <fieldset disabled={submitting} className="m-0 min-w-0 border-0 p-0">
             <HeadingProperties
               key={type}

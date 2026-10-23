@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { boot, readMockFile, openDestination, showPages } from './boot';
+import { boot, readMockFile, openDestination, showPageFolders } from './boot';
 
 /**
  * Sub-pages (M55.13). "Add sub-page" on a plain page moves it into a folder
@@ -36,7 +36,7 @@ const treeRow = (page: Page, path: string): Locator =>
 
 /** Open a folder in the Pages tree when it is folded. */
 async function unfold(page: Page, name: string) {
-  await showPages(page);
+  await showPageFolders(page);
   const folder = page.getByTestId('file-tree').getByTestId('tree-folder').filter({ hasText: name });
   if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click();
 }
@@ -116,7 +116,7 @@ test('Add sub-page grows a page by rename, lists the child everywhere, and a dro
   // -- Home and back: both pages read the same from the tree ---------------
   await openDestination(page, 'Home');
   await expect(page.getByTestId('doc-page')).toHaveCount(0);
-  await showPages(page);
+  await showPageFolders(page);
   await page
     .getByTestId('file-tree')
     .getByTestId('tree-doc')

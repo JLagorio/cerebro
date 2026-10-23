@@ -1,3 +1,4 @@
+import { StateMessage } from '@/components/ui/StateMessage';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import type { FileText } from '@/engine/roots';
@@ -100,7 +101,7 @@ export function FileViewer({
   }, [rootId, path, key]);
   let body;
   if (read.key !== key || read.state === 'loading')
-    body = <div data-testid="viewer-loading" aria-label="Loading file" />;
+    body = <StateMessage state="loading" title="Reading file…" testId="viewer-loading" />;
   else if (read.state === 'missing')
     body = (
       <div data-testid="viewer-not-found" className="p-8">
@@ -144,7 +145,7 @@ export function FileViewer({
       content = <MediaViewer key={key} rootId={rootId} path={path} probe={probe} />;
     else if (viewer === 'pdf')
       content = (
-        <Suspense fallback={<p>Opening PDF…</p>}>
+        <Suspense fallback={<StateMessage state="loading" title="Opening PDF…" />}>
           <PdfViewer key={key} rootId={rootId} path={path} probe={probe} />
         </Suspense>
       );

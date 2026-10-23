@@ -18,9 +18,24 @@ test('imports quoted CSV into a database in one batch and removes it with one Un
     .setInputFiles({ name: 'books.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
   const dialog = page.getByRole('dialog', { name: 'Import CSV' });
   await expect(dialog.getByRole('textbox', { name: 'Database name' })).toHaveValue('Books');
-  await expect(dialog.getByRole('combobox', { name: 'Kind for Notes' })).toHaveValue('text');
-  await expect(dialog.getByRole('combobox', { name: 'Kind for Pages' })).toHaveValue('number');
-  await expect(dialog.getByRole('combobox', { name: 'Kind for Read' })).toHaveValue('checkbox');
+  await expect(dialog.getByRole('button', { name: 'Kind for Notes' })).toHaveAttribute(
+    'data-value',
+    'text',
+  );
+  const pages = dialog.getByRole('button', { name: 'Kind for Pages' });
+  await expect(pages).toHaveAttribute('data-value', 'number');
+  await expect(dialog.getByRole('button', { name: 'Kind for Read' })).toHaveAttribute(
+    'data-value',
+    'checkbox',
+  );
+  // The kinds list opens over the dialog, and Escape closes the list alone.
+  await pages.click();
+  const kinds = page.locator(`[id="${await pages.getAttribute('aria-controls')}"]`);
+  await expect(kinds.getByRole('option')).toHaveText(['Number', 'Text']);
+  await page.keyboard.press('Escape');
+  await expect(kinds).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(pages).toBeFocused();
   await expect(dialog.getByRole('status')).toHaveText('3 records');
   await page.screenshot({
     path: '/private/tmp/cerebro-csv-preview.png',

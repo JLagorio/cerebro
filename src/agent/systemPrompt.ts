@@ -15,6 +15,7 @@
  * rule, and get_vault_context ends with the same words.
  */
 import SERVER_INSTRUCTIONS from '../../shared/prompt/server-instructions.md?raw';
+import { kindFor } from '@/engine/fileKinds';
 import { skillIndex, type SkillRef } from '@/engine/skills';
 import { parseIssuePrefixes, SOURCES_DIR } from '@/engine/ingest';
 import { editsNotes, holds, type PromptGrant } from '@/engine/toolGrant';
@@ -29,6 +30,9 @@ export interface SystemPromptOptions {
   /** What the run holds (M54.7). Required: a prompt composed without one
    * could only guess which tools to name. */
   grant: PromptGrant;
+  /** Vault paths of the files the person attached (M91.17), which the
+   * context snapshot lists by path and kind. */
+  attachments?: readonly string[];
 }
 
 /** One line of the system prompt (M54.7). */
@@ -239,6 +243,10 @@ export function buildSystemPrompt(
   const skillLine = skillIndex(options.skills ?? [], grant);
   if (skillLine !== null) lines.push(skillLine);
 
+  for (const fragment of attachmentFragments(options.attachments ?? [], grant)) {
+    lines.push(...say(fragment));
+  }
+
   const where = describeSelection(selection);
   if (where !== null) lines.push(`The user is currently looking at ${where}.`);
   return lines.join('\n');
@@ -258,6 +266,85 @@ function toolsSentence(grant: PromptGrant): string[] {
     clauses.push('the write tools to change things');
   }
   return clauses.length === 0 ? [] : [`Use the cerebro MCP tools: ${series(clauses)}.`];
+}
+
+/** Claude Code's own reader, by the name its tool answers to. */
+const CLI_READ = 'Read';
+
+/** The extractors read_document opens: the Office rows, which files/read.rs
+ * hands to its Office reader. The PDF row's extractor is the Inbox's own
+ * capture; read_document refuses PDFs and pictures, which Read opens. */
+const OFFICE_EXTRACTORS: ReadonlySet<string> = new Set(['docx', 'pptx', 'xlsx']);
+
+/** The viewers that show a file as text, a picture or a PDF: what Claude
+ * Code's Read opens as well. */
+const READ_VIEWERS: ReadonlySet<string> = new Set(['doc', 'code', 'table', 'image', 'pdf']);
+
+/**
+ * What opens an attached file (M91.17), by its row in the file-kinds table:
+ * read_canvas a board, read_document an Office file, and Claude Code's Read
+ * anything the app shows as text, a picture or a PDF. Null for the rest —
+ * audio, video, archives, a format nothing parses — which no run opens.
+ */
+export function attachmentReader(path: string): string | null {
+  const row = kindFor(path);
+  if (row.kind === 'whiteboard') return 'read_canvas';
+  if (row.extractor !== null && OFFICE_EXTRACTORS.has(row.extractor)) return 'read_document';
+  if (row.kind === 'unknown' || row.kind === 'binary') return null;
+  return READ_VIEWERS.has(row.viewer) ? CLI_READ : null;
+}
+
+/** Does the run hold `reader`: one of cerebro's tools by name, Read as the
+ * grant's `read` says. */
+function holdsReader(grant: PromptGrant, reader: string): boolean {
+  return reader === CLI_READ ? grant.read === true : holds(grant, reader);
+}
+
+const quoted = (paths: readonly string[]) => series(paths.map((path) => `\`${path}\``));
+
+/**
+ * What the run is told about the files the person attached (M91.17): which
+ * reader it holds opens each, a line per reader, and one line for the files
+ * nothing it holds opens, so it says so rather than guessing at them. Each
+ * declares the cerebro tool it names; Read is said only to a run that holds
+ * it, as the web line names WebFetch. Exported for the tests, which hold
+ * every line to what it names.
+ */
+export function attachmentFragments(
+  paths: readonly string[],
+  grant: PromptGrant,
+): readonly Fragment[] {
+  const opened = new Map<string, string[]>();
+  const closed: string[] = [];
+  for (const path of new Set(paths)) {
+    const reader = attachmentReader(path);
+    if (reader !== null && holdsReader(grant, reader)) {
+      opened.set(reader, [...(opened.get(reader) ?? []), path]);
+    } else {
+      closed.push(path);
+    }
+  }
+  const fragments: Fragment[] = [...opened].map(([reader, files]) => {
+    const them = files.length === 1 ? 'it' : 'them';
+    const cli = reader === CLI_READ;
+    return {
+      id: `attached-${reader}`,
+      kind: 'instruction',
+      uses: cli ? [] : [reader],
+      text: `The person attached ${quoted(files)}: open ${them} with ${cli ? 'your Read tool' : reader}.`,
+      ...(cli ? { when: (held: PromptGrant) => held.read === true } : {}),
+    };
+  });
+  if (closed.length > 0) {
+    const one = closed.length === 1;
+    fragments.push({
+      id: 'attached-closed',
+      kind: 'context',
+      uses: [],
+      text: `The person attached ${quoted(closed)}, which you can't open here: nothing this conversation holds reads ${one ? 'it' : 'them'}. If the question needs what ${one ? 'it holds' : 'they hold'}, say so.`,
+    });
+  }
+  return fragments;
 }
 
 /** "a", "a and b", or "a, b, and c". */

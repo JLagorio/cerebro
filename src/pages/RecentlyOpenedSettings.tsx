@@ -38,7 +38,7 @@ export function RecentlyOpenedSettings() {
       data-testid="settings-recently-opened"
     >
       <h2 className="mb-1 text-md font-semibold text-n-900">Recently opened</h2>
-      <p className="mb-4 text-sm leading-[18px] text-n-500">
+      <p className="mb-4 text-ui text-(--text-meta)">
         Pages you open yourself, kept for this vault on this Mac to rank{' '}
         {keycapText('palette.open')} and the pickers. An agent&apos;s opens never count, and nothing
         is written to the vault.
@@ -49,7 +49,7 @@ export function RecentlyOpenedSettings() {
         </p>
       )}
       {rows.length === 0 ? (
-        <p className="m-0 text-sm text-n-500" data-testid="open-log-empty">
+        <p className="m-0 text-ui text-(--text-meta)" data-testid="open-log-empty">
           Nothing opened yet.
         </p>
       ) : (
@@ -65,7 +65,7 @@ export function RecentlyOpenedSettings() {
                   <div className="truncate text-sm font-medium text-n-800">
                     {titles.get(record.path) ?? record.path}
                   </div>
-                  <div className="mt-0.5 truncate text-xs text-n-500">
+                  <div className="mt-0.5 truncate text-xs text-(--text-meta)">
                     <span className="[font-family:var(--font-mono)]">{record.path}</span>
                     {' · '}
                     opened {record.count} {record.count === 1 ? 'time' : 'times'} · last{' '}

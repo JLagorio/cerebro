@@ -8,7 +8,7 @@ import { boot, readMockFile, openAssistantPanel } from './boot';
  * Through the browser-mode mock agent's comment scripts (src/agent/mockAgent.ts),
  * whose calls go through `agentComment`, `agentReply` and `agentResolve` on
  * the mock disk, in Rust's order and words. This reads the mock fs, not the
- * Comments tab: the sidecar is the record, and the page's bytes are the proof
+ * Comments panel: the sidecar is the record, and the page's bytes are the proof
  * nothing else moved.
  */
 

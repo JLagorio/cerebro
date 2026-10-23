@@ -1,0 +1,307 @@
+{
+  "case": "web",
+  "cli_version": "2.1.250",
+  "streams": [
+    {
+      "file": "transcript-web.stream.json",
+      "events": [
+        {
+          "kind": "Init",
+          "session_id": "00000000-0000-4000-8000-000000009300"
+        },
+        {
+          "kind": "ModelChanged",
+          "model": "claude-haiku-4-5-20251001"
+        },
+        {
+          "kind": "Thinking",
+          "message_id": "msg_000000000000000000009301",
+          "text": "",
+          "at": "2026-10-22T12:00:02.000Z"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "WebSearch",
+          "tool_id": "toolu_000000000000000000009301",
+          "input": "{\"query\":\"example docs trace component\"}",
+          "at": "2026-10-22T12:00:02.200Z"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "WebFetch",
+          "tool_id": "toolu_000000000000000000009302",
+          "input": "{\"url\":\"https://example.com/docs/components/trace\",\"prompt\":\"What is the Trace component? Describe it in one sentence.\"}",
+          "at": "2026-10-22T12:00:02.600Z"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009302",
+          "output": "The Trace component is a list of lines, each with an icon, a title and an optional description.",
+          "is_error": false,
+          "at": "2026-10-22T12:00:05.800Z"
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009302",
+          "data": {
+            "type": "web_fetch",
+            "url": "https://example.com/docs/components/trace",
+            "code": 200,
+            "bytes": 55102,
+            "duration_ms": 3151
+          }
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009301",
+          "output": "Web search results for query: \"example docs trace component\"\n\nLinks: [{\"title\":\"Trace - Example Docs\",\"url\":\"https://example.com/docs/components/trace\"},{\"title\":\"Changelog - Example Docs\",\"url\":\"https://example.com/docs/changelog\"}]\n\nBased on the search results, the Trace component draws a list of lines.",
+          "is_error": false,
+          "at": "2026-10-22T12:00:08.500Z"
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009301",
+          "data": {
+            "type": "web_search",
+            "query": "example docs trace component",
+            "results": [
+              {
+                "title": "Trace - Example Docs",
+                "url": "https://example.com/docs/components/trace"
+              },
+              {
+                "title": "Changelog - Example Docs",
+                "url": "https://example.com/docs/changelog"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "Thinking",
+          "message_id": "msg_000000000000000000009302",
+          "text": "",
+          "at": "2026-10-22T12:00:10.000Z"
+        },
+        {
+          "kind": "TextDelta",
+          "text": "The Trace component is a list of lines, each wi"
+        },
+        {
+          "kind": "TextDelta",
+          "text": "th an icon, a title and an optional description."
+        },
+        {
+          "kind": "Text",
+          "message_id": "msg_000000000000000000009302",
+          "text": "The Trace component is a list of lines, each with an icon, a title and an optional description.",
+          "at": "2026-10-22T12:00:10.400Z"
+        },
+        {
+          "kind": "Result",
+          "text": "The Trace component is a list of lines, each with an icon, a title and an optional description.",
+          "session_id": "00000000-0000-4000-8000-000000009300",
+          "duration_ms": 9000
+        },
+        {
+          "kind": "TurnEnded",
+          "stop_reason": "end_turn",
+          "last_uuid": "00000000-0000-4000-8000-000009300107"
+        }
+      ],
+      "classes": {
+        "translated": 15,
+        "ignored": {
+          "a block closing, with nothing new in it": 5,
+          "a block opening; its content follows as deltas, or whole on the assistant line": 5,
+          "a progress word such as requesting; the panel shows its own": 2,
+          "a running estimate of the thinking tokens, sent beside each thinking delta; the result carries the usage": 4,
+          "a thinking block's signature, with nothing to show": 2,
+          "a tool call's input in pieces; the assistant line carries it whole": 2,
+          "the turn's end, with nothing new in it": 2,
+          "the turn's model and opening usage; the assistant line and the result carry both": 2,
+          "the turn's stop reason and running usage; the assistant line and the result carry both": 2
+        },
+        "unclassified": {}
+      }
+    }
+  ],
+  "session": {
+    "file": "transcript-web.session.json",
+    "events": [
+      {
+        "kind": "UserPrompt",
+        "text": "Find the Trace docs and sum the component up in one sentence.",
+        "uuid": "00000000-0000-4000-8000-000009300002"
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "Thinking",
+        "message_id": "msg_000000000000000000009301",
+        "text": "",
+        "at": "2026-10-22T12:00:02.000Z"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "WebSearch",
+        "tool_id": "toolu_000000000000000000009301",
+        "input": "{\"query\":\"example docs trace component\"}",
+        "at": "2026-10-22T12:00:02.200Z"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "WebFetch",
+        "tool_id": "toolu_000000000000000000009302",
+        "input": "{\"url\":\"https://example.com/docs/components/trace\",\"prompt\":\"What is the Trace component? Describe it in one sentence.\"}",
+        "at": "2026-10-22T12:00:02.600Z"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000009302",
+        "output": "The Trace component is a list of lines, each with an icon, a title and an optional description.",
+        "is_error": false,
+        "at": "2026-10-22T12:00:05.800Z"
+      },
+      {
+        "kind": "ToolResult",
+        "tool_id": "toolu_000000000000000000009302",
+        "data": {
+          "type": "web_fetch",
+          "url": "https://example.com/docs/components/trace",
+          "code": 200,
+          "bytes": 55102,
+          "duration_ms": 3151
+        }
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000009301",
+        "output": "Web search results for query: \"example docs trace component\"\n\nLinks: [{\"title\":\"Trace - Example Docs\",\"url\":\"https://example.com/docs/components/trace\"},{\"title\":\"Changelog - Example Docs\",\"url\":\"https://example.com/docs/changelog\"}]\n\nBased on the search results, the Trace component draws a list of lines.",
+        "is_error": false,
+        "at": "2026-10-22T12:00:08.500Z"
+      },
+      {
+        "kind": "ToolResult",
+        "tool_id": "toolu_000000000000000000009301",
+        "data": {
+          "type": "web_search",
+          "query": "example docs trace component",
+          "results": [
+            {
+              "title": "Trace - Example Docs",
+              "url": "https://example.com/docs/components/trace"
+            },
+            {
+              "title": "Changelog - Example Docs",
+              "url": "https://example.com/docs/changelog"
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Thinking",
+        "message_id": "msg_000000000000000000009302",
+        "text": "",
+        "at": "2026-10-22T12:00:10.000Z"
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000009302",
+        "text": "The Trace component is a list of lines, each with an icon, a title and an optional description.",
+        "at": "2026-10-22T12:00:10.400Z"
+      },
+      {
+        "kind": "TurnEnded",
+        "last_uuid": "00000000-0000-4000-8000-000009300107"
+      }
+    ],
+    "classes": {
+      "translated": 8,
+      "ignored": {
+        "a prompt entering or leaving the CLI's queue; the prompt line follows": 2,
+        "the last prompt again, for the CLI's own resume picker": 1
+      },
+      "unclassified": {}
+    }
+  },
+  "content": [
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "Thinking",
+          "text": "",
+          "redacted": false
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "WebSearch",
+          "tool_id": "toolu_000000000000000000009301",
+          "input": "{\"query\":\"example docs trace component\"}"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "WebFetch",
+          "tool_id": "toolu_000000000000000000009302",
+          "input": "{\"url\":\"https://example.com/docs/components/trace\",\"prompt\":\"What is the Trace component? Describe it in one sentence.\"}"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009302",
+          "output": "The Trace component is a list of lines, each with an icon, a title and an optional description.",
+          "is_error": false
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009302",
+          "data": {
+            "type": "web_fetch",
+            "url": "https://example.com/docs/components/trace",
+            "code": 200,
+            "bytes": 55102,
+            "duration_ms": 3151
+          }
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000009301",
+          "output": "Web search results for query: \"example docs trace component\"\n\nLinks: [{\"title\":\"Trace - Example Docs\",\"url\":\"https://example.com/docs/components/trace\"},{\"title\":\"Changelog - Example Docs\",\"url\":\"https://example.com/docs/changelog\"}]\n\nBased on the search results, the Trace component draws a list of lines.",
+          "is_error": false
+        },
+        {
+          "kind": "ToolResult",
+          "tool_id": "toolu_000000000000000000009301",
+          "data": {
+            "type": "web_search",
+            "query": "example docs trace component",
+            "results": [
+              {
+                "title": "Trace - Example Docs",
+                "url": "https://example.com/docs/components/trace"
+              },
+              {
+                "title": "Changelog - Example Docs",
+                "url": "https://example.com/docs/changelog"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "Thinking",
+          "text": "",
+          "redacted": false
+        },
+        {
+          "kind": "Text",
+          "text": "The Trace component is a list of lines, each with an icon, a title and an optional description."
+        },
+        {
+          "kind": "TurnEnded",
+          "last_uuid": "00000000-0000-4000-8000-000009300107"
+        }
+      ]
+    }
+  ]
+}

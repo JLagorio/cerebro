@@ -1,4 +1,5 @@
-import { useLayoutEffect, useState } from 'react';
+import { createElement, useLayoutEffect, useState, type ComponentProps } from 'react';
+import type { EditorReadyInfo } from '@/editor/MarkdownEditor';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -20,6 +21,20 @@ import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
 import { fixtureVault, makeEntry } from '@/test/factories';
+
+const lastEditor = vi.hoisted(() => ({ info: null as EditorReadyInfo | null }));
+vi.mock('@/editor/NoteBodyEditor', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/editor/NoteBodyEditor')>();
+  const Tracked = (props: ComponentProps<typeof mod.NoteBodyEditor>) =>
+    createElement(mod.NoteBodyEditor, {
+      ...props,
+      onReady: (info: EditorReadyInfo) => {
+        lastEditor.info = info;
+        props.onReady?.(info);
+      },
+    });
+  return { ...mod, NoteBodyEditor: Tracked };
+});
 
 vi.mock('@/lib/ipc', () => ({
   listenOsFileDrop: vi.fn().mockResolvedValue(() => {}),
@@ -101,11 +116,12 @@ describe('DetailPanel', () => {
     // Layers are module state; a case that leaves one pushed would make every
     // later Escape assertion pass for the wrong reason.
     resetLayers();
+    lastEditor.info = null;
     useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
     useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
   });
 
-  it('steps j/k through the supplied neighbours, clamps the ends, and leaves title typing alone', () => {
+  it('steps j/k through the supplied neighbours, clamps the ends, and leaves title typing alone', async () => {
     const next = makeEntry({ path: 'next.md', title: 'Next' });
     useVaultStore.setState({ entries: [...fixtureVault(), next] });
     useUiStore.setState({ detailSiblings: [FLD_1, next.path] });
@@ -116,7 +132,7 @@ describe('DetailPanel', () => {
     expect(useUiStore.getState().detailPath).toBe(next.path);
     fireEvent.keyDown(panel, { key: 'j' });
     expect(useUiStore.getState().detailPath).toBe(next.path);
-    const title = screen.getByTestId('detail-title');
+    const title = await screen.findByRole('textbox', { name: 'Document title' });
     title.focus();
     fireEvent.keyDown(title, { key: 'k' });
     expect(useUiStore.getState().detailPath).toBe(next.path);
@@ -133,6 +149,7 @@ describe('DetailPanel', () => {
     const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
     useVaultStore.setState({ patchFrontmatter });
     render(<DetailPanel />);
+    await user.click(screen.getByRole('button', { name: 'Show Status property' }));
     await user.click(screen.getByRole('button', { name: 'Todo' }));
     await user.click(screen.getByRole('option', { name: 'Doing' }));
     expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', {
@@ -142,7 +159,7 @@ describe('DetailPanel', () => {
 
   // M55.11 — the peek wears the page's chrome too: its icon beside the
   // title, its cover as a compact band, and neither as a property row.
-  it("a record's icon shows beside the title, and its cover draws the compact band", () => {
+  it("a record's icon precedes the document title, and its cover draws the compact band", () => {
     const vault = fixtureVault().map((e) =>
       e.path === FLD_1
         ? { ...e, properties: { ...e.properties, icon: '\u{1F680}', cover: 'green' } }
@@ -151,7 +168,10 @@ describe('DetailPanel', () => {
     useVaultStore.setState({ entries: vault });
     render(<DetailPanel />);
     const chrome = screen.getByTestId('page-chrome');
-    expect(chrome.contains(screen.getByTestId('detail-title'))).toBe(true);
+    expect(
+      chrome.compareDocumentPosition(screen.getByRole('heading', { level: 1 })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(screen.getByTestId('page-icon').textContent).toBe('\u{1F680}');
     const band = screen.getByTestId('page-cover');
     expect(band.className).toContain('h-[72px]');
@@ -178,6 +198,7 @@ describe('DetailPanel', () => {
 
   it('shows undeclared frontmatter keys as advisory text', () => {
     render(<DetailPanel />);
+    fireEvent.click(screen.getByTestId('record-properties-toggle'));
     expect(screen.getByText('Channel')).toBeTruthy();
     expect(screen.getByText('field-ops')).toBeTruthy();
   });
@@ -469,17 +490,39 @@ describe('DetailPanel', () => {
     expect(screen.queryByRole('textbox', { name: 'Description' })).toBeNull();
   });
 
-  it('toasts and reverts the title when the H1 rename fails (note 16a)', async () => {
+  it('retains a native title draft when its document save fails', async () => {
     useUiStore.setState({ toasts: [] });
-    vi.mocked(ipc.setNoteTitle).mockRejectedValueOnce(new Error('read-only vault'));
+    vi.mocked(ipc.saveNote).mockRejectedValueOnce(new Error('read-only vault'));
+    vi.mocked(ipc.readNote).mockResolvedValueOnce('# Design first-run flow\n\nBody text\n');
     render(<DetailPanel />);
-    const input = screen.getByLabelText('Title') as HTMLInputElement;
-    fireEvent.change(input, { target: { value: 'Renamed flow' } });
-    fireEvent.blur(input);
-    await waitFor(() => {
-      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain("Couldn't rename item");
+    await waitFor(() => expect(lastEditor.info).not.toBeNull());
+    act(() =>
+      lastEditor.info!.editor.updateBlock(lastEditor.info!.editor.document[0], {
+        content: 'Renamed flow',
+      }),
+    );
+    await act(() => lastEditor.info!.flushPendingSave());
+    expect(screen.getByRole('heading', { name: 'Renamed flow' })).toBeTruthy();
+    expect(
+      useUiStore.getState().toasts.some((t) => t.message.startsWith("Couldn't save page")),
+    ).toBe(true);
+    expect(ipc.setNoteTitle).not.toHaveBeenCalled();
+  });
+
+  it('shows a direct knowledge peek with its frontmatter title and no generic mutation path', async () => {
+    const path = 'knowledge/systems/guarded.md';
+    useVaultStore.setState({
+      entries: [...fixtureVault(), makeEntry({ path, title: 'Guarded concept' })],
     });
-    expect(input.value).toBe('Design first-run flow');
+    useUiStore.setState({ detailPath: path });
+    vi.mocked(ipc.readNote).mockResolvedValueOnce('# Evidence section\n\nGuarded body.\n');
+    render(<DetailPanel />);
+    expect(screen.getByRole('heading', { name: 'Guarded concept' })).toBeTruthy();
+    await waitFor(() => expect(lastEditor.info).not.toBeNull());
+    expect(lastEditor.info!.editor.isEditable).toBe(false);
+    expect(screen.queryByTestId('page-editor-chrome')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add property' })).toBeNull();
+    expect(screen.queryByTestId('doc-title-heading')).toBeNull();
   });
 
   it('toasts when the body cannot be loaded (note 16a guard discipline)', async () => {
@@ -491,88 +534,23 @@ describe('DetailPanel', () => {
     });
   });
 
-  // M1.x stale-body-after-rename, block edition: the editor keeps its
-  // document across a rename (the file path doesn't change) — without the
-  // splice, its next debounced save writes the OLD H1 back over the renamed
-  // file. spliceTitleIntoBlocks unit coverage lives in markdown.test.ts.
-  it('splices the new H1 into the live editor after a rename', async () => {
+  it('owns repeated title edits in the same document and undo history', async () => {
     vi.mocked(ipc.readNote).mockResolvedValueOnce('# Design first-run flow\n\nBody text\n');
     vi.mocked(ipc.scanVault).mockResolvedValue(fixtureVault());
     render(<DetailPanel />);
-    await waitFor(() => expect(screen.getByText('Body text')).toBeTruthy(), { timeout: 5_000 });
-    const input = screen.getByLabelText('Title') as HTMLInputElement;
-    fireEvent.change(input, { target: { value: 'Renamed flow' } });
-    fireEvent.blur(input);
-    // The editor's H1 block now carries the new title...
-    await waitFor(() => {
-      expect(screen.getByTestId('markdown-editor').textContent).toContain('Renamed flow');
-    });
-    // ...and the splice-triggered debounced save writes it to disk.
-    await waitFor(
-      () => {
-        const bodies = vi.mocked(ipc.saveNote).mock.calls.map((c) => c[2]);
-        expect(bodies.some((b) => b.startsWith('# Renamed flow'))).toBe(true);
-      },
-      { timeout: 3_000 },
-    );
-  });
-
-  /**
-   * The SECOND rename must splice too (M45.6 review).
-   *
-   * `entry.title` sat in the editor-handle effect's dependency list, and a
-   * rename changes exactly that and nothing else the panel keys on — the
-   * path does not move (the case above states it: the file is rewritten in
-   * place). So the effect fired, nulled `editorRef.current`, and the
-   * NoteBodyEditor it was pointing at stayed mounted the whole time: nothing
-   * ever handed the handle back. The next rename found null, skipped the
-   * splice, and M1.x came back — the editor's next debounced save writing
-   * the previous H1 over the newly renamed file.
-   *
-   * The fixture has to be able to SEE that: `scanVault` replays whatever
-   * `setNoteTitle` was last given, so the rescan really does change
-   * `entry.title` the way the app does. With a fixture that returns the
-   * original titles forever, the effect never re-fires and this passes
-   * whether or not the bug is present.
-   */
-  it('splices the second rename too — the handle survives the first', async () => {
-    let renamed: string | null = null;
-    vi.mocked(ipc.setNoteTitle).mockImplementation(async (_vault, _path, title) => {
-      renamed = title;
-    });
-    vi.mocked(ipc.scanVault).mockImplementation(async () =>
-      fixtureVault().map((e) =>
-        e.path === 'projects/onboarding/items/fld-1.md' && renamed !== null
-          ? { ...e, title: renamed }
-          : e,
-      ),
-    );
-    vi.mocked(ipc.readNote).mockResolvedValueOnce('# Design first-run flow\n\nBody text\n');
-    render(<DetailPanel />);
-    await waitFor(() => expect(screen.getByText('Body text')).toBeTruthy(), { timeout: 5_000 });
-    const input = screen.getByLabelText('Title') as HTMLInputElement;
-
-    fireEvent.change(input, { target: { value: 'Renamed once' } });
-    fireEvent.blur(input);
-    await waitFor(() =>
-      expect(screen.getByTestId('markdown-editor').textContent).toContain('Renamed once'),
-    );
-    // The precondition, asserted rather than assumed: the rescan really did
-    // change `entry.title`, which is the ONLY input the buggy dependency list
-    // reacted to. Without this the case passes vacuously — a fixture whose
-    // rescan replays the original titles never re-fires the effect, so it
-    // cannot tell a fixed panel from a broken one.
-    await waitFor(() =>
-      expect(useVaultStore.getState().entries.find((e) => e.path === FLD_1)?.title).toBe(
-        'Renamed once',
-      ),
-    );
-
-    fireEvent.change(input, { target: { value: 'Renamed twice' } });
-    fireEvent.blur(input);
-    await waitFor(() =>
-      expect(screen.getByTestId('markdown-editor').textContent).toContain('Renamed twice'),
-    );
+    await waitFor(() => expect(lastEditor.info).not.toBeNull());
+    const info = lastEditor.info!;
+    const titleId = info.editor.document[0].id;
+    act(() => info.editor.updateBlock(titleId, { content: 'Renamed once' }));
+    await act(() => info.flushPendingSave());
+    act(() => info.editor.updateBlock(titleId, { content: 'Renamed twice' }));
+    await act(() => info.flushPendingSave());
+    expect(lastEditor.info).toBe(info);
+    expect(info.editor.document[0].id).toBe(titleId);
+    expect(screen.getByRole('heading', { name: 'Renamed twice' })).toBeTruthy();
+    expect(vi.mocked(ipc.saveNote).mock.calls.at(-1)?.[2]).toContain('# Renamed twice');
+    expect(vi.mocked(ipc.saveNote).mock.calls.at(-1)?.[2]).toContain('Body text');
+    expect(ipc.setNoteTitle).not.toHaveBeenCalled();
   });
 
   // M14.2: which knowledge surface answers is capability-gated — a record the
@@ -699,41 +677,44 @@ describe('DetailPanel', () => {
       render(<DetailPanel />);
       const strip = screen.getByTestId('heading-strip');
       // Between title and properties: the strip FOLLOWS the title input.
-      const title = screen.getByTestId('detail-title');
+      const title = screen.getByRole('heading', { level: 1 });
       expect(title.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       // The stack starts collapsed behind the strip…
-      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Add property' })).toBeNull();
       // …while the body section is untouched by the collapse (M44.1 display
       // config still owns it).
-      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+      expect(screen.getByTestId('page-body-start')).toBeTruthy();
       fireEvent.click(screen.getByTestId('view-details-toggle'));
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
       fireEvent.click(screen.getByTestId('view-details-toggle'));
-      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Add property' })).toBeNull();
     });
 
     it('resets to the collapsed strip when the panel switches records', () => {
       withLayout({ heading: ['status'] });
       render(<DetailPanel />);
       fireEvent.click(screen.getByTestId('view-details-toggle'));
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
       // act: a store write outside any event needs its re-render flushed
       // before the DOM assertion sees it.
       act(() => useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-2.md' }));
-      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Add property' })).toBeNull();
       // …and COMING BACK resets too: the lens forgets a record it left, like
       // RecordProperties' keyed `revealed`. A one-slot {path, shown} cache
       // resurrected A's toggle on A→B→A while A→B(toggled)→A reset —
       // remembering was an accident of whose write survived, not a feature.
       act(() => useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' }));
-      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Add property' })).toBeNull();
     });
 
-    it('no layout → no strip, and the stack renders exactly as today', () => {
+    it('no layout opens on a summary with the full manager one action away', () => {
       render(<DetailPanel />);
       expect(screen.queryByTestId('heading-strip')).toBeNull();
       expect(screen.queryByTestId('view-details-toggle')).toBeNull();
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.getByTestId('record-summary')).toBeTruthy();
+      expect(screen.queryByTestId('page-properties')).toBeNull();
+      fireEvent.click(screen.getByTestId('record-properties-toggle'));
+      expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
     });
 
     // The Task 5 ruling's trap: a heading whose one field is empty under
@@ -746,7 +727,7 @@ describe('DetailPanel', () => {
       });
       render(<DetailPanel />);
       expect(screen.queryByTestId('heading-strip')).toBeNull();
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
     });
   });
 
@@ -780,7 +761,7 @@ describe('DetailPanel', () => {
       render(<DetailPanel />);
       fireEvent.click(screen.getByTestId('record-tab-runs'));
       expect(screen.getByTestId('page-runs')).toBeTruthy();
-      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      expect(screen.queryByTestId('page-body-start')).toBeNull();
     });
 
     it('an Agents tab renders the capability surface in the peek', () => {
@@ -790,15 +771,16 @@ describe('DetailPanel', () => {
       expect(screen.getByTestId('page-agents-unconfigured').textContent).toContain(
         'Work item pages have no relation to Agent',
       );
-      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      expect(screen.queryByTestId('page-body-start')).toBeNull();
     });
 
     it('a type with no saved tabs raises no strip, and the peek is what it was', () => {
       render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-properties-toggle'));
       expect(screen.queryByTestId('record-tabs')).toBeNull();
       // The synthesized Overview drives the content, never a one-tab strip.
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
-      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
+      expect(screen.getByTestId('page-body-start')).toBeTruthy();
     });
 
     it('an untyped note has no tabs at all', () => {
@@ -807,9 +789,10 @@ describe('DetailPanel', () => {
       });
       useUiStore.setState({ detailPath: 'notes/plain.md' });
       render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-properties-toggle'));
       expect(screen.queryByTestId('record-tabs')).toBeNull();
       // …and its properties still render: no tabs is not no record surface.
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
     });
 
     it('saved tabs raise the strip, under the heading strip and over the content', () => {
@@ -817,7 +800,7 @@ describe('DetailPanel', () => {
       render(<DetailPanel />);
       const strip = screen.getByTestId('record-tabs');
       const heading = screen.getByTestId('heading-strip');
-      const body = screen.getByTestId('detail-body-heading');
+      const body = screen.getByTestId('page-body-start');
       expect(
         heading.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
@@ -829,17 +812,19 @@ describe('DetailPanel', () => {
     it('the overview arm is the peek as it was: properties and the body', () => {
       withTabs([OVERVIEW, SPEC]);
       render(<DetailPanel />);
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
-      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('record-properties-toggle'));
+      expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
+      expect(screen.getByTestId('page-body-start')).toBeTruthy();
     });
 
     it('a sections tab is its own free text — the stack stays, the body goes', () => {
       withTabs([SPEC, OVERVIEW]);
       render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-properties-toggle'));
       expect(screen.getByTestId('tab-sections')).toBeTruthy();
       // M46.1: the stack is the RECORD's, so it stands on this tab too.
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
-      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
+      expect(screen.queryByTestId('page-body-start')).toBeNull();
     });
 
     it('a view tab embeds its database in the peek', () => {
@@ -848,10 +833,11 @@ describe('DetailPanel', () => {
         OVERVIEW,
       ]);
       render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-properties-toggle'));
       expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
       expect(screen.getByText('Wire field sync banner')).toBeTruthy();
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
-      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
+      expect(screen.queryByTestId('page-body-start')).toBeNull();
     });
 
     it('a dead source renders the sentence, never an empty database', () => {
@@ -902,12 +888,12 @@ describe('DetailPanel', () => {
       render(<DetailPanel />);
       fireEvent.click(screen.getByTestId('record-tab-spec'));
       expect(screen.getByTestId('tab-sections')).toBeTruthy();
-      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      expect(screen.queryByTestId('page-body-start')).toBeNull();
       // A peek is not a place: the tab is local state, so nothing moved the
       // navigation selection the back button reads.
       expect(useNavStore.getState().selection).toEqual(where);
       fireEvent.click(screen.getByTestId('record-tab-overview'));
-      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+      expect(screen.getByTestId('page-body-start')).toBeTruthy();
     });
 
     it('switching records reopens on the first tab', () => {
@@ -934,6 +920,7 @@ describe('DetailPanel', () => {
     it('a tab deleted under the peek falls back to the first, not to nothing', () => {
       const entries = withTabs([OVERVIEW, SPEC]);
       render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-properties-toggle'));
       fireEvent.click(screen.getByTestId('record-tab-spec'));
       expect(screen.getByTestId('tab-sections')).toBeTruthy();
 
@@ -944,8 +931,8 @@ describe('DetailPanel', () => {
 
       expect(screen.queryByTestId('tab-sections')).toBeNull();
       // Overview's content, not an empty panel: the body and the stack.
-      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.getByTestId('page-body-start')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
       // And the strip says so. This is the assertion that discriminates: a
       // panel that let `activeTab` go null would render no strip at all (the
       // mount is gated on it) while still showing a body, so the two
@@ -953,40 +940,23 @@ describe('DetailPanel', () => {
       expect(screen.getByTestId('record-tab-overview').getAttribute('aria-selected')).toBe('true');
     });
 
-    /**
-     * A tab press must not discard a rename in progress (M45.6 review).
-     *
-     * The panel's title input is state, seeded from `entry.title` by an
-     * effect. That effect used to share a dependency list with the one that
-     * drops the editor handle — and pressing a tab changes `showsBody`, which
-     * the handle effect has to watch. Merged, the two would re-seed the input
-     * from disk truth on every tab press, silently throwing away whatever the
-     * user had typed and not yet committed. Split, only the handle reacts.
-     */
-    it('keeps an uncommitted rename when you press another tab', () => {
+    it('keeps the native title draft and editor owner when you press another tab', async () => {
       withTabs([OVERVIEW, { id: 'props', name: 'Fields', content: 'sections' }]);
+      vi.mocked(ipc.readNote).mockResolvedValueOnce('# Original title\n\nBody text\n');
       render(<DetailPanel />);
-      const input = screen.getByTestId('detail-title') as HTMLInputElement;
-      fireEvent.change(input, { target: { value: 'Half typed' } });
+      await waitFor(() => expect(lastEditor.info).not.toBeNull());
+      const info = lastEditor.info!;
+      act(() => info.editor.updateBlock(info.editor.document[0], { content: 'Half typed' }));
       fireEvent.click(screen.getByTestId('record-tab-props'));
-      // The tab really did change (the body is gone), and the draft survived.
-      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
-      expect((screen.getByTestId('detail-title') as HTMLInputElement).value).toBe('Half typed');
+      expect(screen.queryByTestId('page-body-start')).toBeNull();
+      expect(screen.getByRole('heading', { name: 'Half typed' })).toBeTruthy();
+      expect(lastEditor.info).toBe(info);
+      expect(screen.getByTestId('markdown-editor')).toBeTruthy();
     });
 
-    /**
-     * The peek's chrome holds ONE position, whichever tab is open.
-     *
-     * Two things are pinned here, and they are the same fact. The Overview
-     * tab is the pre-M45.6 panel line for line — the knowledge loop sits
-     * above the Description, where it sat before tabs existed, so growing
-     * tabs moved nothing for the vaults that have none. And on a view tab
-     * the same block sits above the embedded table rather than however many
-     * rows below it, which is what the alternative — hoisting the chrome on
-     * view tabs only — was trying to buy, at the price of chrome that moves
-     * when you press a tab.
-     */
-    it('puts the knowledge block in one place: above the tab’s content, always', () => {
+    // Supporting knowledge follows whichever content the record tab shows;
+    // opening it must no longer push the record body below an action cluster.
+    it('keeps supporting knowledge after the tab content on every tab', () => {
       withTabs([
         OVERVIEW,
         { id: 'items', name: 'Items', content: 'view', source: { type: 'Work item' } },
@@ -994,14 +964,14 @@ describe('DetailPanel', () => {
       render(<DetailPanel />);
       const above = (first: HTMLElement, second: HTMLElement) =>
         Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
-      // Overview: exactly where it was before tabs.
+      // Overview: after the body owner.
       expect(
-        above(screen.getByTestId('detail-knowledge'), screen.getByTestId('detail-body-heading')),
+        above(screen.getByTestId('page-body-start'), screen.getByTestId('detail-knowledge')),
       ).toBe(true);
-      // View: above the table, not buried under its rows.
+      // Related data: still after the content, in the same supporting section.
       fireEvent.click(screen.getByTestId('record-tab-items'));
       expect(
-        above(screen.getByTestId('detail-knowledge'), screen.getByTestId('view-tab-embed')),
+        above(screen.getByTestId('view-tab-embed'), screen.getByTestId('detail-knowledge')),
       ).toBe(true);
     });
 
@@ -1027,13 +997,14 @@ describe('DetailPanel', () => {
       };
       useVaultStore.setState({ entries: [...entries] });
       render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-properties-toggle'));
       const toggle = () => screen.getByTestId('hidden-properties-toggle');
       expect(toggle().getAttribute('aria-expanded')).toBe('false');
       fireEvent.click(toggle());
       expect(toggle().getAttribute('aria-expanded')).toBe('true');
       // A different tab, the same stack: the reveal is still open.
       fireEvent.click(screen.getByTestId('record-tab-props'));
-      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      expect(screen.queryByTestId('page-body-start')).toBeNull();
       expect(toggle().getAttribute('aria-expanded')).toBe('true');
     });
 
@@ -1078,9 +1049,10 @@ describe('DetailPanel', () => {
         content: 'view',
         source: { type: 'Work item' },
       };
-      // No heading here: the strip would fold the stack behind its toggle,
-      // which is its own case below.
+      // An authored empty heading keeps the full manager open. These cases
+      // exercise group placement independently of the automatic summary.
       const SECTIONED = {
+        heading: [],
         groups: [
           { id: 'g-alpha', name: 'Alpha', fields: ['priority'] },
           { id: 'g-beta', name: 'Beta', fields: ['assignee'] },
@@ -1115,11 +1087,11 @@ describe('DetailPanel', () => {
         withTabs([OVERVIEW, SPEC_TAB], SECTIONED);
         render(<DetailPanel />);
         expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
-        expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+        expect(screen.getByTestId('page-body-start')).toBeTruthy();
         fireEvent.click(screen.getByTestId('record-tab-spec'));
         // The body is the Overview tab's alone; the sections are the
         // record's, so they did not move.
-        expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+        expect(screen.queryByTestId('page-body-start')).toBeNull();
         expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
       });
 
@@ -1146,14 +1118,14 @@ describe('DetailPanel', () => {
       useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
     };
 
-    it('shows the Description section by default and drops it on show_body: false', () => {
+    it('shows the document body by default and hides it on show_body: false', () => {
       withDisplay({});
       const { unmount } = render(<DetailPanel />);
-      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+      expect(screen.getByTestId('page-body-start')).toBeTruthy();
       unmount();
       withDisplay({ show_body: false });
       render(<DetailPanel />);
-      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      expect(screen.queryByTestId('page-body-start')).toBeNull();
     });
 
     it('show_file adds a muted path row; absent means none', () => {

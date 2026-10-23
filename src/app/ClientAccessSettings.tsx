@@ -50,7 +50,7 @@ function Snippets({ url, secret }: { url: string | null; secret?: string }) {
           </pre>
         </div>
       ))}
-      <p className="text-xs text-n-500">{CLOUD_HINT}</p>
+      <p className="text-xs text-(--text-meta)">{CLOUD_HINT}</p>
     </div>
   );
 }
@@ -122,7 +122,7 @@ function ClientAccessBody({ vault }: { vault: string | null }) {
   return (
     <section data-testid="client-access" className="mb-6 rounded-xl border border-n-200 p-5">
       <h2 className="mb-1 text-md font-semibold text-n-900">Other apps</h2>
-      <p className="mb-4 text-sm text-n-500">
+      <p className="mb-4 text-ui text-(--text-meta)">
         Let MCP clients on this Mac — Claude Code in a terminal, Cursor and others — use this vault
         through Cerebro&apos;s own tools, under the guards a run has. Each app gets its own token. A
         token reads by default; it writes only in folders you name, and never Agent pages, Type docs
@@ -131,7 +131,7 @@ function ClientAccessBody({ vault }: { vault: string | null }) {
       <div className="flex items-start gap-3">
         <div className="flex-1">
           <div className="text-sm font-medium text-n-800">Let other apps connect</div>
-          <p className="mt-0.5 text-xs text-n-500">
+          <p className="mt-0.5 text-xs text-(--text-meta)">
             Listens on 127.0.0.1 only, while Cerebro is open with this vault. Off by default.
           </p>
         </div>
@@ -164,7 +164,7 @@ function ClientAccessBody({ vault }: { vault: string | null }) {
         </Button>
       </div>
       {store.accessStatus === 'error' ? (
-        <div data-testid="section-unavailable" className="text-xs text-n-500">
+        <div data-testid="section-unavailable" className="text-xs text-(--text-meta)">
           <p>Couldn&apos;t read whether other apps can connect.</p>
           {vault && (
             <Button size="sm" variant="ghost" onClick={() => void store.refresh(vault)}>
@@ -185,18 +185,18 @@ function ClientAccessBody({ vault }: { vault: string | null }) {
       )}
       <div className="my-4 border-t border-n-100 pt-3">
         {!vault ? (
-          <p className="text-sm text-n-500">Open a vault to make a token.</p>
+          <p className="text-ui text-(--text-meta)">Open a vault to make a token.</p>
         ) : store.tokensStatus === 'error' ? (
           <div data-testid="section-unavailable">
-            <p className="text-sm text-n-500">Couldn&apos;t read tokens.</p>
+            <p className="text-ui text-(--text-meta)">Couldn&apos;t read tokens.</p>
             <Button size="sm" variant="ghost" onClick={() => void store.refresh(vault)}>
               Try again
             </Button>
           </div>
         ) : !ready ? (
-          <p className="text-sm text-n-500">Reading tokens…</p>
+          <p className="text-ui text-(--text-meta)">Reading tokens…</p>
         ) : store.tokens.length === 0 ? (
-          <p className="text-sm text-n-500">No app has a token yet.</p>
+          <p className="text-ui text-(--text-meta)">No app has a token yet.</p>
         ) : (
           <ul className="m-0 list-none divide-y divide-n-100 p-0">
             {store.tokens.map((token) => (
@@ -207,19 +207,21 @@ function ClientAccessBody({ vault }: { vault: string | null }) {
               >
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium text-n-800">{token.name}</div>
-                  <div className="font-mono text-2xs text-n-500">client:{token.slug}</div>
+                  <div className="font-mono text-2xs text-(--text-meta)">client:{token.slug}</div>
                   {grantWords(token).map((words) => (
                     <div key={words} className="text-xs text-n-600">
                       {words}
                     </div>
                   ))}
-                  <div className="mt-1 text-2xs text-n-500">
+                  <div className="mt-1 text-2xs text-(--text-meta)">
                     {token.lastUsedAt
                       ? `Last used ${new Date(token.lastUsedAt).toLocaleString()}`
                       : 'Never used'}
                   </div>
                   {!token.currentVault && (
-                    <div className="text-xs text-n-500">For another vault: {token.vaultPath}</div>
+                    <div className="text-xs text-(--text-meta)">
+                      For another vault: {token.vaultPath}
+                    </div>
                   )}
                 </div>
                 <Button
@@ -243,14 +245,14 @@ function ClientAccessBody({ vault }: { vault: string | null }) {
           Make a token
         </Button>
         {ready && store.tokens.length >= CLIENT_TOKEN_CAP && (
-          <p className="mt-2 text-xs text-n-500">{CLIENT_CAP_WORDS}</p>
+          <p className="mt-2 text-xs text-(--text-meta)">{CLIENT_CAP_WORDS}</p>
         )}
       </div>
       <h3 className="text-sm font-medium text-n-800">Connect an app</h3>
       {store.access?.url ? (
         <Snippets url={store.access.url} />
       ) : (
-        <p className="mt-1 text-xs text-n-500">Turn on Let other apps connect first.</p>
+        <p className="mt-1 text-xs text-(--text-meta)">Turn on Let other apps connect first.</p>
       )}
       <Dialog
         open={making}
@@ -269,7 +271,9 @@ function ClientAccessBody({ vault }: { vault: string | null }) {
             onChange={(event) => setName(event.target.value)}
             disabled={store.busy}
           />
-          <div className="text-xs text-n-500">{policy.default.label} is always included.</div>
+          <div className="text-xs text-(--text-meta)">
+            {policy.default.label} is always included.
+          </div>
           {policy.grantable.map((set) => (
             <label key={set.id} className="flex items-start gap-2">
               <input
@@ -286,7 +290,7 @@ function ClientAccessBody({ vault }: { vault: string | null }) {
               />
               <span>
                 <span className="block text-sm font-medium">{set.label}</span>
-                <span className="block text-xs text-n-500">{set.hint}</span>
+                <span className="block text-xs text-(--text-meta)">{set.hint}</span>
               </span>
             </label>
           ))}

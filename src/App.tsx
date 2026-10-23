@@ -166,8 +166,10 @@ function App() {
   const [booted, setBooted] = useState(false);
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   const aiPanelPresentation = useUiStore((s) => s.aiPanelPresentation);
+  const aiPanelMinimized = useUiStore((s) => s.aiPanelMinimized);
   const setAiPanelPresentation = useUiStore((s) => s.setAiPanelPresentation);
   const chatCanvas = aiPanelOpen && aiPanelPresentation === 'canvas';
+  const chatFloating = aiPanelOpen && aiPanelPresentation === 'floating';
   const [assistantNavigationTarget, setAssistantNavigationTarget] = useState<HTMLDivElement | null>(
     null,
   );
@@ -206,10 +208,10 @@ function App() {
   // its tab says so, and closing the record brings it back intact.
   const shell = {
     detail: detailOpen && !chatCanvas,
-    assistant: aiPanelOpen,
+    assistant: aiPanelOpen && !chatFloating,
     collapsed: sidebarCollapsed || narrow,
   };
-  // The rail, once showing, stays below 1094 rather than growing back into a
+  // The rail, once showing, stays below the two-panel threshold rather than growing back into a
   // column as the window shrinks (shellLayout `nextRailLatch`). Adjusted
   // during render, so the classes below never draw a frame of the old value.
   const [railLatched, setRailLatched] = useState(false);
@@ -258,7 +260,7 @@ function App() {
   // `park.floor` picks between them in CSS.
   const drawnFloor = {
     detail: detailOpen && !chatCanvas,
-    assistant: aiPanelOpen && !chatCanvas,
+    assistant: aiPanelOpen && !chatCanvas && !chatFloating,
     assistantWidth: aiWidth,
     pageAside: pageAside && !chatCanvas,
     panes: chatCanvas ? 1 : paneCount,
@@ -273,7 +275,7 @@ function App() {
 
   useEffect(retainOsDropRouter, []);
   // A selected page is the latest navigation intent, including an agent's
-  // open_note and Back/Forward. Dock the same conversation; never remount it.
+  // open_note and Back/Forward. Float the same conversation over it.
   useEffect(
     () =>
       useNavStore.subscribe((state, before) => {
@@ -281,7 +283,7 @@ function App() {
           state.selection !== before.selection &&
           useUiStore.getState().aiPanelPresentation === 'canvas'
         ) {
-          useUiStore.getState().setAiPanelPresentation('panel');
+          useUiStore.getState().setAiPanelPresentation('floating');
         }
       }),
     [],
@@ -326,6 +328,7 @@ function App() {
       <div
         ref={shellRef}
         data-chat-canvas={chatCanvas || undefined}
+        data-chat-floating={chatFloating || undefined}
         className="m71-shell flex h-screen overflow-hidden text-sm leading-5 text-n-900"
       >
         {/* The whole sidebar tree sits between the top of the tab order and the
@@ -339,7 +342,7 @@ function App() {
                   ?.focus()
               : document.getElementById('main')?.focus()
           }
-          className="sr-only rounded-md bg-cortex-500 px-3 py-1.5 text-xs font-medium text-n-0 focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50"
+          className="sr-only rounded-md bg-action-primary px-3 py-1.5 text-ui font-medium text-on-action-primary focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50"
         >
           Skip to content
         </button>
@@ -388,7 +391,7 @@ function App() {
             With multiple panes each frame supplies its own canvas container. */}
           <div
             ref={canvasRowRef}
-            className="@container/canvas flex min-h-0 min-w-0 flex-1 overflow-hidden bg-n-0"
+            className="m91-canvas-row @container/canvas relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-n-0"
           >
             <main
               id="main"
@@ -416,6 +419,7 @@ function App() {
             {(detailOpen || aiPanelOpen) && (
               <div
                 data-testid="right-panel-slot"
+                data-floating={chatFloating || undefined}
                 className="m71-panel-slot flex min-w-0 flex-none overflow-hidden"
                 style={{ maxWidth: `calc(100% - ${CANVAS_MIN_WIDTH}px)` }}
               >
@@ -445,19 +449,25 @@ function App() {
                 {aiPanelOpen && (
                   <div
                     data-testid="ai-panel-frame"
+                    data-presentation={aiPanelPresentation}
+                    data-minimized={(chatFloating && aiPanelMinimized) || undefined}
                     data-parked={parked || undefined}
                     inert={parked}
-                    className={`m71-chat-frame flex min-w-0 flex-none ${park.frame}`}
+                    className={`m71-chat-frame flex min-w-0 flex-none ${chatFloating ? '' : park.frame}`}
                     style={{
-                      maxWidth: detailOpen ? `calc(100% - ${RIGHT_PANEL_MIN_WIDTH}px)` : '100%',
+                      maxWidth: chatFloating
+                        ? undefined
+                        : detailOpen
+                          ? `calc(100% - ${RIGHT_PANEL_MIN_WIDTH}px)`
+                          : '100%',
                     }}
                   >
                     <AiPanel
                       key={vaultPath}
-                      room={rooms?.assistant ?? null}
+                      room={chatFloating ? null : (rooms?.assistant ?? null)}
                       presentation={aiPanelPresentation}
                       onTogglePresentation={() =>
-                        setAiPanelPresentation(chatCanvas ? 'panel' : 'canvas')
+                        setAiPanelPresentation(chatCanvas ? 'floating' : 'canvas')
                       }
                       navigationTarget={chatCanvas ? assistantNavigationTarget : null}
                     />

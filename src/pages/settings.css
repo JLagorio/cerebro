@@ -15,14 +15,14 @@
 }
 .cb-settings-eyebrow {
   margin: 0 0 12px;
-  color: var(--n-500);
-  font-size: 12px;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
   font-weight: 500;
 }
 .cb-settings-nav-group {
   margin: 24px 10px 8px;
-  color: var(--n-500);
-  font-size: 11px;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
   font-weight: 500;
 }
 .cb-settings-nav > div:first-child .cb-settings-nav-group {
@@ -33,8 +33,8 @@
   align-items: center;
   width: 100%;
   gap: 10px;
-  min-height: 36px;
-  padding: 8px 10px;
+  min-height: var(--nav-row-h);
+  padding: 6px 10px;
   border: 0;
   border-radius: var(--r-md);
   background: transparent;
@@ -46,7 +46,7 @@
 }
 .cb-settings-nav button svg {
   flex: none;
-  color: var(--n-500);
+  color: var(--text-meta);
 }
 .cb-settings-nav button:hover {
   background: var(--n-100);
@@ -101,10 +101,6 @@
   /* The selected detail's h1 already supplies this same heading. */
   display: none;
 }
-.cb-settings-panel .text-xs {
-  font-size: 13px;
-  line-height: 20px;
-}
 .cb-settings-panel > section > p {
   line-height: 22px;
 }
@@ -135,4 +131,10 @@
   .cb-settings-panel .cb-setting-row > :first-child {
     min-width: min(100%, 220px);
   }
+}
+
+.cb-setting-help {
+  max-width: 68ch;
+  margin-top: var(--sp-1);
+  color: var(--text-secondary);
 }

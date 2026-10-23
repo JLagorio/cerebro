@@ -5,6 +5,7 @@ import { installKeyRoot, resetKeyRoot } from '@/lib/keys/root';
 import { installPdfGuard } from './pdfGuard';
 import { installMermaidGuard } from './mermaidGuard';
 import { installIronCalcGuard } from './ironcalcGuard';
+import { resetTooltipWarmth } from '@/components/ui/tooltipWarmth';
 
 // waitFor's 1s default is calibrated for a developer machine; CI runs on
 // shared macos-14 runners where a BlockNote serialize that takes ~100ms
@@ -92,6 +93,11 @@ if (typeof Range !== 'undefined' && !Range.prototype.getClientRects) {
 if (typeof document !== 'undefined' && !document.elementFromPoint) {
   document.elementFromPoint = () => null;
 }
+if (typeof document !== 'undefined' && !document.elementsFromPoint) {
+  // jsdom has no layout or hit testing. Pointer geometry is exercised by the
+  // browser suite; an empty hit stack faithfully matches elementFromPoint.
+  document.elementsFromPoint = () => [];
+}
 
 // CV-14: a test file that reaches the real mermaid renderer fails, naming the
 // fix (mermaidGuard.ts). vitest sets the file's path before setup runs.
@@ -107,4 +113,6 @@ installKeyRoot();
 afterEach(() => {
   resetKeymap();
   resetKeyRoot();
+  // A tooltip read in one case must not open the next case's at once.
+  resetTooltipWarmth();
 });

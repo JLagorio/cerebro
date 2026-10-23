@@ -4,12 +4,13 @@ import type { SkillNarrowing } from '@/engine/skills';
 /**
  * Up next (M57.5): the messages a conversation holds for after its turn.
  *
- * Text sent while a turn runs used to be dropped (Enter did nothing), and a
- * second page ask overwrote the first. Now each waits here, in run order, next
- * first. An entry is typed text, a page's ask handed over (a handoff), or
- * review notes sent from the dock (M58.5). It freezes what the person was
- * looking at when they sent it (its TurnContext, M17.6), its text and its
- * skill, whose expansion starts at enqueue; the Settings ceilings and the panel's binding are read when it
+ * Text sent while a turn runs used to be dropped (Enter did nothing). Now it
+ * waits here, in run order, next first. An entry is typed text, a labelled
+ * ask (a handoff: `useUpNext` takes one, though the panel opens each page's
+ * ask in a conversation of its own), or review notes sent from the dock
+ * (M58.5). It freezes what the person was looking at when they sent it (its
+ * TurnContext, M17.6), its text and its skill, whose expansion starts at
+ * enqueue; the Settings ceilings and the panel's binding are read when it
  * starts. Pure: no store, no React, no IPC.
  */
 

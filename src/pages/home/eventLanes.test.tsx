@@ -38,6 +38,18 @@ it('shows why, opens the agent Runs tab, and restores the exact row with Undo', 
   await act(async () => action.run());
   await screen.findByTestId('home-row');
 });
+it("draws an agent's latest run as a trace line in its outcome's state (M91.14)", async () => {
+  __seedFleet([{ ...run(), outcome: 'quota_failed' }]);
+  render(<RunsLane {...props} />);
+  await screen.findByText("1 run ended · 1 didn't succeed");
+  const open = screen.getByTestId('home-row').querySelector('button')!;
+  const line = open.querySelector('[data-slot="trace-line"]')!;
+  expect(line.getAttribute('data-status')).toBe('error');
+  // Its state before its name, its outcome after, and why under it.
+  expect(open.textContent).toMatch(/^Quota failed: Release scoutquota failed/);
+  expect(screen.getByTestId('run-why').closest('.cb-run-extra')).toBeTruthy();
+  expect(screen.getByTestId('home-row-done').textContent).toBe('Done');
+});
 it('holds readable rows with disabled Done when marks cannot be read', async () => {
   __seedFleet([{ ...run(), cause: null }]);
   failNext('done_marks_read');

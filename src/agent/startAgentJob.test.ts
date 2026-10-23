@@ -392,6 +392,39 @@ it('replays a terminal error emitted before the start response and releases the 
     error: 'fast failure',
   });
 });
+// M91.2d: an Error under an Agent call is that subagent's, as Rust's reader
+// takes it (M91.3b): the run goes on, and only its own Error or Done ends it.
+it("a subagent's Error neither fails nor ends the run it ran in", async () => {
+  const context = ctx();
+  expect(await startAgentJob(manual(), context)).toEqual({ kind: 'started', run: 8 });
+  const subagents = {
+    kind: 'Error',
+    message: 'API Error: Request rejected (429)',
+    parent: 'toolu_agent',
+  } as const;
+  events.callback?.(subagents);
+  expect(context.onSettled).not.toHaveBeenCalled();
+  expect(useUiStore.getState().runs).toHaveLength(1);
+  events.callback?.({ kind: 'Done' });
+  expect(context.onSettled).toHaveBeenCalledOnce();
+  expect(useUiStore.getState().runs).toEqual([]);
+  const [entry] = useRunLogStore.getState().entries;
+  expect(entry).toMatchObject({ status: 'ok' });
+  expect(entry).not.toHaveProperty('error');
+});
+it("the run's own Error after a subagent's still fails it, in its own words", async () => {
+  const context = ctx();
+  await startAgentJob(manual(), context);
+  const subagents = { kind: 'Error', message: 'the researcher stopped', parent: 'toolu_agent' };
+  const own = { kind: 'Error', message: 'the run stopped' };
+  events.callback?.(subagents);
+  events.callback?.(own);
+  expect(context.onSettled).toHaveBeenCalledOnce();
+  expect(useRunLogStore.getState().entries[0]).toMatchObject({
+    status: 'failed',
+    error: 'the run stopped',
+  });
+});
 it('an unknown run journal ends the registry with an honest failure', async () => {
   vi.mocked(agent.attachRun).mockResolvedValue({ state: 'unknown' });
   await startAgentJob(manual(), ctx());

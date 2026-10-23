@@ -1,3 +1,5 @@
+import { SearchBox } from '@/views/ViewControlIcons';
+import { searchEntries } from '@/engine/viewFilters';
 import { Icon } from '@/components/ui/Icon';
 import { useEffect, useState } from 'react';
 import { addExistingToHost } from '@/app/relatedActions';
@@ -5,7 +7,7 @@ import { RelationPicker } from '@/detail/RelationPicker';
 import { pointsAt } from '@/engine/linkDelta';
 import { useVaultStore } from '@/stores/vaultStore';
 import { resolveDateField } from '@/engine/schedule';
-import { useQuickAdd, useCreateOnDay } from '@/views/QuickAdd';
+import { useQuickAdd, useCreateOnDay, QuickAddInline } from '@/views/QuickAdd';
 import { columnUniverse } from '@/engine/columns';
 import type { Entry, Schema } from '@/engine/types';
 import type { ViewTabResolution } from '@/engine/viewTab';
@@ -69,7 +71,11 @@ export function ViewTabEmbed({
   const host = resolution.kind === 'ok' ? resolution.filedUnder : null;
   const vault = useVaultStore((state) => state.vaultPath);
   const [adding, setAdding] = useState(false);
-  useEffect(() => setAdding(false), [vault, scope, host?.host.path, host?.field, sourceType]);
+  const [search, setSearch] = useState('');
+  useEffect(() => {
+    setAdding(false);
+    setSearch('');
+  }, [vault, scope, host?.host.path, host?.field, sourceType]);
   const quickAdd = useQuickAdd(sourceType ?? '', host);
   const createOnDay = useCreateOnDay(sourceType ?? '', host);
   if (resolution.kind === 'broken') {
@@ -93,20 +99,32 @@ export function ViewTabEmbed({
   return (
     // No fixed height: unlike a dashboard tile, the embed flows with the
     // record page's own scroll — Notion's linked-database posture.
-    <div data-testid="view-tab-embed" className="flex min-h-0 flex-col">
-      {host !== null && sourceType !== null && (
-        <div className="flex justify-end pb-2">
-          <button
-            type="button"
-            data-testid="view-tab-add-existing"
-            onClick={() => setAdding(true)}
-            className="flex items-center gap-1 rounded-md border border-n-200 bg-transparent px-2 py-1 text-xs text-n-600 hover:bg-n-50"
-          >
-            <Icon name="plus" size={13} />
-            Add existing
-          </button>
-        </div>
-      )}
+    <div data-testid="view-tab-embed" className="flex min-h-0 min-w-0 flex-col">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-n-100 py-2">
+        <span className="min-w-0 flex-1 text-metadata text-n-600">
+          {resolution.sourceLabel}
+          {host !== null && <> · Related to {host.host.title}</>}
+        </span>
+        <SearchBox query={search} onChange={setSearch} />
+        {sourceType !== null && (
+          <span className="min-w-0 max-w-full">
+            <QuickAddInline compact ariaLabel="New related record" onCreate={quickAdd} />
+          </span>
+        )}
+        {host !== null && sourceType !== null && (
+          <div className="relative flex">
+            <button
+              type="button"
+              data-testid="view-tab-add-existing"
+              onClick={() => setAdding(true)}
+              className="flex items-center gap-1 rounded-md border border-n-200 bg-transparent px-2 py-1 text-xs text-n-600 hover:bg-n-50"
+            >
+              <Icon name="plus" size={13} />
+              Add existing
+            </button>
+          </div>
+        )}
+      </div>
       {adding && host !== null && sourceType !== null && (
         <RelationPicker
           fieldName="Add existing"
@@ -131,14 +149,14 @@ export function ViewTabEmbed({
       )}
       <ViewCanvas
         embedded
-        entries={surface.entries}
+        entries={searchEntries(surface.entries, search)}
         allEntries={entries}
         presentation={surface.presentation}
         schema={schema}
         fields={fields}
         scope={scope}
         createType={sourceType ?? undefined}
-        filtered={filtered}
+        filtered={filtered || search.trim() !== ''}
         onCreate={sourceType === null ? undefined : quickAdd}
         onCreateOn={
           sourceType === null || dateField === null

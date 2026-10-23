@@ -1,0 +1,85 @@
+/* A peek is a small page. Keep its title, metadata and prose on one edge;
+   knowledge and versions are supporting context after the content. */
+.cb-record-peek {
+  --fs-workspace-title: 28px;
+  --lh-workspace-title: 34px;
+  --fs-prose: 15px;
+  --lh-prose: 25px;
+}
+.cb-peek-header {
+  min-height: 48px;
+  padding: 8px 16px;
+}
+.cb-peek-scroll {
+  padding: 24px 24px 40px 8px;
+}
+.cb-peek-cover {
+  margin: -24px -24px 20px -8px;
+}
+.cb-record-peek .cerebro-editor-compact .bn-editor {
+  padding-inline: 28px 0;
+}
+.cb-record-peek .cb-page-editor .bn-editor .bn-block-group .cb-page-editor-chrome {
+  margin-block: 10px 20px;
+}
+.cb-record-peek .cb-heading-properties {
+  gap: 4px 14px;
+  margin-bottom: 0;
+}
+.cb-record-peek .cb-heading-details {
+  padding-inline: 4px;
+}
+.cb-record-peek .cb-record-page-properties {
+  margin-bottom: 0;
+}
+.cb-peek-support {
+  margin: 28px 0 0 28px;
+  border-top: 1px solid var(--border-subtle);
+}
+.cb-peek-support:empty {
+  display: none;
+}
+.cb-peek-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  width: 100%;
+  padding: 6px 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  text-align: left;
+}
+.cb-peek-section-toggle:hover {
+  color: var(--text-primary);
+}
+.cb-peek-section-toggle > svg:last-child {
+  margin-left: auto;
+  color: var(--text-meta);
+}
+.cb-peek-section-count {
+  color: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+}
+.cb-peek-knowledge-content {
+  padding: 4px 0 16px;
+}
+.cb-peek-history > div:not([hidden]) {
+  padding-bottom: 14px;
+}
+.cb-peek-history-unavailable {
+  padding-block: 10px 14px;
+}
+.cb-peek-history-unavailable > div:first-child {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.cb-peek-footer {
+  min-height: 34px;
+  padding: 6px 16px;
+}

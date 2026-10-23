@@ -61,12 +61,12 @@ export function ReminderSettings() {
     <section className="mb-6 rounded-xl border border-n-200 p-5" data-testid="settings-reminders">
       <h2 className="mb-1 text-md font-semibold text-n-900">Reminders</h2>
       {permission === 'unavailable' ? (
-        <p className="m-0 text-sm text-n-500" data-testid="section-unavailable">
+        <p className="m-0 text-ui text-(--text-meta)" data-testid="section-unavailable">
           Notification permission could not be read.
         </p>
       ) : (
         <p
-          className="mb-3 text-sm text-n-500"
+          className="mb-3 text-ui text-(--text-meta)"
           data-testid="notification-permission"
           data-state={permission}
         >

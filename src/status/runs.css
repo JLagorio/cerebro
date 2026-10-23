@@ -1,0 +1,90 @@
+/* Runs and what waits to run (M91.14). A run is a trace line (the AI
+   elements' trace.css) in its state's ink, icon and words, and the hops it
+   caused hang from it on the trace's rule; a replayed turn is the
+   conversation's turn at the run detail's size; wakes and follow-ups are
+   queues. Unlayered like the elements' own sheets, and scoped to the classes
+   these surfaces add. Every colour is a token, so both themes follow. */
+
+/* A run's line spans its row: who, why and when share what its facts leave,
+   and each column gives way before the row overflows. */
+.cb-run-line.cb-ai-trace-line {
+  width: 100%;
+}
+/* A list a size or two under the UI role: a page's Runs tab and History
+   panel, the status bar's run list. */
+.cb-run-line-sm.cb-ai-trace-line {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+}
+.cb-run-line-xs.cb-ai-trace-line {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+
+/* What hangs under a run's line — the page it was about, why it started,
+   where it belongs — starts under its title: past the 16px icon and the
+   line's gap. */
+.cb-run-extra {
+  min-width: 0;
+  padding-inline-start: var(--sp-6);
+}
+
+/* The hops a run caused hang from it on the trace's rule, drawn down the
+   middle of its 16px icon: the row's own inset (`--run-inset`, the row's
+   start padding), 8px in, less the rule's 1px. A hop's hops hang from the
+   hop the same way. The fleet's rows are inset 10px (`px-2.5`). */
+.cb-fleet-chain {
+  --run-inset: 10px;
+}
+.cb-run-hops {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-05);
+  min-width: 0;
+  margin-inline-start: calc(var(--run-inset, var(--sp-2)) + 7px);
+  padding-inline-start: var(--sp-1);
+  border-inline-start: 1px solid var(--border-subtle);
+}
+
+/* A replayed turn (RunTranscript): the conversation's turn at the run
+   detail's size. The prompt is a quiet bubble at the start, since a run's
+   prompt is as often its schedule's as a person's; the steps sit a size
+   under the words, as they do in the panel. */
+.cb-run-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.cb-run-transcript .cb-ai-message {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cb-run-transcript .cb-ai-message-content {
+  gap: var(--sp-2);
+}
+.cb-run-transcript .cb-ai-bubble {
+  max-width: 100%;
+}
+.cb-run-transcript .cb-ai-bubble-content {
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-md);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cb-run-transcript .cb-ai-trace-line {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cb-run-answer,
+.cb-run-narration {
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.cb-run-answer {
+  color: var(--text-primary);
+}
+.cb-run-narration {
+  color: var(--text-secondary);
+}

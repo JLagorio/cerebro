@@ -433,6 +433,22 @@
 .workspace-explorer-heading button:hover {
   background: var(--surface-sunken);
 }
+/* The shell already names Work. Its hosted Explorer starts with its two
+   actions instead of repeating a second navigation heading. */
+.workspace-explorer-context .workspace-explorer-heading {
+  min-height: 36px;
+  padding: 0 0 8px;
+}
+.workspace-explorer-context .workspace-mount-action {
+  display: flex;
+  flex: 1;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-left: 0;
+  padding: 4px 8px;
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
 .workspace-heading {
   display: flex;
   flex: none;
@@ -445,8 +461,8 @@
 .workspace-heading h1 {
   margin: 0;
   color: var(--text-primary);
-  font-size: var(--fs-md);
-  font-weight: 550;
+  font-size: var(--fs-section-title);
+  font-weight: var(--w-semibold);
   letter-spacing: -0.015em;
 }
 .workspace-heading-divider {
@@ -456,6 +472,6 @@
 .workspace-heading-meta {
   margin-left: auto;
   color: var(--text-meta);
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
 }

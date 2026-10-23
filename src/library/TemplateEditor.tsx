@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Select } from '@/components/ui/Select';
 import type { TemplateDraft } from '@/engine/libraryDraft';
@@ -24,25 +25,32 @@ export function TemplateEditor({
   types: string[];
   onChange: (next: TemplateDraft) => void;
 }) {
+  // Generated, not literal: a template opens per path in up to four panes,
+  // and a fixed id would let one pane's label name another pane's control.
+  const typeId = useId();
+  const fillId = useId();
   const set = <K extends keyof TemplateDraft>(key: K, value: TemplateDraft[K]) =>
     onChange({ ...draft, [key]: value });
+  // A stamp the vault no longer declares still reads as itself, not as a blank.
+  const stamps = draft.type === '' || types.includes(draft.type) ? types : [...types, draft.type];
 
   return (
     <>
       <EditorSection title="What it makes">
         <Field
           label="Type"
+          htmlFor={typeId}
           hint="Pages made from this template carry this type, and land on its screens. Leave it as a doc for prose that is not a record of anything."
         >
           <Select
+            id={typeId}
             size="sm"
             width={240}
             value={draft.type}
-            ariaLabel="Type"
-            onChange={(e) => set('type', e.target.value)}
+            onChange={(type) => set('type', type)}
             options={[
               { value: '', label: 'A document' },
-              ...types.map((t) => ({ value: t, label: t })),
+              ...stamps.map((t) => ({ value: t, label: t })),
             ]}
           />
         </Field>
@@ -65,9 +73,9 @@ export function TemplateEditor({
         title="Fill it in"
         hint="An instruction for the assistant, run against the page this template just made. Sections it has nothing to say about are left blank rather than invented — a template full of plausible fiction is worse than one left empty, because the empty one is obviously unfinished."
       >
-        <Field label="Fill prompt" htmlFor="template-fill">
+        <Field label="Fill prompt" htmlFor={fillId}>
           <BodyField
-            id="template-fill"
+            id={fillId}
             testId="template-fill"
             rows={4}
             ariaLabel="Fill prompt"

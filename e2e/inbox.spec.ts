@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { boot, readMockFile, openDestination } from './boot';
+import { chooseOption } from './select';
 
 test('inbox: queue untyped captures, organize one, and watch it leave', async ({ page }) => {
   await boot(page);
@@ -24,32 +25,43 @@ test('inbox: queue untyped captures, organize one, and watch it leave', async ({
   // Typed demo records (Objectives, Risks, Work items) must not appear.
   await expect(rows.filter({ hasText: 'Field app readiness' })).toHaveCount(0);
 
-  // -- The checklist names what is missing -----------------------------
+  // -- Opening a capture ------------------------------------------------
   await rows.filter({ hasText: 'Warehouse cutover' }).click();
-  const checklist = page.getByTestId('organize-checklist');
-  await expect(checklist).toContainText('Has a type');
-  // The capture body links [[phoenix-warehouse-rollout]], so it is connected.
-  await expect(checklist).toContainText('Connected to something');
+  await expect(page.getByTestId('inbox-pane-header')).toContainText('Warehouse cutover');
 
   // -- Assigning a type writes frontmatter -----------------------------
-  await page.getByLabel('Organize').getByRole('combobox').first().selectOption('Work item');
+  // Organize is the first section of the capture's inspector, in place of a
+  // page's Properties.
+  const organize = page.getByTestId('doc-side-panel').locator('[data-section="organize"]');
+  await chooseOption(organize.getByLabel('Type'), 'Work item');
   await expect
     .poll(async () => readMockFile(page, 'inbox/warehouse-cutover-thought.md'))
     .toContain('type: Work item');
 
   // -- Organizing removes it from the queue ----------------------------
-  await page.getByRole('button', { name: /Mark organized/i }).click();
+  // From the toolbar, where the act sits beside the capture's own marks;
+  // the inspector's row is the same act (inbox-redesign).
+  await page
+    .getByTestId('inbox-pane-header')
+    .getByRole('button', { name: 'Mark organized', exact: true })
+    .click();
   await expect
     .poll(async () => readMockFile(page, 'inbox/warehouse-cutover-thought.md'))
     .toContain('_organized: true');
   await expect(rows).toHaveCount(queuedBefore - 1);
   await expect(rows.filter({ hasText: 'Warehouse cutover' })).toHaveCount(0);
-  await expect(page.getByTestId('page-navigation').locator('.m75-queue-heading')).toContainText(
-    String(queuedBefore - 1),
-  );
+  // The queue's count is the nav badge's: the list carries no count of its
+  // own. The destinations are out of view while the sidebar lends its body
+  // to the queue, so the badge is read where it waits.
+  await expect(
+    page
+      .getByTestId('nav-surfaces')
+      .locator('button[aria-label^="Inbox"] [data-testid="nav-badge"]'),
+  ).toHaveText(String(queuedBefore - 1));
 
   // -- Auto-advance opened the next capture ----------------------------
-  await expect(page.getByLabel('Organize')).toBeVisible();
+  await expect(page.getByTestId('inbox-pane-header')).not.toContainText('Warehouse cutover');
+  await expect(organize).toBeVisible();
 });
 
 test('inbox: quick capture writes an untyped note into the queue', async ({ page }) => {
@@ -59,13 +71,19 @@ test('inbox: quick capture writes an untyped note into the queue', async ({ page
   const rows = page.getByTestId('inbox-row');
   const before = await rows.count();
 
-  // exact: `name` is a case-insensitive SUBSTRING by default, so 'Capture'
-  // also matched the reading pane's "Previous capture" / "Next capture" that
-  // M15 added — three matches, strict-mode violation.
-  await page.getByRole('button', { name: 'Capture', exact: true }).click();
+  // exact: `name` is a case-insensitive SUBSTRING by default, and the
+  // toolbar's pager holds "Previous capture" and "Next capture" beside it.
+  await page
+    .getByTestId('inbox-pane-header')
+    .getByRole('button', { name: 'New capture', exact: true })
+    .click();
   await expect(rows).toHaveCount(before + 1);
 
   // A capture is untyped on purpose — that is what keeps it in the queue.
-  const checklist = page.getByTestId('organize-checklist');
-  await expect(checklist).toContainText('Has a type');
+  await expect(
+    page
+      .getByTestId('doc-side-panel')
+      .locator('[data-section="organize"]')
+      .getByRole('button', { name: 'Type', exact: true }),
+  ).toHaveText('No type');
 });
