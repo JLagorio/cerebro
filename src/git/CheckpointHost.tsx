@@ -18,7 +18,8 @@ export function CheckpointHost() {
   }, [refresh]);
 
   // Intent (`enabled`) and fact (`isRepo`) are separate gates: the setting can
-  // be on for a vault that has no repository to commit into.
-  useAutoCheckpoint(enabled && isRepo, onCommitted);
+  // be on for a vault that has no repository to commit into, and a vault no
+  // read could tell about yet (M92.9) gets no checkpoint either.
+  useAutoCheckpoint(enabled && isRepo === true, onCommitted);
   return null;
 }

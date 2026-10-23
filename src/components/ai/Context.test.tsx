@@ -3,7 +3,17 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HOVER_OPEN_MS, resetHoverCards } from '@/components/ui/HoverCard';
 import { resetLayers } from '@/components/ui/layers';
-import { CONTEXT_WORDS, Context, contextName, contextShare, type ContextUsage } from './Context';
+import {
+  CONTEXT_WORDS,
+  Context,
+  ContextCategories,
+  contextFigure,
+  contextName,
+  contextShare,
+  contextTokens,
+  type ContextCategoryItem,
+  type ContextUsage,
+} from './Context';
 
 /**
  * Context (M91.8): the reading is the control's name, never "Context: …";
@@ -169,5 +179,136 @@ describe('the detail', () => {
     const card = screen.getByRole('group', { name: 'Context use' });
     expect(card.textContent).toBe(`${title}${detail}`);
     expect(card.textContent).not.toMatch(/\d/);
+  });
+});
+
+describe('the figure and the tokens, in words', () => {
+  it('are one wording for every surface that shows the reading', () => {
+    expect(contextFigure(RECORDED)).toBe('62%');
+    expect(contextFigure({ state: 'recorded', used: 600, window: 200_000 })).toBe('<1%');
+    expect(contextFigure({ state: 'recorded', used: 41_200 })).toBe('41.2K');
+    expect(contextTokens(RECORDED)).toBe('124,000 of 200,000 tokens');
+    expect(contextTokens({ state: 'recorded', used: 41_200, window: 0 })).toBe(
+      '41,200 tokens used',
+    );
+    for (const usage of [
+      { state: 'not_recorded' },
+      { state: 'unavailable' },
+      { state: 'recorded', used: Number.NaN },
+    ] as ContextUsage[]) {
+      expect(contextFigure(usage)).toBeNull();
+      expect(contextTokens(usage)).toBeNull();
+    }
+  });
+});
+
+describe('ContextCategories (M92.14)', () => {
+  const row = (
+    key: string,
+    name: string,
+    kind: ContextCategoryItem['kind'],
+    tokens: number | null,
+  ): ContextCategoryItem => ({ key, name, kind, tokens });
+
+  const ROWS: ContextCategoryItem[] = [
+    row('a', 'System prompt', 'used', 6_797),
+    row('b', 'MCP tools (deferred)', 'deferred', 438),
+    row('c', 'Messages', 'used', 962),
+    row('d', 'Skills', 'used', null),
+    row('e', 'Autocompact buffer', 'buffer', 33_000),
+    row('f', 'Free space', 'free', 159_241),
+  ];
+
+  /** Each legend row: its kind, its hue, its name and its value. */
+  const legend = (root: HTMLElement) =>
+    [...root.querySelectorAll<HTMLElement>('.cb-ai-context-legend-row')].map((el) => [
+      el.dataset.kind,
+      el.dataset.tone,
+      el.querySelector('dt')?.textContent,
+      el.querySelector('dd')?.textContent,
+    ]);
+
+  it('lists every row with its tokens and its share of the window', () => {
+    render(<ContextCategories categories={ROWS} window={200_000} testId="rows" />);
+    expect(legend(screen.getByTestId('rows'))).toEqual([
+      ['used', '0', 'System prompt', '6.8K · 3.4%'],
+      ['deferred', undefined, 'MCP tools (deferred)', CONTEXT_WORDS.notLoaded],
+      ['used', '1', 'Messages', '962 · 0.5%'],
+      ['used', '2', 'Skills', CONTEXT_WORDS.valueNotRecorded],
+      ['buffer', undefined, 'Autocompact buffer', '33K · 16.5%'],
+      ['free', undefined, 'Free space', '159.2K · 79.6%'],
+    ]);
+  });
+
+  it('draws the window as a bar: the used rows in order, the room left, the reserve last', () => {
+    render(<ContextCategories categories={ROWS} window={200_000} testId="rows" />);
+    const bar = screen.getByTestId('rows').querySelector('[data-slot="context-bar"]');
+    expect(bar?.getAttribute('aria-hidden')).toBe('true');
+    const shares = [...(bar?.children ?? [])].map((segment) => {
+      const el = segment as HTMLElement;
+      return [el.dataset.tone ?? el.dataset.kind, el.style.flexGrow];
+    });
+    // A row nobody counted takes no share, and a deferred one none of the
+    // window; the room left is what the used rows and the reserve leave.
+    expect(shares).toEqual([
+      ['0', '6797'],
+      ['1', '962'],
+      ['free', `${200_000 - 6_797 - 962 - 33_000}`],
+      ['buffer', '33000'],
+    ]);
+  });
+
+  it('reads a deferred row as not loaded, never 0 or a dash, whatever it would take', () => {
+    render(
+      <ContextCategories
+        categories={[row('a', 'System tools (deferred)', 'deferred', 0)]}
+        window={200_000}
+        testId="rows"
+      />,
+    );
+    const value = screen.getByTestId('rows').querySelector('dd')?.textContent;
+    expect(value).toBe('not loaded');
+  });
+
+  it('gives a share under a tenth of a percent as such, never 0.0%', () => {
+    render(
+      <ContextCategories
+        categories={[row('a', 'Memory files', 'used', 16), row('b', 'Custom agents', 'used', 0)]}
+        window={1_000_000}
+        testId="rows"
+      />,
+    );
+    const values = [...screen.getByTestId('rows').querySelectorAll('dd')].map(
+      (dd) => dd.textContent,
+    );
+    expect(values).toEqual(['16 · <0.1%', '0 · 0.0%']);
+  });
+
+  it('draws no bar and no shares without a window', () => {
+    for (const window of [null, 0, Number.NaN]) {
+      const { unmount } = render(
+        <ContextCategories categories={ROWS} window={window} testId="rows" />,
+      );
+      const root = screen.getByTestId('rows');
+      expect(root.querySelector('[data-slot="context-bar"]')).toBeNull();
+      expect(legend(root)[0]).toEqual(['used', '0', 'System prompt', '6.8K']);
+      unmount();
+    }
+  });
+
+  it('gives the used rows their hues in order, never cycled, the rest the neutral', () => {
+    const many = Array.from({ length: 9 }, (_, i) => row(`${i}`, `Row ${i}`, 'used', 100));
+    render(<ContextCategories categories={many} window={200_000} testId="rows" />);
+    const tones = legend(screen.getByTestId('rows')).map(([, tone]) => tone);
+    expect(tones).toEqual(['0', '1', '2', '3', '4', '5', '6', 'other', 'other']);
+  });
+
+  it('counts the rows past what was kept', () => {
+    const { rerender } = render(
+      <ContextCategories categories={ROWS} window={200_000} more={2} testId="rows" />,
+    );
+    expect(screen.getByTestId('rows').textContent).toContain('2 more rows not shown');
+    rerender(<ContextCategories categories={ROWS} window={200_000} testId="rows" />);
+    expect(screen.getByTestId('rows').textContent).not.toContain('not shown');
   });
 });

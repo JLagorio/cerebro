@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { agentContextUsage, type ContextUseAnswer } from './agentIpc';
+import { readContextBreakdown } from '@/engine/ai/contextBreakdown';
 
 /** What `useContextUse` reads: the session's latest reading, not recorded,
  * unavailable when the read failed, or loading before the first answer. */
@@ -9,26 +10,43 @@ const LOADING: ContextUseState = { state: 'loading' };
 const NOT_RECORDED: ContextUseState = { state: 'not_recorded' };
 const UNAVAILABLE: ContextUseState = { state: 'unavailable' };
 
-/** An answer as the composer may show it: one that is neither a reading nor
- * not recorded could not be read, so it is unavailable, never a figure. */
+/**
+ * An answer as the composer and the rail may show it: one that is neither a
+ * reading nor not recorded could not be read, so it is unavailable, never a
+ * figure. A reading's breakdown is read here, once (`readContextBreakdown`),
+ * and one that does not read is no breakdown. Where it gives Claude Code's
+ * own total and the window it measures it against, those are the reading's
+ * count and window (O3, M92.14): the composer's ring and the rail's Context
+ * card show one figure, `contextUsageOf`'s.
+ */
 function shown(answer: ContextUseAnswer): ContextUseState {
   if (answer.state === 'not_recorded') return NOT_RECORDED;
   if (
-    answer.state === 'recorded' &&
-    Number.isFinite(answer.used) &&
-    answer.used >= 0 &&
-    typeof answer.at === 'string'
+    answer.state !== 'recorded' ||
+    !Number.isFinite(answer.used) ||
+    answer.used < 0 ||
+    typeof answer.at !== 'string'
   ) {
-    return answer;
+    return UNAVAILABLE;
   }
-  return UNAVAILABLE;
+  if (answer.breakdown === undefined) return answer;
+  const { breakdown: wire, ...reading } = answer;
+  const breakdown = readContextBreakdown(wire);
+  if (breakdown === null) return reading;
+  return {
+    ...reading,
+    used: breakdown.total ?? reading.used,
+    ...(breakdown.max === undefined ? {} : { window: breakdown.max }),
+    breakdown,
+  };
 }
 
 /**
  * How full a conversation's context is (M91.5), for the composer's Context
- * element: `agent_context_usage`, pulled when the hook mounts, when the
- * session changes and when a turn ends (`streaming` going false). Never
- * polled, and never pushed: no event carries a token count (Q7).
+ * element and, from the same pull, the rail's Context card (M92.14):
+ * `agent_context_usage`, pulled when the hook mounts, when the session
+ * changes and when a turn ends (`streaming` going false). Never polled, and
+ * never pushed: no event carries a token count (Q7).
  *
  * `loading` until the session's first answer lands; a later pull keeps the
  * last answer until its own lands. A conversation with no session yet has

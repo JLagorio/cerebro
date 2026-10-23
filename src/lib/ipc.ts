@@ -362,9 +362,12 @@ export async function listenVaultChanged(handler: () => void): Promise<() => voi
 /** Raw `.cerebro/connectors.json`, '' when the vault has none. Rejects when
  * the file exists but cannot be read — permissions, or a symlinked path the
  * backend refuses to follow (PR #5 review). Runs fail closed on that config,
- * so Settings must render it as blocked, never as "no list". */
+ * so Settings must render it as blocked, and the conversation rail's
+ * Connectors card as unavailable (M92.9), never as "no list". */
 export function readConnectors(vault: string): Promise<string> {
-  return inTauri() ? invokeTauri('read_connectors', { vault }) : mock.readConnectors(vault);
+  return inTauri()
+    ? invokeTauri('read_connectors', { vault })
+    : faulted('read_connectors', () => mock.readConnectors(vault));
 }
 
 export function saveConnectors(vault: string, json: string): Promise<void> {
@@ -1027,7 +1030,9 @@ export function runKnowledgeWrites(vault: string, runId: string): Promise<RunWri
  * (M56.9) and what it wrote (M58.1b). An unknown id is refused, so a typo
  * and an unmetered run never look the same. */
 export function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
-  return inTauri() ? invokeTauri('fleet_run_detail', { runId }) : mock.fleetRunDetail(runId);
+  return inTauri()
+    ? invokeTauri('fleet_run_detail', { runId })
+    : faulted('fleet_run_detail', () => mock.fleetRunDetail(runId));
 }
 
 /** One run's transcript, folded from Claude Code's own session file (M56.9,

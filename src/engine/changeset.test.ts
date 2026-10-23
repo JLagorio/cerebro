@@ -6,6 +6,7 @@ import {
   changesetHeadline,
   fileCounts,
   isChangeset,
+  keptOutOfGitWords,
   shortHash,
   upsertChangeset,
   type ChangedFile,
@@ -96,6 +97,9 @@ describe('changeset words (M58.3)', () => {
   it('names who else edited a file, you first as you', () => {
     const label = (actor: string) => (actor === 'process:scout' ? 'Release scout' : actor);
     expect(alsoByWords([], label)).toBeNull();
+    // A commit read back from history did not record it (M92.12): that is
+    // said, never that nobody else did (CV-05).
+    expect(alsoByWords(null, label)).toBe('who else edited it: not recorded');
     expect(alsoByWords(['human:me'], label)).toBe('also edited by you');
     expect(alsoByWords(['process:scout'], label)).toBe('also edited by Release scout');
     expect(alsoByWords(['human:me', 'process:scout'], label)).toBe(
@@ -136,4 +140,28 @@ it('accepts old events without a mail count and refuses invalid recorded counts'
   for (const count of [-1, 0.5, null, '2'])
     expect(isChangeset({ ...old, kept_out_of_git: count })).toBe(false);
   expect(isChangeset({ ...old, kept_out_of_git: 2 })).toBe(true);
+});
+
+// M92.12: what a changeset read back from history cannot know is null, which
+// says not recorded wherever it is drawn, and which no stored event holds.
+it('reads a changeset read back from history as not recorded where it cannot know', () => {
+  const healed = {
+    ...committed({ files: [{ ...file('a.md', 1, 0), also_by: null }] }),
+    kept_out_of_git: null,
+    shell_unrecorded: null,
+  } satisfies RunChangeset;
+  expect(keptOutOfGitWords(healed)).toBeNull();
+  expect(keptOutOfGitWords({ ...healed, kept_out_of_git: 2 })).toBe(
+    'Kept 2 mail files out of git.',
+  );
+  expect(alsoByWords(healed.files[0].also_by, (actor) => actor)).toBe(
+    CHANGESET_WORDS.alsoByNotRecorded,
+  );
+  expect(changesetHeadline(healed)).toBe('Changed 1 file · +3 −1');
+  // Only a run's own event is stored, and it records every field.
+  expect(isChangeset(healed)).toBe(false);
+  expect(isChangeset({ ...committed(), shell_unrecorded: null })).toBe(false);
+  expect(isChangeset({ ...committed(), files: [{ ...file('a.md', 1, 0), also_by: null }] })).toBe(
+    false,
+  );
 });

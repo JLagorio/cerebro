@@ -27,6 +27,7 @@ import { makeEntry } from '@/engine/testHelpers';
 import { resetMockFs } from '@/lib/mockIpc';
 import * as agentIpc from '@/agent/agentIpc';
 import * as ipc from '@/lib/ipc';
+import { connectorFocus } from '@/agent/elements/connectorRow';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { chooseOption, optionLabels } from '@/test/chooseOption';
@@ -452,6 +453,32 @@ describe('SettingsPage', () => {
         expect(scrolled).toHaveBeenCalledTimes(1);
       } finally {
         Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    // M92.9: the conversation rail's Sign in… asks for a connector's row,
+    // which lives in the same section.
+    it("opens the Assistant section at a connector's row when the rail asks", async () => {
+      const scrolled = vi.fn();
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = scrolled;
+      resetMockFs();
+      await ipc.saveConnectors(
+        '/demo-vault',
+        JSON.stringify({ servers: { linear: { transport: 'http', url: 'https://l/mcp' } } }),
+      );
+      try {
+        useUiStore.setState({ agentConnectors: true, settingsFocus: connectorFocus('linear') });
+        render(<SettingsPage />);
+        expect(screen.getByTestId('settings-heading').textContent).toBe('Assistant');
+        await vi.waitFor(() => expect(useUiStore.getState().settingsFocus).toBeNull());
+        expect(scrolled.mock.contexts.at(-1)).toBe(
+          screen.getByTestId('connector-status').closest('.rounded-lg'),
+        );
+      } finally {
+        Element.prototype.scrollIntoView = original;
+        useUiStore.setState({ agentConnectors: false });
+        resetMockFs();
       }
     });
   });

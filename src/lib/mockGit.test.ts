@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { RunPageWrites } from '@/engine/attribution';
+import type { ChangedFile, RunChangeset } from '@/engine/changeset';
+import * as gitIpc from '@/lib/gitIpc';
+import { failNext, resetFaults } from '@/lib/mockFaults';
 import {
   commitRun,
   commitRuns,
+  conversationChanges,
   getFileAtCommit,
   getFileDiffAtCommit,
   getFileHistory,
@@ -11,6 +16,9 @@ import {
   getVaultPulse,
   gitCommit,
   gitDiscardFile,
+  gitPull,
+  gitPush,
+  gitRemoteStatus,
   resetMockGit,
   restoreNoteVersion,
   seedGitHistory,
@@ -18,11 +26,15 @@ import {
   type SeedCommit,
 } from '@/lib/mockGit';
 import {
+  __seedFleet,
   agentAppend,
+  agentCreate,
   beginMockRun,
   endMockRun,
   HUMAN_ACTOR,
   resetMockFs,
+  type FleetRun,
+  type FleetRunDetail,
   type MockWrite,
 } from '@/lib/mockIpc';
 
@@ -63,6 +75,52 @@ describe('mock git history', () => {
     const [head] = resetMockGit().commits;
     resetMockGit({ commits: [{ ...head, changes: null }] });
     expect(await getFileHistory('/v', SEEDED)).toEqual([]);
+  });
+});
+
+// M92.10: the mock counts as `remote::remote_status` does. Counts exist only
+// against an upstream, and a count git could not take is null, never 0.
+describe('mock git remote counts', () => {
+  beforeEach(() => {
+    resetMockGit();
+  });
+
+  it('counts against the upstream once there is one', async () => {
+    resetMockGit({ remoteUrl: 'https://example.test/notes.git', ahead: 2, behind: 1 });
+    expect(await gitRemoteStatus('/v')).toMatchObject({
+      ahead: 2,
+      behind: 1,
+      hasUpstream: true,
+      upstream: 'origin/main',
+    });
+  });
+
+  it('counts nothing without an upstream', async () => {
+    expect(await gitRemoteStatus('/v')).toMatchObject({
+      ahead: null,
+      behind: null,
+      hasRemote: false,
+      hasUpstream: false,
+      upstream: null,
+    });
+  });
+
+  it('reads a failed count as unknown, and leaves the repository to pull and push', async () => {
+    resetMockGit({
+      remoteUrl: 'https://example.test/notes.git',
+      ahead: 2,
+      behind: 1,
+      countFails: true,
+    });
+    expect(await gitRemoteStatus('/v')).toMatchObject({
+      ahead: null,
+      behind: null,
+      hasUpstream: true,
+    });
+    // The count failing is a read failing: what the person asks for still runs.
+    expect((await gitPull('/v')).status).toBe('updated');
+    expect((await gitPush('/v')).status).toBe('ok');
+    expect(await gitRemoteStatus('/v')).toMatchObject({ ahead: null, behind: null });
   });
 });
 
@@ -398,5 +456,248 @@ describe('mock pull requests', () => {
     expect((await pullRequestState(url)).checkedAt).toBe('before');
     resetMockGit();
     expect((await pullRequestState(url)).state).toBe('gh_missing');
+  });
+});
+
+// M92.12: a conversation's changes read back, as `git::conversation` reads
+// runtime.db's runs and run_commits, then git: here the mock fleet's runs,
+// the mock log's run records and its commits.
+describe('mock conversation changes', () => {
+  const SESSION = '00000000-0000-4000-8000-000000000092';
+  const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+  const at = (second: number) =>
+    `2026-10-23T09:${String(Math.floor(second / 60)).padStart(2, '0')}:${String(second % 60).padStart(2, '0')}Z`;
+  const run = (runId: string, second: number, over: Partial<FleetRun> = {}): FleetRun => ({
+    run_id: runId,
+    actor: 'claude-code',
+    vault_id: '/v',
+    mode: 'attended',
+    lane: 'agent',
+    started_at: at(second),
+    ended_at: at(second),
+    outcome: 'succeeded',
+    usage_state: 'exact',
+    input_tokens: 1,
+    output_tokens: 1,
+    proposals_submitted: 0,
+    applied: 0,
+    rejected: 0,
+    parent_run_id: null,
+    cause: null,
+    cli_session_id: SESSION,
+    ...over,
+  });
+  const detail = (of: FleetRun, wrote: RunPageWrites): FleetRunDetail => ({
+    run: of,
+    cost_components: null,
+    assembly: null,
+    model_id: null,
+    refusals: [],
+    refusals_total: 0,
+    wrote,
+  });
+  const runIds = (changesets: RunChangeset[]) => changesets.map((c) => c.run_id);
+
+  beforeEach(() => {
+    resetMockFs();
+    resetFaults();
+    resetMockGit();
+  });
+
+  afterEach(() => {
+    // The demo fleet again, for every other spec.
+    resetMockFs();
+    resetFaults();
+  });
+
+  it('reads a run’s commit back as the run settled it, and nothing only its reader knew', async () => {
+    fs().set('notes/a.md', '# A\n');
+    const stamp = { actor: 'claude-code', runId: 'run-live' };
+    beginMockRun(stamp.runId, stamp.actor);
+    await agentAppend('/v', 'notes/a.md', 'Run line.', undefined, stamp);
+    await agentCreate('/v', { folder: 'notes', slug: 'new', body: '# New\n\nBody.\n' }, stamp);
+    const live = settleMockRun(stamp.runId, stamp.actor, 'tidy');
+    endMockRun(stamp.runId);
+    __seedFleet([run('run-live', 1)]);
+    const read = await conversationChanges('/v', SESSION);
+    expect(read.truncated).toBe(false);
+    const [healed] = read.changesets;
+    if (live.state !== 'committed' || healed?.state !== 'committed') {
+      throw new Error('both are the run’s commit');
+    }
+    const shape = (files: ChangedFile[]) =>
+      files.map(({ path, kind, additions, deletions }) => ({ path, kind, additions, deletions }));
+    expect(shape(healed.files)).toEqual(shape(live.files));
+    expect(healed).toMatchObject({
+      commit: live.commit,
+      additions: live.additions,
+      deletions: live.deletions,
+      binary: live.binary,
+      kept_out_of_git: null,
+      shell_unrecorded: null,
+    });
+    expect(healed.files.map((f) => f.also_by)).toEqual([null, null]);
+  });
+
+  it('reads a seeded commit’s rename and counts from its copies', async () => {
+    seedGitHistory([
+      {
+        hash: 'b'.repeat(40),
+        message: 'assistant: move',
+        date: 1_790_000_200,
+        files: [{ path: 'notes/new.md', status: 'renamed', previousPath: 'notes/old.md' }],
+        snapshots: { 'notes/new.md': '# Old\n\nMoved.\n' },
+        run: { runId: 'run-move', actor: 'claude-code' },
+      },
+      {
+        hash: 'a'.repeat(40),
+        message: 'create',
+        date: 1_790_000_100,
+        files: [{ path: 'notes/old.md', status: 'added' }],
+        snapshots: { 'notes/old.md': '# Old\n' },
+      },
+    ]);
+    __seedFleet([run('run-move', 1)]);
+    const { changesets } = await conversationChanges('/v', SESSION);
+    expect(changesets).toEqual([
+      {
+        kept_out_of_git: null,
+        state: 'committed',
+        run_id: 'run-move',
+        commit: 'b'.repeat(40),
+        files: [
+          {
+            path: 'notes/new.md',
+            previous_path: 'notes/old.md',
+            kind: 'renamed',
+            additions: 2,
+            deletions: 0,
+            also_by: null,
+          },
+        ],
+        additions: 2,
+        deletions: 0,
+        binary: 0,
+        shell_unrecorded: null,
+      },
+    ]);
+  });
+
+  it('reads a run no commit record names as not recorded, whatever its trailer says (CV-35)', async () => {
+    seedGitHistory([
+      {
+        hash: 'c'.repeat(40),
+        message: 'assistant: tidy\n\nCerebro-Run: run-trailer\nCerebro-Actor: claude-code',
+        date: 1_790_000_100,
+        files: [{ path: 'a.md', status: 'modified' }],
+        snapshots: { 'a.md': '# a\n' },
+        run: null,
+      },
+    ]);
+    __seedFleet([run('run-trailer', 1)]);
+    expect((await conversationChanges('/v', SESSION)).changesets).toEqual([
+      {
+        kept_out_of_git: null,
+        state: 'not_recorded',
+        run_id: 'run-trailer',
+        reason: 'no commit was recorded for this run',
+        files: [],
+      },
+    ]);
+  });
+
+  it('lists the paths a run booked in a vault with no history, mail left out', async () => {
+    resetMockGit({ isRepo: false });
+    const wrote = (path: string, to: string | null = null) => ({
+      kind: to === null ? 'vault.write' : 'vault.rename',
+      path,
+      to,
+      at: at(1),
+      approved_by: null,
+    });
+    const paths = run('run-paths', 1);
+    const quiet = run('run-quiet', 2);
+    __seedFleet([paths, quiet, run('run-unbooked', 3)], {
+      'run-paths': detail(paths, {
+        state: 'partial',
+        writes: [
+          wrote('notes/b.md'),
+          wrote('a.md'),
+          wrote('old.md', 'moved.md'),
+          wrote('sources/mail/kept.md'),
+          wrote('.cerebro/connectors.json'),
+        ],
+      }),
+      'run-quiet': detail(quiet, { state: 'recorded', writes: [] }),
+    });
+    expect((await conversationChanges('/v', SESSION)).changesets).toEqual([
+      {
+        kept_out_of_git: null,
+        state: 'not_a_repo',
+        run_id: 'run-paths',
+        files: ['a.md', 'moved.md', 'notes/b.md', 'old.md'],
+        shell_unrecorded: null,
+      },
+      // Its own Write and Edit calls are in no row: none is never "nothing".
+      {
+        kept_out_of_git: null,
+        state: 'not_recorded',
+        run_id: 'run-quiet',
+        reason: 'no page write was recorded for this run',
+        files: [],
+      },
+      {
+        kept_out_of_git: null,
+        state: 'not_recorded',
+        run_id: 'run-unbooked',
+        reason: "this run's writes were not recorded",
+        files: [],
+      },
+    ]);
+  });
+
+  it('leaves out another vault’s runs, another session’s and one still at work', async () => {
+    __seedFleet([
+      run('run-here', 1),
+      run('run-elsewhere', 2, { vault_id: '/elsewhere' }),
+      run('run-other-session', 3, { cli_session_id: '00000000-0000-4000-8000-000000000093' }),
+      run('run-live', 4, { outcome: 'running', ended_at: null }),
+    ]);
+    expect(runIds((await conversationChanges('/v', SESSION)).changesets)).toEqual(['run-here']);
+  });
+
+  it('keeps the newest 100 runs, oldest first, and says it left older ones out', async () => {
+    const many = Array.from({ length: 101 }, (_, n) => run(`run-${String(n).padStart(3, '0')}`, n));
+    __seedFleet(many);
+    const capped = await conversationChanges('/v', SESSION);
+    expect(capped.truncated).toBe(true);
+    expect(capped.changesets).toHaveLength(100);
+    expect(runIds(capped.changesets).at(0)).toBe('run-001');
+    expect(runIds(capped.changesets).at(-1)).toBe('run-100');
+    __seedFleet(many.slice(1));
+    const exact = await conversationChanges('/v', SESSION);
+    expect(exact.truncated).toBe(false);
+    expect(exact.changesets).toHaveLength(100);
+  });
+
+  it('refuses an id that is no session, and fails when the fleet cannot be read', async () => {
+    await expect(conversationChanges('/v', 'short')).rejects.toThrow(
+      'is not a Claude Code session id',
+    );
+    __seedFleet(null);
+    await expect(conversationChanges('/v', SESSION)).rejects.toThrow();
+  });
+
+  it('fails through the lab’s fault, once (CV-44)', async () => {
+    __seedFleet([run('run-here', 1)]);
+    failNext('conversation_changes');
+    await expect(gitIpc.conversationChanges('/v', SESSION)).rejects.toThrow(
+      'state lab: conversation_changes was told to fail once',
+    );
+    // The burst ends with its task.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runIds((await gitIpc.conversationChanges('/v', SESSION)).changesets)).toEqual([
+      'run-here',
+    ]);
   });
 });

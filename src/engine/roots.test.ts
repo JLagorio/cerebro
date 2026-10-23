@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import type { RemoteOutcome, RemoteResult } from './git';
+import {
+  UNCOUNTED_WORDS,
+  type GitRemoteStatus,
+  type RemoteOutcome,
+  type RemoteResult,
+} from './git';
 import {
   DIVERGED_MESSAGE,
   gitBadgeText,
   isMarkdownPath,
+  isRootGitRefusal,
   parentPath,
   syncLanded,
   syncNotice,
+  uncountedSync,
+  type RootGitBadge,
 } from './roots';
 
 describe('isMarkdownPath', () => {
@@ -32,18 +40,40 @@ describe('parentPath', () => {
 });
 
 describe('gitBadgeText', () => {
+  const badge = (counts: Partial<RootGitBadge>): RootGitBadge => ({
+    branch: 'main',
+    ahead: 0,
+    behind: 0,
+    hasUpstream: true,
+    dirty: 0,
+    ...counts,
+  });
+
   it('stays silent when a repo is clean and in sync', () => {
-    expect(gitBadgeText({ branch: 'main', ahead: 0, behind: 0, dirty: 0 })).toBeNull();
+    expect(gitBadgeText(badge({}))).toBeNull();
   });
 
   it('speaks the branch only once there is something to say', () => {
-    expect(gitBadgeText({ branch: 'main', ahead: 2, behind: 0, dirty: 0 })).toBe('main ↑2');
-    expect(gitBadgeText({ branch: 'main', ahead: 0, behind: 3, dirty: 0 })).toBe('main ↓3');
-    expect(gitBadgeText({ branch: 'wip', ahead: 0, behind: 0, dirty: 4 })).toBe('wip ●4');
+    expect(gitBadgeText(badge({ ahead: 2 }))).toBe('main ↑2');
+    expect(gitBadgeText(badge({ behind: 3 }))).toBe('main ↓3');
+    expect(gitBadgeText(badge({ branch: 'wip', dirty: 4 }))).toBe('wip ●4');
   });
 
   it('orders ahead, behind, then dirty', () => {
-    expect(gitBadgeText({ branch: 'main', ahead: 1, behind: 2, dirty: 3 })).toBe('main ↑1 ↓2 ●3');
+    expect(gitBadgeText(badge({ ahead: 1, behind: 2, dirty: 3 }))).toBe('main ↑1 ↓2 ●3');
+  });
+
+  // M92.10: silence says "in sync", so a count git did not take speaks.
+  it('marks a count git did not take with ?, never the silence of a zero', () => {
+    expect(gitBadgeText(badge({ ahead: null, behind: null }))).toBe('main ↑? ↓?');
+    expect(gitBadgeText(badge({ behind: null }))).toBe('main ↓?');
+    expect(gitBadgeText(badge({ ahead: 2, behind: null, dirty: 1 }))).toBe('main ↑2 ↓? ●1');
+  });
+
+  it('shows no counts for a branch with no upstream to count against', () => {
+    const loose = { ahead: null, behind: null, hasUpstream: false };
+    expect(gitBadgeText(badge(loose))).toBeNull();
+    expect(gitBadgeText(badge({ ...loose, dirty: 2 }))).toBe('main ●2');
   });
 });
 
@@ -98,5 +128,32 @@ describe('syncNotice', () => {
 
     const gone = { code: 'no_such_root', message: 'no mounted root with id root-9' };
     expect(syncNotice(gone)).toEqual({ text: 'failed', title: gone.message });
+  });
+
+  // M92.10: the store's own answer when git did not count after the fetch.
+  it('says a sync that could not count couldn’t tell, and why, and never that it landed', () => {
+    const status: GitRemoteStatus = {
+      branch: 'main',
+      ahead: null,
+      behind: null,
+      hasRemote: true,
+      hasUpstream: true,
+      upstream: 'origin/main',
+    };
+    const unread = uncountedSync(status);
+    expect(unread).toEqual({
+      uncounted: 'unread',
+      message: `${UNCOUNTED_WORDS.unread}, so nothing was pulled`,
+    });
+    expect(syncNotice(unread)).toEqual({ text: "couldn't tell", title: unread.message });
+    expect(syncLanded(unread)).toBe(false);
+    expect(isRootGitRefusal(unread)).toBe(false);
+
+    const loose = uncountedSync({ ...status, hasUpstream: false, upstream: null });
+    expect(loose.uncounted).toBe('no_upstream');
+    expect(syncNotice(loose)?.title).toBe(`${UNCOUNTED_WORDS.no_upstream}, so nothing was pulled`);
+
+    // A status read that answered nothing counted nothing either.
+    expect(uncountedSync(undefined).uncounted).toBe('unread');
   });
 });

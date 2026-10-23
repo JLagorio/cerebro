@@ -1,0 +1,83 @@
+/* The rail's Context card (M92.14): the tokens in words, what the context
+   holds (ContextCategories, context-categories.css), a few facts in two
+   columns, the MCP servers folded under one line, and when it was read.
+   Unlayered like the app's other surface stylesheets; it sets no motion. */
+
+.cb-rail-context-figure {
+  margin: 0 0 var(--sp-2);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cb-rail-context-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px var(--sp-3);
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-rail-context-facts dt {
+  color: var(--text-meta);
+}
+.cb-rail-context-facts dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cb-rail-context-servers {
+  margin-top: var(--sp-3);
+}
+.cb-rail-context-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-rail-context-server {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-rail-context-server dt {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+.cb-rail-context-server-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-rail-context-server-tools {
+  color: var(--text-meta);
+}
+.cb-rail-context-server dd {
+  flex: none;
+  margin: 0;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.cb-rail-context-server[data-deferred] dd {
+  color: var(--text-muted);
+}
+
+.cb-rail-context-note,
+.cb-rail-context-freshness {
+  margin: var(--sp-2) 0 0;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-rail-context-freshness {
+  margin-top: var(--sp-3);
+}

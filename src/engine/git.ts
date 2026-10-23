@@ -183,12 +183,42 @@ export interface GitAuthorIdentity {
 
 export interface GitRemoteStatus {
   branch: string;
-  ahead: number;
-  behind: number;
+  /**
+   * Commits to push and to pull, or `null` when git did not count them
+   * (M92.10): the branch tracks no upstream, or the count failed. Unknown is
+   * never 0 (CV-05), so it never reads "Up to date" and never decides a pull.
+   */
+  ahead: number | null;
+  behind: number | null;
   hasRemote: boolean;
   hasUpstream: boolean;
   upstream: string | null;
 }
+
+/** A remote status git counted both ways. */
+export type CountedRemote = GitRemoteStatus & { ahead: number; behind: number };
+
+export function isCounted(remote: GitRemoteStatus): remote is CountedRemote {
+  return remote.ahead !== null && remote.behind !== null;
+}
+
+/**
+ * Why a remote has no counts (M92.10): `no_upstream` when its branch tracks
+ * nothing to count against, `unread` when git could not count.
+ */
+export type CountsUnknown = 'no_upstream' | 'unread';
+
+/** Why `remote` has no counts, or null when git took both. */
+export function countsUnknown(remote: GitRemoteStatus): CountsUnknown | null {
+  if (isCounted(remote)) return null;
+  return remote.hasUpstream ? 'unread' : 'no_upstream';
+}
+
+/** What a surface says where a count git did not take would be, never a 0. */
+export const UNCOUNTED_WORDS: Record<CountsUnknown, string> = {
+  no_upstream: 'No upstream branch to count against',
+  unread: "Couldn't count commits to push or pull",
+};
 
 /**
  * Why a network operation ended. The distinction is the point: auth means
@@ -241,8 +271,13 @@ export function isFailure(result: RemoteResult): boolean {
   );
 }
 
-/** Sync state for the shell SyncBadge, derived rather than stored. */
-export type SyncState = 'clean' | 'local-changes' | 'ahead' | 'behind' | 'diverged' | 'conflict';
+/**
+ * Sync state for the shell SyncBadge, derived rather than stored. `unknown`
+ * is a remote git did not count against (M92.10), and never `clean`: a count
+ * nobody took must not read "Up to date".
+ */
+export type SyncState =
+  'clean' | 'local-changes' | 'ahead' | 'behind' | 'diverged' | 'unknown' | 'conflict';
 
 export function syncState(
   remote: GitRemoteStatus | null,
@@ -252,6 +287,7 @@ export function syncState(
   if (conflictCount > 0) return 'conflict';
   if (modifiedCount > 0) return 'local-changes';
   if (remote === null) return 'clean';
+  if (!isCounted(remote)) return 'unknown';
   if (remote.ahead > 0 && remote.behind > 0) return 'diverged';
   if (remote.ahead > 0) return 'ahead';
   if (remote.behind > 0) return 'behind';

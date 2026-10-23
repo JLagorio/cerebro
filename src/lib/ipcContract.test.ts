@@ -1363,6 +1363,25 @@ describe('the real tree', () => {
     });
     expect(sent).toEqual([field]);
   });
+
+  // M92.12: the Changes heal names its session as Rust spells the parameter.
+  // Tauri would refuse a call that omits it, but a misspelt key beside a
+  // spelled one is dropped without a word; the audit catches that, and this
+  // holds the pair and the one adapter that sends it, which the app reaches.
+  it('sends conversation_changes the vault and the session, from gitIpc alone', () => {
+    const { rust, side } = real();
+    const command = rust.commands.get('conversation_changes');
+    expect(command?.file).toBe('lib.rs');
+    expect(command?.params.map((param) => [param.key, param.optional])).toEqual([
+      ['vault', false],
+      ['sessionId', false],
+    ]);
+    const sites = side.sites.filter((site) => site.cmd === 'conversation_changes');
+    expect(sites.map((site) => [site.file, site.owner, [...site.keys].sort()])).toEqual([
+      ['src/lib/gitIpc.ts', 'conversationChanges', ['sessionId', 'vault']],
+    ]);
+    expect(side.called.has('src/lib/gitIpc.ts#conversationChanges')).toBe(true);
+  });
 });
 
 // --- Negative controls, on inline fixtures -----------------------------------

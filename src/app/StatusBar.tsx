@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
 import { RunList } from '@/agent/RunList';
-import { isFailure, type RemoteResult } from '@/engine/git';
+import { countsUnknown, isFailure, UNCOUNTED_WORDS, type RemoteResult } from '@/engine/git';
 import { useGit } from '@/git/useGit';
 import { APP_VERSION } from '@/lib/appVersion';
 import * as git from '@/lib/gitIpc';
@@ -12,7 +12,8 @@ import { useVaultStore } from '@/stores/vaultStore';
 import './statusBar.css';
 
 /** Quiet workspace identity and actions. Passive repository facts live in the
- * identity disclosure; changes, failed syncs and running assistants stay visible. */
+ * identity disclosure; changes, failed syncs, a history read that failed and
+ * running assistants stay visible. */
 function StatusAction({
   icon,
   label,
@@ -56,7 +57,7 @@ export function StatusBar() {
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
   const navigate = useNavStore((s) => s.navigate);
-  const { isRepo, ready, modified, conflicts, remote, refresh } = useGit();
+  const { isRepo, ready, readError, branch, modified, conflicts, remote, refresh } = useGit();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsRef = useRef<HTMLButtonElement>(null);
   // A completed sync belongs to the vault it ran against. Switching vaults
@@ -113,15 +114,28 @@ export function StatusBar() {
     }
   };
 
+  // M92.9: a read that failed claims nothing it read before, and never that
+  // the vault keeps no history: there is nothing here to start tracking.
+  const unread = readError !== null;
+  const tracked = isRepo === true && !unread;
   const goTo = (kind: 'settings' | 'changes') => {
     setDetailsOpen(false);
     navigate({ kind });
   };
+  // M92.10: a count git did not take is said in words, never as 0, so it
+  // never reads as nothing to sync.
+  const unknown = remote === null ? null : countsUnknown(remote);
+  const ahead = remote?.ahead ?? null;
+  const behind = remote?.behind ?? null;
+  const remoteChanges =
+    remote === null
+      ? null
+      : unknown !== null
+        ? UNCOUNTED_WORDS[unknown]
+        : `${ahead} to push · ${behind} to pull`;
   const divergence =
-    remote !== null && (remote.ahead > 0 || remote.behind > 0)
-      ? [remote.ahead > 0 ? `↑${remote.ahead}` : '', remote.behind > 0 ? `↓${remote.behind}` : '']
-          .filter(Boolean)
-          .join(' ')
+    ahead !== null && behind !== null && (ahead > 0 || behind > 0)
+      ? [ahead > 0 ? `↑${ahead}` : '', behind > 0 ? `↓${behind}` : ''].filter(Boolean).join(' ')
       : '';
   const syncLabel = busy
     ? 'Syncing…'
@@ -173,13 +187,15 @@ export function StatusBar() {
             </div>
             <div>
               <dt>History</dt>
-              <dd>{isRepo ? 'Tracked locally' : 'Not tracked'}</dd>
+              <dd data-testid="status-history">
+                {unread ? 'Couldn’t read' : isRepo === true ? 'Tracked locally' : 'Not tracked'}
+              </dd>
             </div>
-            {isRepo && (
+            {tracked && (
               <>
                 <div>
                   <dt>Branch</dt>
-                  <dd data-testid="status-branch">{remote?.branch || 'Not recorded'}</dd>
+                  <dd data-testid="status-branch">{branch ?? 'Not recorded'}</dd>
                 </div>
                 <div>
                   <dt>Remote</dt>
@@ -191,12 +207,10 @@ export function StatusBar() {
                   <dt>Changes</dt>
                   <dd>{pending === 0 ? 'No changes' : changeLabel}</dd>
                 </div>
-                {remote !== null && (
+                {remoteChanges !== null && (
                   <div>
                     <dt>Remote changes</dt>
-                    <dd>
-                      {remote.ahead} to push · {remote.behind} to pull
-                    </dd>
+                    <dd data-testid="status-remote-changes">{remoteChanges}</dd>
                   </div>
                 )}
                 {lastSync !== null && (
@@ -213,6 +227,11 @@ export function StatusBar() {
               </>
             )}
           </dl>
+          {unread && (
+            <p data-testid="status-history-error" className="cb-status-error">
+              Couldn’t read this vault’s history: {readError}
+            </p>
+          )}
           {syncError !== null && (
             <p role="alert" className="cb-status-error">
               {syncError}
@@ -225,16 +244,28 @@ export function StatusBar() {
               testId="workspace-settings"
               onClick={() => goTo('settings')}
             />
-            <StatusAction
-              icon={isRepo ? 'file-diff' : 'git-branch'}
-              label={isRepo ? 'View changes' : 'Start tracking history'}
-              testId={pending > 0 && isRepo ? 'workspace-changes' : 'status-changes'}
-              onClick={() => goTo('changes')}
-            />
+            {(tracked || (isRepo === false && !unread)) && (
+              <StatusAction
+                icon={tracked ? 'file-diff' : 'git-branch'}
+                label={tracked ? 'View changes' : 'Start tracking history'}
+                testId={pending > 0 && tracked ? 'workspace-changes' : 'status-changes'}
+                onClick={() => goTo('changes')}
+              />
+            )}
           </div>
         </Popover>
       )}
-      {isRepo && pending > 0 && (
+      {unread && (
+        <StatusAction
+          icon="circle-alert"
+          label="History unavailable"
+          title={`Couldn’t read this vault’s history: ${readError}`}
+          tone="warn"
+          testId="status-history-unavailable"
+          onClick={() => setDetailsOpen(true)}
+        />
+      )}
+      {tracked && pending > 0 && (
         <StatusAction
           icon={conflicts.length > 0 ? 'triangle-alert' : 'file-diff'}
           label={changeLabel}
@@ -243,15 +274,17 @@ export function StatusBar() {
           onClick={() => navigate({ kind: 'changes' })}
         />
       )}
-      {isRepo && (remote !== null || syncError !== null) && (
+      {tracked && (remote !== null || syncError !== null) && (
         <StatusAction
           icon={syncError !== null ? 'triangle-alert' : 'refresh-cw'}
           label={syncLabel}
           title={
             syncError ??
-            (divergence !== '' && remote !== null
-              ? `${remote.ahead} to push, ${remote.behind} to pull`
-              : undefined)
+            (unknown !== null
+              ? UNCOUNTED_WORDS[unknown]
+              : divergence !== ''
+                ? `${ahead} to push, ${behind} to pull`
+                : undefined)
           }
           tone={syncError !== null ? 'danger' : divergence !== '' ? 'accent' : 'default'}
           disabled={busy}

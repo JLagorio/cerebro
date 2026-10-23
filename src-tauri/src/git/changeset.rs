@@ -22,6 +22,12 @@
 //! (`write_log::writers_since`). A run whose writes were never recorded reads
 //! not_recorded, never "nothing"; a vault with no history lists the files
 //! without counts; and a git failure lists them as unavailable.
+//!
+//! **Reading back** (M92.12). A conversation's changesets are read back from
+//! these records later (`super::conversation`), its commits through
+//! [`parse_raw_numstat_z`]. What only the run's own reader knew, who else
+//! wrote a file, the mail it kept out of git and whether its shell wrote
+//! unrecorded, reads back as None: not recorded, never empty, 0 or false.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -232,55 +238,85 @@ pub struct ChangedFile {
     pub additions: Option<u64>,
     pub deletions: Option<u64>,
     /// Other actors who wrote this path since its last commit: their edits
-    /// ride in this commit too.
-    pub also_by: Vec<String>,
+    /// ride in this commit too. None where that was not recorded: a commit
+    /// read back from history (M92.12).
+    pub also_by: Option<Vec<String>>,
 }
 
-/// What a run changed, as its panel's footer reads it. Tagged by `state`.
+/// What a run changed, as its panel's footer and the rail's Changes card
+/// read it. Tagged by `state`. `kept_out_of_git` and `shell_unrecorded` are
+/// None on a changeset read back from history (M92.12), which cannot know
+/// them: not recorded, never 0 or false (CV-05).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum RunChangeset {
     /// The run's own commit, under its full hash. A total is None when every
     /// file it counts is binary; `binary` counts the binary files.
     Committed {
-        kept_out_of_git: u64,
+        kept_out_of_git: Option<u64>,
         run_id: String,
         commit: String,
         files: Vec<ChangedFile>,
         additions: Option<u64>,
         deletions: Option<u64>,
         binary: u64,
-        shell_unrecorded: bool,
+        shell_unrecorded: Option<bool>,
     },
     /// The run wrote nothing, or wrote the bytes that were already there.
     Nothing {
-        kept_out_of_git: u64,
+        kept_out_of_git: Option<u64>,
         run_id: String,
-        shell_unrecorded: bool,
+        shell_unrecorded: Option<bool>,
     },
-    /// Nobody recorded what the run wrote: a run with no durable id, or one
-    /// from before its writes were booked.
+    /// Nobody recorded what the run wrote: a run with no durable id, one
+    /// from before its writes were booked, or one read back with no record
+    /// of its commit.
     NotRecorded {
-        kept_out_of_git: u64,
+        kept_out_of_git: Option<u64>,
         run_id: Option<String>,
         reason: String,
         files: Vec<String>,
     },
     /// The vault keeps no history, so there are files and no counts.
     NotARepo {
-        kept_out_of_git: u64,
+        kept_out_of_git: Option<u64>,
         run_id: String,
         files: Vec<String>,
-        shell_unrecorded: bool,
+        shell_unrecorded: Option<bool>,
     },
     /// The commit could not be made or read back.
     Unavailable {
-        kept_out_of_git: u64,
+        kept_out_of_git: Option<u64>,
         run_id: String,
         reason: String,
         files: Vec<String>,
-        shell_unrecorded: bool,
+        shell_unrecorded: Option<bool>,
     },
+}
+
+/// A commit's changeset from its files: each total sums the files git
+/// counted, and is None when it counted none; `binary` is the rest.
+pub(super) fn committed(
+    run_id: &str,
+    commit: String,
+    files: Vec<ChangedFile>,
+    kept_out_of_git: Option<u64>,
+    shell_unrecorded: Option<bool>,
+) -> RunChangeset {
+    let counted: Vec<&ChangedFile> = files.iter().filter(|f| f.additions.is_some()).collect();
+    let total = |pick: fn(&ChangedFile) -> Option<u64>| {
+        (!counted.is_empty()).then(|| counted.iter().filter_map(|f| pick(f)).sum())
+    };
+    RunChangeset::Committed {
+        kept_out_of_git,
+        run_id: run_id.to_string(),
+        commit,
+        additions: total(|f| f.additions),
+        deletions: total(|f| f.deletions),
+        binary: (files.len() - counted.len()) as u64,
+        files,
+        shell_unrecorded,
+    }
 }
 
 /// One row of `git show --numstat -z -M`: a binary file reads `-` for both
@@ -325,6 +361,84 @@ pub fn parse_numstat_z(out: &str) -> Vec<NumstatRow> {
         });
     }
     rows
+}
+
+/// One file of `git show -z -M --raw --numstat` (M92.12): its numstat row,
+/// and the letter its raw record gives the change (`A`, `M`, `D`, `R`, …),
+/// None when no raw record names its path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShowRow {
+    pub status: Option<char>,
+    pub numstat: NumstatRow,
+}
+
+/// Parse `git show -z -M --raw --numstat --format=` output. The raw records
+/// come first, each `:<mode> <mode> <hash> <hash> <letter><score>\0` and its
+/// path, a rename or copy its old path and then its new one; the numstat
+/// records follow and are [`parse_numstat_z`]'s. The paths are read by
+/// place, so one that starts with `:` is never a record.
+pub fn parse_raw_numstat_z(out: &str) -> Vec<ShowRow> {
+    let mut letters: HashMap<&str, char> = HashMap::new();
+    let mut numstat_from = out.len();
+    let mut at = 0;
+    let mut fields = out.split('\0');
+    while let Some(field) = fields.next() {
+        let start = at;
+        at += field.len() + 1;
+        let header = field.trim_start_matches('\n');
+        if header.is_empty() {
+            continue;
+        }
+        let Some(spec) = header.strip_prefix(':') else {
+            numstat_from = start;
+            break;
+        };
+        // A merge's combined record (`::`) names one path and no one letter.
+        let letter = if spec.starts_with(':') {
+            None
+        } else {
+            spec.split(' ')
+                .nth(4)
+                .and_then(|status| status.chars().next())
+        };
+        let names = if matches!(letter, Some('R' | 'C')) {
+            2
+        } else {
+            1
+        };
+        let mut last = None;
+        for _ in 0..names {
+            let Some(name) = fields.next() else {
+                break;
+            };
+            at += name.len() + 1;
+            last = Some(name);
+        }
+        if let (Some(path), Some(letter)) = (last, letter) {
+            letters.insert(path, letter);
+        }
+    }
+    parse_numstat_z(out.get(numstat_from..).unwrap_or_default())
+        .into_iter()
+        .map(|numstat| ShowRow {
+            status: letters.get(numstat.path.as_str()).copied(),
+            numstat,
+        })
+        .collect()
+}
+
+/// How a commit changed a file, as its raw record's letter says: a file a
+/// rename brought from elsewhere in the vault is renamed whatever the
+/// letter, and one it brought from outside the vault was added to it.
+pub fn kind_of(status: Option<char>, renamed_in_vault: bool) -> ChangeKind {
+    if renamed_in_vault {
+        return ChangeKind::Renamed;
+    }
+    match status {
+        Some('A' | 'C' | 'R') => ChangeKind::Added,
+        Some('D') => ChangeKind::Deleted,
+        _ => ChangeKind::Modified,
+    }
 }
 
 /// The label a run's commit subject opens with: an agent's handle, the
@@ -401,6 +515,9 @@ fn stamp(at: DateTime<Utc>) -> String {
 /// its files.
 pub const QUITTING: &str = "Cerebro was quitting";
 
+/// Why a run whose writes were never booked reads not recorded.
+pub const WRITES_NOT_RECORDED: &str = "this run's writes were not recorded";
+
 /// A run's recorded paths: its runtime database (when it opened), the paths,
 /// whether the shell may have written more, and whether its writes were
 /// recorded at all.
@@ -426,11 +543,11 @@ fn recorded(run: &SettleRun<'_>) -> (Result<ReadOnly, String>, Vec<String>, bool
 pub fn quitting(run: SettleRun<'_>) -> RunChangeset {
     let (_, files, shell_unrecorded, _, kept_out_of_git) = recorded(&run);
     RunChangeset::Unavailable {
-        kept_out_of_git,
+        kept_out_of_git: Some(kept_out_of_git),
         run_id: run.run_id.to_string(),
         reason: QUITTING.into(),
         files,
-        shell_unrecorded,
+        shell_unrecorded: Some(shell_unrecorded),
     }
 }
 
@@ -443,15 +560,15 @@ pub fn settle_run(run: SettleRun<'_>) -> RunChangeset {
     if files.is_empty() {
         return if known || kept_out_of_git > 0 {
             RunChangeset::Nothing {
-                kept_out_of_git,
+                kept_out_of_git: Some(kept_out_of_git),
                 run_id,
-                shell_unrecorded,
+                shell_unrecorded: Some(shell_unrecorded),
             }
         } else {
             RunChangeset::NotRecorded {
-                kept_out_of_git,
+                kept_out_of_git: Some(kept_out_of_git),
                 run_id: Some(run_id),
-                reason: "this run's writes were not recorded".into(),
+                reason: WRITES_NOT_RECORDED.into(),
                 files,
             }
         };
@@ -459,10 +576,10 @@ pub fn settle_run(run: SettleRun<'_>) -> RunChangeset {
     let ws = workspace::resolve(run.vault);
     if !ws.is_repo() {
         return RunChangeset::NotARepo {
-            kept_out_of_git,
+            kept_out_of_git: Some(kept_out_of_git),
             run_id,
             files,
-            shell_unrecorded,
+            shell_unrecorded: Some(shell_unrecorded),
         };
     }
     let identity = ro
@@ -498,11 +615,11 @@ pub fn settle_run(run: SettleRun<'_>) -> RunChangeset {
     commit
         .make()
         .unwrap_or_else(|reason| RunChangeset::Unavailable {
-            kept_out_of_git,
+            kept_out_of_git: Some(kept_out_of_git),
             run_id,
             reason,
             files,
-            shell_unrecorded,
+            shell_unrecorded: Some(shell_unrecorded),
         })
 }
 
@@ -548,9 +665,9 @@ impl Commit<'_> {
         let message = with_trailers(&subject, self.run_id, self.actor, head.as_deref());
         let Some(hash) = commit::commit_paths_in(ws, self.files, &message)? else {
             return Ok(RunChangeset::Nothing {
-                kept_out_of_git: self.kept_out_of_git,
+                kept_out_of_git: Some(self.kept_out_of_git),
                 run_id: self.run_id.to_string(),
-                shell_unrecorded: self.shell_unrecorded,
+                shell_unrecorded: Some(self.shell_unrecorded),
             });
         };
         record_commit(self.vault_id, &hash, self.run_id);
@@ -586,23 +703,16 @@ impl Commit<'_> {
                 kind,
                 additions: row.additions,
                 deletions: row.deletions,
-                also_by,
+                also_by: Some(also_by),
             });
         }
-        let counted: Vec<&ChangedFile> = files.iter().filter(|f| f.additions.is_some()).collect();
-        let total = |pick: fn(&ChangedFile) -> Option<u64>| {
-            (!counted.is_empty()).then(|| counted.iter().filter_map(|f| pick(f)).sum())
-        };
-        Ok(RunChangeset::Committed {
-            kept_out_of_git: self.kept_out_of_git,
-            run_id: self.run_id.to_string(),
-            commit: hash,
-            additions: total(|f| f.additions),
-            deletions: total(|f| f.deletions),
-            binary: (files.len() - counted.len()) as u64,
+        Ok(committed(
+            self.run_id,
+            hash,
             files,
-            shell_unrecorded: self.shell_unrecorded,
-        })
+            Some(self.kept_out_of_git),
+            Some(self.shell_unrecorded),
+        ))
     }
 
     /// The other actors who wrote `path` between its last commit and now,
@@ -796,6 +906,95 @@ mod tests {
         assert!(parse_numstat_z("").is_empty());
     }
 
+    fn numstat(path: &str, previous: Option<&str>, counts: Option<(u64, u64)>) -> NumstatRow {
+        NumstatRow {
+            path: path.into(),
+            previous_path: previous.map(str::to_string),
+            additions: counts.map(|(adds, _)| adds),
+            deletions: counts.map(|(_, dels)| dels),
+        }
+    }
+
+    /// M92.12: git's raw records first, as `git show -z -M --raw --numstat`
+    /// writes them, then its numstat. A path is read by place, so one with a
+    /// tab or one that starts with `:` is a path, never a record.
+    #[test]
+    fn parse_raw_numstat_z_reads_letters_counts_binaries_and_renames() {
+        let out = concat!(
+            ":100644 100644 893b649 0f42a2b M\0a.md\0",
+            ":100644 000000 890bd8b 0000000 D\0c.md\0",
+            ":100644 100644 541b5f1 8c51542 M\0logo.png\0",
+            ":000000 100644 0000000 3e75765 A\0new.md\0",
+            ":100644 100644 c0d8151 617b348 R089\0b.md\0renamed-b.md\0",
+            ":100644 100644 587be6b 975fbec M\0sp ace/tab\tname.md\0",
+            ":000000 100644 0000000 be761e0 A\0:colon.md\0",
+            "1\t0\ta.md\0",
+            "0\t1\tc.md\0",
+            "-\t-\tlogo.png\0",
+            "1\t0\tnew.md\0",
+            "1\t0\t\0b.md\0renamed-b.md\0",
+            "1\t1\tsp ace/tab\tname.md\0",
+            "1\t0\t:colon.md\0",
+        );
+        let rows: Vec<(Option<char>, NumstatRow)> = parse_raw_numstat_z(out)
+            .into_iter()
+            .map(|row| (row.status, row.numstat))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (Some('M'), numstat("a.md", None, Some((1, 0)))),
+                (Some('D'), numstat("c.md", None, Some((0, 1)))),
+                (Some('M'), numstat("logo.png", None, None)),
+                (Some('A'), numstat("new.md", None, Some((1, 0)))),
+                (
+                    Some('R'),
+                    numstat("renamed-b.md", Some("b.md"), Some((1, 0)))
+                ),
+                (
+                    Some('M'),
+                    numstat("sp ace/tab\tname.md", None, Some((1, 1)))
+                ),
+                (Some('A'), numstat(":colon.md", None, Some((1, 0)))),
+            ]
+        );
+        assert!(parse_raw_numstat_z("").is_empty());
+        // A leading newline and an empty field between the sections are
+        // skipped; numstat with no raw record for its path has no letter.
+        let loose = concat!(
+            "\n:100644 100644 1 2 M\0a.md\0",
+            "\0",
+            "3\t1\ta.md\0",
+            "2\t0\tb.md\0",
+        );
+        assert_eq!(
+            parse_raw_numstat_z(loose),
+            vec![
+                ShowRow {
+                    status: Some('M'),
+                    numstat: numstat("a.md", None, Some((3, 1))),
+                },
+                ShowRow {
+                    status: None,
+                    numstat: numstat("b.md", None, Some((2, 0))),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_raw_letter_reads_as_the_kind_a_run_commit_says() {
+        assert_eq!(kind_of(Some('A'), false), ChangeKind::Added);
+        assert_eq!(kind_of(Some('M'), false), ChangeKind::Modified);
+        assert_eq!(kind_of(Some('T'), false), ChangeKind::Modified);
+        assert_eq!(kind_of(Some('D'), false), ChangeKind::Deleted);
+        assert_eq!(kind_of(Some('R'), true), ChangeKind::Renamed);
+        // A rename from outside the vault brought the file into it.
+        assert_eq!(kind_of(Some('R'), false), ChangeKind::Added);
+        assert_eq!(kind_of(None, true), ChangeKind::Renamed);
+        assert_eq!(kind_of(None, false), ChangeKind::Modified);
+    }
+
     /// The roadmap's case: three files changed, the run wrote two, and the
     /// commit holds exactly those two while the third stays modified.
     #[test]
@@ -827,7 +1026,7 @@ mod tests {
                 kind: ChangeKind::Modified,
                 additions: Some(2),
                 deletions: Some(0),
-                also_by: vec![],
+                also_by: Some(vec![]),
             }
         );
         f.done();
@@ -905,9 +1104,9 @@ mod tests {
         assert_eq!(
             f.settle("run-3", vec![]),
             RunChangeset::Nothing {
-                kept_out_of_git: 0,
+                kept_out_of_git: Some(0),
                 run_id: "run-3".into(),
-                shell_unrecorded: false
+                shell_unrecorded: Some(false)
             }
         );
         assert_eq!(f.git(&["rev-parse", "HEAD"]), before, "no empty commit");
@@ -996,7 +1195,7 @@ mod tests {
         f.wrote("vault.write", "a.md", "process:scout", Some("run-7"));
         let changeset = f.settle("run-7", vec![]);
         let (_, files) = committed(&changeset);
-        assert_eq!(files[0].also_by, vec!["human:me".to_string()]);
+        assert_eq!(files[0].also_by, Some(vec!["human:me".to_string()]));
         f.done();
     }
 
@@ -1008,10 +1207,10 @@ mod tests {
         assert_eq!(
             f.settle("run-8", vec![]),
             RunChangeset::NotARepo {
-                kept_out_of_git: 0,
+                kept_out_of_git: Some(0),
                 run_id: "run-8".into(),
                 files: vec!["a.md".into()],
-                shell_unrecorded: false,
+                shell_unrecorded: Some(false),
             }
         );
         f.done();
@@ -1218,14 +1417,14 @@ mod tests {
         else {
             panic!("expected a commit");
         };
-        assert!(shell_unrecorded);
+        assert_eq!(shell_unrecorded, Some(true));
         f.run("run-13", "process:scout", 2);
         assert_eq!(
             f.settle("run-13", vec![]),
             RunChangeset::Nothing {
-                kept_out_of_git: 0,
+                kept_out_of_git: Some(0),
                 run_id: "run-13".into(),
-                shell_unrecorded: true
+                shell_unrecorded: Some(true)
             }
         );
         f.done();
@@ -1249,11 +1448,11 @@ mod tests {
         assert_eq!(
             changeset,
             RunChangeset::Unavailable {
-                kept_out_of_git: 0,
+                kept_out_of_git: Some(0),
                 run_id: "run-14".into(),
                 reason: BUSY.into(),
                 files: vec!["a.md".into()],
-                shell_unrecorded: false,
+                shell_unrecorded: Some(false),
             }
         );
         assert_eq!(f.git(&["status", "--porcelain"]).trim(), "M a.md");
@@ -1280,7 +1479,7 @@ mod tests {
         else {
             panic!("expected public commit");
         };
-        assert_eq!(kept_out_of_git, 1);
+        assert_eq!(kept_out_of_git, Some(1));
         assert_eq!(
             files
                 .iter()
@@ -1315,8 +1514,8 @@ mod tests {
             ),
             RunChangeset::Nothing {
                 run_id: "mail-only".into(),
-                shell_unrecorded: false,
-                kept_out_of_git: 2
+                shell_unrecorded: Some(false),
+                kept_out_of_git: Some(2)
             }
         );
         assert_eq!(f.git(&["rev-parse", "HEAD"]), head);

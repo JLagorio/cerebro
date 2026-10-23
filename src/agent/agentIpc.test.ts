@@ -25,7 +25,7 @@ import {
 } from './agentIpc';
 import { releaseHeldMockRuns, runMockAgent } from './mockAgent';
 import { resetMockInteractions } from './mockInteractions';
-import type { AgentEvent, AgentStreamEvent, PendingInteraction } from './types';
+import type { AgentEvent, AgentStreamEvent, PendingInteraction, RunReach } from './types';
 import { failNext, resetFaults } from '@/lib/mockFaults';
 import { resetMockGit } from '@/lib/mockGit';
 import * as mock from '@/lib/mockIpc';
@@ -568,5 +568,57 @@ describe('onRunStarted (M92.7)', () => {
     const after = await start('hello');
     await doneOf(after.run);
     expect(heard).toHaveLength(2);
+  });
+
+  it('hands back a started run even when a start listener throws', async () => {
+    const heard: number[] = [];
+    const offThrowing = onRunStarted(() => {
+      throw new Error('a listener broke');
+    });
+    const offHearing = onRunStarted((turn) => heard.push(turn.run));
+    const handle = await start('hello');
+    offThrowing();
+    offHearing();
+    expect(heard).toEqual([handle.run]);
+    await doneOf(handle.run);
+  });
+});
+
+describe('a mock run says what it reaches (M92.8)', () => {
+  /** Run one turn to its Done, declaring `allowedTools`, and hear what it
+   * says it reaches. */
+  async function reachOf(allowedTools?: string[] | null): Promise<RunReach | null> {
+    const handle = await runAgent(VAULT, {
+      message: 'hello',
+      shell: 'off',
+      connectors: false,
+      attended: true,
+      allowedTools,
+    });
+    if ('deferred' in handle || 'settled' in handle) {
+      throw new Error('an attended run is never deferred or settled');
+    }
+    let reach: RunReach | null = null;
+    const off = onAgentEvent((event) => {
+      if (event.kind === 'Reach') reach = event.reach;
+    }, handle.run);
+    await doneOf(handle.run);
+    off();
+    return reach;
+  }
+
+  it('hands the script the run’s declared tools', async () => {
+    await reachOf(['Read']);
+    const options = vi.mocked(runMockAgent).mock.calls.at(-1)?.[2];
+    expect(options?.allowedTools).toEqual(['Read']);
+  });
+
+  it('holds Cerebro’s tools only while its declared tools leave it one', async () => {
+    expect((await reachOf(undefined))?.cerebro).toBe(true);
+    expect((await reachOf(null))?.cerebro).toBe(true);
+    expect((await reachOf(['mcp__cerebro__get_note']))?.cerebro).toBe(true);
+    expect((await reachOf(['get_note']))?.cerebro).toBe(true);
+    expect((await reachOf(['Read']))?.cerebro).toBe(false);
+    expect((await reachOf([]))?.cerebro).toBe(false);
   });
 });

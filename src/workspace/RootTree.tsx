@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePageNavigationControls } from '@/app/PageNavigation';
 import { chevronClass, ROW_CONTROL } from '@/app/sidebarChrome';
 import { Icon } from '@/components/ui/Icon';
+import { countsUnknown, UNCOUNTED_WORDS } from '@/engine/git';
 import { gitBadgeText, syncNotice } from '@/engine/roots';
 import { selectActiveTab, useRootsStore } from '@/stores/rootsStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -161,8 +162,17 @@ export function RootTree() {
       branch: status.branch,
       ahead: status.ahead,
       behind: status.behind,
+      hasUpstream: status.hasUpstream,
       dirty: gitDirty[row.rootId] ?? 0,
     });
+  };
+
+  /** The words behind a badge's `?` (M92.10): the counts git did not take. */
+  const badgeTitle = (row: TreeRow): string | undefined => {
+    const status = gitStatus[row.rootId];
+    return status !== undefined && countsUnknown(status) === 'unread'
+      ? UNCOUNTED_WORDS.unread
+      : undefined;
   };
 
   // Exactly one row is tabbable. The remembered row when it still exists,
@@ -273,6 +283,7 @@ export function RootTree() {
                 {gitBadge(row) !== null && (
                   <span
                     data-testid="root-git-badge"
+                    title={badgeTitle(row)}
                     className="flex-none rounded-sm bg-n-100 px-1 font-normal text-2xs text-n-500"
                   >
                     {gitBadge(row)}

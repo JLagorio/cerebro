@@ -119,6 +119,8 @@ describe('historyOf', () => {
     expect(historyOf(false, true)).toBeUndefined();
     expect(historyOf(true, true)).toBe('git');
     expect(historyOf(true, false)).toBe('none');
+    // M92.9: a read that failed before any told leaves it unknown, never none.
+    expect(historyOf(true, null)).toBeUndefined();
   });
 });
 

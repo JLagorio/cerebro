@@ -30,7 +30,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(details).toBeVisible();
     await expect(details.getByTitle('Cerebro version')).toBeVisible();
     await expect(details.getByTestId('status-remote')).toHaveText('No remote');
-    await expect(details.getByTestId('status-branch')).toHaveText('Not recorded');
+    await expect(details.getByTestId('status-branch')).toHaveText('main');
     await expect(details.getByRole('button', { name: 'Workspace settings' })).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(details.getByRole('button', { name: 'View changes' })).toBeFocused();

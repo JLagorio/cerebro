@@ -237,12 +237,15 @@ export async function readFileText(rootId: string, path: string): Promise<FileTe
  * that answers `git status`). Flipping the capability here is what lets a test
  * model a directory that BECOMES a repo after mount, which is the case the
  * Rust gate re-probes for.
+ *
+ * A null count models one git could not take (M92.10). A branch seeded with
+ * no upstream has no counts at all, as `remote::remote_status` gives none.
  */
 export function seedRootGit(rootPath: string, status: Partial<GitRemoteStatus>): void {
   for (const root of roots) {
     if (root.path === rootPath) root.caps = { ...root.caps, git: true };
   }
-  gitStatuses.set(rootPath, {
+  const seeded: GitRemoteStatus = {
     branch: 'main',
     ahead: 0,
     behind: 0,
@@ -250,7 +253,11 @@ export function seedRootGit(rootPath: string, status: Partial<GitRemoteStatus>):
     hasUpstream: true,
     upstream: 'origin/main',
     ...status,
-  });
+  };
+  gitStatuses.set(
+    rootPath,
+    seeded.hasUpstream ? seeded : { ...seeded, ahead: null, behind: null, upstream: null },
+  );
 }
 
 export function seedRootGitPulse(rootPath: string, commits: PulseCommit[]): void {
@@ -325,8 +332,8 @@ export async function rootGitRemoteStatus(
   return (
     gitStatuses.get(gate.path) ?? {
       branch: 'main',
-      ahead: 0,
-      behind: 0,
+      ahead: null,
+      behind: null,
       hasRemote: false,
       hasUpstream: false,
       upstream: null,
@@ -433,6 +440,9 @@ export async function rootGitFetch(rootId: string): Promise<RemoteResult | RootG
  * Fast-forward only. A root seeded BOTH ahead and behind has diverged, so the
  * pull is refused and nothing moves — the same answer `--ff-only` gives, for
  * the same reason: Cerebro never creates a conflict in a repo it doesn't own.
+ * A root seeded with a count git could not take (M92.10) has no history the
+ * mock can fast-forward through, so its pull fails as git's own failure
+ * reads, and nothing moves.
  */
 export async function rootGitPullFf(rootId: string): Promise<RemoteResult | RootGitRefusal> {
   const gate = syncGate(rootId);
@@ -448,6 +458,9 @@ export async function rootGitPullFf(rootId: string): Promise<RemoteResult | Root
   }
   const failed = remoteFailure(gate.path);
   if (failed !== null) return failed;
+  if (status.ahead === null || status.behind === null) {
+    return { status: 'error', message: CLASSIFIED.error, updatedFiles: [], conflictFiles: [] };
+  }
   if (status.ahead > 0 && status.behind > 0) {
     return {
       status: 'rejected',

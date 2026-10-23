@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+import { StateMessage } from '@/components/ui/StateMessage';
 import { Switch } from '@/components/ui/Switch';
 import type { GitAuthorIdentity, GitProviderStatus, GitRemoteStatus } from '@/engine/git';
 import { useGit } from '@/git/useGit';
@@ -15,14 +16,15 @@ import { useVaultStore } from '@/stores/vaultStore';
  * Gated on two separate things by design: `autoCheckpoint` is intent (does
  * the user want unattended commits) and `isRepo` is fact (is there anywhere
  * to put them). A setting that claims to be on while nothing is tracked
- * would be a lie the UI tells about itself.
+ * would be a lie the UI tells about itself. A git read that failed (M92.9)
+ * says so, and offers no Enable history: it is not a vault with none.
  */
 export function GitSettings() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const toast = useUiStore((s) => s.toast);
   const autoCheckpoint = useUiStore((s) => s.autoCheckpoint);
   const setAutoCheckpoint = useUiStore((s) => s.setAutoCheckpoint);
-  const { isRepo, ready, remote, refresh } = useGit();
+  const { isRepo, readError, ready, remote, refresh } = useGit();
 
   const [provider, setProvider] = useState<GitProviderStatus | null>(null);
   const [identity, setIdentity] = useState<GitAuthorIdentity | null>(null);
@@ -37,7 +39,7 @@ export function GitSettings() {
   }, []);
 
   useEffect(() => {
-    if (vaultPath === null || !isRepo) return;
+    if (vaultPath === null || isRepo !== true) return;
     void git
       .gitAuthorIdentity(vaultPath)
       .then(setIdentity)
@@ -73,7 +75,7 @@ export function GitSettings() {
     toast('Remote disconnected.');
   };
 
-  if (!ready) return null;
+  if (!ready || (isRepo === null && readError === null)) return null;
 
   return (
     <section data-testid="git-settings" className="flex flex-col gap-3">
@@ -86,7 +88,19 @@ export function GitSettings() {
         </div>
       )}
 
-      {!isRepo ? (
+      {readError !== null ? (
+        <StateMessage
+          state="unavailable"
+          title="Couldn’t read this vault’s history"
+          action={
+            <Button variant="secondary" size="sm" onClick={() => void refresh()}>
+              Try again
+            </Button>
+          }
+        >
+          {readError}
+        </StateMessage>
+      ) : !isRepo ? (
         <div className="flex flex-col items-start gap-2 rounded-lg border border-n-200 px-3 py-2.5">
           <p className="m-0 text-ui text-n-600">
             This vault is not tracked. Turning on history keeps every version of every note — and

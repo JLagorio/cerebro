@@ -10,11 +10,18 @@ import { isKeptOutOfGit } from '@/engine/mailPolicy';
  * each commit made here also keeps its parent, the bytes of every file it
  * committed (`snapshots`, null for a file it removed) and, for a run's own
  * commit, the run that made it, as runtime.db's `run_commits` records it:
- * the versions the history lens opens, the record attribution reads, and
- * what Restore writes back. `window.__cerebroSeedGitHistory` stages such
+ * the versions the history lens opens, the record attribution reads, what
+ * Restore writes back, and what a conversation's changes read back with the
+ * mock fleet's runs (M92.12). `window.__cerebroSeedGitHistory` stages such
  * commits for a spec.
  */
-import type { ChangedFile, RunChangeset } from '@/engine/changeset';
+import type { RunPageWrites } from '@/engine/attribution';
+import type {
+  ChangedFile,
+  ChangeKind,
+  ConversationChangesets,
+  RunChangeset,
+} from '@/engine/changeset';
 import { humanize } from '@/engine/frontmatter';
 import type {
   CommitQuery,
@@ -38,6 +45,8 @@ import type {
 } from '@/engine/git';
 import {
   diffLines,
+  fleetRunDetail,
+  fleetRunsPage,
   guardHumanWrite,
   guardRestoreTarget,
   HUMAN_ACTOR,
@@ -79,6 +88,10 @@ interface MockState {
   remoteUrl: string | null;
   ahead: number;
   behind: number;
+  /** Make git's ahead/behind count fail, as a rev-list exiting non-zero
+   * does (M92.10): the status then reads both as unknown, and the
+   * repository itself is unchanged. */
+  countFails: boolean;
   branch: string;
   /** Force the next remote call to fail a particular way. */
   nextRemoteFailure: RemoteResult | null;
@@ -135,6 +148,7 @@ function seed(): MockState {
     remoteUrl: null,
     ahead: 0,
     behind: 0,
+    countFails: false,
     branch: 'main',
     nextRemoteFailure: null,
     diffs: {},
@@ -568,6 +582,167 @@ export async function commitRuns(_vault: string, queries: CommitQuery[]): Promis
   return answered;
 }
 
+/** `git::conversation::MAX_RUNS`: the most runs one read takes, the newest. */
+const CONVERSATION_RUNS = 100;
+/** Why a run reads not recorded, in `git::conversation`'s and
+ *  `changeset::WRITES_NOT_RECORDED`'s words. */
+const NO_COMMIT_RECORDED = 'no commit was recorded for this run';
+const NO_WRITE_RECORDED = 'no page write was recorded for this run';
+const WRITES_NOT_RECORDED = "this run's writes were not recorded";
+/** A Claude Code session id as `cause::is_cli_session_id` reads one. */
+const CLI_SESSION_ID = /^(?!-)[0-9A-Za-z-]{8,64}$/;
+
+/** Whether a run's commit may take `path`, as `changeset::keeps` says:
+ *  vault-relative, never escaping, outside `.git/` and `.cerebro/`. */
+function keeps(path: string): boolean {
+  if (path === '' || path.startsWith('/') || path.startsWith('\\')) return false;
+  const parts = path.split('/');
+  return !parts.some((part) => part === '..' || part === '.git') && parts[0] !== '.cerebro';
+}
+
+/** A file's lines in a mock commit, as git's numstat counts them: from the
+ *  run's own patch, else from its copy against its parent's; null where the
+ *  commit kept neither, or a side is not text. */
+function numstatAt(
+  s: MockState,
+  index: number,
+  path: string,
+  previousPath: string | null,
+): { additions: number | null; deletions: number | null } {
+  const commit = s.commits[index];
+  const patch = s.patches[commit.hash]?.[path];
+  if (patch !== undefined) {
+    // Lines under the hunk header only: `+++`/`---` name the files.
+    const lines = patch.split('\n');
+    const hunk = lines.findIndex((line) => line.startsWith('@@'));
+    const body = hunk === -1 ? [] : lines.slice(hunk + 1);
+    return {
+      additions: body.filter((line) => line.startsWith('+')).length,
+      deletions: body.filter((line) => line.startsWith('-')).length,
+    };
+  }
+  const uncounted = { additions: null, deletions: null };
+  const side = (at: FileAt): string | null | undefined =>
+    at.kind === 'text' ? at.text : at.kind === 'absent' ? null : undefined;
+  try {
+    const parent = parentOf(s, index);
+    const after = side(fileAt(s, path, commit.hash));
+    const before = parent === null ? null : side(fileAt(s, previousPath ?? path, parent));
+    if (after === undefined || before === undefined) return uncounted;
+    const diff = diffLines(before, after);
+    return { additions: diff.additions, deletions: diff.deletions };
+  } catch {
+    // A commit that kept no copies cannot be counted (`fileAt`).
+    return uncounted;
+  }
+}
+
+/** A run's commit read back, as `conversation::read_commit` reads git's:
+ *  each file's kind and counts, and nothing only the run's reader knew. */
+function readBackCommit(s: MockState, index: number, runId: string): RunChangeset {
+  const commit = s.commits[index];
+  const files: ChangedFile[] = (commit.changes?.files ?? []).map((file) => {
+    const previous = commit.renamedFrom?.[file.path] ?? null;
+    const kind: ChangeKind =
+      previous !== null
+        ? 'renamed'
+        : file.status === 'added' || file.status === 'untracked' || file.status === 'renamed'
+          ? 'added'
+          : file.status === 'deleted'
+            ? 'deleted'
+            : 'modified';
+    return {
+      path: file.path,
+      previous_path: previous,
+      kind,
+      ...numstatAt(s, index, file.path, previous),
+      also_by: null,
+    };
+  });
+  const counted = files.filter((f) => f.additions !== null && f.deletions !== null);
+  const total = (pick: (f: ChangedFile) => number | null): number | null =>
+    counted.length === 0 ? null : counted.reduce((n, f) => n + (pick(f) ?? 0), 0);
+  return {
+    kept_out_of_git: null,
+    state: 'committed',
+    run_id: runId,
+    commit: commit.hash,
+    files,
+    additions: total((f) => f.additions),
+    deletions: total((f) => f.deletions),
+    binary: files.length - counted.length,
+    shell_unrecorded: null,
+  };
+}
+
+const notRecordedRun = (runId: string, reason: string): RunChangeset => ({
+  kept_out_of_git: null,
+  state: 'not_recorded',
+  run_id: runId,
+  reason,
+  files: [],
+});
+
+/** A run in a vault with no history, as `conversation::without_history`
+ *  reads it: the paths its booked writes name, mail left out. */
+async function readBackWithoutHistory(runId: string): Promise<RunChangeset> {
+  // A listed run with no detail booked no writes: Rust reads its row's
+  // `writes_booked`, and a row that says nothing is not recorded.
+  const wrote = await fleetRunDetail(runId).then(
+    (detail): RunPageWrites => detail.wrote,
+    (): RunPageWrites => ({ state: 'not_recorded' }),
+  );
+  if (wrote.state === 'not_recorded') return notRecordedRun(runId, WRITES_NOT_RECORDED);
+  const paths = wrote.writes.flatMap((w) => (w.to === null ? [w.path] : [w.path, w.to]));
+  const files = [...new Set(paths)].filter((path) => keeps(path) && !isKeptOutOfGit(path)).sort();
+  if (files.length === 0) return notRecordedRun(runId, NO_WRITE_RECORDED);
+  return {
+    kept_out_of_git: null,
+    state: 'not_a_repo',
+    run_id: runId,
+    files,
+    shell_unrecorded: null,
+  };
+}
+
+/**
+ * As `git::conversation::changes` (M92.12): the ended runs the mock fleet
+ * books under this session in this vault, the newest 100, oldest first,
+ * each as its commit record (`run` on a mock commit, CV-35) and the mock
+ * repository read it back. A run no commit record names is not recorded,
+ * whatever its message says; a vault with no history lists the paths its
+ * booked writes name. The fleet's own page cap (200 a vault) bounds what
+ * the mock can see; an unavailable fleet fails the read, as an unopened
+ * runtime database does.
+ */
+export async function conversationChanges(
+  vault: string,
+  sessionId: string,
+): Promise<ConversationChangesets> {
+  if (!CLI_SESSION_ID.test(sessionId)) {
+    throw new Error(`${JSON.stringify(sessionId)} is not a Claude Code session id.`);
+  }
+  const vaultId = vault === '/demo-vault' ? 'demo' : vault;
+  const runs = (await fleetRunsPage({ vault_id: vaultId, limit: 200 })).filter(
+    (run) => run.cli_session_id === sessionId && run.outcome !== 'running',
+  );
+  const s = state();
+  const changesets: RunChangeset[] = [];
+  for (const run of runs.slice(0, CONVERSATION_RUNS).reverse()) {
+    if (!s.isRepo) {
+      changesets.push(await readBackWithoutHistory(run.run_id));
+      continue;
+    }
+    const index = s.commits.findIndex((c) => c.run?.runId === run.run_id);
+    changesets.push(
+      index === -1
+        ? notRecordedRun(run.run_id, NO_COMMIT_RECORDED)
+        : readBackCommit(s, index, run.run_id),
+    );
+  }
+  return { changesets, truncated: runs.length > CONVERSATION_RUNS };
+}
+
 /** Restore's refusals, in restore.rs's words. */
 const NO_HISTORY = 'This vault keeps no history, so there is no version to restore.';
 const NOT_IN_HISTORY = "That version is not in this page's history.";
@@ -680,15 +855,19 @@ export async function gitFileUrl(_vault: string, path: string): Promise<string |
   return `https://github.com/acme/notes/blob/${s.branch}/${path}`;
 }
 
+/** As `remote::remote_status` (M92.10): git counts only against an
+ * upstream, and a count it could not take is null, never 0. */
 export async function gitRemoteStatus(_vault: string): Promise<GitRemoteStatus> {
   const s = state();
+  const tracked = s.remoteUrl !== null;
+  const counted = tracked && !s.countFails;
   return {
     branch: s.branch,
-    ahead: s.ahead,
-    behind: s.behind,
-    hasRemote: s.remoteUrl !== null,
-    hasUpstream: s.remoteUrl !== null,
-    upstream: s.remoteUrl === null ? null : `origin/${s.branch}`,
+    ahead: counted ? s.ahead : null,
+    behind: counted ? s.behind : null,
+    hasRemote: tracked,
+    hasUpstream: tracked,
+    upstream: tracked ? `origin/${s.branch}` : null,
   };
 }
 

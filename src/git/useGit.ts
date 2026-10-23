@@ -28,7 +28,21 @@ import { useVaultStore } from '@/stores/vaultStore';
  */
 export interface GitState {
   ready: boolean;
-  isRepo: boolean;
+  /**
+   * Whether the vault is a git repository, as the newest probe that could
+   * tell said (M92.9): null until one has. A read that fails leaves it as it
+   * was, so a failure never reads as "not a repository" (CV-05).
+   */
+  isRepo: boolean | null;
+  /**
+   * Why the newest read failed, or null when it answered (M92.9). The rest
+   * of the snapshot is then what the last read that answered said, and a
+   * surface says the read failed rather than claim any of it.
+   */
+  readError: string | null;
+  /** The branch the repository is on, kept with or without a remote
+   * (M92.9); null outside a repository, and when git could not name it. */
+  branch: string | null;
   modified: ModifiedFile[];
   conflicts: string[];
   conflictMode: ConflictMode;
@@ -41,12 +55,19 @@ type GitSnapshot = Omit<GitState, 'sync' | 'refresh'>;
 
 const EMPTY: GitSnapshot = {
   ready: false,
-  isRepo: false,
+  isRepo: null,
+  readError: null,
+  branch: null,
   modified: [],
   conflicts: [],
   conflictMode: 'none',
   remote: null,
 };
+
+/** A failed read's reason, as a surface can say it. */
+function reasonOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 /**
  * ONE git state for the whole app (M15).
@@ -76,12 +97,23 @@ export async function refreshGit(): Promise<void> {
     commit({ ...EMPTY });
     return;
   }
+  // A git probe failing must never take the app down with it — the vault is
+  // still perfectly usable as plain files. Nor may it read as a vault with
+  // no history (M92.9): it says the read failed, and leaves what an earlier
+  // read found, so no surface offers to start tracking a repository it only
+  // failed to read.
+  let repo: boolean;
   try {
-    const repo = await git.isGitRepo(vaultPath);
-    if (!repo) {
-      commit({ ...EMPTY, isRepo: false });
-      return;
-    }
+    repo = await git.isGitRepo(vaultPath);
+  } catch (err) {
+    commit({ readError: reasonOf(err) });
+    return;
+  }
+  if (!repo) {
+    commit({ ...EMPTY, isRepo: false });
+    return;
+  }
+  try {
     const [files, conflicted, mode, remoteStatus] = await Promise.all([
       git.getModifiedFiles(vaultPath),
       git.getConflictFiles(vaultPath),
@@ -90,15 +122,17 @@ export async function refreshGit(): Promise<void> {
     ]);
     commit({
       isRepo: true,
+      readError: null,
+      // git names the branch whether or not there is a remote to sync with.
+      branch: remoteStatus.branch === '' ? null : remoteStatus.branch,
       modified: files,
       conflicts: conflicted,
       conflictMode: mode,
       remote: remoteStatus.hasRemote ? remoteStatus : null,
     });
-  } catch {
-    // A git probe failing must never take the app down with it — the vault
-    // is still perfectly usable as plain files.
-    commit({ ...EMPTY, isRepo: false });
+  } catch (err) {
+    // The repository answered; what it holds did not.
+    commit({ isRepo: true, readError: reasonOf(err) });
   }
 }
 
@@ -168,23 +202,30 @@ function detach(): void {
   document.removeEventListener('visibilitychange', onVisible);
 }
 
-export function useGit(): GitState {
+/**
+ * The shared state, kept honest while this consumer is mounted. `watch:
+ * false` reads it as it stands and starts nothing: no probe, no poll and no
+ * trigger of its own, for a surface that must not read while it is folded
+ * away (the conversation rail's Environment card, M92.9).
+ */
+export function useGit({ watch = true }: { watch?: boolean } = {}): GitState {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const snapshot = useGitStore();
 
   useEffect(() => {
+    if (!watch) return;
     attach();
     return detach;
-  }, []);
+  }, [watch]);
 
   useEffect(() => {
     // Guarded on the module's own record of what was read, not on this hook's
     // render, so six mounted consumers cause ONE probe rather than six.
-    if (described === vaultPath) return;
+    if (!watch || described === vaultPath) return;
     described = vaultPath;
     useGitStore.setState({ ...EMPTY });
     void refreshGit();
-  }, [vaultPath]);
+  }, [vaultPath, watch]);
 
   return {
     ...snapshot,
@@ -194,8 +235,9 @@ export function useGit(): GitState {
   };
 }
 
-/** Test seam: forget what the shared state describes, so the next mount reads
- * again. Nothing in the app needs it — a vault change is detected on its own. */
+/** Test and state-lab seam: forget what the shared state describes, so the
+ * next mount reads again. Nothing in the app needs it — a vault change is
+ * detected on its own. */
 export function resetGitState(): void {
   described = undefined;
   seq += 1;

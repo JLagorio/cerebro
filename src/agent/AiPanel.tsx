@@ -1,5 +1,6 @@
 import {
   Fragment,
+  memo,
   useCallback,
   useEffect,
   useId,
@@ -22,7 +23,7 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { Chat } from '@/components/ai/Chat';
 import { Context } from '@/components/ai/Context';
 import { useMergedRefs } from '@/components/ai/mergeRefs';
-import { MessageScrollerItem } from '@/components/ai/MessageScroller';
+import { MessageScrollerItem, type MessageScrollerCommands } from '@/components/ai/MessageScroller';
 import {
   PromptInput,
   PromptInputButton,
@@ -44,7 +45,7 @@ import {
 } from '@/components/ai/Trace';
 import { checkAgent } from '@/agent/agentIpc';
 import { historyOf } from '@/agent/AiActionCard';
-import { Arrival, Presence, useArrival, useDrawn } from '@/components/ui/motion';
+import { Arrival, Presence, motionAllowed, useArrival, useDrawn } from '@/components/ui/motion';
 import { Message, TurnCheckpoint } from '@/agent/ChatTurn';
 import { ChatInput } from '@/agent/ChatInput';
 import {
@@ -71,13 +72,15 @@ import { PermissionCard } from '@/agent/PermissionCard';
 import { WriteApprovalCard } from '@/agent/WriteApprovalCard';
 import { RunOptionsPicker } from '@/agent/RunOptionsPicker';
 import { TranscriptNotice } from '@/agent/TranscriptNotice';
-import { useConversations } from '@/agent/useConversations';
+import { useConversations, type ConversationState } from '@/agent/useConversations';
 import { loadDraft, pruneDrafts, saveDraft } from '@/agent/drafts';
 import { useAgentChat, type TurnContext } from '@/agent/useAgentChat';
+import { useChangesHeal } from '@/agent/useChangesHeal';
 import { useContextUse } from '@/agent/useContextUse';
 import { composerFiles } from '@/agent/elements/attachments';
 import { contextUsageOf } from '@/agent/elements/composerContext';
 import { pageStarters, starterSend } from '@/agent/elements/composerStarters';
+import { railChanges, runOfCommit, type RailChanges } from '@/agent/elements/conversationChanges';
 import { branchPoints } from '@/agent/elements/panelCheckpoints';
 import { livePlan, type LivePlan } from '@/agent/elements/panelPlan';
 import {
@@ -85,11 +88,15 @@ import {
   pullRequestSources,
   turnKnowledge,
 } from '@/agent/elements/panelSources';
+import { railPlan } from '@/agent/elements/railPlan';
+import { railSources } from '@/agent/elements/railSources';
+import { railSubagents } from '@/agent/elements/railSubagents';
+import { railWaiting, waitingRowId } from '@/agent/elements/railWaiting';
 import { UpNext } from '@/agent/UpNext';
 import { ReviewNotesDock } from '@/agent/ReviewNotesDock';
 import { useUpNext, type SkillResolution } from '@/agent/useUpNext';
 import { useUpNextStore } from '@/stores/upNextStore';
-import { type AgentStatus, type PrLink } from '@/agent/types';
+import { type AgentStatus, type Conversation, type PrLink } from '@/agent/types';
 import {
   listSkills,
   matchSkillInvocation,
@@ -252,18 +259,24 @@ function PrLinks({ links }: { links: PrLink[] }) {
  * it works: its todo list as a Queue at the dock's scale, what is left open
  * with the step under way in the agent's own words, and what is done folded
  * under its count. The reply's own Plan line keeps the whole list in the
- * transcript; this is the glance at it from wherever the reader is.
+ * transcript; this is the glance at it from wherever the reader is. Beside
+ * a docked rail whose Plan card shows the list (Q11, M92.17), that card is
+ * the glance: the dock's is hidden, kept with its folds, so the list shows
+ * once.
  */
 function DockPlan({
   plan,
   working,
   arrive,
+  inRail,
 }: {
   plan: LivePlan;
   /** The agent is at it now, not waiting on the person or stopping: the
    *  step under way carries the working light. */
   working: boolean;
   arrive: boolean;
+  /** A docked rail's Plan card shows the list. */
+  inRail: boolean;
 }) {
   // A list may name one todo twice; its place in the list is its identity.
   const items = (todos: LivePlan['todo']) =>
@@ -273,6 +286,7 @@ function DockPlan({
       <Queue
         isStreaming={working}
         className="cb-chat-plan"
+        hidden={inRail || undefined}
         render={<section data-testid="live-plan" aria-label="Plan" />}
       >
         {plan.todo.length > 0 && (
@@ -293,6 +307,72 @@ function DockPlan({
         )}
       </Queue>
     </Arrival>
+  );
+}
+
+/** The conversation list, in the canvas sidebar and the header's menu: drawn
+ *  again only when what it lists changes (`useListState`), never by a word
+ *  a turn streams. */
+const ListNavigation = memo(ConversationNavigation);
+const ListSwitcher = memo(ConversationSwitcher);
+
+const sameRows = (a: readonly Conversation[], b: readonly Conversation[]): boolean =>
+  a === b || (a.length === b.length && a.every((row, at) => row === b[at]));
+
+/**
+ * The conversation list's state, the same object while what the list shows
+ * is the same. `useConversations` builds its state afresh every render, its
+ * list sorted again, so every word a turn streams would draw the list again.
+ * Its actions are the latest render's, read as one is called.
+ */
+function useListState(state: ConversationState): ConversationState {
+  const latest = useRef(state);
+  latest.current = state;
+  const actions = useMemo(() => {
+    const now = () => latest.current;
+    const act: Pick<
+      ConversationState,
+      'anchorNow' | 'start' | 'select' | 'rename' | 'remove' | 'setRunOptions' | 'branchFrom'
+    > = {
+      anchorNow: () => now().anchorNow(),
+      start: () => now().start(),
+      select: (id) => now().select(id),
+      rename: (id, title) => now().rename(id, title),
+      remove: (id) => now().remove(id),
+      setRunOptions: (id, choice) => now().setRunOptions(id, choice),
+      branchFrom: (threadId, messageId) => now().branchFrom(threadId, messageId),
+    };
+    return act;
+  }, []);
+  const rows = useRef(state.conversations);
+  if (!sameRows(rows.current, state.conversations)) rows.current = state.conversations;
+  const conversations = rows.current;
+  const { activeId, active, here, hereLabel, startedElsewhere, transcript, blocked, ready } = state;
+  return useMemo(
+    () => ({
+      ...actions,
+      conversations,
+      activeId,
+      active,
+      here,
+      hereLabel,
+      startedElsewhere,
+      transcript,
+      blocked,
+      ready,
+    }),
+    [
+      actions,
+      conversations,
+      activeId,
+      active,
+      here,
+      hereLabel,
+      startedElsewhere,
+      transcript,
+      blocked,
+      ready,
+    ],
   );
 }
 
@@ -465,6 +545,14 @@ export function AiPanel({
   );
   const conversations = useConversations(chat, place, placeLookup, vaultPath);
   const blocked = conversations.blocked;
+  // M92.7: the conversation list marks each thread's status, the open one's
+  // from this chat's own flags. Both stay the same objects while a turn
+  // streams words, so a word draws no list.
+  const listState = useListState(conversations);
+  const listTurn = useMemo(
+    () => ({ streaming: chat.streaming, waiting: chat.waiting }),
+    [chat.streaming, chat.waiting],
+  );
 
   // M57.6: the composer's draft is per thread and outlives the panel. A
   // thread's draft loads when it opens, saves 300 ms after typing stops, and
@@ -1081,7 +1169,10 @@ export function AiPanel({
   // dialog over the panel that produced it. At the run's commit when there is
   // one (M58.3): the working tree is clean once the run commits. A turn's
   // commit opens with this conversation and its run, so notes left on its
-  // lines come back here (M58.5).
+  // lines come back here (M58.5). The run is the Changes card's, `changes`
+  // with the rail's views below, read through a latest-value ref as the diff
+  // opens.
+  const changesRef = useRef<RailChanges | null>(null);
   const viewDiff = (path: string, commit: string | null = null) => {
     openPath(path);
     const conversationId = conversations.activeId;
@@ -1089,10 +1180,11 @@ export function AiPanel({
       openDiff(path, commit);
       return;
     }
-    const run = chat.messages
-      .flatMap((m) => m.changesets ?? [])
-      .find((c) => c.state === 'committed' && c.commit === commit);
-    openDiff(path, commit, { conversationId, runId: run?.run_id ?? null });
+    const made = changesRef.current;
+    openDiff(path, commit, {
+      conversationId,
+      runId: made === null ? null : runOfCommit(made, commit),
+    });
   };
 
   const openTarget = (target: string) => {
@@ -1279,6 +1371,53 @@ export function AiPanel({
     setRailDrawer(false);
     go();
   }, []);
+  // A row's jump lands where the transcript's scroller puts it, so a turn
+  // still streaming never pulls the reader off it (M92.4).
+  const chatScroller = useRef<MessageScrollerCommands | null>(null);
+  const revealInTranscript = useCallback((element: HTMLElement) => {
+    if (chatScroller.current?.scrollToElement(element) === true) return;
+    element.scrollIntoView?.({ block: 'center', behavior: motionAllowed() ? 'smooth' : 'auto' });
+  }, []);
+  // The cards' views of the thread, each the same object while a turn streams
+  // words: the rail takes these, never the messages (§1). The Changes card's
+  // is `changes`, which opening a turn's diff reads too (`viewDiff`): what
+  // the conversation changed, folded across its turns, and the run each of
+  // its commits was made by (M92.5). While the rail can be seen, the runs no
+  // reply holds are read back from Cerebro's records and folded in (M92.12).
+  const changesHeal = useChangesHeal(vaultPath, chat.sessionId, {
+    visible: railVisible,
+    streaming: chat.streaming,
+  });
+  const changes = useMemo(
+    () =>
+      railChanges({
+        messages: chat.messages,
+        inFlight: chat.streaming,
+        sessionId: chat.sessionId,
+        prLinks: chat.prLinks,
+        heal: changesHeal,
+      }),
+    [chat.messages, chat.streaming, chat.sessionId, chat.prLinks, changesHeal],
+  );
+  changesRef.current = changes;
+  const railWaitingView = useMemo(
+    () => railWaiting(chat.interaction, chat.messages),
+    [chat.interaction, chat.messages],
+  );
+  const railPlanView = useMemo(
+    () => railPlan(chat.messages, conversations.transcript),
+    [chat.messages, conversations.transcript],
+  );
+  const railSubagentsView = useMemo(() => railSubagents(chat.messages), [chat.messages]);
+  const railSourcesView = useMemo(
+    () => railSources(chat.messages, conversations.transcript),
+    [chat.messages, conversations.transcript],
+  );
+  // Q11 (M92.17): a docked rail whose Plan card shows the list holds the
+  // plan, and the dock's steps aside, so the list shows once. React's word
+  // that the rail docks comes a frame after CSS's, as its inert does.
+  const railDocked = railVisible && !railInDrawer;
+  const planInRail = railDocked && railPlanView.list !== null && railPlanView.list.todos.length > 0;
 
   const notice =
     conversations.transcript.state === 'unavailable' ? (
@@ -1459,7 +1598,7 @@ export function AiPanel({
       )}
       {presentation === 'canvas' &&
         navigationTarget !== null &&
-        createPortal(<ConversationNavigation state={conversations} />, navigationTarget)}
+        createPortal(<ListNavigation state={listState} turn={listTurn} />, navigationTarget)}
       {presentation === 'panel' && (
         <ResizeHandle
           label="Resize AI panel"
@@ -1476,7 +1615,7 @@ export function AiPanel({
           <>
             <IconButton icon="minus" label="Minimize conversation" onClick={minimize} />
             <div className="cb-chat-heading">
-              <ConversationSwitcher state={conversations} />
+              <ListSwitcher state={listState} turn={listTurn} />
               {vaultPath !== null && boundAgent !== null && (
                 <PanelAgentLabel
                   vaultPath={vaultPath}
@@ -1567,7 +1706,7 @@ export function AiPanel({
             </span>
             {/* M9.5: conversations are kept and named, so this is a switcher
             rather than a label beside a button that erased the transcript. */}
-            <ConversationSwitcher state={conversations} />
+            <ListSwitcher state={listState} turn={listTurn} />
             {vaultPath !== null && boundAgent !== null && (
               <PanelAgentLabel
                 vaultPath={vaultPath}
@@ -1664,6 +1803,8 @@ export function AiPanel({
           contentClassName="cb-chat-thread"
           label="Conversation"
           jumpTestId="jump-to-latest"
+          // The rail's jumps move the thread from beside it (M92.4).
+          scrollerRef={chatScroller}
           // A turn waiting on the person streams nothing: the card that
           // asks is news, and the log says so as it comes.
           busy={chat.streaming && !chat.waiting}
@@ -1767,7 +1908,11 @@ export function AiPanel({
                 still waiting stays the same node across every fold. */}
           {chat.interaction !== null && (
             <Arrival key={chat.interaction.card.id} when>
-              <MessageScrollerItem className="cb-chat-item cb-chat-waiting">
+              <MessageScrollerItem
+                // Where the rail's Waiting on you jumps (M92.4).
+                messageId={waitingRowId(chat.interaction.card.id)}
+                className="cb-chat-item cb-chat-waiting"
+              >
                 {chat.interaction.card.kind === 'write' ? (
                   <WriteApprovalCard interaction={chat.interaction} onAnswer={chat.answer} />
                 ) : chat.interaction.card.kind !== 'question' &&
@@ -1793,9 +1938,15 @@ export function AiPanel({
         <div className="cb-chat-dock">
           <div className="cb-chat-activity">
             {/* M91.12c: while a turn works through a plan, its steps, over
-                what waits for after it. */}
+                what waits for after it; beside a docked rail that shows
+                them, hidden (Q11). */}
             {plan !== null && (
-              <DockPlan plan={plan} working={!chat.waiting && !chat.stopping} arrive={onScreen} />
+              <DockPlan
+                plan={plan}
+                working={!chat.waiting && !chat.stopping}
+                arrive={onScreen}
+                inRail={planInRail}
+              />
             )}
             {/* M57.5: what this conversation holds for after its turn. Each is
                 drawn with its thread, so what a thread opens holding is simply
@@ -2066,6 +2217,19 @@ export function AiPanel({
               folded={railFolded}
               closing={closing}
               jump={jumpFromRail}
+              waiting={railWaitingView}
+              vault={vaultPath}
+              thread={conversations.activeId}
+              scroller={chatScroller}
+              plan={railPlanView}
+              working={chat.streaming && !chat.waiting && !chat.stopping}
+              subagents={railSubagentsView}
+              transcript={conversations.transcript.state}
+              changes={changes}
+              sources={railSourcesView}
+              onOpenPath={turnHandlers.openPath}
+              onViewDiff={isRepo ? turnHandlers.viewDiff : undefined}
+              reveal={revealInTranscript}
             />
           )}
         />

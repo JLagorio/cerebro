@@ -18,6 +18,7 @@ import {
   type ConnectorSpec,
   type ConnectorStatusRow,
 } from '@/engine/connectors';
+import { connectorFocus } from '@/agent/elements/connectorRow';
 import * as ipc from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -641,5 +642,70 @@ describe('ConnectorSettings presets (M69.1)', () => {
     expect(await screen.findByText('oauth Claude Code would refuse')).toBeTruthy();
     expect(screen.getByText('timeout Claude Code would refuse')).toBeTruthy();
     expect(screen.queryByText('Approve')).toBeNull();
+  });
+});
+
+// M92.9: the conversation rail's Sign in… opens Settings at the connector's
+// row: once the section shows and the list has loaded, it scrolls there and
+// forgets the ask.
+describe('ConnectorSettings and the rail’s Sign in… (M92.9)', () => {
+  const LIST = JSON.stringify({
+    servers: {
+      jira: { transport: 'http', url: 'https://jira/mcp', enabled: true },
+      Gmail: { transport: 'http', url: 'https://gmail.example.test/mcp', enabled: true },
+    },
+  });
+  const scrolled = vi.fn();
+  const original = Element.prototype.scrollIntoView;
+
+  beforeEach(() => {
+    useVaultStore.setState({ vaultPath: '/vault' });
+    useUiStore.setState({ stdioApprovals: {}, settingsFocus: null });
+    vi.mocked(ipc.readConnectors).mockResolvedValue(LIST);
+    vi.mocked(ipc.connectorStatus).mockResolvedValue([]);
+    scrolled.mockClear();
+    Element.prototype.scrollIntoView = scrolled;
+  });
+
+  afterEach(() => {
+    cleanup();
+    Element.prototype.scrollIntoView = original;
+    vi.mocked(ipc.readConnectors).mockReset();
+    vi.mocked(ipc.connectorStatus).mockReset();
+    useUiStore.setState({ settingsFocus: null });
+  });
+
+  const row = (name: string) =>
+    screen
+      .getAllByTestId('connector-status')
+      .find((el) => el.textContent?.startsWith(name))
+      ?.closest('.rounded-lg');
+
+  it('scrolls to the named connector once, then clears the ask', async () => {
+    useUiStore.setState({ settingsFocus: connectorFocus('Gmail') });
+    render(<ConnectorSettings />);
+    await waitFor(() => expect(useUiStore.getState().settingsFocus).toBeNull());
+    expect(scrolled).toHaveBeenCalledOnce();
+    expect(scrolled.mock.contexts[0]).toBe(row('Gmail'));
+    expect(scrolled.mock.calls[0]).toEqual([{ block: 'center' }]);
+  });
+
+  it('waits for its section to show before it takes the ask', async () => {
+    useUiStore.setState({ settingsFocus: connectorFocus('Gmail') });
+    const view = render(<ConnectorSettings active={false} />);
+    await screen.findAllByTestId('connector-status');
+    expect(useUiStore.getState().settingsFocus).toBe(connectorFocus('Gmail'));
+    expect(scrolled).not.toHaveBeenCalled();
+    view.rerender(<ConnectorSettings active />);
+    await waitFor(() => expect(useUiStore.getState().settingsFocus).toBeNull());
+    expect(scrolled.mock.contexts[0]).toBe(row('Gmail'));
+  });
+
+  it('leaves every other Settings ask alone', async () => {
+    useUiStore.setState({ settingsFocus: 'claude-code' });
+    render(<ConnectorSettings />);
+    await screen.findAllByTestId('connector-status');
+    expect(useUiStore.getState().settingsFocus).toBe('claude-code');
+    expect(scrolled).not.toHaveBeenCalled();
   });
 });

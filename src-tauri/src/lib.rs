@@ -564,6 +564,24 @@ fn commit_runs(
     )
 }
 
+/// What a conversation's runs changed, read back (M92.12): the ended runs
+/// that ran as `session_id` in this vault, the newest
+/// `git::conversation::MAX_RUNS`, each run's commit as `run_commits`
+/// recorded it (CV-35) and as one bounded `git show` reads it, through a
+/// read-only handle on runtime.db. The rail's Changes card folds them in for
+/// the runs no reply holds. A database that will not open, or a commit git
+/// cannot read, is an error, which the card renders as unavailable, never as
+/// nothing changed (CV-05).
+#[tauri::command(async)]
+fn conversation_changes(
+    app: tauri::AppHandle,
+    vault: String,
+    session_id: String,
+) -> Result<git::conversation::ConversationChangesets, String> {
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    git::conversation::changes(&ro, Path::new(&vault), &session_id)
+}
+
 /// What happened in one vault (M64.2): its write rows, its runs and when
 /// Cerebro had it open, each lane read alone from runtime.db through a
 /// read-only handle, for History to fold into sessions and days. A window
@@ -3547,6 +3565,7 @@ pub fn run() {
             run_knowledge_writes,
             page_attribution,
             commit_runs,
+            conversation_changes,
             vault_activity,
             page_activity,
             fleet_actor_summary,

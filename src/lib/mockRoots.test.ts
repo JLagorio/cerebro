@@ -223,6 +223,35 @@ describe('root git sync', () => {
     const after = await mock.rootGitRemoteStatus(repo.id);
     expect(!isRootGitRefusal(after) && after.behind).toBe(0);
   });
+
+  // M92.10: as `remote::remote_status`, counts exist only against an
+  // upstream, and one git could not take stays null and moves nothing.
+  it('counts nothing without an upstream, and never pulls through an unknown count', async () => {
+    const plain = mock.seedRoot({ path: '/repos/plain', label: 'plain', git: true });
+    expect(await mock.rootGitRemoteStatus(plain.id)).toMatchObject({
+      ahead: null,
+      behind: null,
+      hasUpstream: false,
+      upstream: null,
+    });
+
+    const loose = mock.seedRoot({ path: '/repos/loose', label: 'loose', git: true });
+    mock.seedRootGit('/repos/loose', { branch: 'topic', ahead: 2, hasUpstream: false });
+    expect(await mock.rootGitRemoteStatus(loose.id)).toMatchObject({
+      ahead: null,
+      behind: null,
+      upstream: null,
+    });
+
+    const broken = mock.seedRoot({ path: '/repos/broken', label: 'broken', git: true });
+    mock.seedRootGit('/repos/broken', { branch: 'main', ahead: null, behind: null });
+    for (const root of [loose, broken]) {
+      const pulled = await mock.rootGitPullFf(root.id);
+      expect(!isRootGitRefusal(pulled) && pulled.status).toBe('error');
+      const after = await mock.rootGitRemoteStatus(root.id);
+      expect(!isRootGitRefusal(after) && after.behind).toBeNull();
+    }
+  });
 });
 
 describe('thumbnail browser parity', () => {

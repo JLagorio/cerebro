@@ -22,6 +22,7 @@ pub mod changeset;
 pub mod command;
 pub mod commit;
 pub mod conflict;
+pub mod conversation;
 pub mod credentials;
 pub mod dates;
 pub mod history;

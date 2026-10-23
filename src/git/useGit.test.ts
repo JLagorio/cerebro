@@ -257,6 +257,145 @@ describe('useGit shares one state', () => {
   });
 });
 
+// M92.9: a probe that fails says so, and is never "not a repository": the
+// failure used to commit isRepo:false, so the status bar offered to start
+// tracking a vault it had only failed to read.
+describe('a git read that fails', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetGitState();
+    useVaultStore.setState({ vaultPath: '/demo-vault', entries: [] });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.mocked(gitIpc.isGitRepo).mockResolvedValue(true);
+    vi.mocked(gitIpc.getModifiedFiles).mockResolvedValue([]);
+  });
+
+  it('sets readError and leaves isRepo unknown, never false, when nothing was read before', async () => {
+    vi.mocked(gitIpc.isGitRepo).mockRejectedValueOnce(new Error('git is not on this PATH'));
+    const { result } = renderHook(() => useGit());
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.readError).toBe('git is not on this PATH');
+    expect(result.current.isRepo).toBeNull();
+    expect(result.current.isRepo).not.toBe(false);
+  });
+
+  it('leaves isRepo as an earlier read found it, and what it found', async () => {
+    vi.mocked(gitIpc.getModifiedFiles).mockResolvedValueOnce([file('notes/a.md')]);
+    const { result } = renderHook(() => useGit());
+    await waitFor(() => expect(result.current.modified).toHaveLength(1));
+    vi.mocked(gitIpc.isGitRepo).mockRejectedValueOnce(new Error('spawn failed'));
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.readError).toBe('spawn failed');
+    expect(result.current.isRepo).toBe(true);
+    expect(result.current.modified).toHaveLength(1);
+  });
+
+  it('knows the repository when only what it holds could not be read', async () => {
+    vi.mocked(gitIpc.isGitRepo).mockResolvedValueOnce(true);
+    vi.mocked(gitIpc.getModifiedFiles).mockRejectedValueOnce(new Error('index.lock exists'));
+    const { result } = renderHook(() => useGit());
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.readError).toBe('index.lock exists');
+    expect(result.current.isRepo).toBe(true);
+  });
+
+  it('clears the error once a read answers, and says not a repository only then', async () => {
+    vi.mocked(gitIpc.isGitRepo).mockRejectedValueOnce(new Error('spawn failed'));
+    const { result } = renderHook(() => useGit());
+    await waitFor(() => expect(result.current.readError).toBe('spawn failed'));
+    vi.mocked(gitIpc.isGitRepo).mockResolvedValueOnce(false);
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.readError).toBeNull();
+    expect(result.current.isRepo).toBe(false);
+  });
+
+  it('keeps the branch with no remote to sync with', async () => {
+    vi.mocked(gitIpc.gitRemoteStatus).mockResolvedValueOnce({
+      branch: 'topic',
+      ahead: null,
+      behind: null,
+      hasRemote: false,
+      hasUpstream: false,
+      upstream: null,
+    });
+    const { result } = renderHook(() => useGit());
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.remote).toBeNull();
+    expect(result.current.branch).toBe('topic');
+  });
+
+  it('reads a branch git could not name as none', async () => {
+    vi.mocked(gitIpc.gitRemoteStatus).mockResolvedValueOnce({
+      branch: '',
+      ahead: null,
+      behind: null,
+      hasRemote: false,
+      hasUpstream: false,
+      upstream: null,
+    });
+    const { result } = renderHook(() => useGit());
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.branch).toBeNull();
+  });
+});
+
+// M92.9: a folded rail's card reads the shared state as it stands, and
+// starts nothing of its own.
+describe('useGit({ watch: false })', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    resetGitState();
+    useVaultStore.setState({ vaultPath: '/demo-vault', entries: [] });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('probes nothing, polls nothing, and reads as soon as it watches', async () => {
+    const { result, rerender } = renderHook(({ watch }) => useGit({ watch }), {
+      initialProps: { watch: false },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000 * 3);
+    });
+    expect(gitIpc.isGitRepo).not.toHaveBeenCalled();
+    expect(result.current.ready).toBe(false);
+    act(() => useVaultStore.setState({ entries: [] }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(gitIpc.isGitRepo).not.toHaveBeenCalled();
+    rerender({ watch: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(gitIpc.isGitRepo).toHaveBeenCalledTimes(1);
+    expect(result.current.ready).toBe(true);
+  });
+
+  it('draws what another consumer read, without a read of its own', async () => {
+    const shown = renderHook(() => useGit());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const folded = renderHook(() => useGit({ watch: false }));
+    expect(folded.result.current.isRepo).toBe(true);
+    shown.unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000 * 3);
+    });
+    expect(gitIpc.isGitRepo).toHaveBeenCalledTimes(1);
+  });
+});
+
 // M53.13: the shell stopped letting WebKit throttle a hidden window, so an
 // awake 20 s poll would keep spawning git for as long as the app sat hidden,
 // for a state nothing hidden shows. It sleeps instead, and coming back reads.

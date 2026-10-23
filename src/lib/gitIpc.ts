@@ -1,7 +1,9 @@
 /**
  * Git and read-only gh IPC facade. Same shape as `lib/ipc.ts`: inside Tauri these
  * invoke the Rust commands; in the browser (pnpm dev, vitest, Playwright)
- * they delegate to `mockGit.ts`.
+ * they delegate to `mockGit.ts`. A browser branch may pass through `faulted`
+ * (mockFaults.ts, M64.1), which fails it once when the state lab or a test
+ * arms that command.
  *
  * The mock is not a convenience — without it every git-aware component would
  * throw the moment the vitest suite rendered it, and the whole surface would
@@ -25,6 +27,8 @@ import type {
   RestoreResult,
   VaultPulse,
 } from '@/engine/git';
+import type { ConversationChangesets } from '@/engine/changeset';
+import { faulted } from './mockFaults';
 import * as mock from './mockGit';
 
 function inTauri(): boolean {
@@ -37,11 +41,15 @@ async function invokeTauri<T>(cmd: string, args: Record<string, unknown> = {}): 
 }
 
 export function gitWorkspaceInfo(vault: string): Promise<GitWorkspaceInfo> {
-  return inTauri() ? invokeTauri('git_workspace_info', { vault }) : mock.gitWorkspaceInfo(vault);
+  return inTauri()
+    ? invokeTauri('git_workspace_info', { vault })
+    : faulted('git_workspace_info', () => mock.gitWorkspaceInfo(vault));
 }
 
 export function isGitRepo(vault: string): Promise<boolean> {
-  return inTauri() ? invokeTauri('is_git_repo', { vault }) : mock.isGitRepo(vault);
+  return inTauri()
+    ? invokeTauri('is_git_repo', { vault })
+    : faulted('is_git_repo', () => mock.isGitRepo(vault));
 }
 
 export function initGitRepo(vault: string): Promise<void> {
@@ -82,6 +90,17 @@ export function commitRuns(vault: string, commits: CommitQuery[]): Promise<Commi
   return inTauri()
     ? invokeTauri('commit_runs', { vault, commits })
     : mock.commitRuns(vault, commits);
+}
+
+/** What a conversation's runs changed, read back from Cerebro's records and
+ *  git (M92.12): its session's ended runs in this vault, oldest first. */
+export function conversationChanges(
+  vault: string,
+  sessionId: string,
+): Promise<ConversationChangesets> {
+  return inTauri()
+    ? invokeTauri('conversation_changes', { vault, sessionId })
+    : faulted('conversation_changes', () => mock.conversationChanges(vault, sessionId));
 }
 
 /** Restore a page to one version from its history, as the person (M58.4). */
@@ -147,7 +166,9 @@ export function gitFileUrl(vault: string, path: string): Promise<string | null> 
 }
 
 export function gitRemoteStatus(vault: string): Promise<GitRemoteStatus> {
-  return inTauri() ? invokeTauri('git_remote_status', { vault }) : mock.gitRemoteStatus(vault);
+  return inTauri()
+    ? invokeTauri('git_remote_status', { vault })
+    : faulted('git_remote_status', () => mock.gitRemoteStatus(vault));
 }
 
 export function gitPull(vault: string): Promise<RemoteResult> {

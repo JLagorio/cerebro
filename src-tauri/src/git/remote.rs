@@ -19,8 +19,13 @@ use super::workspace::GitWorkspaceInfo;
 #[serde(rename_all = "camelCase")]
 pub struct GitRemoteStatus {
     pub branch: String,
-    pub ahead: usize,
-    pub behind: usize,
+    /// Commits HEAD holds that its upstream lacks, or `None` when git did not
+    /// count them (M92.10): the branch tracks no upstream, or the count
+    /// failed or answered in a shape it never gives. Unknown is never 0
+    /// (CV-05): a 0 reads as "Up to date" and decides whether a root pulls.
+    pub ahead: Option<usize>,
+    /// Commits the upstream holds that HEAD lacks; `None` as for `ahead`.
+    pub behind: Option<usize>,
     pub has_remote: bool,
     pub has_upstream: bool,
     pub upstream: Option<String>,
@@ -135,12 +140,24 @@ pub fn classify(stderr: &str) -> (RemoteOutcome, String) {
     )
 }
 
+/// `rev-list --left-right --count @{upstream}...HEAD` answers
+/// "<behind>\t<ahead>". Any other shape is no count at all, never a zero.
+fn left_right_counts(out: &str) -> Option<(usize, usize)> {
+    let mut parts = out.split_whitespace();
+    let behind = parts.next()?.parse().ok()?;
+    let ahead = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((ahead, behind))
+}
+
 pub fn remote_status(ws: &GitWorkspaceInfo) -> Result<GitRemoteStatus, String> {
     if !ws.is_repo() {
         return Ok(GitRemoteStatus {
             branch: String::new(),
-            ahead: 0,
-            behind: 0,
+            ahead: None,
+            behind: None,
             has_remote: false,
             has_upstream: false,
             upstream: None,
@@ -157,20 +174,17 @@ pub fn remote_status(ws: &GitWorkspaceInfo) -> Result<GitRemoteStatus, String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
+    // No upstream is nothing to count against, and a rev-list that failed
+    // counted nothing: both are unknown (M92.10), never (0, 0).
     let (ahead, behind) = match &upstream {
-        None => (0, 0),
+        None => (None, None),
         Some(_) => command::run_str(
             &dir,
             &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
         )
         .ok()
-        .and_then(|out| {
-            let mut parts = out.split_whitespace();
-            let behind = parts.next()?.parse().ok()?;
-            let ahead = parts.next()?.parse().ok()?;
-            Some((ahead, behind))
-        })
-        .unwrap_or((0, 0)),
+        .and_then(|out| left_right_counts(&out))
+        .unzip(),
     };
 
     Ok(GitRemoteStatus {
@@ -354,10 +368,12 @@ pub fn push(ws: &GitWorkspaceInfo) -> RemoteResult {
         return RemoteResult::plain(RemoteOutcome::NoRemote, "No remote is configured.");
     }
     let dir = ws.dir();
+    // Spelled out on purpose: a status that could not be read counted
+    // nothing (M92.10), and push reads only its branch and upstream.
     let status = remote_status(ws).unwrap_or(GitRemoteStatus {
         branch: String::new(),
-        ahead: 0,
-        behind: 0,
+        ahead: None,
+        behind: None,
         has_remote: true,
         has_upstream: false,
         upstream: None,
@@ -516,6 +532,88 @@ mod tests {
 
         let after = command::run_str(&ws.dir(), &["rev-parse", "HEAD"]).unwrap();
         assert_eq!(before, after, "fetch must never move HEAD");
+    }
+
+    /// Once the upstream's commit is fetched, the diverged fixture counts
+    /// one commit on each side (M92.10).
+    #[test]
+    fn counts_are_read_against_the_upstream() {
+        let ws = diverged_fixture("m92-counted");
+        assert_eq!(fetch(&ws).status, RemoteOutcome::Updated);
+
+        let status = remote_status(&ws).unwrap();
+
+        assert!(status.has_upstream);
+        assert_eq!((status.ahead, status.behind), (Some(1), Some(1)));
+    }
+
+    /// A rev-list that fails counted nothing (M92.10): both counts are
+    /// unknown, never the zeros that read as "Up to date", and they cross to
+    /// the webview as null. The tracking ref names a commit the clone does
+    /// not hold, so `@{upstream}` still resolves while the count exits
+    /// non-zero.
+    #[test]
+    fn a_failed_rev_list_reads_unknown_never_zero() {
+        let ws = diverged_fixture("m92-uncounted");
+        let dir = ws.dir();
+        let branch = command::run_str(&dir, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+        // A loose ref outranks the packed one the clone wrote.
+        let tracking = dir.join(".git/refs/remotes/origin");
+        std::fs::create_dir_all(&tracking).unwrap();
+        std::fs::write(
+            tracking.join(&branch),
+            "0123456789abcdef0123456789abcdef01234567\n",
+        )
+        .unwrap();
+        assert!(
+            command::run_str(
+                &dir,
+                &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+            )
+            .is_err(),
+            "the fixture must make the count itself fail"
+        );
+
+        let status = remote_status(&ws).unwrap();
+
+        assert!(status.has_upstream, "the upstream still resolves");
+        assert_eq!((status.ahead, status.behind), (None, None));
+        let wire = serde_json::to_value(&status).unwrap();
+        assert!(
+            wire["ahead"].is_null() && wire["behind"].is_null(),
+            "{wire}"
+        );
+    }
+
+    /// A branch that tracks no upstream has nothing to count against, and a
+    /// folder that is not a repository has no branch to count (M92.10).
+    #[test]
+    fn no_upstream_and_no_repository_count_nothing() {
+        let dir = crate::vault::testutil::temp_vault("m92-no-upstream");
+        crate::git::commit::init_repo(&dir).unwrap();
+        seed_identity(&dir);
+        command::run_str(&dir, &["commit", "--allow-empty", "-m", "base"]).unwrap();
+        let status = remote_status(&workspace::resolve(&dir)).unwrap();
+        assert!(!status.has_upstream);
+        assert_eq!((status.ahead, status.behind), (None, None));
+
+        let plain = crate::vault::testutil::temp_vault("m92-not-a-repo");
+        let status = remote_status(&workspace::resolve(&plain)).unwrap();
+        assert_eq!((status.ahead, status.behind), (None, None));
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&plain);
+    }
+
+    #[test]
+    fn a_count_in_any_other_shape_is_no_count() {
+        assert_eq!(left_right_counts("2\t3\n"), Some((3, 2)));
+        for out in ["", "2", "2\tx", "-1\t0", "1\t2\t3"] {
+            assert_eq!(left_right_counts(out), None, "{out:?}");
+        }
     }
 
     #[test]

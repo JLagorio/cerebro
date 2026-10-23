@@ -66,10 +66,11 @@ export const NO_REVERT =
 /** Whether the vault keeps git history, as the panel last read it. */
 export type GitHistory = 'git' | 'none';
 
-/** The vault's history from `useGit`'s state: undefined until git status has
- * been read, so a card never claims either way on a guess. */
-export function historyOf(ready: boolean, isRepo: boolean): GitHistory | undefined {
-  if (!ready) return undefined;
+/** The vault's history from `useGit`'s state: undefined until a git read has
+ * told (`isRepo` null while none could, M92.9), so a card never claims
+ * either way on a guess. */
+export function historyOf(ready: boolean, isRepo: boolean | null): GitHistory | undefined {
+  if (!ready || isRepo === null) return undefined;
   return isRepo ? 'git' : 'none';
 }
 

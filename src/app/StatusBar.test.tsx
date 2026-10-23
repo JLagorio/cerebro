@@ -28,11 +28,11 @@ vi.mock('@/lib/gitIpc', async (importOriginal) => {
 import { StatusBar } from '@/app/StatusBar';
 import { APP_VERSION } from '@/lib/appVersion';
 import * as gitIpc from '@/lib/gitIpc';
-import { resetGitState } from '@/git/useGit';
+import { refreshGit, resetGitState } from '@/git/useGit';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
-import type { RemoteResult } from '@/engine/git';
+import { UNCOUNTED_WORDS, type RemoteResult } from '@/engine/git';
 
 const result = (status: RemoteResult['status'], message: string): RemoteResult => ({
   status,
@@ -133,7 +133,8 @@ describe('StatusBar', () => {
     fireEvent.click(opener);
     expect(screen.getByRole('dialog', { name: 'Workspace status' })).toBeTruthy();
     expect(screen.getByTestId('status-remote').textContent).toBe('No remote');
-    expect(screen.getByTestId('status-branch').textContent).toBe('Not recorded');
+    // M92.9: git names the branch with no remote to sync with.
+    expect(screen.getByTestId('status-branch').textContent).toBe('main');
     fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(document.activeElement).toBe(opener));
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -145,6 +146,66 @@ describe('StatusBar', () => {
     expect(useNavStore.getState().selection).toEqual({ kind: 'settings' });
     expect(gitIpc.gitPull).not.toHaveBeenCalled();
     expect(gitIpc.gitPush).not.toHaveBeenCalled();
+  });
+
+  it('says Not recorded where git could not name the branch', async () => {
+    vi.mocked(gitIpc.gitRemoteStatus).mockResolvedValue({
+      hasRemote: false,
+      hasUpstream: false,
+      upstream: null,
+      branch: '',
+      ahead: null,
+      behind: null,
+    });
+    render(<StatusBar />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Workspace status: demo-vault' }));
+    expect(screen.getByTestId('status-branch').textContent).toBe('Not recorded');
+  });
+
+  // M92.9: a probe that failed is not a vault with no history, so nothing
+  // offers to start tracking one, and the footer says the read failed.
+  it('offers no Start tracking history on a failed read, and says it failed', async () => {
+    vi.mocked(gitIpc.isGitRepo).mockRejectedValue(new Error('git is not on this PATH'));
+    render(<StatusBar />);
+    const failed = await screen.findByTestId('status-history-unavailable');
+    expect(failed.textContent).toBe('History unavailable');
+    expect(failed.getAttribute('data-tone')).toBe('warn');
+    expect(failed.getAttribute('title')).toBe(
+      'Couldn’t read this vault’s history: git is not on this PATH',
+    );
+    expect(screen.queryByTestId('status-sync')).toBeNull();
+    fireEvent.click(failed);
+    const details = screen.getByRole('dialog', { name: 'Workspace status' });
+    expect(within(details).getByTestId('status-history').textContent).toBe('Couldn’t read');
+    expect(within(details).queryByText('Not tracked')).toBeNull();
+    expect(within(details).getByTestId('status-history-error').textContent).toBe(
+      'Couldn’t read this vault’s history: git is not on this PATH',
+    );
+    expect(within(details).queryByRole('button', { name: 'Start tracking history' })).toBeNull();
+    expect(within(details).queryByTestId('status-branch')).toBeNull();
+  });
+
+  it('claims nothing an earlier read found once a later read fails', async () => {
+    vi.mocked(gitIpc.gitRemoteStatus).mockResolvedValue({
+      hasRemote: true,
+      hasUpstream: true,
+      upstream: 'origin/main',
+      branch: 'main',
+      ahead: 2,
+      behind: 0,
+    });
+    render(<StatusBar />);
+    expect(await screen.findByText('1 change')).toBeTruthy();
+    expect(screen.getByTestId('status-sync')).toBeTruthy();
+    vi.mocked(gitIpc.getModifiedFiles).mockRejectedValue(new Error('index.lock exists'));
+    await act(async () => {
+      await refreshGit();
+    });
+    expect(screen.queryByText('1 change')).toBeNull();
+    expect(screen.queryByTestId('status-sync')).toBeNull();
+    fireEvent.click(screen.getByTestId('status-history-unavailable'));
+    expect(screen.queryByRole('button', { name: 'Start tracking history' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'View changes' })).toBeNull();
   });
 
   it('keeps the history setup action for an untracked vault in workspace details', async () => {
@@ -208,6 +269,62 @@ describe('StatusBar', () => {
     await act(async () => complete(result('up_to_date', 'Ready.')));
     await screen.findByRole('button', { name: 'Synced' });
     expect(gitIpc.gitPush).toHaveBeenCalledOnce();
+  });
+
+  // M92.10: a count git did not take is unknown, never "0 to push · 0 to pull".
+  it('says the counts it could not take in words, and keeps Sync an action', async () => {
+    vi.mocked(gitIpc.gitRemoteStatus).mockResolvedValue({
+      hasRemote: true,
+      hasUpstream: true,
+      upstream: 'origin/main',
+      branch: 'main',
+      ahead: null,
+      behind: null,
+    });
+    render(<StatusBar />);
+    const sync = await screen.findByTestId('status-sync');
+    expect(sync.textContent).toBe('Sync');
+    expect(sync.getAttribute('title')).toBe(UNCOUNTED_WORDS.unread);
+    expect(sync.getAttribute('data-tone')).toBe('default');
+    fireEvent.click(screen.getByTestId('status-vault'));
+    const changes = screen.getByTestId('status-remote-changes');
+    expect(changes.textContent).toBe(UNCOUNTED_WORDS.unread);
+    expect(changes.textContent).not.toMatch(/null|\d/);
+  });
+
+  it('names a branch with no upstream instead of counting zeros', async () => {
+    vi.mocked(gitIpc.gitRemoteStatus).mockResolvedValue({
+      hasRemote: true,
+      hasUpstream: false,
+      upstream: null,
+      branch: 'topic',
+      ahead: null,
+      behind: null,
+    });
+    render(<StatusBar />);
+    expect((await screen.findByTestId('status-sync')).getAttribute('title')).toBe(
+      UNCOUNTED_WORDS.no_upstream,
+    );
+    fireEvent.click(screen.getByTestId('status-vault'));
+    expect(screen.getByTestId('status-remote-changes').textContent).toBe(
+      UNCOUNTED_WORDS.no_upstream,
+    );
+  });
+
+  it('counts what git counted', async () => {
+    vi.mocked(gitIpc.gitRemoteStatus).mockResolvedValue({
+      hasRemote: true,
+      hasUpstream: true,
+      upstream: 'origin/main',
+      branch: 'main',
+      ahead: 2,
+      behind: 1,
+    });
+    render(<StatusBar />);
+    const sync = await screen.findByRole('button', { name: 'Sync ↑2 ↓1' });
+    expect(sync.getAttribute('title')).toBe('2 to push, 1 to pull');
+    fireEvent.click(screen.getByTestId('status-vault'));
+    expect(screen.getByTestId('status-remote-changes').textContent).toBe('2 to push · 1 to pull');
   });
 
   it('catches an unexpected remote rejection without losing the retry control', async () => {

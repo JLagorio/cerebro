@@ -1,0 +1,76 @@
+/* The rail's Connectors card (M92.9): a row per connector, as the AI
+   elements' Item draws one, its status in Settings' words under its name,
+   what the conversation's latest run did with it under that, and Sign in…
+   at its end; then the card's notes. Unlayered like the app's other surface
+   stylesheets; motion spends the tokens only. */
+
+.cb-rail-connectors.cb-ai-item-group {
+  gap: var(--sp-1);
+}
+
+.cb-rail-connector.cb-ai-item {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  padding: var(--sp-1);
+}
+
+.cb-rail-connector-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Settings' words: a warning unless they state a plain fact. A refusal
+   says why at length, so they wrap. */
+.cb-rail-connector-status {
+  margin: 0;
+  color: var(--warn-700);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: anywhere;
+}
+.cb-rail-connector-status[data-quiet] {
+  color: var(--text-meta);
+}
+
+.cb-rail-connector .cb-ai-item-description {
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+
+/* Sign in…: the row's one action, quiet until a pointer or the keyboard
+   reaches it. */
+.cb-rail-connector-sign-in {
+  flex: none;
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  transition:
+    background-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.cb-rail-connector-sign-in:hover {
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+.cb-rail-connector-sign-in:focus-visible {
+  box-shadow: var(--ring);
+}
+
+.cb-rail-connectors-note {
+  margin: var(--sp-2) 0 0;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-rail-connectors-note:first-child {
+  margin-top: 0;
+}

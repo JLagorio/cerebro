@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, AgentStreamEvent, ChatMessage, Conversation } from './types';
 import type { ConversationRailProps } from './rail/ConversationRail';
@@ -78,6 +78,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
 
 import App from '@/App';
 import { AiPanel } from './AiPanel';
+import { listInteractions } from './agentIpc';
 import { forgetDraftsInMemory } from './drafts';
 import { openOutside } from './rail/ConversationRail';
 import { useAppCommands } from '@/app/useAppCommands';
@@ -96,7 +97,9 @@ import { useVaultStore } from '@/stores/vaultStore';
  * preference; where it has not, it folds away, still mounted and inert, and
  * a person opens it as a drawer for the session, which writes nothing.
  * Which one CSS draws is the browser's to prove (e2e/m92-rail.spec.ts); here
- * the panel's word on it is.
+ * the panel's word on it is. Its cards are the thread's, in §0 Q5's order:
+ * a row's first action stays in the canvas, its open floats first, and a
+ * docked rail's Plan card stands in for the dock's.
  */
 
 const RAIL_KEY = 'cerebro.chatRailOpen';
@@ -112,7 +115,12 @@ const replied = (id: string, text: string): ChatMessage => ({
 });
 
 /** A kept thread with a turn in it, so the conversation is not welcoming. */
-function keep() {
+function keep(
+  messages: ChatMessage[] = [
+    asked('u-1', 'What is at risk?'),
+    replied('a-1', 'The rollout moves a week.'),
+  ],
+) {
   const thread: Conversation = {
     id: 'kept',
     title: 'Release risks',
@@ -122,10 +130,90 @@ function keep() {
     vault: '/demo-vault',
     archived: false,
     place: null,
-    messages: [asked('u-1', 'What is at risk?'), replied('a-1', 'The rollout moves a week.')],
+    messages,
   };
   localStorage.setItem('cerebro.activeConversation', thread.id);
   localStorage.setItem('cerebro.conversations', JSON.stringify([thread]));
+}
+
+/** A page the vault does not list: opening it is a plain page open, which
+ *  floats nothing by itself. */
+const PAGE = 'notes/release-plan.md';
+const COMMIT = 'c0ffee'.padEnd(40, '0');
+
+/** A turn that worked through a plan, started a subagent, read a record and
+ *  changed a page: something for every card the rail holds. */
+function worked(): ChatMessage {
+  return {
+    id: 'a-1',
+    role: 'assistant',
+    text: 'Scanner delivery is the risk to escalate.',
+    tools: [
+      {
+        id: 'todo-1',
+        name: 'TodoWrite',
+        input: JSON.stringify({
+          todos: [
+            { content: 'List the open risks', status: 'completed', activeForm: 'Listing' },
+            { content: 'Name the risk to escalate', status: 'in_progress', activeForm: 'Naming' },
+          ],
+        }),
+        output: 'Todos have been modified successfully.',
+        done: true,
+        failed: false,
+      },
+      {
+        id: 'agent-1',
+        name: 'Agent',
+        input: JSON.stringify({
+          description: 'Read the open risks',
+          subagent_type: 'cerebro-researcher',
+          prompt: 'Read the open risks.',
+        }),
+        output: 'Scanner delivery.',
+        done: true,
+        failed: false,
+        subagent: {
+          type: 'cerebro-researcher',
+          description: 'Read the open risks',
+          status: 'done',
+          toolUses: 0,
+          durationMs: 4100,
+          parts: [],
+          tools: [],
+        },
+      },
+      {
+        id: 'read-1',
+        name: 'mcp__cerebro__get_note',
+        input: JSON.stringify({ path: ITEM }),
+        output: '# Field app',
+        done: true,
+        failed: false,
+      },
+    ],
+    changesets: [
+      {
+        state: 'committed',
+        run_id: 'run-1',
+        commit: COMMIT,
+        files: [
+          {
+            path: PAGE,
+            previous_path: null,
+            kind: 'modified',
+            additions: 2,
+            deletions: 1,
+            also_by: [],
+          },
+        ],
+        additions: 2,
+        deletions: 1,
+        binary: 0,
+        shell_unrecorded: false,
+      },
+    ],
+  };
 }
 
 /** The panel as the shell draws it: one presentation from the store, the
@@ -184,6 +272,7 @@ beforeEach(() => {
   handed.draws = 0;
   seq = 0;
   Element.prototype.scrollTo ??= () => {};
+  vi.mocked(listInteractions).mockImplementation(async () => []);
   useVaultStore.setState({ vaultPath: '/demo-vault', entries: fixtureVault(), views: [] });
   useNavStore.setState({ selection: { kind: 'home' } });
   useUiStore.setState({
@@ -197,6 +286,7 @@ beforeEach(() => {
     handoffs: [],
     runs: [],
     detailPath: null,
+    diffView: null,
     toasts: [],
   });
 });
@@ -263,8 +353,13 @@ describe('the rail in the canvas', () => {
     const rail = details()!;
     expect(toggle().getAttribute('aria-expanded')).toBe('true');
     await waitFor(() => expect(document.activeElement).toBe(heading()));
-    // No card draws a body in a conversation that holds nothing yet.
-    expect(rail.querySelectorAll('[data-slot="rail-section"]')).toHaveLength(0);
+    // No card draws a body in a conversation that holds nothing yet: each is
+    // its heading line, saying None, and nothing waits.
+    const cards = [...rail.querySelectorAll<HTMLElement>('[data-slot="rail-section"]')];
+    expect(cards.length).toBeGreaterThan(0);
+    for (const card of cards) expect(card.dataset.state).toBe('empty');
+    expect(rail.querySelector('.cb-ai-rail-section-body')).toBeNull();
+    expect(screen.queryByTestId('rail-waiting')).toBeNull();
     expect(localStorage.getItem(RAIL_KEY)).toBeNull();
     expect(screen.getByTestId('chat-welcome')).toBeTruthy();
   });
@@ -430,6 +525,198 @@ describe('⌥⌘R and "Expand with conversation details"', () => {
     // Focus in the rail goes back to its toggle, never to <body>.
     expect(document.activeElement).toBe(toggle());
     expect(localStorage.getItem(RAIL_KEY)).toBeNull();
+  });
+});
+
+/** Send `text` from the composer, and wait for its run to attach. */
+async function send(text: string) {
+  fireEvent.change(input(), { target: { value: text } });
+  await act(async () => {
+    fireEvent.keyDown(input(), { key: 'Enter' });
+  });
+  await waitFor(() => expect(wire.deliver).not.toBeNull());
+}
+
+/** Open a kept conversation whose turn did something for every card. */
+async function openWorked(width: number) {
+  measurement.width = width;
+  keep([asked('u-1', 'What is at risk?'), worked()]);
+  const view = render(<Assistant />);
+  await screen.findByText('Scanner delivery is the risk to escalate.');
+  return view;
+}
+
+/** The transcript, where a rail row's jump lands. */
+const transcript = () => screen.getByTestId('chat-scroll');
+
+describe('the cards', () => {
+  /** The rail's cards, in the order it draws them. */
+  const cardIds = () =>
+    [...details()!.querySelectorAll<HTMLElement>('[data-slot="rail-cards"] > [data-testid]')].map(
+      (card) => card.dataset.testid,
+    );
+
+  it('holds Q5’s cards in order, each drawn from the thread', async () => {
+    // Nothing waits and the book cannot be read: Waiting on you says so,
+    // first, rather than leaving the rail quiet (CV-05).
+    vi.mocked(listInteractions).mockImplementation(async () => {
+      throw new Error('the book is unreadable');
+    });
+    await openWorked(1200);
+    await screen.findByTestId('rail-waiting');
+    expect(cardIds()).toEqual([
+      'rail-waiting',
+      'rail-plan',
+      'rail-subagents',
+      'rail-changes',
+      'rail-sources',
+    ]);
+    const state = (id: string) => screen.getByTestId(id).dataset.state;
+    expect(state('rail-waiting')).toBe('unavailable');
+    for (const id of ['rail-plan', 'rail-subagents', 'rail-changes', 'rail-sources']) {
+      expect(state(id)).toBe('ready');
+    }
+    const rail = within(details()!);
+    expect(rail.getByTestId('rail-subagent').dataset.toolId).toBe('agent-1');
+    expect(rail.getByTestId('rail-change').dataset.path).toBe(PAGE);
+    expect(rail.getByTestId('rail-source').dataset.turn).toBe('a-1');
+  });
+
+  it('shows the plan once beside a docked rail, and the dock’s wherever the rail is not', async () => {
+    const view = await openKept(1200);
+    await send('Make a plan');
+    stream({
+      kind: 'ToolStart',
+      tool_name: 'TodoWrite',
+      tool_id: 'todo-live',
+      input: JSON.stringify({
+        todos: [{ content: 'Read the risks', status: 'in_progress', activeForm: 'Reading' }],
+      }),
+    });
+    const dock = screen.getByTestId('live-plan');
+    const docked = () => screen.queryByRole('region', { name: 'Plan' });
+    // Docked: the rail's card holds the list, and the dock's is kept hidden.
+    expect(screen.getByTestId('rail-plan').dataset.state).toBe('ready');
+    expect(dock.hidden).toBe(true);
+    expect(docked()).toBeNull();
+    // Turned off, the rail takes its card with it: the dock's shows.
+    fireEvent.click(toggle());
+    expect(mounted()).toBeNull();
+    expect(docked()).toBe(dock);
+    fireEvent.click(toggle());
+    expect(docked()).toBeNull();
+    // Folded away where it does not fit, and opened there as a drawer.
+    measurement.width = 800;
+    view.rerender(<Assistant />);
+    expect(mounted()?.hasAttribute('inert')).toBe(true);
+    expect(docked()).toBe(dock);
+    fireEvent.click(toggle());
+    expect(details()!.dataset.drawer).toBe('true');
+    expect(docked()).toBe(dock);
+    expect(screen.getByTestId('live-plan')).toBe(dock);
+  });
+
+  it('a subagent row opens its line in the transcript, and the canvas stays', async () => {
+    await openWorked(1200);
+    const line = transcript().querySelector<HTMLElement>('[data-tool-id="agent-1"]')!;
+    const fold = line.querySelector<HTMLElement>('[data-slot="trace-collapsible-trigger"]')!;
+    expect(fold.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(within(details()!).getByTestId('rail-subagent'));
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(fold);
+    expect(presentation()).toBe('canvas');
+  });
+
+  it('a subagent row in the drawer closes it and lands on the line', async () => {
+    await openWorked(800);
+    fireEvent.click(toggle());
+    await waitFor(() => expect(document.activeElement).toBe(heading()));
+    fireEvent.click(within(details()!).getByTestId('rail-subagent'));
+    expect(details()).toBeNull();
+    expect(scrim()).toBeNull();
+    const line = transcript().querySelector<HTMLElement>('[data-tool-id="agent-1"]')!;
+    expect(document.activeElement).toBe(
+      line.querySelector('[data-slot="trace-collapsible-trigger"]'),
+    );
+    expect(presentation()).toBe('canvas');
+  });
+
+  it('Waiting on you jumps to the card in the transcript and lands on its first answer', async () => {
+    await openKept(1200);
+    await send('Escalate it');
+    stream({
+      kind: 'ToolStart',
+      tool_name: 'mcp__cerebro__append_to_note',
+      tool_id: 'ask-1',
+      input: JSON.stringify({ path: PAGE, text: 'Escalate the scanner risk.' }),
+    });
+    stream({
+      kind: 'Interaction',
+      interaction: {
+        id: 'card-1',
+        kind: 'permission',
+        tool_name: 'mcp__cerebro__append_to_note',
+        tool_id: 'ask-1',
+        session_id: 'session-1',
+        summary: 'Append to release-plan.md',
+        input: '{}',
+        asked_at: '2026-10-14T12:00:00Z',
+      },
+    });
+    const row = transcript().querySelector<HTMLElement>('[data-message-id="waiting:card-1"]');
+    expect(row?.contains(screen.getByTestId('interaction-card'))).toBe(true);
+    fireEvent.click(await screen.findByTestId('rail-waiting-card'));
+    expect(document.activeElement).toBe(screen.getByTestId('interaction-allow'));
+    expect(presentation()).toBe('canvas');
+  });
+
+  it('a Changes row shows its change in the canvas, and its open floats first', async () => {
+    await openWorked(1200);
+    const change = within(details()!).getByTestId('rail-change');
+    // Its first action: the file's row in the turn's changeset.
+    fireEvent.click(within(change).getByRole('button', { name: /^Jump to where/ }));
+    const file = transcript().querySelector<HTMLElement>(
+      `[data-slot="file-tree-file"][data-path="${PAGE}"]`,
+    )!;
+    expect(file.contains(document.activeElement)).toBe(true);
+    expect(presentation()).toBe('canvas');
+    // Its second: the page, which the canvas would hide.
+    fireEvent.click(within(change).getByTestId('rail-change-open'));
+    expect(presentation()).toBe('floating');
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: PAGE });
+  });
+
+  it('a Sources row jumps to the reply that used it, and its open floats first', async () => {
+    await openWorked(1200);
+    const source = within(details()!).getByTestId('rail-source');
+    fireEvent.click(within(source).getByTestId('rail-source-jump'));
+    const line = transcript().querySelector<HTMLElement>('[data-testid="turn-sources"]')!;
+    expect(line.contains(document.activeElement)).toBe(true);
+    expect(presentation()).toBe('canvas');
+    fireEvent.click(within(source).getByTestId('rail-source-open'));
+    expect(presentation()).toBe('floating');
+    expect(useUiStore.getState().detailPath).toBe(ITEM);
+  });
+
+  it('opens a turn’s diff with the run the conversation’s fold names', async () => {
+    await openWorked(1200);
+    fireEvent.click(await screen.findByTestId('turn-changeset-view-diff'));
+    expect(useUiStore.getState().diffView).toEqual({
+      path: PAGE,
+      commit: COMMIT,
+      review: { conversationId: 'kept', runId: 'run-1' },
+    });
+  });
+});
+
+describe('the conversation list', () => {
+  it('marks the open thread from its own turn', async () => {
+    await openKept(1200);
+    await send('Say it again');
+    fireEvent.click(screen.getByTestId('conversation-switcher'));
+    const row = await screen.findByTestId('conversation-row');
+    expect(row.dataset.threadStatus).toBe('working');
+    expect(within(row).getByTestId('thread-status').dataset.status).toBe('working');
   });
 });
 

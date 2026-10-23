@@ -23,11 +23,12 @@ import type {
   TranscriptRead,
   UiAction,
 } from './types';
+import type { ContextBreakdown } from '@/engine/ai/contextBreakdown';
 import type { RunState } from '@/engine/ai/threadStatus';
 import { ASSISTANT_ACTOR } from '@/engine/authors';
 import type { RunCauseRequest } from '@/engine/jobs';
 import { runOptionsRefusal } from '@/engine/runOptions';
-import { namesTool } from '@/engine/toolGrant';
+import { grantedTools, namesTool } from '@/engine/toolGrant';
 import { conditionRun, withheldRun } from '@/lib/demoOperational';
 import { faulted } from '@/lib/mockFaults';
 import { settleMockRun } from '@/lib/mockGit';
@@ -751,7 +752,7 @@ function startMockRun(
         // M91.5: filed before Done, as Rust's reader files it, so a panel
         // that pulls at the turn's end reads this run's.
         if (options.attended && answering !== null) {
-          fillMockContext(sessionId, answering, replay, options.systemPrompt);
+          fillMockContext(sessionId, answering, replay, options);
         }
         recordMockCliTranscript(sessionId, replay.splice(0));
         if (booked !== null)
@@ -849,6 +850,9 @@ function startMockRun(
       asks: options.attended ? mockAsks : undefined,
       // M57.2: the CLI's own tools decide through the run's plan.
       approval: mockApproval(options),
+      // M92.8: the run's declared tools, for whether the reach it says
+      // holds Cerebro's own.
+      allowedTools: options.allowedTools,
       onDefer: (call) => {
         const card = confirmMockInteraction(
           registerMockInteraction(
@@ -1370,6 +1374,12 @@ export interface ContextUseRecorded {
   window?: number;
   model?: string;
   at: string;
+  /** Claude Code's own account of the context at the turn's end, as the
+   *  meter keeps its answer to the context ask (M92.13): absent when the
+   *  run asked none or the answer could not be read. It crosses as
+   *  `context-breakdown.json` writes it, and is read only through
+   *  `readContextBreakdown` (M92.14). */
+  breakdown?: ContextBreakdown;
 }
 
 /** What `agent_context_usage` answers (M91.5): a reading, or `not_recorded`
@@ -1423,32 +1433,93 @@ export const mockContextBook = (() => {
  * word of the conversation: where a mock session's first reading starts. */
 const MOCK_CONTEXT_FLOOR = 14_000;
 
+/** How the floor reads in a mock session's breakdown (M92.14): Claude
+ * Code's own system prompt, then its own tools and the few of Cerebro's
+ * that a session has loaded. Each of Cerebro's tools takes
+ * `MOCK_TOOL_TOKENS`, and the rest of them wait behind tool search. */
+const MOCK_PROMPT_TOKENS = 6_200;
+const MOCK_TOOL_TOKENS = 225;
+const MOCK_TOOLS_LOADED = 4;
+
+/** The room Claude Code's autocompact keeps below a window, as it reported
+ * it for a 200,000-token window (cli-probe notes, M92). */
+const MOCK_AUTOCOMPACT_BUFFER = 33_000;
+
 /**
  * File a plausible reading for a mock run of `sessionId` (M91.5): the
  * session's last reading, or the floor and the run's system prompt for a
  * new one, grown by what the run said, at about four characters a token.
  * The window is the one Claude Code reports for its models, a million for
- * a `[1m]` pick.
+ * a `[1m]` pick. Its breakdown (M92.14) is the meter's, as
+ * `context-breakdown.json` writes one: the floor, the run's system prompt
+ * and the conversation, which together are the reading.
  */
 function fillMockContext(
   sessionId: string,
   model: string,
   said: readonly AgentStreamEvent[],
-  systemPrompt: string | undefined,
+  { systemPrompt, allowedTools }: Pick<RunOptions, 'systemPrompt' | 'allowedTools'>,
 ): void {
   const last = mockContextBook.read(sessionId);
-  const before =
-    last.state === 'recorded'
-      ? last.used
-      : MOCK_CONTEXT_FLOOR + Math.ceil((systemPrompt?.length ?? 0) / 4);
+  const prompt = Math.ceil((systemPrompt?.length ?? 0) / 4);
+  const before = last.state === 'recorded' ? last.used : MOCK_CONTEXT_FLOOR + prompt;
   const chars = said.reduce((sum, event) => sum + JSON.stringify(event).length, 0);
+  const used = before + Math.ceil(chars / 4);
+  const window = model.endsWith('[1m]') ? 1_000_000 : 200_000;
   mockContextBook.record(sessionId, {
     state: 'recorded',
-    used: before + Math.ceil(chars / 4),
-    window: model.endsWith('[1m]') ? 1_000_000 : 200_000,
+    used,
+    window,
     model,
     at: new Date().toISOString(),
+    breakdown: mockBreakdown(used, window, model, prompt, grantedTools(allowedTools ?? null).size),
   });
+}
+
+/**
+ * A mock reading's breakdown: Claude Code's system prompt with the run's
+ * (`prompt` tokens), its tools, Cerebro's `held` tools as tool search
+ * leaves them (a few loaded, the rest deferred), the conversation, and the
+ * reserve autocompact keeps. The rows in the window add up to `used`, so the
+ * report's total is the reading's. A run that holds none of Cerebro's tools
+ * lists no server.
+ */
+function mockBreakdown(
+  used: number,
+  window: number,
+  model: string,
+  prompt: number,
+  held: number,
+): ContextBreakdown {
+  const loaded = Math.min(held, MOCK_TOOLS_LOADED);
+  const mcp = loaded * MOCK_TOOL_TOKENS;
+  const categories: ContextBreakdown['categories'] = [
+    { name: 'System prompt', tokens: MOCK_PROMPT_TOKENS + prompt, kind: 'used' },
+    { name: 'System tools', tokens: MOCK_CONTEXT_FLOOR - MOCK_PROMPT_TOKENS - mcp, kind: 'used' },
+  ];
+  if (mcp > 0) categories.push({ name: 'MCP tools', tokens: mcp, kind: 'used' });
+  if (held > loaded) {
+    const deferred = (held - loaded) * MOCK_TOOL_TOKENS;
+    categories.push({ name: 'MCP tools (deferred)', tokens: deferred, kind: 'deferred' });
+  }
+  categories.push(
+    { name: 'Messages', tokens: Math.max(0, used - MOCK_CONTEXT_FLOOR - prompt), kind: 'used' },
+    { name: 'Autocompact buffer', tokens: MOCK_AUTOCOMPACT_BUFFER, kind: 'buffer' },
+    {
+      name: 'Free space',
+      tokens: Math.max(0, window - used - MOCK_AUTOCOMPACT_BUFFER),
+      kind: 'free',
+    },
+  );
+  return {
+    categories,
+    total: used,
+    max: window,
+    model,
+    autocompact: { enabled: true, threshold: window - MOCK_AUTOCOMPACT_BUFFER },
+    mcpServers: held === 0 ? [] : [{ name: 'cerebro', tools: held, loaded, tokens: mcp }],
+    memoryFiles: 0,
+  };
 }
 
 // --- Event fan-out ---------------------------------------------------------
@@ -1497,10 +1568,19 @@ export function onAgentEvent(listener: Listener, run?: number): () => void {
 type StartListener = (turn: Pick<LiveTurn, 'run' | 'attach'>) => void;
 const startListeners = new Set<StartListener>();
 
-/** `handle`, once every start listener has heard the run it names. */
+/** `handle`, once every start listener has heard the run it names. Rust has
+ * already started the run, so a listener that throws must not turn the
+ * start into a failure its caller would never attach to (CV-30). */
 function announced(handle: RunHandle): RunHandle {
   const { run, attach } = handle;
-  if (attach !== undefined) for (const listener of [...startListeners]) listener({ run, attach });
+  if (attach === undefined) return handle;
+  for (const listener of [...startListeners]) {
+    try {
+      listener({ run, attach });
+    } catch {
+      // The run goes on either way; the next listener still hears it.
+    }
+  }
   return handle;
 }
 

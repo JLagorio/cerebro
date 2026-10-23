@@ -69,7 +69,10 @@ export function PageHistory({ path }: { path: string }) {
   const queries = useMemo(() => historyQueries(commits ?? NO_COMMITS), [commits]);
   const runs = useCommitRuns(queries);
   const isKnowledge = isKnowledgePath(path);
-  const gitOff = git.ready && !git.isRepo;
+  // Only a read that answered says the vault keeps no history (M92.9): one
+  // that failed leaves the versions to their own read, which says if it
+  // failed too.
+  const gitOff = git.ready && git.readError === null && git.isRepo === false;
 
   const timeline = useMemo(
     () =>

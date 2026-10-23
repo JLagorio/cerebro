@@ -335,7 +335,7 @@ pub(crate) fn close_run(close: RunClose<'_>, emit: &mut dyn FnMut(AgentEvent)) {
     use crate::git::changeset::{self, RunChangeset, SettleRun};
     let changeset = match close.meter {
         None => RunChangeset::NotRecorded {
-            kept_out_of_git: 0,
+            kept_out_of_git: Some(0),
             run_id: None,
             reason: NO_DURABLE_ID.into(),
             files: Vec::new(),
@@ -10333,9 +10333,9 @@ mod tests {
         assert_eq!(
             changeset_of(&events),
             &crate::git::changeset::RunChangeset::Nothing {
-                kept_out_of_git: 0,
+                kept_out_of_git: Some(0),
                 run_id: "run-nothing".into(),
-                shell_unrecorded: false,
+                shell_unrecorded: Some(false),
             }
         );
         assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
@@ -10385,11 +10385,11 @@ mod tests {
         assert_eq!(
             changeset_of(&events),
             &crate::git::changeset::RunChangeset::Unavailable {
-                kept_out_of_git: 0,
+                kept_out_of_git: Some(0),
                 run_id: "run-quitting".into(),
                 reason: crate::git::changeset::QUITTING.into(),
                 files: vec!["a.md".into()],
-                shell_unrecorded: false,
+                shell_unrecorded: Some(false),
             }
         );
         assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "git was left alone");

@@ -1,0 +1,127 @@
+/* What the context holds, row by row (M92.14): a bar of the window, each
+   used row a share in its own hue with a 2px gap of the surface between
+   shares, the room left as the track and the reserve compaction keeps
+   hatched at the end; then a legend, a swatch beside each name and the
+   numbers in text ink. Unlayered like the app's other surface stylesheets;
+   motion spends the tokens only. */
+
+.cb-ai-context-categories {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.cb-ai-context-bar {
+  display: flex;
+  gap: var(--sp-05);
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+}
+.cb-ai-context-segment {
+  flex: 0 0 0;
+  min-width: var(--sp-05);
+  height: 100%;
+  transition: flex-grow var(--motion-move);
+}
+
+/* The used rows' hues, in a fixed order and never cycled: the option
+   palette's, ordered so neighbours stay apart for colour-blind readers; a
+   row past them takes the neutral. */
+.cb-ai-context-categories [data-tone='0'] {
+  --context-tone: var(--opt-blue);
+}
+.cb-ai-context-categories [data-tone='1'] {
+  --context-tone: var(--opt-orange);
+}
+.cb-ai-context-categories [data-tone='2'] {
+  --context-tone: var(--opt-pink);
+}
+.cb-ai-context-categories [data-tone='3'] {
+  --context-tone: var(--opt-yellow);
+}
+.cb-ai-context-categories [data-tone='4'] {
+  --context-tone: var(--swatch-teal);
+}
+.cb-ai-context-categories [data-tone='5'] {
+  --context-tone: var(--opt-purple);
+}
+.cb-ai-context-categories [data-tone='6'] {
+  --context-tone: var(--opt-green);
+}
+.cb-ai-context-categories [data-tone='other'] {
+  --context-tone: var(--opt-gray);
+}
+.cb-ai-context-segment[data-tone] {
+  background: var(--context-tone);
+}
+/* The track one step off the card's surface in either theme (the raised
+   surface is --n-100 in the dark one). */
+.cb-ai-context-segment[data-kind='free'] {
+  background: var(--n-200);
+}
+/* The reserve: hatched at 135 degrees, so it never reads as content. */
+.cb-ai-context-segment[data-kind='buffer'],
+.cb-ai-context-legend-row[data-kind='buffer'] .cb-ai-context-swatch {
+  background: repeating-linear-gradient(135deg, var(--n-400) 0 2px, var(--n-200) 2px 4px);
+}
+
+.cb-ai-context-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-ai-context-legend-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-context-legend-row > dt {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-context-legend-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-ai-context-legend-row > dd {
+  flex: none;
+  margin: 0;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.cb-ai-context-swatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--context-tone, transparent);
+}
+.cb-ai-context-legend-row[data-kind='free'] .cb-ai-context-swatch {
+  background: var(--n-200);
+}
+/* Held outside the window: an outline, and its value in quiet ink. */
+.cb-ai-context-legend-row[data-kind='deferred'] .cb-ai-context-swatch {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.cb-ai-context-legend-row[data-kind='deferred'] > dd {
+  color: var(--text-muted);
+}
+
+.cb-ai-context-more {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}

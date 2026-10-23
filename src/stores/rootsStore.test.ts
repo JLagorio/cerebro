@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { DIVERGED_MESSAGE } from '@/engine/roots';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { UNCOUNTED_WORDS } from '@/engine/git';
+import { DIVERGED_MESSAGE, syncNotice } from '@/engine/roots';
 import {
   resetMockRoots,
   seedFile,
@@ -9,12 +10,17 @@ import {
   seedRootGitRemoteFailure,
   seedRootNested,
 } from '@/lib/mockRoots';
+import * as rootsIpc from '@/lib/rootsIpc';
 import { initialRootsState, selectActiveTab, useRootsStore } from './rootsStore';
 import { useUiStore } from './uiStore';
 
 beforeEach(() => {
   resetMockRoots();
   useRootsStore.setState(initialRootsState());
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('loadRoots', () => {
@@ -213,6 +219,85 @@ describe('syncRoot', () => {
 
     const second = useRootsStore.getState().gitSync[root.id];
     expect(second && 'status' in second && second.status).toBe('updated');
+  });
+
+  // M92.10: a count git did not take is unknown, never the 0 that would read
+  // as "nothing to pull" or the 0 that would let a diverged root pull.
+  it.each([
+    ['both counts unknown', { ahead: null, behind: null }],
+    ['behind unknown while nothing is ahead', { ahead: 0, behind: null }],
+    ['ahead unknown while behind', { ahead: null, behind: 2 }],
+  ] as const)('never pulls with %s, and settles as couldn’t tell', async (_, counts) => {
+    const root = seedRoot({ path: '/repos/uncounted', label: 'uncounted', git: true });
+    seedRootGit('/repos/uncounted', { branch: 'main', ...counts });
+    await useRootsStore.getState().loadRoots();
+    useUiStore.setState({ toasts: [] });
+    const pull = vi.spyOn(rootsIpc, 'rootGitPullFf');
+
+    const result = await useRootsStore.getState().syncRoot(root.id);
+
+    expect(pull).not.toHaveBeenCalled();
+    const unread = {
+      uncounted: 'unread',
+      message: `${UNCOUNTED_WORDS.unread}, so nothing was pulled`,
+    };
+    expect(result).toEqual(unread);
+    expect(useRootsStore.getState().gitSync[root.id]).toEqual(unread);
+    expect(syncNotice(result ?? undefined)).toEqual({
+      text: "couldn't tell",
+      title: unread.message,
+    });
+    // The counts stay unknown: nothing turned them into zeros.
+    expect(useRootsStore.getState().gitStatus[root.id]).toMatchObject(counts);
+    expect(useUiStore.getState().toasts).toEqual([]);
+  });
+
+  it('never pulls a branch that tracks no upstream, and says why it couldn’t tell', async () => {
+    const root = seedRoot({ path: '/repos/loose', label: 'loose', git: true });
+    seedRootGit('/repos/loose', { branch: 'topic', hasUpstream: false });
+    await useRootsStore.getState().loadRoots();
+    const pull = vi.spyOn(rootsIpc, 'rootGitPullFf');
+
+    const result = await useRootsStore.getState().syncRoot(root.id);
+
+    expect(pull).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      uncounted: 'no_upstream',
+      message: `${UNCOUNTED_WORDS.no_upstream}, so nothing was pulled`,
+    });
+    expect(useRootsStore.getState().gitStatus[root.id]).toMatchObject({
+      ahead: null,
+      behind: null,
+    });
+  });
+
+  it('never pulls when the status read after the fetch answered nothing', async () => {
+    const root = seedRoot({ path: '/repos/unread', label: 'unread', git: true });
+    seedRootGit('/repos/unread', { branch: 'main', behind: 2 });
+    await useRootsStore.getState().loadRoots();
+    vi.spyOn(rootsIpc, 'rootGitRemoteStatus').mockResolvedValue({
+      code: 'git_error',
+      message: 'git exited non-zero',
+    });
+    const pull = vi.spyOn(rootsIpc, 'rootGitPullFf');
+
+    const result = await useRootsStore.getState().syncRoot(root.id);
+
+    expect(pull).not.toHaveBeenCalled();
+    expect(result && 'uncounted' in result && result.uncounted).toBe('unread');
+    // What the read said stays the read's answer.
+    expect(useRootsStore.getState().gitRefusals[root.id]?.code).toBe('git_error');
+  });
+
+  it('still pulls a root whose counts were read and say it is only behind', async () => {
+    const root = seedRoot({ path: '/repos/counted', label: 'counted', git: true });
+    seedRootGit('/repos/counted', { branch: 'main', ahead: 0, behind: 1 });
+    await useRootsStore.getState().loadRoots();
+    const pull = vi.spyOn(rootsIpc, 'rootGitPullFf');
+
+    await useRootsStore.getState().syncRoot(root.id);
+
+    expect(pull).toHaveBeenCalledOnce();
   });
 
   it('returns parent_repo as a value the caller renders, and does not toast', async () => {

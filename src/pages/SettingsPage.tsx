@@ -21,6 +21,7 @@ import { Select } from '@/components/ui/Select';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { ConnectorSettings } from '@/app/ConnectorSettings';
+import { focusedConnector } from '@/agent/elements/connectorRow';
 import { TrashSettings } from '@/app/TrashSettings';
 import { MailSettings } from '@/app/MailSettings';
 import { listAgents } from '@/engine/agents';
@@ -255,8 +256,11 @@ function PanelAgentRow({ vaultPath, entries }: { vaultPath: string; entries: Ent
 
 export function SettingsPage() {
   const focus = useUiStore((s) => s.settingsFocus);
+  // The Claude Code row and a connector's (M92.9, the rail's Sign in…) live
+  // in the Assistant section.
+  const assistantFocus = focus === 'claude-code' || focusedConnector(focus) !== null;
   const [selected, setSelected] = useState<SettingsSection>(() =>
-    focus === 'claude-code' ? 'assistant' : 'general',
+    assistantFocus ? 'assistant' : 'general',
   );
   const [visited, setVisited] = useState<ReadonlySet<SettingsSection>>(() => new Set([selected]));
   const scrollHost = useRef<HTMLDivElement>(null);
@@ -268,8 +272,8 @@ export function SettingsPage() {
     setVisited((previous) => (previous.has(section) ? previous : new Set([...previous, section])));
   };
   useEffect(() => {
-    if (focus === 'claude-code') selectSection('assistant');
-  }, [focus]);
+    if (assistantFocus) selectSection('assistant');
+  }, [assistantFocus]);
   useLayoutEffect(() => {
     if (scrollHost.current) scrollHost.current.scrollTop = 0;
   }, [selected]);
@@ -495,7 +499,7 @@ export function SettingsPage() {
               checked={connectors}
               onChange={setConnectors}
             />
-            {connectors && <ConnectorSettings />}
+            {connectors && <ConnectorSettings active={selected === 'assistant'} />}
             <CliWorkspaceRow />
             <div
               className={`cb-setting-row flex items-start gap-3 py-2 ${connectors ? '' : 'opacity-50'}`}

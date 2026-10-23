@@ -3,7 +3,7 @@ import * as groups from '@/engine/editorGroups';
 import type { EditorGroup, Layout, OpenTab } from '@/engine/editorGroups';
 import type { GitRemoteStatus } from '@/engine/git';
 import type { DirEntry, MountRefusal, Root, RootGitRefusal, RootSyncOutcome } from '@/engine/roots';
-import { DIVERGED_MESSAGE, isRootGitRefusal, syncLanded } from '@/engine/roots';
+import { DIVERGED_MESSAGE, isRootGitRefusal, syncLanded, uncountedSync } from '@/engine/roots';
 import * as ipc from '@/lib/rootsIpc';
 import { useUiStore } from './uiStore';
 
@@ -53,8 +53,8 @@ interface RootsState {
    * The outcome is a value to RENDER, never a toast: it lands in `gitSync`,
    * where the row reads it (`auth_error` with the credential hint, a diverged
    * root with the divergence message, `parent_repo` as the quiet nested
-   * state), and is returned as well. Only a transport failure toasts, and it
-   * resolves to null.
+   * state, an uncounted root as "couldn't tell"), and is returned as well.
+   * Only a transport failure toasts, and it resolves to null.
    */
   syncRoot(rootId: string): Promise<RootSyncOutcome | null>;
   /** Resolves to the refusal to be RENDERED, or null on success. Never throws. */
@@ -234,6 +234,11 @@ export const useRootsStore = create<RootsState>((set, get) => ({
    * repository it does not own. `--ff-only` would refuse anyway; not asking
    * is better than being refused, and the row still gets the answer it would
    * have given.
+   *
+   * So a count git did not take never pulls (M92.10): an unknown ahead could
+   * be a divergence, and an unknown behind is not "nothing to pull". The sync
+   * settles as "couldn't tell", and so does a status read that answered
+   * nothing.
    */
   async syncRoot(rootId) {
     // Every exit replaces the last sync's answer: an "auth failed" must not
@@ -258,7 +263,10 @@ export const useRootsStore = create<RootsState>((set, get) => ({
 
     await get().loadGitStatus(rootId);
     const status = get().gitStatus[rootId];
-    if (status === undefined || status.behind === 0) return settle(fetched);
+    if (status === undefined || status.ahead === null || status.behind === null) {
+      return settle(uncountedSync(status));
+    }
+    if (status.behind === 0) return settle(fetched);
     if (status.ahead > 0) {
       return settle({
         status: 'rejected',

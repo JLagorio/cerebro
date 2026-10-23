@@ -1,0 +1,47 @@
+/* The rail's Environment card (M92.9): a term and its value per line, in two
+   columns, the sync line led by the SyncBadge's icon. Unlayered like the
+   app's other surface stylesheets; it sets no motion. */
+
+.cb-rail-environment {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+
+.cb-rail-environment-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: baseline;
+}
+.cb-rail-environment-line dt {
+  color: var(--text-meta);
+}
+.cb-rail-environment-line dd {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  min-width: 0;
+  margin: 0;
+  color: var(--text-primary);
+}
+.cb-rail-environment-line dd svg {
+  flex: none;
+}
+
+.cb-rail-environment-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A value that says the card could not read, or what is not recorded. */
+.cb-rail-environment-line[data-state='unavailable'] dd,
+.cb-rail-environment-line[data-state='not-recorded'] dd,
+.cb-rail-environment-line[data-state='missing'] dd {
+  color: var(--text-meta);
+}

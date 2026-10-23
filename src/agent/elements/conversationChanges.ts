@@ -28,8 +28,9 @@ import {
  * (M58.3); a reply rebuilt from the session file holds none. The heal
  * (M92.12, `conversation_changes`) reads a session's runs back from
  * Cerebro's records, and is folded in for the runs no reply holds: a live
- * or cached changeset wins per run id. Until the rail asks it, `heal` is
- * absent and the card reads the replies alone.
+ * or cached changeset wins per run id. It is asked only while the rail can
+ * be seen (`useChangesHeal`); until it answers, `heal` is absent and the
+ * card reads the replies alone.
  *
  * A branch's replies up to the one it branched from are copies (M91.6),
  * and say so, row by row. The turn at work changes what it changes when it
@@ -167,7 +168,7 @@ export const RAIL_CHANGES_WORDS = {
   notCommitted: 'not committed',
   copiedRow: 'copied',
   from: (path: string) => `from ${path}`,
-  alsoByNotRecorded: 'who else edited it: not recorded',
+  alsoByNotRecorded: CHANGESET_WORDS.alsoByNotRecorded,
   /** Around a file's name in its first action's name: where it goes. */
   jump: 'Jump to where ',
   jumpAfter: ' changed',
@@ -474,13 +475,23 @@ const sameTurns = (a: readonly TurnChanges[], b: readonly TurnChanges[]): boolea
       turn.copied === b[at].copied,
   );
 
-/** The same answer from the heal: a failure, or the same changesets read. */
+/** The same changesets by content: each read hands back new objects, as they
+ *  crossed IPC, so their JSON is what is compared. */
+const sameChangesets = (a: readonly RunChangeset[], b: readonly RunChangeset[]): boolean =>
+  a === b ||
+  (a.length === b.length &&
+    a.every((changeset, at) => JSON.stringify(changeset) === JSON.stringify(b[at])));
+
+/** The same answer from the heal: a failure, or the same changesets read,
+ *  compared by content (M92.12). */
 const sameHeal = (a: ChangesHeal | null, b: ChangesHeal | null): boolean =>
   a === b ||
   (a !== null &&
     b !== null &&
     (a.state === 'read'
-      ? b.state === 'read' && a.changesets === b.changesets && a.truncated === b.truncated
+      ? b.state === 'read' &&
+        (a.truncated === true) === (b.truncated === true) &&
+        sameChangesets(a.changesets, b.changesets)
       : b.state === 'unavailable'));
 
 /** The last card made, and what it was made from. */
@@ -494,9 +505,10 @@ let last: {
 /**
  * The conversation's changes, as the card shows them. The same object comes
  * back while the replies' changesets, which turn is at work and which were
- * copied, the pull requests and the heal's answer are the same: a reply's
- * changesets change only when a run's Changeset lands, so a turn's stream
- * never hands the rail a new one.
+ * copied, the pull requests and the heal's answer, by content, are the same:
+ * a reply's changesets change only when a run's Changeset lands, so a
+ * turn's stream never hands the rail a new one, and neither does a heal
+ * read that says what the last one said.
  */
 export function railChanges(input: RailChangesInput): RailChanges {
   const replies = replyTurns(input);
@@ -507,6 +519,9 @@ export function railChanges(input: RailChangesInput): RailChanges {
     sameHeal(last.heal, heal) &&
     sameTurns(last.replies, replies)
   ) {
+    // The newest answer's own object, so the next call meets it by identity
+    // and compares no content.
+    last.heal = heal;
     return last.changes;
   }
   const changes = changesOf(input, replies);

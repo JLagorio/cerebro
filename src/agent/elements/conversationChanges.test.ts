@@ -111,10 +111,10 @@ describe('the heal (M92.12), merged by run id', () => {
       commit: 'aaaaaaa',
     });
     // The heal's own reading of run-a: other counts, and no also_by.
-    const reread = committed(
-      [{ ...file('a.md', 'modified', 9, 9), also_by: null } as unknown as ChangedFile],
-      { run_id: 'run-a', commit: 'aaaaaaa' },
-    );
+    const reread = committed([file('a.md', 'modified', 9, 9, { also_by: null })], {
+      run_id: 'run-a',
+      commit: 'aaaaaaa',
+    });
     const older = committed([file('b.md', 'added', 4, 0)], { run_id: 'run-b', commit: 'bbbbbbb' });
     const heal: ChangesHeal = { state: 'read', changesets: [older, reread] };
     const changes = changesOf([asked('u-1'), replied('a-1', { changesets: [cached] })], { heal });
@@ -542,6 +542,41 @@ describe('the same card while nothing it reads changes', () => {
       ],
     });
     expect(opened).not.toBe(healed);
+  });
+});
+
+describe('the heal’s answer, by content (M92.12)', () => {
+  /** One read of the heal: each hands back new objects, as they crossed
+   *  IPC. */
+  const answer = (additions: number, truncated?: boolean): ChangesHeal => ({
+    state: 'read',
+    changesets: [
+      committed([file('a.md', 'modified', additions, 0, { also_by: null })], {
+        run_id: 'run-h',
+        commit: 'abcdef1',
+      }),
+    ],
+    ...(truncated === undefined ? {} : { truncated }),
+  });
+
+  it('hands back the same card for a read that says what the last one said', () => {
+    const messages = [asked('u-1'), replied('a-1')];
+    const prLinks: PrLink[] = [];
+    const cardFor = (heal: ChangesHeal) =>
+      railChanges({ messages, inFlight: false, sessionId: 's-own', prLinks, heal });
+    const first = cardFor(answer(2, false));
+    expect(rows(first)).toEqual(['a.md: modified · +2 −0']);
+    expect(first.others[0].alsoBy).toBeNull();
+    expect(cardFor(answer(2, false))).toBe(first);
+    // Not cut is not cut, said or left unsaid.
+    expect(cardFor(answer(2))).toBe(first);
+    const counted = cardFor(answer(3));
+    expect(counted).not.toBe(first);
+    expect(rows(counted)).toEqual(['a.md: modified · +3 −0']);
+    const cut = cardFor(answer(3, true));
+    expect(cut).not.toBe(counted);
+    expect(cut.state).toBe('partial');
+    expect(cardFor({ state: 'unavailable' })).not.toBe(cut);
   });
 });
 

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+import { StateMessage } from '@/components/ui/StateMessage';
 import { actorLabel } from '@/engine/authors';
 import type { FileStatus, ModifiedFile } from '@/engine/git';
 import { isKnowledgePath } from '@/engine/okf';
@@ -40,6 +41,10 @@ const KNOWLEDGE_DISCARD =
  * and offers no Discard: it commits with that run when the run ends, so the
  * commit here leaves it out, and the message is prefilled from the other
  * files only. A knowledge/ file offers no Discard either, and says why.
+ *
+ * A git read that failed (M92.9) says so, with a way to read again: never
+ * the offer to start tracking a vault it only failed to read, and never a
+ * list it read before, whose Commit and Discard would act on stale files.
  */
 export function ChangesPage() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -47,7 +52,7 @@ export function ChangesPage() {
   const toast = useUiStore((s) => s.toast);
   const entries = useVaultStore((s) => s.entries);
   const openPath = useOpenPath();
-  const { isRepo, modified, conflicts, conflictMode, ready, refresh } = useGit();
+  const { isRepo, readError, modified, conflicts, conflictMode, ready, refresh } = useGit();
   // What a commit here takes: every change but a live run's (M58.3).
   const unowned = modified.filter((f) => f.owner == null);
 
@@ -155,6 +160,26 @@ export function ChangesPage() {
   };
 
   if (!ready) return null;
+
+  if (readError !== null) {
+    return (
+      <div className="flex min-w-0 flex-1 items-center justify-center p-5">
+        <StateMessage
+          state="unavailable"
+          title="Couldn’t read this vault’s history"
+          action={
+            <Button size="sm" onClick={() => void refresh()}>
+              Try again
+            </Button>
+          }
+        >
+          {readError}
+        </StateMessage>
+      </div>
+    );
+  }
+
+  if (isRepo === null) return null;
 
   if (!isRepo) {
     return (

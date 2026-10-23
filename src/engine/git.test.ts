@@ -5,13 +5,16 @@ import {
   RESTORE_OUTSIDE,
   RESTORE_REMOVED,
   RESTORE_TOO_LARGE,
+  UNCOUNTED_WORDS,
+  countsUnknown,
   diffStats,
+  isCounted,
   isFailure,
   parseDiff,
   restoreBlock,
   syncState,
 } from '@/engine/git';
-import type { FileCommit, RemoteResult } from '@/engine/git';
+import type { FileCommit, GitRemoteStatus, RemoteResult } from '@/engine/git';
 
 const result = (status: RemoteResult['status']): RemoteResult => ({
   status,
@@ -133,16 +136,25 @@ describe('diffStats', () => {
   });
 });
 
-describe('syncState', () => {
-  const remote = {
-    branch: 'main',
-    ahead: 0,
-    behind: 0,
-    hasRemote: true,
-    hasUpstream: true,
-    upstream: 'origin/main',
-  };
+const remote: GitRemoteStatus = {
+  branch: 'main',
+  ahead: 0,
+  behind: 0,
+  hasRemote: true,
+  hasUpstream: true,
+  upstream: 'origin/main',
+};
 
+/** A branch that tracks nothing, as `remote::remote_status` reads it (M92.10). */
+const untracked: GitRemoteStatus = {
+  ...remote,
+  ahead: null,
+  behind: null,
+  hasUpstream: false,
+  upstream: null,
+};
+
+describe('syncState', () => {
   it('reports conflicts above everything else', () => {
     expect(syncState({ ...remote, ahead: 3, behind: 2 }, 5, 1)).toBe('conflict');
   });
@@ -159,6 +171,36 @@ describe('syncState', () => {
 
   it('is clean with no remote and nothing pending', () => {
     expect(syncState(null, 0, 0)).toBe('clean');
+  });
+
+  // M92.10: a count git did not take is unknown, never the zero that reads
+  // "Up to date", whichever count it is and whatever the other one says.
+  it('is unknown, never clean, when git did not count', () => {
+    expect(syncState({ ...remote, ahead: null, behind: null }, 0, 0)).toBe('unknown');
+    expect(syncState({ ...remote, behind: null }, 0, 0)).toBe('unknown');
+    expect(syncState({ ...remote, ahead: 2, behind: null }, 0, 0)).toBe('unknown');
+    expect(syncState({ ...remote, ahead: null, behind: 3 }, 0, 0)).toBe('unknown');
+    expect(syncState(untracked, 0, 0)).toBe('unknown');
+    // What is measured on disk still comes first.
+    expect(syncState(untracked, 2, 0)).toBe('local-changes');
+    expect(syncState(untracked, 0, 1)).toBe('conflict');
+  });
+});
+
+describe('countsUnknown (M92.10)', () => {
+  it('names why a remote has no counts, and nothing once git took both', () => {
+    expect(countsUnknown(remote)).toBeNull();
+    expect(isCounted(remote)).toBe(true);
+    expect(countsUnknown({ ...remote, behind: null })).toBe('unread');
+    expect(countsUnknown({ ...remote, ahead: null, behind: null })).toBe('unread');
+    expect(countsUnknown(untracked)).toBe('no_upstream');
+    expect(isCounted(untracked)).toBe(false);
+  });
+
+  it('has words for every reason, and none of them is a number', () => {
+    for (const reason of ['no_upstream', 'unread'] as const) {
+      expect(UNCOUNTED_WORDS[reason]).toMatch(/^[^\d]+$/);
+    }
   });
 });
 

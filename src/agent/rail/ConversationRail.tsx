@@ -1,4 +1,16 @@
 import { memo, useLayoutEffect, useRef, type Ref, type RefObject } from 'react';
+import type { RailChanges } from '@/agent/elements/conversationChanges';
+import type { RailPlan } from '@/agent/elements/railPlan';
+import type { RailSources } from '@/agent/elements/railSources';
+import type { RailSubagents } from '@/agent/elements/railSubagents';
+import type { RailWaiting } from '@/agent/elements/railWaiting';
+import { ChangesCard } from '@/agent/rail/ChangesCard';
+import { PlanCard } from '@/agent/rail/PlanCard';
+import { SourcesCard } from '@/agent/rail/SourcesCard';
+import { SubagentsCard } from '@/agent/rail/SubagentsCard';
+import { WaitingCard } from '@/agent/rail/WaitingCard';
+import type { TranscriptStatus } from '@/agent/useConversations';
+import type { MessageScrollerCommands } from '@/components/ai/MessageScroller';
 import { Rail } from '@/components/ai/Rail';
 import { useMergedRefs } from '@/components/ai/mergeRefs';
 import { leaveGhost, useArrival } from '@/components/ui/motion';
@@ -68,6 +80,33 @@ export interface ConversationRailProps {
    * then runs `go`, which scrolls to the row's target and focuses it.
    */
   jump: (go: () => void) => void;
+  /** Waiting on you: the call the thread's turn waits on (`railWaiting`). */
+  waiting: RailWaiting | null;
+  /** The open vault, whose book Waiting on you checks while none waits. */
+  vault: string | null;
+  /** The conversation the rail is open on. */
+  thread: string;
+  /** The transcript's scroll commands (Chat's `scrollerRef`). */
+  scroller: RefObject<MessageScrollerCommands | null>;
+  /** Plan: the conversation's latest todo list (`railPlan`). */
+  plan: RailPlan;
+  /** The agent is at it now: a turn runs, not waiting and not stopping. */
+  working: boolean;
+  /** Subagents: every subagent the conversation started (`railSubagents`). */
+  subagents: RailSubagents;
+  /** What reading the thread's transcript back found. */
+  transcript: TranscriptStatus['state'];
+  /** Changes: what the conversation changed (`railChanges`). */
+  changes: RailChanges;
+  /** Sources: what the conversation drew on (`railSources`). */
+  sources: RailSources;
+  /** A row's second action, a vault page; `openOutside` floats first. */
+  onOpenPath: (path: string) => void;
+  /** A deleted file's diff at its commit; absent where diffs cannot show. */
+  onViewDiff?: (path: string, commit: string) => void;
+  /** Brings a transcript element into view, through the transcript's
+   *  scroller. */
+  reveal: (element: HTMLElement) => void;
 }
 
 /**
@@ -86,6 +125,20 @@ export const ConversationRail = memo(function ConversationRail({
   closing,
   headingRef,
   ref,
+  jump,
+  waiting,
+  vault,
+  thread,
+  scroller,
+  plan,
+  working,
+  subagents,
+  transcript,
+  changes,
+  sources,
+  onOpenPath,
+  onViewDiff,
+  reveal,
 }: ConversationRailProps) {
   const own = useRef<HTMLElement | null>(null);
   const setRail = useMergedRefs(own, ref);
@@ -124,6 +177,31 @@ export const ConversationRail = memo(function ConversationRail({
     >
       {drawer && <DrawerExit rail={own} />}
       {/* The cards, in §0 Q5's order: each wave adds its own here. */}
+      <WaitingCard
+        waiting={waiting}
+        vault={vault}
+        thread={thread}
+        folded={folded}
+        jump={jump}
+        scroller={scroller}
+      />
+      <PlanCard plan={plan} working={working} folded={folded} />
+      <SubagentsCard subagents={subagents} transcript={transcript} folded={folded} jump={jump} />
+      <ChangesCard
+        changes={changes}
+        folded={folded}
+        jump={jump}
+        onOpenPath={onOpenPath}
+        onViewDiff={onViewDiff}
+        reveal={reveal}
+      />
+      <SourcesCard
+        sources={sources}
+        folded={folded}
+        jump={jump}
+        onOpenPath={onOpenPath}
+        reveal={reveal}
+      />
     </Rail>
   );
 });

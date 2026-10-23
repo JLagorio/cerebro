@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as agentIpc from './agentIpc';
 import type { ContextUseAnswer, ContextUseRecorded } from './agentIpc';
 import { useContextUse } from './useContextUse';
+import { readContextBreakdown, type ContextBreakdown } from '@/engine/ai/contextBreakdown';
 import { failNext, resetFaults } from '@/lib/mockFaults';
 import * as mock from '@/lib/mockIpc';
 import { useUiStore } from '@/stores/uiStore';
@@ -258,5 +259,92 @@ describe('useContextUse (M91.5)', () => {
     const filed = await turnOf(session);
     rerender({ streaming: false });
     await waitFor(() => expect(result.current).toEqual(filed));
+  });
+});
+
+describe('the breakdown beside a reading (M92.14)', () => {
+  const BREAKDOWN: ContextBreakdown = {
+    categories: [
+      { name: 'System prompt', tokens: 6_797, kind: 'used' },
+      { name: 'Messages', tokens: 26_450, kind: 'used' },
+      { name: 'Free space', tokens: 166_753, kind: 'free' },
+    ],
+    total: 33_247,
+    max: 200_000,
+  };
+
+  it('is filed by an attended mock turn as the meter keeps one, adding up to the reading', async () => {
+    const first = await turnOf(freshSession());
+    if (first.state !== 'recorded') throw new Error('the turn filed a reading');
+    const { breakdown } = first;
+    expect(readContextBreakdown(breakdown)).toEqual(breakdown);
+    expect(breakdown).toMatchObject({ total: first.used, max: first.window, model: first.model });
+    const inWindow = (breakdown?.categories ?? [])
+      .filter((row) => row.kind === 'used')
+      .reduce((sum, row) => sum + (row.tokens ?? 0), 0);
+    expect(inWindow).toBe(first.used);
+    expect(breakdown?.mcpServers).toEqual([
+      expect.objectContaining({ name: 'cerebro', loaded: 4, tokens: 900 }),
+    ]);
+  });
+
+  it('lists no server for a mock run whose declared tools hold none of Cerebro’s', async () => {
+    const session = freshSession();
+    const start = await agentIpc.runAgent(VAULT, {
+      message: 'hello',
+      sessionId: session,
+      shell: 'off',
+      connectors: false,
+      attended: true,
+      allowedTools: ['Read'],
+    });
+    if (!('run' in start)) throw new Error('a run with no lane is never deferred or settled');
+    await new Promise<void>((resolve) => {
+      const stop = agentIpc.onAgentEvent((event) => {
+        if (event.kind !== 'Done') return;
+        stop();
+        resolve();
+      }, start.run);
+    });
+    const filed = agentIpc.mockContextBook.read(session);
+    if (filed.state !== 'recorded') throw new Error('the turn filed a reading');
+    expect(filed.breakdown?.mcpServers).toEqual([]);
+    expect(filed.breakdown?.categories.map((row) => row.name)).not.toContain('MCP tools');
+  });
+
+  it('makes Claude Code’s total and window the reading’s, so ring and card show one figure', async () => {
+    const session = freshSession();
+    agentIpc.mockContextBook.record(session, {
+      ...reading(33_300),
+      window: 1_000_000,
+      breakdown: BREAKDOWN,
+    });
+    const { result } = renderHook(() => useContextUse(session, { streaming: false }));
+    await waitFor(() =>
+      expect(result.current).toEqual({
+        ...reading(33_247),
+        window: 200_000,
+        breakdown: BREAKDOWN,
+      }),
+    );
+  });
+
+  it('keeps the reading’s own count and window where the breakdown gives neither', async () => {
+    const session = freshSession();
+    const { total: _total, max: _max, ...rows } = BREAKDOWN;
+    agentIpc.mockContextBook.record(session, { ...reading(33_300), breakdown: rows });
+    const { result } = renderHook(() => useContextUse(session, { streaming: false }));
+    await waitFor(() => expect(result.current).toEqual({ ...reading(33_300), breakdown: rows }));
+  });
+
+  it('reads a breakdown that does not read as none, keeping the reading', async () => {
+    const session = freshSession();
+    agentIpc.mockContextBook.record(session, {
+      ...reading(33_300),
+      breakdown: { categories: 'System prompt' } as unknown as ContextBreakdown,
+    });
+    const { result } = renderHook(() => useContextUse(session, { streaming: false }));
+    await waitFor(() => expect(result.current).toEqual(reading(33_300)));
+    expect(result.current).not.toHaveProperty('breakdown');
   });
 });

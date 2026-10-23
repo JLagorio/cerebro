@@ -1,5 +1,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { boot } from './boot';
+import {
+  askAssistant,
+  assistantSettled,
+  boot,
+  holdClock,
+  stepUntil,
+  stepUntilSettled,
+} from './boot';
 
 /**
  * The conversation rail's frame (M92.1): in the canvas, a third grid area of
@@ -8,6 +15,11 @@ import { boot } from './boot';
  * under that and opens as a drawer over the transcript when asked, and a
  * person's word on it outlives a reload. Moving the same conversation
  * between presentations keeps its input, its turn and the rail.
+ *
+ * Its cards (M92.4–M92.6, M92.17) act in the canvas: a row's first action
+ * shows where in the conversation its thing happened, and its open floats
+ * the conversation first, so the page it opens is on screen. A docked
+ * rail's Plan card holds the plan, and the dock's steps aside.
  */
 
 const RAIL_KEY = 'cerebro.chatRailOpen';
@@ -181,4 +193,106 @@ test('canvas, floating and canvas again mid-turn keep the input, the turn and th
   await expect(panel.locator('[data-testid="chat-message"][data-role="user"]')).toHaveCount(1);
   await expect(input).toHaveValue('Keep this draft');
   await expect(rail(panel)).toBeVisible();
+});
+
+test('a subagent row jumps to its line in the canvas, and a source opens its page outside it', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await boot(page);
+  const panel = await openCanvas(page);
+  await askAssistant(page, 'research the open risks with subagents');
+  await assistantSettled(page, 1);
+  const details = rail(panel);
+  await expect(details).toBeVisible();
+  const rows = details.getByTestId('rail-subagent');
+  await expect(rows).toHaveCount(2);
+  await expect(details.getByTestId('rail-subagents')).toHaveAttribute('data-state', 'ready');
+
+  // Each researcher folds to its line once done; the row opens it there.
+  const id = await rows.first().getAttribute('data-tool-id');
+  const line = panel.getByTestId('chat-scroll').locator(`[data-tool-id="${id}"]`);
+  const fold = line.getByRole('button', { name: /^Done: Read the open risks/ });
+  await expect(fold).toHaveAttribute('aria-expanded', 'false');
+  await rows.first().click();
+  await expect(fold).toHaveAttribute('aria-expanded', 'true');
+  await expect(fold).toBeFocused();
+  await expect(fold).toBeInViewport();
+  await expect(panel).toHaveAttribute('data-presentation', 'canvas');
+  await expect(details).toBeVisible();
+
+  // What the researchers read, under the reply that used it. Opening a
+  // record floats the conversation first: the peek it opens in is drawn,
+  // and the page under it is live.
+  const scanner = details.getByTestId('rail-source').filter({ hasText: 'Scanner' });
+  await expect(scanner).toHaveCount(1);
+  await scanner.getByTestId('rail-source-open').click();
+  await expect(panel).toHaveAttribute('data-presentation', 'floating');
+  const peek = page.getByTestId('detail-panel');
+  await expect(peek).toBeVisible();
+  await expect(peek).toContainText('Scanner');
+  await expect(page.locator('#main')).not.toHaveAttribute('inert');
+});
+
+test('a Changes row shows its change in the canvas, and its open leaves the page on screen', async ({
+  page,
+}) => {
+  const path = 'delivery/how-we-schedule.md';
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await boot(page);
+  const panel = await openCanvas(page);
+  await askAssistant(page, `append "- call the vendor" to ${path}`);
+  await assistantSettled(page, 1);
+  const changes = rail(panel).getByTestId('rail-changes');
+  await expect(changes).toHaveAttribute('data-state', 'ready');
+  const row = changes.locator(`[data-testid="rail-change"][data-path="${path}"]`);
+
+  // Its first action: the file's row in the turn's changeset, in the canvas.
+  await row.getByRole('button', { name: /^Jump to where how-we-schedule\.md changed/ }).click();
+  const file = panel
+    .getByTestId('chat-scroll')
+    .locator(`[data-slot="file-tree-file"][data-path="${path}"]`);
+  await expect.poll(() => file.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+  await expect(panel).toHaveAttribute('data-presentation', 'canvas');
+
+  // Its second: the page, which the canvas would hide, so it floats first.
+  await row.getByRole('button', { name: 'Open how-we-schedule.md (leaves full screen)' }).click();
+  await expect(panel).toHaveAttribute('data-presentation', 'floating');
+  const doc = page.getByTestId('doc-page');
+  await expect(doc).toBeVisible();
+  await expect(doc).toContainText('call the vendor');
+  await expect(page.locator('#main')).not.toHaveAttribute('inert');
+});
+
+test('in the canvas, a docked rail holds the plan, and the dock’s shows only without it', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await boot(page);
+  const panel = await openCanvas(page);
+  await holdClock(page);
+  await askAssistant(page, 'make a todo list of the open risks');
+  const plan = rail(panel).getByTestId('rail-plan');
+  const items = plan.locator('[data-section="todo"] [data-slot="queue-item"]');
+  await stepUntil(page, async () => (await items.count()) === 3, 'the rail’s plan');
+  // One list on screen: the rail's card, the dock's kept hidden.
+  const dock = panel.getByTestId('live-plan');
+  await expect(dock).toHaveCount(1);
+  await expect(dock).toBeHidden();
+  await expect(panel.getByRole('region', { name: 'Plan', exact: true })).toHaveCount(0);
+
+  // The rail turned off takes its card with it: the dock's shows the list.
+  await toggle(panel).click();
+  await expect(rail(panel)).toBeHidden();
+  await expect(dock).toBeVisible();
+  await expect(dock.locator('[data-section="todo"] [data-slot="queue-item"]')).toHaveCount(3);
+  await toggle(panel).click();
+  await expect(plan).toBeVisible();
+  await expect(dock).toBeHidden();
+
+  // The turn ends: the dock's plan goes, and the rail keeps the list.
+  await stepUntilSettled(page, 1);
+  await expect(panel.getByTestId('live-plan')).toHaveCount(0);
+  await expect(plan).toHaveAttribute('data-state', 'ready');
+  await expect(plan).toContainText('3 of 3 done');
 });

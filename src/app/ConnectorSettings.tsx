@@ -1,4 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  approvalLine,
+  connectorRow,
+  focusedConnector,
+  signInWithout,
+  type ConnectorStatusRead,
+} from '@/agent/elements/connectorRow';
 import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -7,70 +14,17 @@ import { Switch } from '@/components/ui/Switch';
 import {
   approvalKey,
   CONNECTOR_PRESETS,
-  httpHeaders,
-  httpOAuth,
-  httpTimeout,
   parseConnectors,
   presetHolder,
   presetSpec,
   removalNote,
   serializeConnectors,
-  signInBlocker,
-  signInCommand,
-  stateLabel,
-  stdioEnv,
   type ConnectorSpec,
-  type ConnectorState,
-  type ConnectorStatusRow,
 } from '@/engine/connectors';
 import { relativeWhen } from '@/engine/whenText';
 import { connectorStatus, readConnectors, saveConnectors } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
-
-/** Pairs sorted by key, the order a fingerprint sorts them in. */
-function sortedPairs<V>(record: Record<string, V>): [string, V][] {
-  return Object.entries(record).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-}
-
-/** The status read (M54.11). A failed read is its own state, never no rows. */
-type StatusRead =
-  | { kind: 'loading' }
-  | { kind: 'ready'; rows: ConnectorStatusRow[] }
-  | { kind: 'unavailable'; reason: string };
-
-/** What a row says after its name: a switch or an approval this machine
- * decides, a refusal Rust found, or what the last run that used it saw.
- * `words` is null while the status is loading or unreadable, so no row
- * claims an observation nobody could read. */
-interface RowStatus {
-  key:
-    'off' | 'refused' | 'unapproved' | 'loading' | 'unavailable' | 'not_observed' | ConnectorState;
-  words: string | null;
-}
-
-const OBSERVED: readonly string[] = ['working', 'needs_sign_in', 'failed', 'not_approved'];
-
-/** One line on what to do about a state, where there is something to do. */
-const HINTS: Partial<Record<RowStatus['key'], string>> = {
-  failed:
-    'The last run that used it got no answer from it — check that the server is up and its URL is right.',
-  not_approved:
-    'Your own Claude Code permission rules stopped its tools in the last run — allow them with /permissions in claude.',
-};
-
-/** What a row that needs sign-in says in place of a command it cannot show. */
-function withoutCommand(spec: ConnectorSpec): string {
-  switch (signInBlocker(spec)) {
-    case 'name':
-      return `Claude Code adds a connector only under a name of letters, digits, - and _, so rename ${spec.name} here, then sign in.`;
-    case 'entry':
-      return 'Its URL or one of its headers holds a character other than printable ASCII, which a pasted command must not carry, so fix this entry in .cerebro/connectors.json, then sign in.';
-    case 'stdio':
-    case null:
-      return `Run claude, type /mcp, and sign in to ${spec.name}.`;
-  }
-}
 
 /**
  * The vault's connector list (M13.3) — `.cerebro/connectors.json` with a
@@ -87,14 +41,21 @@ function withoutCommand(spec: ConnectorSpec): string {
  *
  * Each entry shows the last status a run saw it in (M54.11), read on mount
  * and again whenever the window regains focus, since a sign-in finishes in a
- * terminal. One that needs sign-in shows the command that adds it to Claude
- * Code, where `/mcp` signs in: the token stays there, never here. An entry
- * the command cannot carry safely, such as a URL holding a control
- * character, shows what to fix instead of a command to paste.
+ * terminal, in the words `connectorRow` derives for it, which the
+ * conversation rail's Connectors card says too (M92.9). One that needs
+ * sign-in shows the command that adds it to Claude Code, where `/mcp` signs
+ * in: the token stays there, never here. An entry the command cannot carry
+ * safely, such as a URL holding a control character, shows what to fix
+ * instead of a command to paste. The rail's Sign in… opens Settings here, at
+ * its connector's row, once its section is shown (`active`).
  */
-export function ConnectorSettings() {
+export function ConnectorSettings({ active = true }: { active?: boolean }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const toast = useUiStore((s) => s.toast);
+  const focus = useUiStore((s) => s.settingsFocus);
+  const setFocus = useUiStore((s) => s.setSettingsFocus);
+  const focused = focusedConnector(focus);
+  const focusedRow = useRef<HTMLDivElement>(null);
   // Approvals live in the store — OUTSIDE the vault — so the file cannot
   // approve itself; see uiStore.stdioApprovals (PR #5 security review),
   // which holds both transports' keys since M54.9.
@@ -116,7 +77,7 @@ export function ConnectorSettings() {
   const [name, setName] = useState('');
   const [transport, setTransport] = useState<'http' | 'stdio'>('http');
   const [target, setTarget] = useState('');
-  const [status, setStatus] = useState<StatusRead>({ kind: 'loading' });
+  const [status, setStatus] = useState<ConnectorStatusRead>({ kind: 'loading' });
   // The connector whose sign-in command the clipboard took, set only once
   // the write resolved.
   const [copied, setCopied] = useState<string | null>(null);
@@ -175,6 +136,15 @@ export function ConnectorSettings() {
       stale = true;
     };
   }, [vaultPath, loadSeq]);
+
+  // A one-shot (M92.9): once the section shows and the list has loaded,
+  // bring the rail's connector into view, then forget it, so a later visit
+  // to Settings opens at the top as usual.
+  useEffect(() => {
+    if (!active || focused === null || specs === null) return;
+    focusedRow.current?.scrollIntoView({ block: 'center' });
+    setFocus(null);
+  }, [active, focused, specs, setFocus]);
 
   if (vaultPath === null) return null;
 
@@ -283,74 +253,29 @@ export function ConnectorSettings() {
   return (
     <div className="mt-1 flex flex-col gap-1.5" data-testid="connector-settings">
       {specs.map((spec) => {
-        // The file naming an entry travels with the vault, so the entry
-        // stays out of runs until a person approves its exact spec on this
-        // machine: a stdio entry names a command this app would EXECUTE, and
-        // an http one a server whose tools a run is granted (M54.9). null =
-        // malformed (a non-string env value or header, or an oauth or
+        // What the row says, first rule wins: the switch; a name Rust can
+        // never grant; this machine's approval; then what the last run that
+        // used it saw, or that none has (M54.11). One derivation, which the
+        // rail's Connectors card reads too (M92.9).
+        const row = connectorRow(spec, approvals[vaultPath] ?? [], status);
+        // null = malformed (a non-string env value or header, or an oauth or
         // timeout Claude Code would refuse, M69.1), which can never be
         // approved. The ledger holds digests, never the fingerprint itself.
-        const fp = approvalKey(spec);
-        const unapproved = fp === null || !(approvals[vaultPath] ?? []).includes(fp);
+        const fp = row.approval;
+        const said = row.status;
+        const { observedAt, hint, signIn, command } = row;
         // What Approve approves is the whole spec — so the env pairs, the
         // headers and the oauth must be on the table, not just the command
         // line or the URL (PR #5 security review): an env value can redirect
         // a benign-looking command, a header can change who the server thinks
-        // is calling. Sorted like the fingerprint sorts them.
-        const shown =
-          spec.transport === 'http'
-            ? [
-                spec.url,
-                ...sortedPairs(httpHeaders(spec) ?? {}).map(([k, v]) => `${k}: ${v}`),
-                // oauth is part of the approval too (M69.1): a metadata URL
-                // can send the sign-in elsewhere.
-                ...sortedPairs(httpOAuth(spec) ?? {}).map(([k, v]) => `oauth ${k}: ${v}`),
-              ].join(' · ')
-            : [
-                ...sortedPairs(stdioEnv(spec) ?? {}).map(([k, v]) => `${k}=${v}`),
-                spec.command,
-                ...spec.args,
-              ].join(' ');
-        const why =
-          spec.transport === 'stdio'
-            ? fp === null
-              ? 'malformed env'
-              : 'runs a local command'
-            : httpHeaders(spec) === null
-              ? 'malformed headers'
-              : httpOAuth(spec) === null
-                ? 'oauth Claude Code would refuse'
-                : httpTimeout(spec) === null
-                  ? 'timeout Claude Code would refuse'
-                  : 'not approved on this machine';
-        // What the row says, first rule wins: the switch; a name Rust can
-        // never grant; this machine's approval; then what the last run that
-        // used it saw, or that none has (M54.11).
-        const seen =
-          status.kind === 'ready'
-            ? status.rows.find((row) => row.connector === spec.name)
-            : undefined;
-        const said: RowStatus = !spec.enabled
-          ? { key: 'off', words: 'off' }
-          : seen?.refused != null
-            ? { key: 'refused', words: `can’t be granted: ${seen.refused}` }
-            : unapproved
-              ? { key: 'unapproved', words: why }
-              : status.kind !== 'ready'
-                ? { key: status.kind, words: null }
-                : {
-                    key: seen?.state ?? 'not_observed',
-                    words: stateLabel(seen?.state ?? null),
-                  };
-        const observedAt = OBSERVED.includes(said.key) ? (seen?.seen_at ?? null) : null;
-        const hint = HINTS[said.key];
-        // A preset no run has used yet shows its sign-in too (M69.1): it
-        // was added to be signed in to, and the first run would only say so.
-        const preset = CONNECTOR_PRESETS.some((p) => presetHolder(p, [spec]) !== undefined);
-        const signIn = said.key === 'needs_sign_in' || (said.key === 'not_observed' && preset);
-        const command = signIn ? signInCommand(spec) : null;
+        // is calling, and a metadata URL can send the sign-in elsewhere.
+        const shown = approvalLine(spec);
         return (
-          <div key={spec.name} className="rounded-lg border border-n-200 px-2.5 py-1.5">
+          <div
+            key={spec.name}
+            ref={spec.name === focused ? focusedRow : undefined}
+            className="rounded-lg border border-n-200 px-2.5 py-1.5"
+          >
             <div className="flex items-center gap-2">
               {/* The status words can be long (a refusal says why), so they
                   wrap in their own column and never push the controls out. */}
@@ -360,15 +285,7 @@ export function ConnectorSettings() {
                   {said.words !== null && (
                     <>
                       {' — '}
-                      <span
-                        className={
-                          said.key === 'working' ||
-                          said.key === 'off' ||
-                          said.key === 'not_observed'
-                            ? 'text-(--text-meta)'
-                            : 'text-warn-700'
-                        }
-                      >
+                      <span className={row.quiet ? 'text-(--text-meta)' : 'text-warn-700'}>
                         {said.words}
                       </span>
                     </>
@@ -381,7 +298,7 @@ export function ConnectorSettings() {
                   {shown}
                 </div>
               </div>
-              {unapproved && fp !== null && said.key !== 'refused' && (
+              {row.unapproved && fp !== null && said.key !== 'refused' && (
                 <Button variant="secondary" size="sm" onClick={() => approve(vaultPath, fp)}>
                   Approve
                 </Button>
@@ -446,7 +363,7 @@ export function ConnectorSettings() {
                   </>
                 ) : (
                   <p className="m-0 text-2xs leading-[14px] text-(--text-meta)">
-                    {withoutCommand(spec)} The sign-in stays in Claude Code; Cerebro never holds the
+                    {signInWithout(spec)} The sign-in stays in Claude Code; Cerebro never holds the
                     token.
                   </p>
                 )}

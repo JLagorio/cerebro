@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { UNCOUNTED_WORDS } from '@/engine/git';
 import { DIVERGED_MESSAGE } from '@/engine/roots';
 import {
   resetMockRoots,
@@ -220,6 +221,32 @@ describe('RootTree git badge', () => {
     expect(screen.queryByTestId('root-git-badge')).toBeNull();
   });
 
+  // M92.10: a count git did not take is never the silence of a root in sync.
+  it('marks counts git could not take with ?, and says so in words', async () => {
+    seedRoot({ path: '/repos/broken', label: 'broken', git: true });
+    seedRootGit('/repos/broken', { branch: 'main', ahead: null, behind: null });
+    await useRootsStore.getState().loadRoots();
+
+    render(<RootTree />);
+
+    const badge = await screen.findByTestId('root-git-badge');
+    expect(badge.textContent).toBe('main ↑? ↓?');
+    expect(badge.getAttribute('title')).toBe(UNCOUNTED_WORDS.unread);
+  });
+
+  it('shows no counts for a branch that tracks no upstream', async () => {
+    seedRoot({ path: '/repos/loose', label: 'loose', git: true });
+    seedRootGit('/repos/loose', { branch: 'topic', hasUpstream: false });
+    await useRootsStore.getState().loadRoots();
+
+    render(<RootTree />);
+
+    await waitFor(() => {
+      expect(useRootsStore.getState().gitStatus['root-1']?.branch).toBe('topic');
+    });
+    expect(screen.queryByTestId('root-git-badge')).toBeNull();
+  });
+
   it('never badges a root that is not a repo, and stores the refusal instead', async () => {
     seedRoot({ path: '/notes', label: 'notes', git: false });
     await useRootsStore.getState().loadRoots();
@@ -274,6 +301,23 @@ describe('RootTree sync control', () => {
       expect(screen.getByTestId('root-git-sync').textContent).toBe('diverged');
     });
     expect(screen.getByTestId('root-git-sync').getAttribute('title')).toBe(DIVERGED_MESSAGE);
+  });
+
+  it('says it couldn’t tell when git could not count, and why, without pulling', async () => {
+    const root = seedRoot({ path: '/repos/broken', label: 'broken', git: true });
+    seedRootGit('/repos/broken', { branch: 'main', ahead: null, behind: null });
+    await useRootsStore.getState().loadRoots();
+    useUiStore.setState({ toasts: [] });
+
+    fireEvent.click(await renderSettled(root.id));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('root-git-sync').textContent).toBe("couldn't tell");
+    });
+    const control = screen.getByTestId('root-git-sync');
+    expect(control.getAttribute('title')).toBe(`${UNCOUNTED_WORDS.unread}, so nothing was pulled`);
+    expect(control.getAttribute('aria-label')).toBe("Sync broken: couldn't tell");
+    expect(useUiStore.getState().toasts).toEqual([]);
   });
 
   it('goes quiet again once a sync lands', async () => {

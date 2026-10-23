@@ -7,7 +7,14 @@
  * a repo a zero-blast-radius change to the vault surfaces.
  */
 import { kindFor } from './fileKinds';
-import type { RemoteOutcome, RemoteResult } from './git';
+import {
+  countsUnknown,
+  UNCOUNTED_WORDS,
+  type CountsUnknown,
+  type GitRemoteStatus,
+  type RemoteOutcome,
+  type RemoteResult,
+} from './git';
 
 export interface RootCaps {
   /** Carries a `knowledge/` bundle. Exactly one mounted root may, in v1. */
@@ -70,8 +77,22 @@ export function isRootGitRefusal(result: unknown): result is RootGitRefusal {
   return typeof result === 'object' && result !== null && 'code' in result && 'message' in result;
 }
 
-/** What one sync of a mounted root ended in: git's answer, or the gate's refusal. */
-export type RootSyncOutcome = RemoteResult | RootGitRefusal;
+/**
+ * The store's own answer when git did not count a root's commits after its
+ * fetch (M92.10): nothing was pulled, because an unknown behind could hide a
+ * divergence and "nothing to pull" would be a guess. `uncounted` says why the
+ * counts are missing; `message` is the row's title.
+ */
+export interface RootSyncUncounted {
+  uncounted: CountsUnknown;
+  message: string;
+}
+
+/**
+ * What one sync of a mounted root ended in: git's answer, the gate's refusal,
+ * or the store's "couldn't tell".
+ */
+export type RootSyncOutcome = RemoteResult | RootGitRefusal | RootSyncUncounted;
 
 /**
  * What a fast-forward-only pull says when local and remote have diverged:
@@ -79,6 +100,15 @@ export type RootSyncOutcome = RemoteResult | RootGitRefusal;
  * it refuses, and the store gives it for the pull it declines to ask for.
  */
 export const DIVERGED_MESSAGE = 'Local and remote have diverged; resolve outside Cerebro';
+
+/**
+ * The sync's answer when the status read after its fetch left a count
+ * unknown, or answered no status at all (`undefined`): git could not count.
+ */
+export function uncountedSync(status: GitRemoteStatus | undefined): RootSyncUncounted {
+  const uncounted = (status === undefined ? null : countsUnknown(status)) ?? 'unread';
+  return { uncounted, message: `${UNCOUNTED_WORDS[uncounted]}, so nothing was pulled` };
+}
 
 /**
  * The sync control's word for each outcome git can answer, and `null` for the
@@ -98,9 +128,9 @@ const SYNC_WORD: Record<RemoteOutcome, string | null> = {
   error: 'failed',
 };
 
-/** Did this sync step land? A refusal never does. */
+/** Did this sync step land? A refusal never does, nor a sync that couldn't tell. */
 export function syncLanded(outcome: RootSyncOutcome): boolean {
-  return !isRootGitRefusal(outcome) && SYNC_WORD[outcome.status] === null;
+  return 'status' in outcome && SYNC_WORD[outcome.status] === null;
 }
 
 /** What a root's sync control says in place of ↻. */
@@ -117,11 +147,12 @@ export interface RootSyncNotice {
  * Nothing speaks first (M8): a sync that landed leaves the control as it was.
  * Every other outcome is named on the row and never toasted (M32.11). The
  * title carries the outcome's own message, so `auth_error` shows the
- * credential hint `remote::classify` writes and a diverged root shows
- * `DIVERGED_MESSAGE`.
+ * credential hint `remote::classify` writes, a diverged root shows
+ * `DIVERGED_MESSAGE`, and an uncounted one says why it couldn't tell.
  */
 export function syncNotice(outcome: RootSyncOutcome | undefined): RootSyncNotice | null {
   if (outcome === undefined) return null;
+  if ('uncounted' in outcome) return { text: "couldn't tell", title: outcome.message };
   if (isRootGitRefusal(outcome)) {
     return outcome.code === 'parent_repo'
       ? { text: 'nested', title: 'Nested in a larger repository — sync it there' }
@@ -131,11 +162,15 @@ export function syncNotice(outcome: RootSyncOutcome | undefined): RootSyncNotice
   return word === null ? null : { text: word, title: outcome.message };
 }
 
-/** The counts a root's git badge summarises. */
+/**
+ * The counts a root's git badge summarises. A null count is one git did not
+ * take (M92.10).
+ */
 export interface RootGitBadge {
   branch: string;
-  ahead: number;
-  behind: number;
+  ahead: number | null;
+  behind: number | null;
+  hasUpstream: boolean;
   dirty: number;
 }
 
@@ -146,11 +181,22 @@ export interface RootGitBadge {
  * nothing to disambiguate, so it renders no badge at all rather than a
  * permanent "main 0 0 0". The branch name rides along only when there is
  * already a reason to speak — a row that is always decorated stops being read.
+ *
+ * A count git did not take is `?`, never a silent 0 (M92.10), while the
+ * branch has an upstream to count against. A branch that tracks none has no
+ * counts to show, as a repository with no remote has none.
  */
 export function gitBadgeText(badge: RootGitBadge): string | null {
   const parts: string[] = [];
-  if (badge.ahead > 0) parts.push(`↑${badge.ahead}`);
-  if (badge.behind > 0) parts.push(`↓${badge.behind}`);
+  const count = (arrow: string, n: number | null): void => {
+    if (n === null) {
+      if (badge.hasUpstream) parts.push(`${arrow}?`);
+    } else if (n > 0) {
+      parts.push(`${arrow}${n}`);
+    }
+  };
+  count('↑', badge.ahead);
+  count('↓', badge.behind);
   if (badge.dirty > 0) parts.push(`●${badge.dirty}`);
   if (parts.length === 0) return null;
   return [badge.branch, ...parts].join(' ');

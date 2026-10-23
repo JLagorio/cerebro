@@ -3,8 +3,14 @@ import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { destination } from '@/engine/destinations';
-import { isFailure, type SyncState } from '@/engine/git';
-import { useGit } from '@/git/useGit';
+import {
+  countsUnknown,
+  isFailure,
+  UNCOUNTED_WORDS,
+  type GitRemoteStatus,
+  type SyncState,
+} from '@/engine/git';
+import { useGit, type GitState } from '@/git/useGit';
 import * as git from '@/lib/gitIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -15,10 +21,18 @@ import { useVaultStore } from '@/stores/vaultStore';
  *
  * Held to the no-idle-chrome rule: a clean, remoteless vault renders NOTHING.
  * The badge appears only when it has something to tell you — uncommitted
- * work, a divergence from the remote, or a conflict — and every state it
- * shows is one you can act on from the popover it opens.
+ * work, a divergence from the remote, counts git could not take (M92.10), or
+ * a conflict — and every state it shows is one you can act on from the
+ * popover it opens. A read that failed (M92.9) shows no badge: it can tell
+ * none of those, and the status bar says the read failed.
+ *
+ * Each state's icon, colour and words, which the conversation rail's
+ * Environment card says too (M92.9).
  */
-const TONE: Record<SyncState, { icon: string; color: string; label: (n: number) => string }> = {
+export const SYNC_TONE: Record<
+  SyncState,
+  { icon: string; color: string; label: (n: number) => string }
+> = {
   clean: { icon: 'check', color: 'var(--n-400)', label: () => 'Up to date' },
   'local-changes': {
     icon: 'file-diff',
@@ -28,31 +42,47 @@ const TONE: Record<SyncState, { icon: string; color: string; label: (n: number) 
   ahead: { icon: 'arrow-up', color: 'var(--cortex-600)', label: (n) => `${n} to push` },
   behind: { icon: 'arrow-down', color: 'var(--cortex-600)', label: (n) => `${n} to pull` },
   diverged: { icon: 'git-branch', color: 'var(--warn-600)', label: () => 'Diverged' },
+  // M92.10: counts git did not take are never "Up to date".
+  unknown: { icon: 'circle-dashed', color: 'var(--n-500)', label: () => 'Sync unknown' },
   conflict: { icon: 'triangle-alert', color: 'var(--danger-500)', label: (n) => `${n} conflicted` },
 };
+
+/** The number a state's words count: conflicted or changed files, or
+ * commits to pull or to push. */
+export function syncCount(
+  sync: SyncState,
+  git: Pick<GitState, 'modified' | 'conflicts' | 'remote'>,
+): number {
+  if (sync === 'conflict') return git.conflicts.length;
+  if (sync === 'local-changes') return git.modified.length;
+  if (sync === 'behind') return git.remote?.behind ?? 0;
+  return git.remote?.ahead ?? 0;
+}
+
+/** The popover's first line: where the branch stands, or why nobody can say. */
+function remoteLine(remote: GitRemoteStatus): string {
+  const unknown = countsUnknown(remote);
+  return unknown === null
+    ? `${remote.branch} · ${remote.ahead} ahead, ${remote.behind} behind`
+    : `${remote.branch} · ${UNCOUNTED_WORDS[unknown]}`;
+}
 
 export function SyncBadge({ quiet = false }: { quiet?: boolean }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
   const navigate = useNavStore((s) => s.navigate);
-  const { isRepo, ready, sync, modified, conflicts, remote, refresh } = useGit();
+  const { isRepo, ready, readError, sync, modified, conflicts, remote, refresh } = useGit();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // Nothing to say: not a repo, still loading, or clean with no remote.
-  if (!ready || !isRepo) return null;
+  // Nothing to say: not a repo, still loading, a read that failed, or clean
+  // with no remote.
+  if (!ready || isRepo !== true || readError !== null) return null;
   if (sync === 'clean' && remote === null) return null;
 
-  const count =
-    sync === 'conflict'
-      ? conflicts.length
-      : sync === 'local-changes'
-        ? modified.length
-        : sync === 'behind'
-          ? (remote?.behind ?? 0)
-          : (remote?.ahead ?? 0);
-  const tone = TONE[sync];
+  const count = syncCount(sync, { modified, conflicts, remote });
+  const tone = SYNC_TONE[sync];
   const history = destination('pulse');
 
   const run = async (op: 'pull' | 'push') => {
@@ -96,10 +126,8 @@ export function SyncBadge({ quiet = false }: { quiet?: boolean }) {
           />
           <FixedBelowAnchor>
             <div className="w-[260px] rounded-lg border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]">
-              <div className="px-0.5 pb-1.5 text-2xs text-n-500">
-                {remote === null
-                  ? 'Tracked locally. No remote connected.'
-                  : `${remote.branch} · ${remote.ahead} ahead, ${remote.behind} behind`}
+              <div data-testid="sync-remote-line" className="px-0.5 pb-1.5 text-2xs text-n-500">
+                {remote === null ? 'Tracked locally. No remote connected.' : remoteLine(remote)}
               </div>
               <div className="flex flex-col gap-1">
                 {(modified.length > 0 || conflicts.length > 0) && (
