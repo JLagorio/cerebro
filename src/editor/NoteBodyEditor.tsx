@@ -355,10 +355,14 @@ export function NoteBodyEditor({
     },
     [recoveryCapture],
   );
-  const captureBodyDraft = useCallback(
-    (markdown: string) => {
-      recoveryCapture.owner()?.edit(markdown, 'rich');
-    },
+  // M93.1 (BL-03): rich typing bumps the owner's generation; the owner keeps
+  // the editor's materializer and serializes only when a reader needs text.
+  const bodyDraft = useMemo(
+    () => ({
+      edit: (materialize: () => string) => recoveryCapture.owner()?.touch(materialize),
+      settle: () => recoveryCapture.owner()?.settleDraft(),
+      release: (materialize: () => string) => recoveryCapture.releaseDraft(materialize),
+    }),
     [recoveryCapture],
   );
   const beginBodySave = useCallback(
@@ -2163,7 +2167,7 @@ export function NoteBodyEditor({
             markdown={loaded.body}
             readOnly={locked || mode === 'source'}
             onChange={saveOwner}
-            onDraft={captureBodyDraft}
+            draft={bodyDraft}
             onBeginSave={beginBodySave}
             getSaveDraft={bodySaveDraft}
             onReady={(info: EditorReadyInfo) => {
@@ -2208,7 +2212,8 @@ export function NoteBodyEditor({
                     });
                   }
                   // The owner drives status. A presentation-only rich event
-                  // may serialize unchanged bytes and creates no generation.
+                  // bumps a generation its materialization withdraws (BL-03),
+                  // so the page reports clean again without a write.
                   emitSaveState(
                     state.inFlightGeneration !== null
                       ? 'saving'
@@ -2241,6 +2246,8 @@ export function NoteBodyEditor({
                     if (!attached) return;
                     titleDraftRef.current?.();
                     settleSheetDrafts(info.editor);
+                    // A leave reads exact text from here on (BL-03).
+                    target.settleDraft();
                   },
                   blocked: () => {
                     if (

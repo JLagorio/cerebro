@@ -290,3 +290,135 @@ it('a clean presentation switch does not capture or submit any write', async () 
   expect((await owner.flush()).kind).toBe('clean');
   expect(writes).toBe(0);
 });
+
+describe('lazy rich drafts (M93.1, BL-03)', () => {
+  /** A stand-in editor: its text, and how often the owner read it. */
+  function page(initial: string) {
+    const editor = { text: initial, reads: 0 };
+    const materialize = () => {
+      editor.reads += 1;
+      return editor.text;
+    };
+    return { editor, materialize };
+  }
+
+  it('a keystroke is a generation bump; text is read once, when something needs it', () => {
+    const { editor, materialize } = page('initial');
+    const owner = new DocumentOwner(key, 'initial', async () => ack);
+    for (const letter of 'typed') {
+      editor.text += letter;
+      owner.touch(materialize);
+    }
+    expect(editor.reads).toBe(0);
+    expect(owner.snapshot()).toMatchObject({
+      latestDraft: 'initialtyped',
+      generation: 1,
+      acknowledgedGeneration: 0,
+    });
+    expect(editor.reads).toBe(1);
+    owner.snapshot();
+    expect(editor.reads).toBe(1);
+  });
+
+  it('subscribers hear the clean-to-dirty transition once, without a serialization', () => {
+    const { editor, materialize } = page('initial');
+    const owner = new DocumentOwner(key, 'initial', async () => ack);
+    const heard: number[] = [];
+    owner.subscribe(() => heard.push(owner.snapshot().generation));
+    for (const letter of 'abc') {
+      editor.text += letter;
+      owner.touch(materialize);
+    }
+    expect(heard).toEqual([1]);
+    expect(editor.reads).toBe(0);
+  });
+
+  it('a no-op materialization reports clean and writes nothing', async () => {
+    const { editor, materialize } = page('initial');
+    let writes = 0;
+    const owner = new DocumentOwner(key, 'initial', async () => {
+      writes += 1;
+      return ack;
+    });
+    const heard = vi.fn();
+    owner.subscribe(heard);
+    editor.text = 'initialx';
+    owner.touch(materialize);
+    editor.text = 'initial';
+    owner.settleDraft();
+    expect(owner.snapshot()).toMatchObject({ generation: 0, acknowledgedGeneration: 0 });
+    await Promise.resolve();
+    expect(heard).toHaveBeenCalledTimes(2);
+    expect(await owner.flush()).toMatchObject({ kind: 'clean' });
+    expect(writes).toBe(0);
+  });
+
+  it('a flush, a retry and a release each take the exact text with no further edit', async () => {
+    const { editor, materialize } = page('initial');
+    const saved: string[] = [];
+    let fail = true;
+    const owner = new DocumentOwner(key, 'initial', async (body) => {
+      saved.push(body);
+      if (fail) throw new Error('offline');
+      return ack;
+    });
+    editor.text = 'flushed exact';
+    owner.touch(materialize);
+    expect(await owner.flush()).toMatchObject({ kind: 'failed', generation: 1 });
+    editor.text = 'released exact 😀';
+    owner.touch(materialize);
+    owner.releaseMaterializer(materialize);
+    editor.text = 'never read: the editor is gone';
+    fail = false;
+    expect(await owner.retry()).toMatchObject({ kind: 'acknowledged', generation: 2 });
+    expect(saved).toEqual(['flushed exact', 'released exact 😀']);
+  });
+
+  it('typing during an in-flight write is materialized before the drain continues', async () => {
+    const first = deferred<NoteWriteAck>();
+    const saved: string[] = [];
+    const { editor, materialize } = page('initial');
+    const owner = new DocumentOwner(key, 'initial', async (body) => {
+      saved.push(body);
+      return saved.length === 1 ? first.promise : ack;
+    });
+    editor.text = 'one';
+    owner.touch(materialize);
+    const saving = owner.flush();
+    editor.text = 'one two';
+    owner.touch(materialize);
+    first.resolve(ack);
+    await saving;
+    expect(saved).toEqual(['one', 'one two']);
+    expect(owner.snapshot()).toMatchObject({
+      latestDraft: 'one two',
+      generation: 2,
+      acknowledgedGeneration: 2,
+    });
+  });
+
+  it('another presentation settles the previous one before it binds', () => {
+    const before = page('initial');
+    const after = page('initial');
+    const owner = new DocumentOwner(key, 'initial', async () => ack);
+    before.editor.text = 'from the old editor';
+    owner.touch(before.materialize);
+    after.editor.text = 'from the new editor';
+    owner.touch(after.materialize);
+    expect(before.editor.reads).toBe(1);
+    expect(owner.snapshot()).toMatchObject({ latestDraft: 'from the new editor', generation: 2 });
+  });
+
+  it('source edits keep edit(markdown) and see the rich edit before them', () => {
+    const { editor, materialize } = page('# Old\n\nbody');
+    const owner = new DocumentOwner(key, '# Old\n\nbody', async () => ack);
+    editor.text = '# Old\n\nbody typed';
+    owner.touch(materialize);
+    owner.edit(owner.snapshot().latestDraft.replace('# Old', '# New'), 'source');
+    expect(owner.snapshot()).toMatchObject({
+      latestDraft: '# New\n\nbody typed',
+      bodyFormat: 'source',
+      generation: 2,
+    });
+  });
+});

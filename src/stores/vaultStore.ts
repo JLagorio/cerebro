@@ -373,10 +373,75 @@ async function fencedWrite<T>(apply: () => void, write: () => Promise<T>): Promi
   }
 }
 
+/**
+ * Inline writes to one file land in issue order (BL-197). The frontmatter and
+ * title doors are async in Rust, so two calls race for the path lock: CV-21
+ * makes them take turns but not in the order they were asked, and own-write
+ * suppression means no scan puts a reordered pair right. So one inline write
+ * per path is in flight; the next waits for its answer, and a patch issued
+ * while another patch waits merges into it, later keys winning, as a waiting
+ * title gives way to a later one. Each caller still fences and reports its own.
+ */
+type InlineWrite =
+  | { kind: 'patch'; patch: Record<string, unknown>; result: Promise<unknown> | null }
+  | { kind: 'title'; title: string; result: Promise<unknown> | null };
+interface InlineLane {
+  tail: Promise<unknown>;
+  /** The last write asked for and not started yet: the one a later one joins. */
+  waiting: InlineWrite | null;
+}
+let inlineLanes = new Map<string, InlineLane>();
+
+function inlineWrite(vault: string, path: string, write: InlineWrite): Promise<unknown> {
+  const id = JSON.stringify([vault, path]);
+  const lane = inlineLanes.get(id);
+  const waiting = lane?.waiting ?? null;
+  if (waiting?.result && waiting.kind === 'patch' && write.kind === 'patch') {
+    Object.assign(waiting.patch, write.patch);
+    return waiting.result;
+  }
+  if (waiting?.result && waiting.kind === 'title' && write.kind === 'title') {
+    waiting.title = write.title;
+    return waiting.result;
+  }
+  const start = (): Promise<unknown> =>
+    write.kind === 'patch'
+      ? ipc.updateFrontmatter(vault, path, write.patch)
+      : ipc.setNoteTitle(vault, path, write.title);
+  // Nothing in flight here: the write starts now, as it always did.
+  const result =
+    lane === undefined
+      ? start()
+      : lane.tail
+          .catch(() => undefined)
+          .then(() => {
+            if (lane.waiting === write) lane.waiting = null;
+            return start();
+          });
+  write.result = result;
+  const current = lane ?? { tail: result, waiting: null };
+  current.tail = result;
+  if (lane !== undefined) current.waiting = write;
+  inlineLanes.set(id, current);
+  void result
+    .catch(() => undefined)
+    .then(() => {
+      if (inlineLanes.get(id) === current && current.tail === result) inlineLanes.delete(id);
+    });
+  return result;
+}
+const queuePatch = (vault: string, path: string, patch: Record<string, unknown>) =>
+  inlineWrite(vault, path, { kind: 'patch', patch: { ...patch }, result: null }) as Promise<
+    string | null
+  >;
+const queueTitle = (vault: string, path: string, title: string) =>
+  inlineWrite(vault, path, { kind: 'title', title, result: null }) as Promise<void>;
+
 /** Test isolation: forget every pending write and any rescan in flight. */
 export function __resetRescans(): void {
   writes = newFence();
   refresh = newRefresh();
+  inlineLanes = new Map();
 }
 
 export const useVaultStore = create<VaultState>()((set, get) => ({
@@ -643,7 +708,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
             set({ entries: get().entries.map((e) => (e.path === path ? optimistic : e)) });
           }
         },
-        () => ipc.updateFrontmatter(vault, path, normalized),
+        () => queuePatch(vault, path, normalized),
       );
       // The write names the bytes it landed (M55.2). The optimistic entry
       // takes that hash only while it still stands: only a scan that read
@@ -717,7 +782,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
                 entry.path === path ? { ...entry, title: trimmed, hash: null } : entry,
               ),
             }),
-          () => ipc.setNoteTitle(vault, path, trimmed),
+          () => queueTitle(vault, path, trimmed),
         );
         // Reconcile the owning editor before releasing its held save. The
         // title feeds links and dossiers too, so this scan is required in

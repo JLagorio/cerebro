@@ -18,7 +18,7 @@ const lastFailure = new WeakMap<DocumentOwner, unknown>();
 const prefix = 'checklist:';
 const titlePrefix = 'title:';
 export function selectedTitleOwners(vault: string): DocumentOwner[] {
-  return unresolvedDocumentOwners().filter(
+  return unresolvedDocumentOwners(
     (owner) =>
       owner.key.vaultId === vault &&
       owner.key.ownerId.startsWith(titlePrefix) &&
@@ -43,7 +43,7 @@ export function attachSelectedTitleOwner(owner: DocumentOwner): () => void {
   };
 }
 export function selectedTaskOwners(vault: string): DocumentOwner[] {
-  return unresolvedDocumentOwners().filter(
+  return unresolvedDocumentOwners(
     (owner) =>
       owner.key.vaultId === vault &&
       owner.key.ownerId.startsWith(prefix) &&

@@ -14,7 +14,7 @@ vi.mock('@playwright/test', () => ({
     connect: async () => doubles.browser,
   },
 }));
-import { launchDriver } from './browser';
+import { launchDriver, milestone } from './browser';
 import { buildCorpus, reliabilityMatrix } from './corpus';
 
 const fixture = reliabilityMatrix().find((row) => row.kind === 'search')!;
@@ -180,6 +180,36 @@ describe('bounded browser ownership', () => {
     expect(page.close).toHaveBeenCalledTimes(1);
     expect(page.addInitScript).not.toHaveBeenCalled();
     await driver.close();
+  });
+
+  it('records an absent frontend_ready mark as a timeout row, never a zero, and goes on', async () => {
+    const page = fakePage();
+    // The mark poll answers null; frames and elapsed time answer a number;
+    // the vault-write check answers that nothing was written.
+    page.evaluate.mockImplementation(((fn: () => unknown) => {
+      const source = String(fn);
+      if (source.includes('getEntriesByName')) return Promise.resolve(null);
+      if (source.includes('__cerebroMockWrites')) return Promise.resolve(false);
+      return Promise.resolve(4);
+    }) as never);
+    doubles.browser.newContext.mockResolvedValue(fakeContext(page));
+    const driver = await launchDriver('http://127.0.0.1:1');
+    const result = await driver.measure(fixture, corpus, { ...options, preflight: false });
+    expect(result.correctness).toBe('passed');
+    expect(result.observations.find((row) => row.phase === 'frontend-ready')).toMatchObject({
+      status: 'timeout',
+      samples: [],
+      p95: null,
+    });
+    expect(result.observations.find((row) => row.phase === 'filter')?.status).toBe('measured');
+    await driver.close();
+  });
+
+  it('reads a milestone relative to its start, and a non-number as absent', async () => {
+    const page = fakePage();
+    page.evaluate.mockResolvedValueOnce(250 as never).mockResolvedValueOnce('late' as never);
+    expect(await milestone(page as unknown as Page, 'editor_ready', 100)).toBe(150);
+    expect(await milestone(page as unknown as Page, 'frontend_ready', 0)).toBeNull();
   });
 
   it('resets attribution before timed boot after preflight reached memory', async () => {

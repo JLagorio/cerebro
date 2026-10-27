@@ -1,4 +1,5 @@
 export const PHASES = [
+  'frontend-ready',
   'scan',
   'readable-corpus',
   'tokenization',
@@ -7,18 +8,25 @@ export const PHASES = [
   'first-content',
   'editor-parse',
   'editor-apply',
+  'editor-ready',
   'readiness',
   'input',
+  'keystroke',
+  'serialize',
+  'serialize-calls',
+  'writes',
   'scroll',
   'filter',
   'save-to-visible',
   'memory',
 ] as const;
 export type Phase = (typeof PHASES)[number];
+/** Per-burst tallies of the typing workload (M93.6, BL-02). */
+const COUNTED: readonly Phase[] = ['serialize-calls', 'writes'];
 export type Observation = {
   phase: Phase;
   status: 'measured' | 'timeout' | 'unavailable';
-  unit: 'ms' | 'bytes';
+  unit: 'ms' | 'bytes' | 'count';
   samples: number[];
   sampleCount: number;
   p50: number | null;
@@ -52,7 +60,11 @@ export function measurement(
   samples: readonly number[],
   reason?: string,
   status?: Observation['status'],
-  unit: Observation['unit'] = phase === 'memory' ? 'bytes' : 'ms',
+  unit: Observation['unit'] = phase === 'memory'
+    ? 'bytes'
+    : COUNTED.includes(phase)
+      ? 'count'
+      : 'ms',
 ): Observation {
   if (samples.some((value) => !Number.isFinite(value))) throw new Error('Samples must be finite');
   if (samples.some((value) => value < 0)) throw new Error('Samples must be nonnegative');
@@ -80,6 +92,26 @@ const HISTORICAL: Record<string, number | null> = {
   'table-5000x12': null,
   'table-5000x24': null,
 };
+/** One typing burst: per-character keystroke→frame samples, the serializer
+ * passes the page made from its first key until its save landed, and the
+ * writes it took. Serializer time is per change, so a lazy page reads near
+ * zero and a page that serializes per keystroke reads one pass. */
+export type TypingBurst = {
+  keystrokes: readonly number[];
+  serializations: readonly number[];
+  writes: number;
+};
+export function typingSamples(burst: TypingBurst) {
+  const changes = burst.keystrokes.length;
+  if (changes === 0) throw new Error('A typing burst needs at least one keystroke');
+  return {
+    keystroke: [...burst.keystrokes],
+    serializeMsPerChange: burst.serializations.reduce((sum, ms) => sum + ms, 0) / changes,
+    serializeCalls: burst.serializations.length,
+    writes: burst.writes,
+  };
+}
+
 export function historicalComparison(caseId: string, input: Observation) {
   if (!(caseId in HISTORICAL) || input.phase !== 'input') return null;
   return {

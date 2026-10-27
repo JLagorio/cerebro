@@ -1,6 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { measurement, renderReport, historicalComparison, type BenchmarkResult } from './report';
+import {
+  PHASES,
+  measurement,
+  renderReport,
+  historicalComparison,
+  typingSamples,
+  type BenchmarkResult,
+} from './report';
 
 describe('performance evidence', () => {
   it('preserves unavailable observations instead of creating zero measurements', () => {
@@ -52,6 +59,50 @@ describe('performance evidence', () => {
     expect(browser).toContain('scan | unavailable | 0 | — | —');
     expect(browser).not.toContain('Native acceptance passed');
     expect(renderReport([{ ...result, runtime: 'packaged-native' }])).toContain('Packaged native');
+  });
+
+  it('declares the typing and readiness phases, counting what is a count', () => {
+    expect(PHASES).toEqual(
+      expect.arrayContaining([
+        'frontend-ready',
+        'editor-ready',
+        'keystroke',
+        'serialize',
+        'serialize-calls',
+        'writes',
+      ]),
+    );
+    expect(measurement('writes', [1, 2])).toMatchObject({ unit: 'count', p95: 2 });
+    expect(measurement('serialize-calls', [11])).toMatchObject({ unit: 'count' });
+    expect(measurement('keystroke', [3])).toMatchObject({ unit: 'ms' });
+    // A milestone that never came is a timeout row with no number, never a zero.
+    expect(
+      measurement('editor-ready', [], 'No editor_ready mark within 15000 ms', 'timeout'),
+    ).toMatchObject({ status: 'timeout', samples: [], p50: null, p95: null });
+    expect(
+      renderReport([
+        {
+          caseId: 'document-256k',
+          runtime: 'browser-mock',
+          correctness: 'passed',
+          observations: [measurement('writes', [1])],
+        },
+      ]),
+    ).toContain('| writes | measured | 1 | 1.00 | 1.00 | count |');
+  });
+
+  it('reports serializer time per change, keeping a real zero and every keystroke', () => {
+    expect(
+      typingSamples({ keystrokes: [5, 6, 7, 8], serializations: [40, 40, 40, 40, 40], writes: 1 }),
+    ).toEqual({ keystroke: [5, 6, 7, 8], serializeMsPerChange: 50, serializeCalls: 5, writes: 1 });
+    expect(typingSamples({ keystrokes: [5, 6], serializations: [], writes: 0 })).toMatchObject({
+      serializeMsPerChange: 0,
+      serializeCalls: 0,
+      writes: 0,
+    });
+    expect(() => typingSamples({ keystrokes: [], serializations: [1], writes: 1 })).toThrow(
+      /keystroke/,
+    );
   });
 
   it('compares only the retained synthetic input metric, with hardware caveats and absent values', () => {

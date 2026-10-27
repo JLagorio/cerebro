@@ -509,8 +509,13 @@ export function releaseDocumentOwner(owner: DocumentOwner, attachedPath = owner.
     documentOwners.delete(documentKey(owner.key));
   }
 }
-export function unresolvedDocumentOwners(): DocumentOwner[] {
+/** `match` filters by key before any snapshot, which may serialize a page
+ * (BL-03): a host listing other owners never reads this one's text. */
+export function unresolvedDocumentOwners(
+  match: (owner: DocumentOwner) => boolean = () => true,
+): DocumentOwner[] {
   return [...documentOwners.values()].filter((owner) => {
+    if (!match(owner)) return false;
     const state = owner.snapshot();
     return (
       state.selectedSave !== undefined ||

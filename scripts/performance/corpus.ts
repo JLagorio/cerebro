@@ -9,7 +9,7 @@ export type BenchmarkCase = {
   seed: number;
   count: number;
   fields: number;
-  shape: 'short' | 'long' | 'sparse' | 'wrapped' | 'relations';
+  shape: 'short' | 'long' | 'sparse' | 'wrapped' | 'relations' | 'blocks';
   documentBytes: number;
 };
 export type Corpus = {
@@ -57,6 +57,16 @@ export function reliabilityMatrix(seed = 93): BenchmarkCase[] {
       shape: 'long',
       documentBytes,
     })),
+    // A page of many small blocks: per-block work, not bytes, dominates it.
+    {
+      id: 'document-2000-blocks',
+      kind: 'document',
+      seed,
+      count: 2000,
+      fields: 0,
+      shape: 'blocks',
+      documentBytes: 0,
+    },
     {
       id: 'transcript-1000',
       kind: 'transcript',
@@ -92,7 +102,7 @@ function checkCase(fixture: BenchmarkCase) {
     !Number.isInteger(fixture.documentBytes) ||
     fixture.documentBytes < 0 ||
     fixture.documentBytes > 1024 * 1024 ||
-    (fixture.kind === 'document' && fixture.documentBytes < 256) ||
+    (fixture.kind === 'document' && fixture.shape !== 'blocks' && fixture.documentBytes < 256) ||
     (fixture.kind === 'table' && fixture.fields < 3)
   ) {
     throw new Error('Fixture exceeds the bounded corpus contract');
@@ -151,6 +161,21 @@ export function buildCorpus(fixture: BenchmarkCase): Corpus {
         content: `---\ntype: Benchmark\n${values.join('\n')}\n---\n# Benchmark record ${i}\n`,
       });
     }
+  } else if (fixture.kind === 'document' && fixture.shape === 'blocks') {
+    // `count` top-level blocks: the title, rotating kinds so the page holds
+    // headings, paragraphs, bullets, numbers and tasks, and the end sentinel.
+    const kinds = [
+      (i: number) => `## Block ${i} ${next()}`,
+      (i: number) => `Paragraph ${i} with **formatting** and ${next()} words.`,
+      (i: number) => `- Bullet ${i} ${next()}`,
+      (i: number) => `1. Numbered ${i} ${next()}`,
+      (i: number) => `- [ ] Task ${i} ${next()}`,
+    ];
+    const blocks = Array.from({ length: fixture.count - 2 }, (_, i) => kinds[i % kinds.length](i));
+    files.push({
+      path: 'benchmark/document.md',
+      content: `${['# Benchmark document', ...blocks, 'PERFORMANCE END'].join('\n\n')}\n`,
+    });
   } else if (fixture.kind === 'document') {
     const heading = '# Benchmark document\n\n';
     const paragraph = `## Section ${next()}\n\nA repeatable paragraph with **formatting**, a [local link](./other.md) and enough words to parse.\n\n`;

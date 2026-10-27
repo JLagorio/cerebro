@@ -1040,3 +1040,103 @@ describe('LazyMarkdownEditor', () => {
     await waitFor(() => expect(screen.getByText('Lazy')).toBeTruthy());
   });
 });
+
+describe('save cadence under steady typing (BL-196)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  /** After the page's last character of text. */
+  const lastTextEnd = (editor: CerebroEditor) => {
+    let at = 0;
+    editor.prosemirrorView!.state.doc.descendants((node, pos) => {
+      if (node.isText) at = pos + node.nodeSize;
+    });
+    return at;
+  };
+
+  /** A key every 200 ms for 12 s, then the debounce: each write and when. */
+  async function typeSteadily(maxWaitMs?: number) {
+    const writes: { at: number; markdown: string }[] = [];
+    const onReady = vi.fn<(info: EditorReadyInfo) => void>();
+    const view = render(
+      <MarkdownEditor
+        markdown={'# Doc\n\nSteady'}
+        onChange={(markdown) => {
+          writes.push({ at: Date.now() - start, markdown });
+        }}
+        onReady={onReady}
+        debounceMs={500}
+        {...(maxWaitMs === undefined ? {} : { maxWaitMs })}
+      />,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    const { editor, serialize } = onReady.mock.calls[0][0];
+    vi.useFakeTimers();
+    const start = Date.now();
+    let last = 0;
+    for (let at = 0; at <= 12_000; at += 200) {
+      act(() => {
+        const pm = editor.prosemirrorView!;
+        pm.dispatch(
+          pm.state.tr.insertText(String.fromCharCode(97 + ((at / 200) % 26)), lastTextEnd(editor)),
+        );
+      });
+      last = at;
+      await vi.advanceTimersByTimeAsync(200);
+    }
+    await vi.advanceTimersByTimeAsync(1_000);
+    const final = serialize();
+    vi.useRealTimers();
+    view.unmount();
+    return { writes, last, final };
+  }
+
+  it('lands a save at least every max wait while typing, and the last one debounce after it ends', async () => {
+    const { writes, last, final } = await typeSteadily();
+    const times = writes.map((write) => write.at);
+    expect(times.filter((at) => at <= last).length).toBeGreaterThanOrEqual(2);
+    for (const [index, at] of times.entries())
+      expect(at - (index === 0 ? 0 : times[index - 1])).toBeLessThanOrEqual(5_000 + 500);
+    expect(times.at(-1)).toBe(last + 500);
+    expect(writes.at(-1)?.markdown).toBe(final);
+  });
+
+  it('writes the same final bytes as a trailing-only debounce', async () => {
+    const capped = await typeSteadily();
+    const trailing = await typeSteadily(Number.POSITIVE_INFINITY);
+    expect(trailing.writes.map((write) => write.at)).toEqual([trailing.last + 500]);
+    expect(capped.writes.at(-1)?.markdown).toBe(trailing.writes.at(-1)?.markdown);
+    expect(capped.final).toBe(trailing.final);
+  });
+
+  it('source edits share the one debounce and its max wait', async () => {
+    let source = '# Doc\n\nSource';
+    const writes: number[] = [];
+    const onReady = vi.fn<(info: EditorReadyInfo) => void>();
+    render(
+      <MarkdownEditor
+        markdown={'# Doc\n\nSource'}
+        readOnly
+        getSaveDraft={() => source}
+        onChange={() => {
+          writes.push(Date.now() - start);
+        }}
+        onReady={onReady}
+        debounceMs={500}
+      />,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    const { schedulePendingSave } = onReady.mock.calls[0][0];
+    vi.useFakeTimers();
+    const start = Date.now();
+    for (let at = 0; at <= 12_000; at += 200) {
+      source += 'x';
+      schedulePendingSave();
+      await vi.advanceTimersByTimeAsync(200);
+    }
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(writes).toEqual([5_000, 10_000, 12_500]);
+  });
+});

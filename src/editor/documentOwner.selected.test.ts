@@ -18,6 +18,7 @@ import type {
   SelectedRecordVersion,
 } from '@/lib/generated/workspace';
 import { sha256Hex } from '@/lib/sha256';
+import { replaceSelectedTitle } from './selectedTitleDraft';
 
 const key = { vaultId: '/selected-toy', path: 'page.md', ownerId: 'pane-a' };
 const target: SelectedEditorTarget = {
@@ -497,4 +498,35 @@ describe('explicit selected refusal comparison', () => {
       expect(calls).toHaveLength(1);
     },
   );
+
+  it('selected_source_change_commits_the_latest_generation_over_unread_rich_typing', async () => {
+    // M93.1 (BL-03, CX-OUT-20): rich typing is unread when the selected title
+    // edits the same body as source. The one commit carries both, at the
+    // latest generation, while the first attempt's reply is held.
+    const held = deferred<EditorSaveResult>();
+    const { calls, write } = writer(({ request, body }, index) =>
+      index === 1 ? held.promise : applied(request, body),
+    );
+    const owner = new DocumentOwner(key, '# Title\n\nbody', write, target);
+    let text = '# Title\n\nbody typed';
+    const materialize = () => text;
+    owner.touch(materialize);
+    const first = owner.flush();
+    text = '# Title\n\nbody typed more';
+    owner.touch(materialize);
+    owner.edit(replaceSelectedTitle(owner.snapshot().latestDraft, 'Renamed'), 'source');
+    held.resolve(applied(calls[0].request, calls[0].body));
+    await first;
+    expect(calls.map((call) => call.body)).toEqual([
+      '# Title\n\nbody typed',
+      '# Renamed\n\nbody typed more',
+    ]);
+    const state = owner.snapshot();
+    expect(state).toMatchObject({
+      latestDraft: '# Renamed\n\nbody typed more',
+      bodyFormat: 'source',
+    });
+    expect(state.acknowledgedGeneration).toBe(state.generation);
+    expect(state.selectedSave).toBeUndefined();
+  });
 });

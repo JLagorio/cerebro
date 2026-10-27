@@ -175,6 +175,17 @@ export class DocumentOwner {
   private failedAttempt: { body: string; format: BodyFormat; generation: number } | null = null;
   private recoveryBypass: { nonce: string; generation: number } | null = null;
   private writeGate: () => 'reconcile' | 'choice' | null = () => null;
+  /** M93.1 (BL-03): rich typing is an O(1) generation bump. The presentation
+   * that typed binds its materializer, which serializes the page only when a
+   * reader needs exact text: `snapshot()`, an edit, a flush, a retry, a leave's
+   * preparation, a debounce or the presentation's unmount. */
+  private materializer: (() => string) | null = null;
+  /** The generation before an edit no reader has materialized yet. */
+  private touchedFrom: number | null = null;
+  /** Up only while a dirty transition publishes: its listeners read the bump
+   * without serializing, so a burst of typing costs one pass per save. */
+  private quiet = false;
+  private cleanQueued = false;
   constructor(
     readonly key: DocumentKey,
     initial: string,
@@ -262,6 +273,7 @@ export class DocumentOwner {
       await Promise.all([...this.preparations, this.running]);
   }
   snapshot(): OwnerSnapshot {
+    if (!this.quiet) this.materialize();
     return {
       ...this.state,
       ...(this.state.selectedSave === undefined
@@ -304,6 +316,7 @@ export class DocumentOwner {
   }
   /** Optional dependent-transform CAS evidence; never a permission. */
   expectSelectedVersion(version: SelectedRecordVersion): boolean {
+    this.materialize();
     if (
       this.retired ||
       this.selectedTarget === undefined ||
@@ -339,6 +352,9 @@ export class DocumentOwner {
   retireRecovery(): boolean {
     if (this.recoveryBusy()) return false;
     this.retired = true;
+    // An explicit discard: the unmaterialized edit goes with the draft.
+    this.touchedFrom = null;
+    this.materializer = null;
     this.selectedTextIntent = null;
     this.recoveryReload = false;
     this.expectedHash = undefined;
@@ -372,6 +388,83 @@ export class DocumentOwner {
   private publish() {
     for (const listener of this.listeners) listener();
   }
+  /** Rich typing, per keystroke and O(1). Subscribers hear only the change from
+   * clean to dirty; later keystrokes in the same window publish nothing. */
+  touch(materialize: () => string): void {
+    if (this.retired) return;
+    if (this.materializer !== materialize) {
+      // Another presentation's unread edit is settled before this one binds.
+      this.materialize();
+      this.materializer = materialize;
+    }
+    if (this.touchedFrom !== null) return;
+    const wasClean = this.state.generation === this.state.acknowledgedGeneration;
+    this.touchedFrom = this.state.generation;
+    this.state.generation += 1;
+    if (!wasClean) return;
+    this.quiet = true;
+    try {
+      this.publish();
+    } finally {
+      this.quiet = false;
+    }
+  }
+  /** Materialize now: a debounce that found nothing new to save, or a leave's
+   * synchronous preparation. */
+  settleDraft(): void {
+    this.materialize();
+  }
+  /** The presentation is going: its last edit becomes exact text first. */
+  releaseMaterializer(materialize: () => string): void {
+    if (this.materializer !== materialize) return;
+    this.materialize();
+    this.materializer = null;
+  }
+  /** The pending edit as text, exactly as `edit(markdown, 'rich')` would have
+   * recorded it. One that changed nothing withdraws its bump, so a page that
+   * was clean reports clean again without a write. */
+  private materialize(): void {
+    const from = this.touchedFrom;
+    const read = this.materializer;
+    if (from === null || read === null) return;
+    this.touchedFrom = null;
+    let markdown: string | null = null;
+    try {
+      markdown = read();
+    } catch (error) {
+      // As a serializer that threw per keystroke did: nothing is recorded, and
+      // the fault reaches the diagnostic log rather than this reader.
+      queueMicrotask(() => {
+        throw error;
+      });
+    }
+    if (
+      markdown !== null &&
+      (markdown !== this.state.latestDraft || this.state.bodyFormat !== 'rich')
+    ) {
+      this.selectedTextIntent = null;
+      this.recoveryBypass = null;
+      this.selectedRetry = null;
+      this.state.bodyFormat = 'rich';
+      this.state.latestDraft = markdown;
+      return;
+    }
+    this.state.generation = from;
+    // Never synchronously: a reader may be rendering. Listeners then read
+    // the clean state the withdrawn bump left.
+    if (from === this.state.acknowledgedGeneration && !this.cleanQueued) {
+      this.cleanQueued = true;
+      queueMicrotask(() => {
+        this.cleanQueued = false;
+        this.publish();
+      });
+    }
+  }
+  /** The drain's loop condition, over exact text. */
+  private unsaved(): boolean {
+    this.materialize();
+    return this.state.generation > this.state.acknowledgedGeneration;
+  }
   private currentSelectedText(): SelectedTextIntent | null {
     return this.selectedTextIntent?.generation === this.state.generation
       ? this.selectedTextIntent
@@ -380,6 +473,7 @@ export class DocumentOwner {
   /** A read cannot settle this generation's explicit canonical-adoption intent.
    * Once acknowledged, later observations follow ordinary merge behavior. */
   hasSelectedTextIntent(): boolean {
+    this.materialize();
     return (
       this.currentSelectedText() !== null &&
       this.state.generation > this.state.acknowledgedGeneration
@@ -388,6 +482,7 @@ export class DocumentOwner {
   /** A person's explicit save of a proven clean selected presentation. It
    * books a generation, while the existing drain alone freezes and writes it. */
   saveSelectedText(raw: string, generation: number): Promise<SaveOutcome> {
+    this.materialize();
     const base = this.state.mergeBase;
     const reason = this.blockedReason();
     if (
@@ -423,6 +518,7 @@ export class DocumentOwner {
   }
   edit(markdown: string, bodyFormat = this.state.bodyFormat ?? 'rich'): number {
     if (this.retired) return this.state.generation;
+    this.materialize();
     if (markdown !== this.state.latestDraft || bodyFormat !== this.state.bodyFormat) {
       this.selectedTextIntent = null;
       this.recoveryBypass = null;
@@ -438,6 +534,7 @@ export class DocumentOwner {
    * a clean raw view, provide the exact authoritative body read. */
   present(markdown: string, bodyFormat: BodyFormat): void {
     if (this.retired) return;
+    this.materialize();
     if (markdown !== this.state.latestDraft || bodyFormat !== this.state.bodyFormat) {
       const intent = this.currentSelectedText();
       if (intent === null) {
@@ -463,6 +560,7 @@ export class DocumentOwner {
    * after that write. Keep the draft unresolved until the caller rereads. */
   acceptExternal(markdown: string, base = { raw: markdown, canon: markdown }): boolean {
     if (this.retired) return false;
+    this.materialize();
     if (this.selectedAttempt !== null || this.state.inFlightGeneration !== null) {
       this.holdForReconcile();
       return false;
@@ -483,6 +581,7 @@ export class DocumentOwner {
     snapshot: SelectedEditorSnapshot;
     choice: 'mine' | 'theirs';
   }): boolean {
+    this.materialize();
     const attempt = this.selectedAttempt;
     const observed = choice.snapshot;
     if (
@@ -531,6 +630,7 @@ export class DocumentOwner {
   }
   /** Explicit comparison of a definitely refused dependent transform. */
   compareSelectedRefusal(): boolean {
+    this.materialize();
     const retry = this.selectedRetry;
     if (
       this.retired ||
@@ -575,6 +675,7 @@ export class DocumentOwner {
   }
   /** A human's choice authorizes only the exact failed attempt, once. */
   saveWithoutRecoveryCopy(nonce: string, generation: number): Promise<SaveOutcome> {
+    this.materialize();
     const attempt = this.failedAttempt;
     if (
       this.running !== null ||
@@ -664,10 +765,7 @@ export class DocumentOwner {
       ownerId: this.key.ownerId,
       generation: this.state.generation,
     };
-    while (
-      this.selectedAttempt !== null ||
-      this.state.generation > this.state.acknowledgedGeneration
-    ) {
+    while (this.selectedAttempt !== null || this.unsaved()) {
       if (this.selectedAttempt?.status === 'reconcile')
         return {
           kind: 'blocked',
@@ -849,7 +947,7 @@ export class DocumentOwner {
       ownerId: this.key.ownerId,
       generation: this.state.generation,
     };
-    while (this.state.generation > this.state.acknowledgedGeneration) {
+    while (this.unsaved()) {
       const reason = this.blockedReason();
       if (reason !== null)
         return {

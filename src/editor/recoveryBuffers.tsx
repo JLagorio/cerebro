@@ -9,6 +9,9 @@ export interface RecoveryCapture {
   commit: (group: string, apply: () => void) => void;
   detach: () => void;
   owner: () => DocumentOwner | null;
+  /** An unmounting editor settles its last edit into the owner it typed
+   * into, detached or not: that text was already this owner's (BL-03). */
+  releaseDraft: (materialize: () => string) => void;
 }
 export function createRecoveryCapture(scope?: {
   vaultId: string | null;
@@ -52,6 +55,9 @@ export function createRecoveryCapture(scope?: {
     },
     owner() {
       return active && !target?.recoveryRetired() ? target : null;
+    },
+    releaseDraft(materialize) {
+      target?.releaseMaterializer(materialize);
     },
   };
 }

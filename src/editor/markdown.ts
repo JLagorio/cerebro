@@ -4,6 +4,7 @@ import { DATABASE_FENCE, parseDatabaseRef, serializeDatabaseRef } from '@/engine
 import { SUBPAGES_FENCE } from '@/engine/docPages';
 import { PAGE_CARD_FENCE, parsePageRef, serializePageRef } from '@/engine/pageCard';
 import { SHEET_FENCE } from '@/engine/sheet/fence';
+import { measureSerialize } from '@/lib/perfMarks';
 import {
   chipPropsToDateValue,
   DATE_TOKEN_SOURCE,
@@ -1978,8 +1979,18 @@ export async function markdownToBlocks(editor: AnyEditor, markdown: string): Pro
   return markdownToBlocksNow(editor, markdown);
 }
 
-/** Blocks (the live document by default) as a note body, synchronously (M55.6). */
+/** Blocks (the live document by default) as a note body, synchronously (M55.6).
+ * Each pass is timed onto the performance timeline for the M93.6 runner. */
 export function blocksToMarkdownNow(editor: AnyEditor, blocks?: PartialBlock[]): string {
+  const start = performance.now();
+  try {
+    return serializeBlocks(editor, blocks);
+  } finally {
+    measureSerialize(start);
+  }
+}
+
+function serializeBlocks(editor: AnyEditor, blocks?: PartialBlock[]): string {
   const source = (blocks ?? editor.document) as PartialBlock[];
   // Deep copy: demotion must never touch live editor state. Every custom
   // block and chip is plain markdown before the serializer sees it, because

@@ -104,7 +104,6 @@ import {
   type SectionQuery,
 } from './linkMenu';
 import {
-  blocksToMarkdown,
   blocksToMarkdownNow,
   escapeMarkerLines,
   lossyImportCause,
@@ -114,6 +113,7 @@ import {
   unwrapReplyFence,
 } from './markdown';
 import { NotePathContext } from './notePath';
+import { markMilestone } from '@/lib/perfMarks';
 import { pageLinkPasteHandler } from './pageCardInput';
 import { SectionFlash } from './SectionFlash';
 import {
@@ -408,8 +408,24 @@ export interface MarkdownEditorProps {
   readOnly?: boolean;
   /** A user edit was made and a save is now pending (fires per keystroke). */
   onDirty?: () => void;
-  /** Capture exact text before a debounce or presentation unmount. */
-  onDraft?: (markdown: string) => void;
+  /**
+   * The page's draft, without serializing it per keystroke (M93.1, BL-03).
+   * `edit` fires per user edit and must stay O(1); `settle` when a debounce
+   * finds nothing new to save; `release` at unmount, before this editor goes.
+   * Each hands over this editor's materializer, one function for its
+   * lifetime, which serializes the page when called (cached on the document
+   * it read), so the owner can take exact text whenever a reader needs it.
+   */
+  draft?: {
+    edit: (materialize: () => string) => void;
+    settle: () => void;
+    release: (materialize: () => string) => void;
+  };
+  /**
+   * The longest steady typing defers a save (BL-196): the debounce restarts
+   * on every edit, so without a ceiling a burst never saved until it paused.
+   */
+  maxWaitMs?: number;
   /** Synchronous lease over preparation, serialization and its owning save. */
   onBeginSave?: () => () => void;
   /** Source shares this debounce, never a second writer or timer. */
@@ -474,10 +490,11 @@ export function MarkdownEditor({
   onChange,
   onReady,
   debounceMs = 500,
+  maxWaitMs = 5_000,
   autoFocus = false,
   readOnly = false,
   onDirty,
-  onDraft,
+  draft,
   onBeginSave,
   getSaveDraft,
   pageChromeHost,
@@ -659,6 +676,21 @@ export function MarkdownEditor({
   const [dueDate, setDueDate] = useState('');
   const lastEmitted = useRef<string | null>(null);
   const timer = useRef<number | null>(null);
+  // BL-196: the save a window of steady typing still owes, from its first
+  // edit. Armed and cleared with the debounce, never reset by a keystroke.
+  const maxTimer = useRef<number | null>(null);
+  // M93.1 (BL-03): the one serializer for this page, cached on the
+  // ProseMirror document it read. Documents are immutable, so a hit is exact
+  // text, and a save that follows a materialization serializes nothing.
+  const draftCache = useRef<{ doc: unknown; text: string } | null>(null);
+  const materialize = useRef(() => {
+    const doc = editor.prosemirrorState.doc;
+    const cached = draftCache.current;
+    if (cached !== null && cached.doc === doc) return cached.text;
+    const text = blocksToMarkdownNow(editor);
+    draftCache.current = { doc, text };
+    return text;
+  }).current;
   // Up while an outside write is applied (M55.6): its change events are not
   // the person's edits, so they neither mark the page dirty nor save.
   const applying = useRef(false);
@@ -671,8 +703,8 @@ export function MarkdownEditor({
   const getSaveDraftRef = useRef(getSaveDraft);
   getSaveDraftRef.current = getSaveDraft;
   const schedulePendingRef = useRef<() => void>(() => {});
-  const onDraftRef = useRef(onDraft);
-  onDraftRef.current = onDraft;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const onBeginSaveRef = useRef(onBeginSave);
   onBeginSaveRef.current = onBeginSave;
   const onDirtyRef = useRef(onDirty);
@@ -714,8 +746,12 @@ export function MarkdownEditor({
     const emitted = (async () => {
       try {
         const override = getSaveDraftRef.current?.();
-        const md = await (override == null ? blocksToMarkdown(editor) : Promise.resolve(override));
-        if (md === lastEmitted.current) return;
+        const md = await Promise.resolve(override ?? materialize());
+        if (md === lastEmitted.current) {
+          // Nothing new to save: a window that netted out reports clean.
+          if (override == null) draftRef.current?.settle();
+          return;
+        }
         lastEmitted.current = md;
         await write(md);
       } finally {
@@ -756,6 +792,8 @@ export function MarkdownEditor({
   // Handed to the owner via onReady and kept for the editor's lifetime, so
   // they must be identity-stable — they close over refs only, never props.
   const cancelPendingSave = useRef(() => {
+    if (maxTimer.current !== null) window.clearTimeout(maxTimer.current);
+    maxTimer.current = null;
     if (timer.current === null) return;
     window.clearTimeout(timer.current);
     timer.current = null;
@@ -808,7 +846,7 @@ export function MarkdownEditor({
     return {
       kind: 'applied',
       next: plan.next,
-      after: blocksToMarkdownNow(editor),
+      after: materialize(),
       dirty: plan.dirty,
     };
   };
@@ -835,7 +873,7 @@ export function MarkdownEditor({
       if (blocks.length > 0) editor.replaceBlocks(editor.document, blocks);
       // Serialized baseline: change events only emit when they diverge from
       // it, so mounting (and the trailing-block plugin) never writes back.
-      const roundTripped = await blocksToMarkdown(editor);
+      const roundTripped = await Promise.resolve(materialize());
       if (cancelled) return;
       lastEmitted.current = roundTripped;
       setLoaded({
@@ -856,7 +894,7 @@ export function MarkdownEditor({
           lastEmitted.current = canonical;
           return { lossy, canonical };
         },
-        serialize: () => blocksToMarkdownNow(editor),
+        serialize: materialize,
         sheetSources: (source) =>
           sheetSourcesOf(
             source === undefined ? editor.document : markdownToBlocksNow(editor, source),
@@ -880,8 +918,24 @@ export function MarkdownEditor({
   // readiness after that commit so an immediate edit cannot precede the
   // listener and disappear from the save path.
   useEffect(() => {
-    if (loaded !== null) onReadyRef.current?.(loaded);
+    if (loaded === null) return;
+    onReadyRef.current?.(loaded);
+    // M93.6: the performance runner's editor-readiness mark; nothing reads it.
+    markMilestone('editor_ready');
   }, [loaded]);
+
+  /** One debounce, rich and source alike, with a ceiling (BL-196): each edit
+   *  restarts it, and the window's first edit starts the most it may wait. */
+  const armSave = () => {
+    const fire = () => {
+      cancelPendingSave();
+      emitRef.current();
+    };
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(fire, debounceMs);
+    if (maxTimer.current === null && Number.isFinite(maxWaitMs))
+      maxTimer.current = window.setTimeout(fire, maxWaitMs);
+  };
 
   const scheduleEmit = () => {
     // An outside write being applied is not an edit (M55.6).
@@ -889,33 +943,27 @@ export function MarkdownEditor({
     // A read-only document must not be able to schedule a write at all — the
     // editable flag alone would still let a programmatic change through.
     if (readOnlyRef.current) return;
-    onDraftRef.current?.(blocksToMarkdownNow(editor));
+    // M93.1 (BL-03): a mark, not a serialization. The owner reads the page
+    // through `materialize` when something needs its exact text.
+    draftRef.current?.edit(materialize);
     onDirtyRef.current?.();
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      timer.current = null;
-      emitRef.current();
-    }, debounceMs);
+    armSave();
   };
 
-  schedulePendingRef.current = () => {
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      timer.current = null;
-      emitRef.current();
-    }, debounceMs);
-  };
+  schedulePendingRef.current = armSave;
 
-  // Flush a pending debounce on unmount so the last edit isn't lost.
+  // Flush a pending debounce on unmount so the last edit isn't lost, then
+  // settle the owner's draft from this editor while it can still be read.
   useEffect(
     () => () => {
       if (timer.current !== null) {
-        window.clearTimeout(timer.current);
-        timer.current = null;
+        cancelPendingSave();
         if (!readOnlyRef.current || getSaveDraftRef.current?.() != null) emitRef.current();
       }
+      draftRef.current?.release(materialize);
     },
-    [],
+    // Both are identity-stable for the editor's lifetime: this runs at unmount.
+    [cancelPendingSave, materialize],
   );
 
   useEffect(() => {
@@ -1498,7 +1546,7 @@ export function MarkdownEditor({
       const settled = () => setAiBlockRunning(editor, id, false);
       void (async () => {
         try {
-          const document = await blocksToMarkdown(editor);
+          const document = await Promise.resolve(materialize());
           // Attended, no lane: never gated — startedOrThrow makes a contract
           // break visible instead of a silent no-run.
           const { run: runId } = startedOrThrow(

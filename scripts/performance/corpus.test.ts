@@ -63,6 +63,22 @@ describe('repeatable performance corpus', () => {
     expect(() => buildCorpus({ ...matrix[0], count: 1000000 })).toThrow(/bound/i);
   });
 
+  it('declares a 2,000-block page whose blocks are counted, titled and end on the sentinel', () => {
+    const fixture = reliabilityMatrix().find((row) => row.id === 'document-2000-blocks')!;
+    expect(fixture).toMatchObject({ kind: 'document', count: 2000, shape: 'blocks' });
+    const corpus = buildCorpus(fixture);
+    expect(buildCorpus(fixture)).toEqual(corpus);
+    expect(corpus.files).toHaveLength(1);
+    const blocks = corpus.files[0].content.trimEnd().split('\n\n');
+    expect(blocks).toHaveLength(2000);
+    expect(blocks[0]).toBe('# Benchmark document');
+    expect(blocks.at(-1)).toBe('PERFORMANCE END');
+    for (const kind of [/^## /, /^Paragraph /, /^- Bullet /, /^1\. /, /^- \[ \] /])
+      expect(blocks.some((block) => kind.test(block))).toBe(true);
+    // A document still needs bytes unless it is declared by its blocks.
+    expect(() => buildCorpus({ ...fixture, shape: 'long' })).toThrow(/bound/i);
+  });
+
   it('actually enables variable-height wrapping and declares an evaluated relation rollup', () => {
     const matrix = reliabilityMatrix();
     const wrapped = buildCorpus(matrix.find((row) => row.shape === 'wrapped')!);

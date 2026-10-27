@@ -66,6 +66,9 @@ M93.1 produces `SaveOutcome`/`FlushReport` as REL-02 in the spec, including the 
 - [ ] Implement retained owner state and serialize writes. Move acknowledgement bookkeeping out of pre-callback `lastSaved`; preserve complete failed payload until acknowledgement or explicit discard. Expose file content hash from the writer; for the governed path return `projectionHash` only after authoritative materialization/read confirmation, never convert null to a guessed hash. Preserve receipt guards and nonthrowing human action semantics.
 - [ ] Add Rust/mock parity tests for ordinary hash, governed confirmation failure, and malformed/deleted target refusal. Run the targeted Vitest files, `cargo test --manifest-path src-tauri/Cargo.toml vault::write`, and `pnpm typecheck`; expect all targeted tests/typechecks to pass.
 - [ ] Commit the owner/ack change under its M93 phase; inspect the diff for unrelated files before staging.
+- [x] Audit BL-03 (2026-10-27, uncommitted): rich typing no longer serializes per keystroke. `DocumentOwner.touch(materialize)` bumps a generation in O(1) and binds the editor's materializer (`MarkdownEditor`, cached on the ProseMirror doc it read); `snapshot()`, `edit`/`present`/`acceptExternal`, flush/retry, the drain loop, a leave's `prepare`, the debounce (`settle` when nothing new) and unmount (`release`, through `RecoveryCapture.releaseDraft`) materialize exact text. Source mode keeps `edit(markdown)`. Subscribers hear only the clean→dirty transition, read without serializing; a no-op materialization withdraws its bump and reports clean. `unresolvedDocumentOwners(match)` filters by key before any snapshot, so the selected title/task hosts no longer serialize other pages. Tests: `NoteBodyEditor.lazy.test.tsx` (one pass per window on 256 KiB; IME composition, unmount and quit; Retry remount and Retry save; section fault; net-zero window clean), `documentOwner.test.ts` (lazy rich drafts), `documentOwner.selected.test.ts` (`selected_source_change_commits_the_latest_generation_over_unread_rich_typing`).
+- [x] Audit BL-196 (2026-10-27, uncommitted): the one 500 ms debounce has `maxWaitMs` 5000, armed at a window's first edit and shared by source edits. Test: `MarkdownEditor.test.tsx` › save cadence under steady typing (a key every 200 ms for 12 s writes at 5.0, 10.0 and 12.5 s; final bytes equal a trailing-only debounce's).
+- [x] Audit BL-197 (2026-10-27, uncommitted): `patchFrontmatter`/`setTitle` hold one inline write per path in flight; a patch issued while another waits merges into it (later keys win), a waiting title gives way to a later one, and a title waits for the patch before it. Tests: `vaultStore.test.ts` › first answer held (views A→B ends B on disk and in the store; tick→untick ends unticked), merge, title order.
 
 ### M93.2 — Make every leave path inspect unresolved owners
 
@@ -153,6 +156,15 @@ historical ordinary tickets cannot suppress automatic last-place restoration.
 - [ ] Future run: `pnpm build`, then `pnpm perf:run -- --output <temporary-directory> --matrix reliability`. Expected: machine-readable complete/timeout/unavailable rows, corpus cleanup and an explicit comparison to historical 1,000-row results. No numerical pass is assumed in advance.
 - [ ] Review profile attribution and set a proposed 5,000-row usability budget with the owner before enforcement. Select exactly one next scale experiment; retain results, including failed candidates, as evidence.
 - [ ] Commit tooling and report schema; do not hide noisy timings in unit tests.
+- [x] Audit BL-02 (2026-10-27, uncommitted): typing workload and app marks. Each document case types ten-character bursts at frame pace and records `keystroke` (real key event to the end of its next frame), `serialize` (serializer ms per change), `serialize-calls` and `writes` per window; `document-2000-blocks` joins the matrix; the app writes `frontend_ready`, `editor_ready` and an `editor_serialize` measure (`src/lib/perfMarks.ts`, read only by the runner) and absent marks are timeout rows. Browser mock, headless Chromium, `--samples 10 --fixture-ms 120000`, load 7–19 (local evidence only). Before = HEAD editor plus the probes; after = BL-03/196/197:
+
+  | Case | Keystroke p50 / p95 ms | Serialize ms per change (p50) | Serializer passes per burst | Writes per window |
+  | --- | --- | --- | --- | --- |
+  | document-64k | 73.7 / 81.6 → 18.0 / 26.3 | 60.6 → 6.2 | 11 → 1 | 1 → 1 |
+  | document-256k | 418.7 / 456.8 → 189.7 / 222.6 | 245.0 → 23.6 | 11 → 1 | 1 → 1 |
+  | document-2000-blocks | 134.3 / 148.7 → 52.0 / 63.9 | 90.1 → 8.9 | 11 → 1 | 1 → 1 |
+
+  The 256 KiB page still spends ~190 ms per keystroke outside the serializer (per-transaction editor work, BL-36's decoration and outline costs); editor parse/apply stay unavailable. No native number follows.
 
 ### M93.7 — Ship a measured scale improvement with access preserved
 

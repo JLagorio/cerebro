@@ -1,5 +1,6 @@
 import { PaneRow } from '@/app/PaneRow';
 import { retainOsDropRouter } from '@/lib/osDrop';
+import { markMilestone } from '@/lib/perfMarks';
 import { usePageAsideOpen } from '@/pages/DocPage';
 import { PaneLayoutHost } from '@/app/LastPlaceHost';
 import { RetainedSavesHost } from '@/editor/RetainedSavesHost';
@@ -278,6 +279,11 @@ function App() {
   );
 
   useEffect(retainOsDropRouter, []);
+  // M93.6: the first commit of the shell for an open vault, a mark the
+  // performance runner reads and the product never does.
+  useEffect(() => {
+    if (vaultPath) markMilestone('frontend_ready');
+  }, [vaultPath]);
   // A selected page is the latest navigation intent, including an agent's
   // open_note and Back/Forward. Float the same conversation over it.
   useEffect(

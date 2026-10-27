@@ -41,8 +41,10 @@ pnpm perf:run -- --output /private/tmp/cerebro-perf-search --case search-10000 -
 ```
 
 The matrix contains 100/1,000/5,000 records at 12/24 declared fields, plus 1,000×12
-long, sparse, wrapped and relation/rollup cases; 64/256 KiB documents; a cached
-1,000-message conversation; and 10,000 readable notes with a private control file.
+long, sparse, wrapped and relation/rollup cases; 64/256 KiB documents and a
+2,000-block page (`document-2000-blocks`: a title, rotating headings, paragraphs,
+bullets, numbered items and tasks, and the end sentinel); a cached 1,000-message
+conversation; and 10,000 readable notes with a private control file.
 Wrapped cases enable wrapping in the saved view. The relation case evaluates a
 rollup over a stored relation and numeric property. The corpus seed, exact file
 and conversation byte counts, and SHA-256 fingerprint accompany each attempted
@@ -50,8 +52,9 @@ case. Seed defaults to 93 and can be supplied with `--seed`.
 
 Each timing case first runs a **separate correctness context**. Its durations are
 discarded. `--preflight` performs only that pass and emits no measured timing
-rows. Timed input, scroll, filter and document save loops default to 20 samples
-(`--samples 1..50`). Initial readiness and renderer heap are single observations;
+rows. Timed input, scroll, filter and document save loops and typing bursts default
+to 20 samples (`--samples 1..50`). Initial readiness, the app's ready marks and
+renderer heap are single observations;
 their sample counts say so. All samples are retained. Percentiles use nearest
 rank. A real zero is valid; an unavailable observation has no samples and null
 percentiles. Timeout rows retain only samples completed before the timeout.
@@ -79,14 +82,26 @@ failure after the fact.
 | Scroll          | Actual scroll container moves between extremes, then two frames. Not native wheel input.                                                                                          |
 | Filter          | View search to one result, or 10,000-note mock body search to its known positive result, then two frames. Includes debounce and automation delivery.                              |
 | Save-to-visible | Real document edit through the editor to mock file acknowledgement and visible text. Includes autosave debounce; excludes disk I/O.                                               |
+| Frontend ready  | Navigation start to the app's `frontend_ready` mark (first shell commit for an open vault, including the vault chooser click). Absent after 5 s: a timeout row.                   |
+| Editor ready    | Document open click to the app's `editor_ready` mark (document loaded, save listener attached). Absent after 15 s: a timeout row, and the case goes on.                           |
+| Keystroke       | Typing workload: a real key event (CDP) per character at the document end, from the event's timestamp to the end of its next frame. Ten characters per burst, at frame pace.      |
+| Serialize       | Serializer milliseconds per typed change: the burst's `editor_serialize` measures, from its first key until its save landed, divided by its characters.                           |
+| Serialize calls | Serializer passes per ten-character burst. One per save window when serialization is lazy; one per keystroke plus the save when it is not.                                        |
+| Writes          | Body writes per ten-character save window, counted from the mock write log.                                                                                                       |
 | Memory          | CDP `JSHeapUsedSize` at workload end. Excludes native, GPU and total resident memory.                                                                                             |
+
+**App probes.** `src/lib/perfMarks.ts` writes `frontend_ready` and `editor_ready`
+marks and an `editor_serialize` measure around every serializer pass to the
+browser's own performance timeline. The product never reads them; a serializer
+measure is cleared as it is made, and the runner collects it with a
+`PerformanceObserver`. The 256 KiB typing case can need `--fixture-ms 120000`.
 
 **Attribution gaps stay explicit.** Native scan, readable-corpus construction,
 tokenization and agent-grant-scoped BM25 are unavailable in this browser driver.
 The 10,000-note case measures the human browser search experience; it does not
 stand in for native scope/ranking correctness. Isolated derivation, render,
 editor parse and editor apply have no production phase marks and are also
-unavailable. The cached conversation case makes no live-model or CLI transcript
+unavailable; editor readiness is the `editor_ready` mark above. The cached conversation case makes no live-model or CLI transcript
 read claim. These gaps need native/instrumented follow-up before REL-07 is fully
 accepted; this tooling does not close M93.6's measurement and owner-budget gates.
 

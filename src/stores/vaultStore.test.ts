@@ -1027,6 +1027,96 @@ describe('vaultStore rescans (M58.2)', () => {
       cleanup();
     }
   });
+
+  /** Two inline writes to one file, the first one's IPC answer held (BL-197). */
+  async function inIssueOrder(first: Record<string, unknown>, second: Record<string, unknown>) {
+    const write = parkNextPatch();
+    const one = useVaultStore.getState().patchFrontmatter(PATH, first);
+    await vi.waitFor(() => expect(write.started()).toBe(true));
+    const two = useVaultStore.getState().patchFrontmatter(PATH, second);
+    await new Promise((r) => setTimeout(r, 0));
+    // The second waits for the first one's answer instead of racing it.
+    expect(vi.mocked(ipc.updateFrontmatter)).toHaveBeenCalledTimes(1);
+    write.release();
+    expect(await one).toBe(true);
+    expect(await two).toBe(true);
+    expect(vi.mocked(ipc.updateFrontmatter)).toHaveBeenCalledTimes(2);
+  }
+
+  it('views A then views B, the first answer held, ends with B on disk and in the store (Tauri)', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const cleanup = routeToMockBackend();
+    enterTauri();
+    try {
+      vi.mocked(ipc.updateFrontmatter).mockClear();
+      await inIssueOrder({ views: 'A' }, { views: 'B' });
+      expect(mockFsDisk().get(PATH)).toMatch(/^views: B$/m);
+      expect(findEntry(PATH)?.properties.views).toBe('B');
+    } finally {
+      exitTauri();
+      cleanup();
+    }
+  });
+
+  it('a tick then an untick, the first answer held, ends unticked', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const cleanup = routeToMockBackend();
+    try {
+      vi.mocked(ipc.updateFrontmatter).mockClear();
+      await inIssueOrder({ reviewed: true }, { reviewed: false });
+      expect(mockFsDisk().get(PATH)).toMatch(/^reviewed: false$/m);
+      expect(findEntry(PATH)?.properties.reviewed).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('patches issued while another waits merge into one write, later keys winning', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const cleanup = routeToMockBackend();
+    enterTauri();
+    try {
+      vi.mocked(ipc.updateFrontmatter).mockClear();
+      const write = parkNextPatch();
+      const one = useVaultStore.getState().patchFrontmatter(PATH, { views: 'A' });
+      await vi.waitFor(() => expect(write.started()).toBe(true));
+      const two = useVaultStore.getState().patchFrontmatter(PATH, { views: 'B', reviewed: true });
+      const three = useVaultStore.getState().patchFrontmatter(PATH, { views: 'C' });
+      write.release();
+      expect(await Promise.all([one, two, three])).toEqual([true, true, true]);
+      expect(vi.mocked(ipc.updateFrontmatter).mock.calls.map(([, , patch]) => patch)).toEqual([
+        { views: 'A' },
+        { views: 'C', reviewed: true },
+      ]);
+      expect(mockFsDisk().get(PATH)).toMatch(/^views: C$/m);
+      expect(findEntry(PATH)?.properties).toMatchObject({ views: 'C', reviewed: true });
+    } finally {
+      exitTauri();
+      cleanup();
+    }
+  });
+
+  it('a title waits for the patch before it on the same file', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const cleanup = routeToMockBackend();
+    enterTauri();
+    try {
+      const write = parkNextPatch();
+      const patched = useVaultStore.getState().patchFrontmatter(PATH, { views: 'A' });
+      await vi.waitFor(() => expect(write.started()).toBe(true));
+      const renamed = useVaultStore.getState().setTitle(PATH, 'Renamed after the patch');
+      await new Promise((r) => setTimeout(r, 0));
+      expect(vi.mocked(ipc.setNoteTitle)).not.toHaveBeenCalled();
+      write.release();
+      expect(await patched).toBe(true);
+      expect(await renamed).toBe(true);
+      expect(mockFsDisk().get(PATH)).toContain('# Renamed after the patch');
+      expect(mockFsDisk().get(PATH)).toMatch(/^views: A$/m);
+    } finally {
+      exitTauri();
+      cleanup();
+    }
+  });
 });
 
 /**

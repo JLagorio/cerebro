@@ -1,7 +1,14 @@
 import { chromium, type BrowserContext, type Page } from '@playwright/test';
 import { stripVTControlCharacters } from 'node:util';
 import type { BenchmarkCase, Corpus } from './corpus';
-import { PHASES, measurement, type BenchmarkResult, type Observation, type Phase } from './report';
+import {
+  PHASES,
+  measurement,
+  typingSamples,
+  type BenchmarkResult,
+  type Observation,
+  type Phase,
+} from './report';
 import { TimeoutError, withDeadline, type Options } from './measure';
 
 type BrowserProbe = {
@@ -14,7 +21,17 @@ type BrowserProbe = {
   __performanceTasks?: { at: number; duration: number }[];
   __performanceTaskObserver?: PerformanceObserver;
   __performanceTasksTruncated?: boolean;
+  __performanceKeys?: number[];
+  __performanceTyping?: boolean;
+  __performanceSerialize?: number[];
+  __performanceSerializeObserver?: PerformanceObserver;
 };
+
+/** Characters per typing burst. Each burst is one save window: it types at
+ * frame pace, well inside the debounce, then waits for its save to land. */
+export const BURST = 10;
+/** How long a missing app milestone is awaited before it is a timeout row. */
+export const MILESTONE_MS = { frontend_ready: 5_000, editor_ready: 15_000 } as const;
 
 /** All timing boundaries below observe the shipped app. No source modules are imported into it. */
 async function frames(page: Page): Promise<number> {
@@ -100,6 +117,35 @@ async function boot(page: Page, url: string, stage: (name: string) => void): Pro
 }
 
 type Recorder = (phase: Phase, sample: number, unit?: Observation['unit'], reason?: string) => void;
+/** A phase whose observation never arrived within its bound: never a zero. */
+type Missing = (phase: Phase, reason: string) => void;
+
+/**
+ * The app's own performance mark (`src/lib/perfMarks.ts`), as milliseconds
+ * since `since` on the page clock, or null when it never came. The page polls
+ * its timeline; the product never reads these marks itself.
+ */
+export async function milestone(
+  page: Page,
+  name: keyof typeof MILESTONE_MS,
+  since: number,
+): Promise<number | null> {
+  const at = await page.evaluate(
+    async ({ milestone, since, timeout }) => {
+      const deadline = performance.now() + timeout;
+      for (;;) {
+        const mark = performance
+          .getEntriesByName(milestone, 'mark')
+          .find((entry) => entry.startTime >= since);
+        if (mark) return mark.startTime;
+        if (performance.now() > deadline) return null;
+        await new Promise((done) => setTimeout(done, 25));
+      }
+    },
+    { milestone: name, since, timeout: MILESTONE_MS[name] },
+  );
+  return typeof at === 'number' && Number.isFinite(at) ? Math.max(0, at - since) : null;
+}
 async function observeScroll(page: Page, selector: string, count: number, record: Recorder) {
   for (let i = 0; i < count; i++) {
     const sample = await page.evaluate(
@@ -226,10 +272,124 @@ async function table(
   if (writes !== 0) throw new Error('Read-only table workload made an unexpected vault write');
 }
 
+/** Install the per-key frame probe and the serializer observer once. */
+async function installTypingProbe(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const host = window as Window & BrowserProbe;
+    host.__performanceKeys = [];
+    host.__performanceSerialize = [];
+    host.__performanceTyping = false;
+    // The app clears each measure as it makes it; an observer still sees it.
+    host.__performanceSerializeObserver = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries())
+        if (entry.name === 'editor_serialize') host.__performanceSerialize!.push(entry.duration);
+    });
+    host.__performanceSerializeObserver.observe({ type: 'measure' });
+    // From the key event's own timestamp to the end of the frame after its
+    // handlers: a message posted from requestAnimationFrame runs once that
+    // frame has been produced.
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        if (!host.__performanceTyping) return;
+        const start = event.timeStamp > 0 ? event.timeStamp : performance.now();
+        requestAnimationFrame(() => {
+          const channel = new MessageChannel();
+          channel.port1.onmessage = () => host.__performanceKeys!.push(performance.now() - start);
+          channel.port2.postMessage(null);
+        });
+      },
+      { capture: true },
+    );
+  });
+}
+
+async function typingWorkload(page: Page, samples: number, record: Recorder) {
+  await installTypingProbe(page);
+  const writesTo = () =>
+    page.evaluate(
+      () =>
+        ((window as Window & BrowserProbe).__cerebroMockWrites ?? []).filter(
+          (write) => (write as { path?: string }).path === 'benchmark/document.md',
+        ).length,
+    );
+  for (let burst = 0; burst < samples; burst++) {
+    const token = ` k${burst.toString(36).padStart(2, '0')}`.padEnd(BURST, 'q');
+    const writesBefore = await writesTo();
+    await page.evaluate(() => {
+      const host = window as Window & BrowserProbe;
+      // Anything measured before this burst's first key belongs to no burst.
+      host.__performanceSerializeObserver!.takeRecords();
+      host.__performanceKeys = [];
+      host.__performanceSerialize = [];
+      host.__performanceTyping = true;
+    });
+    for (const [index, character] of [...token].entries()) {
+      await page.keyboard.type(character);
+      await page.waitForFunction(
+        (count) => ((window as Window & BrowserProbe).__performanceKeys?.length ?? 0) >= count,
+        index + 1,
+      );
+    }
+    await page.evaluate(() => {
+      (window as Window & BrowserProbe).__performanceTyping = false;
+    });
+    await page.waitForFunction(
+      (token) =>
+        (window as Window & BrowserProbe).__cerebroMockFs
+          ?.get('benchmark/document.md')
+          ?.includes(token) === true,
+      token,
+    );
+    await frames(page);
+    const observed = await page.evaluate(() => {
+      const host = window as Window & BrowserProbe;
+      for (const entry of host.__performanceSerializeObserver!.takeRecords())
+        if (entry.name === 'editor_serialize') host.__performanceSerialize!.push(entry.duration);
+      return { keys: host.__performanceKeys ?? [], serialize: host.__performanceSerialize ?? [] };
+    });
+    if (observed.keys.length !== BURST) throw new Error('A typed character produced no frame');
+    const burstSamples = typingSamples({
+      keystrokes: observed.keys,
+      serializations: observed.serialize,
+      writes: (await writesTo()) - writesBefore,
+    });
+    for (const sample of burstSamples.keystroke)
+      record(
+        'keystroke',
+        sample,
+        'ms',
+        'Real key event (CDP) at the document end to the end of its next frame; includes handlers and render',
+      );
+    record(
+      'serialize',
+      burstSamples.serializeMsPerChange,
+      'ms',
+      `Serializer milliseconds per typed change: a ${BURST}-character burst's editor_serialize total until its save landed, divided by ${BURST}`,
+    );
+    record(
+      'serialize-calls',
+      burstSamples.serializeCalls,
+      'count',
+      `Serializer passes per ${BURST}-character burst, from its first key until its save landed`,
+    );
+    record(
+      'writes',
+      burstSamples.writes,
+      'count',
+      `Body writes per ${BURST}-character save window`,
+    );
+  }
+  await page.evaluate(() =>
+    (window as Window & BrowserProbe).__performanceSerializeObserver?.disconnect(),
+  );
+}
+
 async function documentWorkload(
   page: Page,
   samples: number,
   record: Recorder,
+  missing: Missing,
   phase: (p: Phase) => void,
 ) {
   await page.keyboard.press('ControlOrMeta+k');
@@ -242,7 +402,23 @@ async function documentWorkload(
   await option.waitFor();
   phase('readiness');
   await mark(page, '[data-testid="markdown-editor"] [contenteditable="true"]');
+  const opened = await page.evaluate(() => performance.now());
   await option.click();
+  phase('editor-ready');
+  const ready = await milestone(page, 'editor_ready', opened);
+  if (ready === null)
+    missing(
+      'editor-ready',
+      `No editor_ready mark within ${MILESTONE_MS.editor_ready} ms of the open; the editor never announced readiness`,
+    );
+  else
+    record(
+      'editor-ready',
+      ready,
+      'ms',
+      "Open click to the app's editor_ready mark: document loaded and its save listener attached",
+    );
+  phase('readiness');
   const editor = page.getByTestId('markdown-editor').locator('[contenteditable="true"]').first();
   await editor.waitFor();
   await page.waitForFunction(() =>
@@ -283,6 +459,9 @@ async function documentWorkload(
       'Text insertion through actual editor to mock file acknowledgement and visible content; includes autosave debounce, excludes native disk',
     );
   }
+  phase('keystroke');
+  await editor.press('ControlOrMeta+End');
+  await typingWorkload(page, samples, record);
   phase('scroll');
   // Begin at the top so the first scroll proves a change even after typing at the end.
   await editor.press('ControlOrMeta+Home');
@@ -499,6 +678,14 @@ export async function launchDriver(url: string) {
             ),
           );
         };
+        const missing: Missing = (phase, reason) => {
+          if (!timed || controller.signal.aborted) return;
+          const prior = observations.get(phase);
+          observations.set(
+            phase,
+            measurement(phase, prior?.samples ?? [], reason, 'timeout', prior?.unit),
+          );
+        };
         try {
           await withDeadline(
             (async () => {
@@ -545,6 +732,23 @@ export async function launchDriver(url: string) {
                 ensureActive();
                 result.diagnostics!.stage = stage;
               });
+              ensureActive();
+              activePhase = 'frontend-ready';
+              result.diagnostics!.stage = 'frontend_ready mark';
+              const frontend = await milestone(page, 'frontend_ready', 0);
+              if (frontend === null)
+                missing(
+                  'frontend-ready',
+                  `No frontend_ready mark within ${MILESTONE_MS.frontend_ready} ms of the shell appearing`,
+                );
+              else
+                record(
+                  'frontend-ready',
+                  frontend,
+                  'ms',
+                  "Navigation start to the app's frontend_ready mark: first shell commit for an open vault, including the vault chooser click",
+                );
+              activePhase = 'readiness';
               result.diagnostics!.stage = `${fixture.kind} workload`;
               if (timed)
                 await page.evaluate(() => {
@@ -571,7 +775,8 @@ export async function launchDriver(url: string) {
                 result.diagnostics!.stage = `${fixture.kind}: ${next}`;
               };
               if (fixture.kind === 'table') await table(page, fixture, samples, record, phase);
-              if (fixture.kind === 'document') await documentWorkload(page, samples, record, phase);
+              if (fixture.kind === 'document')
+                await documentWorkload(page, samples, record, missing, phase);
               if (fixture.kind === 'transcript')
                 await transcript(page, fixture, samples, record, phase);
               if (fixture.kind === 'search') await searchWorkload(page, samples, record, phase);
