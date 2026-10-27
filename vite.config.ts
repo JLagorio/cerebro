@@ -47,6 +47,8 @@ export default defineConfig({
       // Review packets retain old sources and browser specs, not live tests.
       '.superpowers/**',
       'src-tauri/.bundle-resources/**',
+      // A node:test file (`node --test`), which vitest cannot run.
+      'conformance/native-read-smoke/quit-build-contract.test.mjs',
     ],
     // setup.ts grants waitFor 5s for shared CI runners, but vitest's default
     // testTimeout is ALSO 5s — so a slow-but-passing waitFor loses the race to

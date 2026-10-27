@@ -1274,7 +1274,12 @@ function nativeItem(source: string, declaration: string): string {
   }
   expect(open).toBeGreaterThanOrEqual(0);
   expect(close).toBeGreaterThan(open);
-  return (declaration + tail.slice(0, close + 1)).replace(/\s+/g, '');
+  return layoutFree(declaration + tail.slice(0, close + 1));
+}
+
+/** Layout is not code: whitespace and the trailing commas rustfmt adds both go. */
+function layoutFree(code: string): string {
+  return code.replace(/\s+/g, '').replace(/,([)\]}])/g, '$1');
 }
 
 function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
@@ -1310,8 +1315,8 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
     'native_credential_import_smoke.rs',
     'native_credentials_smoke.rs',
     'native_delegation_smoke.rs',
-    'native_quit_smoke.rs',
     'native_managed_action_smoke.rs',
+    'native_quit_smoke.rs',
     'native_workflow_smoke.rs',
   ]);
   expect([...entryCode.matchAll(/\bmod\s+(\w+)\s*;/g)].map((m) => m[1])).toEqual([
@@ -1320,8 +1325,8 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
     'credential_import_profile',
     'credential_profile',
     'delegation_profile',
-    'quit_profile',
     'managed_action_profile',
+    'quit_profile',
     'workflow_profile',
   ]);
   expect(entryCode).toMatch(
@@ -1465,7 +1470,7 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
     'actions::native_owner::set_managed_action_access(&app,&window,run,request)',
   );
   expect(nativeItem(productionCode, 'fn answer_interaction(')).toContain(
-    'actions::native_owner::answer_held_managed_interaction(&app,&window,Path::new(&vault),&id,&answer,updated_input.as_ref(),)',
+    'actions::native_owner::answer_held_managed_interaction(&app,&window,Path::new(&vault),&id,&answer,updated_input.as_ref())',
   );
   expect(nativeItem(productionCode, 'fn stop_agent(')).toContain('state.stop(run)');
   expect([...side.commands.keys()]).toEqual([
@@ -1511,7 +1516,7 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
     'pub(super) enum Probe { Ready, BindAttempt, PhaseBatch(PhaseBatch), WaitLateWindow { binding: String, }, Stage { stage: Stage, edge: Edge, ms: f64, snapshot: Snapshot, }, Stayed(Stayed), HangArmed { ms: f64, snapshot: Snapshot, }, }',
   ]) {
     expect(nativeItem(quitCode, declaration.slice(0, declaration.indexOf('{')).trim())).toBe(
-      declaration.replace(/\s+/g, ''),
+      layoutFree(declaration),
     );
   }
   expect(quitCode).toMatch(/#\[serde\(rename_all = "kebab-case"\)\]\s*pub\(super\) enum Stage/);
@@ -1637,7 +1642,7 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
   expect(exit).toContain('ifbytes.len()<=65536{');
   const capture = nativeItem(entryCode, 'async fn capture_native_reads(');
   expect(capture).toContain(
-    'ifquit_profile::enabled(&app){returnmatchprobe{None=>quit_profile::bootstrap(&app,&window),Some(probe)=>quit_profile::probe(&app,probe).await,};}ifprobe.is_some(){returnErr("probe-requires-quit-profile");}',
+    'ifquit_profile::enabled(&app){returnmatchprobe{None=>quit_profile::bootstrap(&app,&window),Some(probe)=>quit_profile::probe(&app,probe).await};}ifprobe.is_some(){returnErr("probe-requires-quit-profile");}',
   );
   expect(capture).toContain('tauri::async_runtime::spawn_blocking(move||{');
   const cancel = nativeItem(quitCode, 'pub(super) async fn native_smoke_cancel_quit(');
@@ -1662,7 +1667,7 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
   expect(nativeItem(managedCode, 'enum Probe')).toBe(
     'enumProbe{Progress{stage:Progress},Access{card_id:String},BeforeAnswer{card_id:String},Answered{card_id:String,answered_id:String},Stopped{card_id:String,refused:bool},DestroyWindow{card_id:String},Finish,Fail{stage:String}}',
   );
-  expect(managedCode.replace(/\s/g, '')).toContain(
+  expect(layoutFree(managedCode)).toContain(
     '#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]enumProbe',
   );
   expect(nativeItem(managedCode, 'enum Progress')).toBe(
@@ -1683,12 +1688,12 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
   expect(nativeItem(managedCode, 'fn card(')).toContain(
     'found.session_id!=session.handle.session_id',
   );
-  const entryCompact = entryCode.replace(/\s/g, '');
+  const entryCompact = layoutFree(entryCode);
   expect(entryCompact).toContain(
     '#[cfg(feature="native-action-smoke")]if!matches!(invoke.message.command(),"capture_native_reads"|"native_managed_action_probe"|"native_smoke_cancel_quit"|"native_smoke_finish_quit")',
   );
   expect(entryCompact).toContain(
-    'crate::workspace_service::native_admission::request(invoke.message.command(),invoke.message.payload()).and_then(|request|crate::workspace_service::authority::context().and_then(|context|crate::workspace_service::native_admission::dispatch_checked(&context,request,||generated(invoke))))',
+    'crate::workspace_service::native_admission::request(invoke.message.command(),invoke.message.payload()).and_then(|request|{crate::workspace_service::authority::context().and_then(|context|{crate::workspace_service::native_admission::dispatch_checked(&context,request,||generated(invoke))})})',
   );
   return side;
 }
@@ -1817,7 +1822,7 @@ describe('the closed native quit fixture audit', () => {
     [
       'managed outer admission bypass',
       'native_read_smoke.rs',
-      'native_admission::dispatch_checked(&context,request,||generated(invoke))',
+      'native_admission::dispatch_checked(&context,request,||generated(invoke),)',
       'Ok(generated(invoke))',
     ],
     [
@@ -2027,7 +2032,13 @@ describe('the closed native quit fixture audit', () => {
       'pub(super) fn watchdog(app: &AppHandle) {',
       'pub(super) fn watchdog(app: &AppHandle) {\napp.emit("extra-event", ());',
     ],
-    ['non-quit probe admission', 'native_read_smoke.rs', 'if probe.is_some() {', 'if false {'],
+    // The outer guard, by its indent: the managed branch has its own deeper one.
+    [
+      'non-quit probe admission',
+      'native_read_smoke.rs',
+      '\n    if probe.is_some() {',
+      '\n    if false {',
+    ],
     [
       'cancel bypass',
       'native_quit_smoke.rs',
@@ -2099,7 +2110,7 @@ describe('the closed native quit fixture audit', () => {
     ],
   ])('refuses an unapproved %s', (_name, file, from, to) => {
     const files = nativeSmokeFiles();
-    edit(files, file, from, to);
+    editCode(files, file, from, to);
     expect(() => nativeSmokeAudit(files)).toThrow();
   });
 
@@ -2509,6 +2520,24 @@ function edit(files: Map<string, string>, path: string, from: string, to: string
   if (text === undefined || !text.includes(from))
     throw new Error(`fixture: ${path} has no ${from}`);
   files.set(path, text.replace(from, to));
+}
+
+/** `edit` over Rust source. An exact match wins, as its spacing may pick one
+ * occurrence; otherwise `from` matches whatever whitespace rustfmt put between
+ * its characters, so a compact case still names its code. */
+function editCode(files: Map<string, string>, path: string, from: string, to: string): void {
+  const text = files.get(path);
+  if (text?.includes(from)) return edit(files, path, from, to);
+  const pattern = new RegExp(
+    [...from.replace(/\s/g, '')]
+      .map((c) => c.replace(/[\^$\\.*+?()[\]{}|/]/g, '\\$&'))
+      .join('\\s*'),
+  );
+  if (text === undefined || !pattern.test(text)) throw new Error(`fixture: ${path} has no ${from}`);
+  files.set(
+    path,
+    text.replace(pattern, () => to),
+  );
 }
 
 const FIXTURE_EVENTS = ['cerebro://agent'];

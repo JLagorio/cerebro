@@ -11,7 +11,8 @@ const JOB_RUN = 8;
 /** M33.7: `runAgent` hands back BOTH ids — the process tag the stream is
  * filtered by, and the durable id the run's database row is keyed under. */
 const JOB_DURABLE = 'durable-job-8';
-vi.mock('./agentIpc', () => ({
+vi.mock('./agentIpc', async (importOriginal) => ({
+  startedOrThrow: (await importOriginal<typeof import('./agentIpc')>()).startedOrThrow,
   checkWake: vi.fn(async (_vault: string, _actor: string, wakes: string[]) => ({
     state: 'met',
     wakes,

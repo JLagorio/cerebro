@@ -5,7 +5,7 @@ import { createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CommentHighlights } from '@/editor/commentHighlights';
 import type { EditorReadyInfo } from '@/editor/MarkdownEditor';
-import { announceExternalWrites } from '@/editor/openPages';
+import { announceExternalWrites, __resetOpenPages } from '@/editor/openPages';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -36,6 +36,8 @@ const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> })
 describe('DocPage', () => {
   beforeEach(async () => {
     resetMockFs();
+    // A page an earlier test left unsaved would hold every later navigation.
+    __resetOpenPages();
     await useVaultStore.getState().openVault('/demo-vault');
     useNavStore.setState({
       selection: { kind: 'doc', path: DOC },
