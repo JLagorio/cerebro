@@ -18,7 +18,7 @@ fn fixture(label: &str) -> Fixture {
     // Disposable creation only: never ALTER a selected-v2 store in production.
     fs::remove_file(&f.db).unwrap();
     let conn = Connection::open(&f.db).unwrap();
-    conn.execute_batch(include_str!("selected_schema_v3.sql"))
+    conn.execute_batch(crate::workspace_service::selected::schema::V3)
         .unwrap();
     conn.execute("INSERT INTO workspace VALUES (1,2,?1,5,11)", [WORKSPACE])
         .unwrap();

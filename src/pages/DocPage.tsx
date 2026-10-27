@@ -182,7 +182,10 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         Workspace unavailable{error === null ? '' : `: ${error}`}
       </div>
     );
-  if (entry?.authority?.kind === 'sqlite_metadata') return <SelectedDocPage entry={entry} />;
+  // A selected page with its own state (BL-25) may have no canonical identity
+  // yet; it still never reaches the legacy writer.
+  if (entry?.authority?.kind === 'sqlite_metadata' || entry?.selectedState !== undefined)
+    return <SelectedDocPage entry={entry} />;
   return <LegacyDocPage selection={selection} />;
 }
 

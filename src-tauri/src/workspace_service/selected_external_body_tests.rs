@@ -126,6 +126,48 @@ fn command(
     .map_err(|error| serde_json::to_value(error).unwrap())
 }
 
+/// A strict reader's entries: every changed record is one NeedsReconciliation
+/// state with its canonical metadata and no outside bytes; the Type pairs.
+fn assert_strictly_withheld(
+    entries: &[crate::vault::entry::Entry],
+    canonical: &SelectedRecordVersion,
+) {
+    let page = entries
+        .iter()
+        .find(|entry| entry.path == "page.md")
+        .unwrap();
+    assert_eq!(
+        page.selected_state.as_ref().unwrap().kind,
+        SelectedRecordStateKind::NeedsReconciliation
+    );
+    assert_eq!(page.authority.as_ref(), Some(canonical));
+    assert_eq!(page.entry_type.as_deref(), Some("Task"));
+    assert_eq!(
+        page.hash.as_deref(),
+        Some(hash(EXTERNAL.as_bytes()).as_str())
+    );
+    assert!(
+        page.parse_error.is_some() && page.snippet.is_empty() && page.outgoing_links.is_empty()
+    );
+    for path in ["b.md", "c.md"] {
+        let neighbor = entries.iter().find(|entry| entry.path == path).unwrap();
+        assert_eq!(
+            neighbor.selected_state.as_ref().unwrap().kind,
+            SelectedRecordStateKind::NeedsReconciliation
+        );
+        assert!(
+            neighbor.entry_type.is_none(),
+            "body YAML cannot create a type"
+        );
+    }
+    let declaration = entries
+        .iter()
+        .find(|entry| entry.path == "task-type.md")
+        .unwrap();
+    assert!(declaration.selected_state.is_none() && declaration.parse_error.is_none());
+    assert_eq!(entries.len(), 4);
+}
+
 fn assert_unpaired_entry(entry: &crate::vault::entry::Entry, body: &str, canonical_hash: &str) {
     let observed = hash(body.as_bytes());
     assert_ne!(observed, canonical_hash);
@@ -266,7 +308,7 @@ fn external_presentation_actual_startup_accepts_complete_drift_without_a_new_ope
 }
 
 #[test]
-fn external_presentation_editor_read_stays_observational_and_strict_services_stay_closed() {
+fn external_presentation_editor_read_stays_observational_and_strict_services_report_the_record() {
     let f = with_neighbors("external-presentation-strict", true);
     f.run(|| {
         let _journal = journal(&f, true);
@@ -284,14 +326,24 @@ fn external_presentation_editor_read_stays_observational_and_strict_services_sta
         assert_eq!(read.coherence, EditorBodyCoherence::ExternalChange);
         assert_eq!(read.version, canonical);
         assert!(read.editable);
-        assert_eq!(
-            selected::scan(&f.root).unwrap_err().kind,
-            AuthorityErrorKind::SourceChanged
-        );
-        assert!(crate::vault::scan::scan_vault(&f.root).is_err());
-        assert!(crate::vault::corpus::CorpusCache::new(1)
+        // BL-25: a strict service names the changed record and keeps the rest;
+        // it never presents or adopts the outside bytes.
+        for entries in [
+            selected::scan(&f.root).unwrap(),
+            crate::vault::scan::scan_vault(&f.root).unwrap(),
+        ] {
+            assert_strictly_withheld(&entries, &canonical);
+        }
+        let corpus = crate::vault::corpus::CorpusCache::new(1)
             .snapshot(&f.root)
-            .is_err());
+            .unwrap();
+        assert_strictly_withheld(&corpus.entries, &canonical);
+        let at = corpus
+            .entries
+            .iter()
+            .position(|entry| entry.path == "page.md")
+            .unwrap();
+        assert!(corpus.texts[at].body.is_empty() && corpus.texts[at].source.is_none());
         assert!(crate::read_note(f.root.to_string_lossy().into_owned(), "page.md".into()).is_err());
         assert_eq!(
             crate::set_page_full_width(
@@ -451,9 +503,18 @@ fn external_neighbors_do_not_block_one_original_human_target_save_or_retain_thei
                 assert_eq!(join["record_id"], RECORD);
                 assert_eq!(join["operation_id"], operation.operation_id);
             }
-            // Pairing one record must not stamp B/C to make these reads succeed.
-            assert_eq!(selected::scan(&f.root).unwrap_err().kind, AuthorityErrorKind::SourceChanged);
-            assert!(crate::vault::corpus::CorpusCache::new(1).snapshot(&f.root).is_err());
+            // Pairing one record never stamps B/C: each stays its own state.
+            let scanned = selected::scan(&f.root).unwrap();
+            for entry in &scanned {
+                let state = entry.selected_state.as_ref().map(|state| state.kind);
+                if entry.path == "b.md" || entry.path == "c.md" {
+                    assert_eq!(state, Some(SelectedRecordStateKind::NeedsReconciliation));
+                } else {
+                    assert_eq!(state, None, "{}", entry.path);
+                }
+            }
+            let corpus = crate::vault::corpus::CorpusCache::new(1).snapshot(&f.root).unwrap();
+            assert_eq!(corpus.entries.iter().filter(|e| e.selected_state.is_some()).count(), 2);
             assert!(matches!(
                 command(&f, &journal, AFTER, fresh()).unwrap(),
                 crate::NoteSaveResult::Selected(EditorSaveResult::Unchanged { .. })
@@ -464,13 +525,29 @@ fn external_neighbors_do_not_block_one_original_human_target_save_or_retain_thei
 }
 
 #[test]
-fn external_presentation_incomplete_or_unreadable_known_records_remain_unavailable() {
-    for damage in [
-        "missing_body",
-        "invalid_utf8",
-        "directory_body",
-        "missing_metadata",
-        "orphan_body",
+fn external_presentation_incomplete_or_unreadable_known_records_are_one_state_each() {
+    for (damage, path, expected) in [
+        ("missing_body", "b.md", SelectedRecordStateKind::BodyMissing),
+        (
+            "invalid_utf8",
+            "b.md",
+            SelectedRecordStateKind::BodyUnavailable,
+        ),
+        (
+            "directory_body",
+            "b.md",
+            SelectedRecordStateKind::BodyUnavailable,
+        ),
+        (
+            "missing_metadata",
+            "b.md",
+            SelectedRecordStateKind::PlainPageCandidate,
+        ),
+        (
+            "orphan_body",
+            "copied.md",
+            SelectedRecordStateKind::PlainPageCandidate,
+        ),
     ] {
         let f = with_neighbors("external-unavailable-control", false);
         f.run(|| {
@@ -491,17 +568,51 @@ fn external_presentation_incomplete_or_unreadable_known_records_remain_unavailab
                 _ => unreachable!(),
             }
             let before = durable_files(&f);
+            let before_rows = rows(&f);
+            // BL-25: the workspace stays open with exactly this one state.
+            let entries = crate::scan_vault(f.root.to_string_lossy().into_owned()).unwrap();
+            let states: Vec<_> = entries
+                .iter()
+                .filter_map(|entry| {
+                    entry
+                        .selected_state
+                        .as_ref()
+                        .map(|s| (entry.path.as_str(), s.kind))
+                })
+                .collect();
+            assert_eq!(states, vec![(path, expected)], "{damage}");
+            let damaged = entries.iter().find(|entry| entry.path == path).unwrap();
             assert!(
-                crate::scan_vault(f.root.to_string_lossy().into_owned()).is_err(),
+                damaged.parse_error.is_some() && damaged.snippet.is_empty(),
                 "{damage}"
             );
-            assert!(
-                crate::prepare_selected_open_with_retention(&f.root, Some(&journal)).is_err(),
-                "{damage}"
+            crate::prepare_selected_open_with_retention(&f.root, Some(&journal)).unwrap();
+            assert_eq!(
+                durable_files(&f),
+                before,
+                "{damage}: reads and opening write nothing"
             );
-            assert!(command(&f, &journal, AFTER, fresh()).is_err(), "{damage}");
-            assert_eq!(durable_files(&f), before, "{damage}");
+            assert_eq!(
+                rows(&f),
+                before_rows,
+                "{damage}: no metadata is adopted or deleted"
+            );
             assert_no_publication(&f);
+            // A neighbor's state is never another page's refusal.
+            applied(command(&f, &journal, AFTER, fresh()).unwrap());
+            assert_eq!(selected::read_body(&f.root, "page.md").unwrap(), AFTER);
+            let after = crate::scan_vault(f.root.to_string_lossy().into_owned()).unwrap();
+            assert_eq!(
+                after
+                    .iter()
+                    .find(|entry| entry.path == path)
+                    .unwrap()
+                    .selected_state
+                    .as_ref()
+                    .map(|s| s.kind),
+                Some(expected),
+                "{damage}: the save never touched the damaged record"
+            );
         });
     }
 }
@@ -580,8 +691,27 @@ fn external_type_dependency_is_not_treated_as_an_unrelated_ordinary_budget_read(
             target(),
         )
         .is_err());
-        assert!(crate::scan_vault(f.root.to_string_lossy().into_owned()).is_err());
-        assert!(crate::prepare_selected_open_with_retention(&f.root, Some(&journal)).is_err());
+        // BL-25: the changed declaration is its own state; it is withheld,
+        // never recomputed into another database name, and the rest open.
+        let entries = crate::scan_vault(f.root.to_string_lossy().into_owned()).unwrap();
+        let declaration = entries
+            .iter()
+            .find(|entry| entry.path == "task-type.md")
+            .unwrap();
+        assert_eq!(
+            declaration.selected_state.as_ref().unwrap().kind,
+            SelectedRecordStateKind::NeedsReconciliation
+        );
+        assert_eq!(declaration.title, "Task type");
+        assert!(declaration.parse_error.is_some() && declaration.snippet.is_empty());
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.selected_state.is_some())
+                .count(),
+            1
+        );
+        crate::prepare_selected_open_with_retention(&f.root, Some(&journal)).unwrap();
         assert_eq!(durable_files(&f), before);
         assert_no_publication(&f);
     });
@@ -675,10 +805,23 @@ fn external_neighbors_aggregate_bound_counts_observed_bytes_before_any_publicati
             error["error"]["kind"], "source_limit",
             "budget validation counts actual neighbor bytes without adopting their hashes"
         );
-        assert!(crate::scan_vault(f.root.to_string_lossy().into_owned()).is_err());
-        assert!(crate::prepare_selected_open_with_retention(&f.root, Some(&journal)).is_err());
+        // BL-25: the pages past the budget are each unavailable; the rest open.
+        let entries = crate::scan_vault(f.root.to_string_lossy().into_owned()).unwrap();
+        let over: Vec<&str> = entries
+            .iter()
+            .filter(|entry| {
+                entry.selected_state.as_ref().map(|state| state.kind)
+                    == Some(SelectedRecordStateKind::BodyUnavailable)
+            })
+            .map(|entry| entry.path.as_str())
+            .collect();
+        assert_eq!(over, vec!["page.md", "task-type.md"]);
+        crate::prepare_selected_open_with_retention(&f.root, Some(&journal)).unwrap();
         assert_eq!(rows(&f), before_rows);
         assert_eq!(durable_files(&f), before);
         assert_no_publication(&f);
     });
 }
+
+#[path = "selected_record_state_tests.rs"]
+mod record_states;

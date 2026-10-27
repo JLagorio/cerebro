@@ -1,6 +1,6 @@
 ---
 name: policy-artifact-edit
-description: Edit a rule artifact under shared/ (policy, runtime, schema, calendar or files) without breaking the byte anchor Rust and TypeScript share. Use before changing any file in those folders.
+description: Edit a rule artifact under shared/ (policy, runtime, schema, calendar, files or the workspace store schemas) without breaking the byte anchor Rust and TypeScript share. Use before changing any file in those folders.
 ---
 
 # policy-artifact-edit
@@ -13,7 +13,7 @@ this file and a README disagree, the README wins and this file gets fixed.
 - Read the folder's README first: `shared/policy/README.md`,
   `shared/runtime/README.md`, `shared/schema/README.md` (field kinds and view vocabulary),
   `shared/calendar/README.md` (the date grammar) or `shared/files/README.md`
-  (file kinds), `shared/import/README.md` (import stamps and identity), or `shared/canvas/README.md` (JSON Canvas format and codecs).
+  (file kinds), `shared/import/README.md` (import stamps and identity), `shared/canvas/README.md` (JSON Canvas format and codecs), or `shared/workspace/README.md` (the selected-store schemas under `shared/workspace/schema/`, which are frozen).
   Its table names each
   artifact's readers, its Regenerating section is the procedure, and the
   policy README adds the Ordering rules and the twin registry.
@@ -53,6 +53,9 @@ this file and a README disagree, the README wins and this file gets fixed.
   replay its readers with the `canvas::` filter and `pnpm test:run src/engine/scene`.
 - Whiteboard agent limits use `canvas::agent_limits::tests::write_canvas_agent_limits_digest`;
   replay `canvas::` plus `src/engine/scene/canvasLimits.test.ts`.
+- A shipped `shared/workspace/schema/` file is never edited: a new store version
+  is a new file, anchored by `workspace_service::selected::schema::tests::write_selected_schema_digests`
+  (it refuses to re-anchor a shipped file); replay `workspace_service::`.
 - The view vocabulary digest writer is `vault::views::tests::write_views_digest`;
   its raw-note cases are `src-tauri/fixtures/view-suggestion-cases.json`,
   replayed by Rust and the TS checker.

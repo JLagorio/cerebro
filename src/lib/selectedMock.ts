@@ -252,9 +252,7 @@ function ordered(value: PropertyValue): PropertyValue {
 function source(value: PropertyValue): string {
   return JSON.stringify(ordered(value));
 }
-function version(fixture: Fixture, record: RecordState): SelectedRecordVersion {
-  if (sha256Hex(record.body) !== record.pairedBodyHash)
-    throw refusal('source_changed', 'The visible body disagrees with its canonical pairing.');
+function canonicalVersion(fixture: Fixture, record: RecordState): SelectedRecordVersion {
   return {
     kind: 'sqlite_metadata',
     workspaceId: fixture.workspaceId,
@@ -264,15 +262,26 @@ function version(fixture: Fixture, record: RecordState): SelectedRecordVersion {
     bodyHash: record.pairedBodyHash,
   };
 }
+function version(fixture: Fixture, record: RecordState): SelectedRecordVersion {
+  if (sha256Hex(record.body) !== record.pairedBodyHash)
+    throw refusal('source_changed', 'The visible body disagrees with its canonical pairing.');
+  return canonicalVersion(fixture, record);
+}
+/** Each record is paired or its own state (BL-25), never a refused scan: a
+ * body that disagrees with its pairing comes back with its observed hash. */
 export function scanSelectedMock(vault: string) {
   const fixture = active(vault);
   if (fixture === null) return null;
-  return fixture.records.map((record) => ({
-    path: record.path,
-    body: record.body,
-    metadata: structuredClone(record.metadata),
-    version: version(fixture, record),
-  }));
+  return fixture.records.map((record) => {
+    const observed = sha256Hex(record.body);
+    return {
+      path: record.path,
+      body: record.body,
+      metadata: structuredClone(record.metadata),
+      version: canonicalVersion(fixture, record),
+      changedBodyHash: observed === record.pairedBodyHash ? null : observed,
+    };
+  });
 }
 export function readSelectedMock(vault: string, path: string): string | null {
   const fixture = active(vault);

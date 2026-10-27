@@ -856,6 +856,10 @@ export function __seedFileTimes(
   times.set(path, value);
 }
 
+/** Rust's words for a selected page changed outside Cerebro (BL-25). */
+const SELECTED_NEEDS_RECONCILIATION =
+  'This page was changed outside Cerebro. Its properties are kept; reconcile the page to keep or discard the outside change.';
+
 export async function scanVault(_vault: string): Promise<Entry[]> {
   const selected = scanSelectedMock(_vault);
   if (selected !== null)
@@ -863,22 +867,45 @@ export async function scanVault(_vault: string): Promise<Entry[]> {
       selected.map((record): Entry => {
         const projected = projectSelectedMetadata(record.metadata);
         const properties = projected.properties;
-        return {
+        const filename = record.path.split('/').at(-1) ?? record.path;
+        const shared = {
           path: record.path,
-          filename: record.path.split('/').at(-1) ?? record.path,
+          filename,
           folder: record.path.split('/').slice(0, -1).join('/'),
           project: null,
-          ...canonicalBodyFacts(record.path, record.body),
           type: projected.type,
           // The existing DTO preserves nested values at runtime; its historical Scalar type is narrower.
           properties: properties as Entry['properties'],
           relationships: {},
           createdAt: SEED_TIME,
           modifiedAt: SEED_TIME,
-          parseError: null,
-          hash: record.version.bodyHash,
           authority: record.version,
           canonicalProperties: projected.canonicalProperties,
+        };
+        if (record.changedBodyHash === null)
+          return {
+            ...shared,
+            ...canonicalBodyFacts(record.path, record.body),
+            parseError: null,
+            hash: record.version.bodyHash,
+          };
+        // BL-25: the record keeps its metadata and its own state; the browser's
+        // exact read-only presentation never shows bytes that are not paired.
+        return {
+          ...shared,
+          title: humanize(filename.replace(/\.md$/, '')),
+          snippet: '',
+          outgoingLinks: [],
+          parseError: SELECTED_NEEDS_RECONCILIATION,
+          hash: record.changedBodyHash,
+          bodyObservation: {
+            coherence: 'external_change',
+            observedBodyHash: record.changedBodyHash,
+          },
+          selectedState: {
+            kind: 'needs_reconciliation',
+            message: SELECTED_NEEDS_RECONCILIATION,
+          },
         };
       }),
     );

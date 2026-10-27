@@ -218,6 +218,20 @@ export type SelectedPropertySnapshot = {
 
 export type SelectedPropertyValue = { kind: 'absent' } | { kind: 'present'; value: PropertyValue };
 
+export type SelectedRecordState = {
+  kind: SelectedRecordStateKind;
+  message: string;
+  visiblePath?: string | null;
+};
+
+export type SelectedRecordStateKind =
+  | 'needs_reconciliation'
+  | 'body_missing'
+  | 'body_unavailable'
+  | 'plain_page_candidate'
+  | 'conflict'
+  | 'unsupported_carrier';
+
 export type SelectedRecordVersion = {
   bodyHash: string;
   kind: SelectedAuthorityKind;

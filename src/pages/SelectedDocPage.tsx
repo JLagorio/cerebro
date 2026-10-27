@@ -3,10 +3,53 @@ import type { Entry } from '@/engine/types';
 import { PageToolbar, Crumb } from '@/components/PageToolbar';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import { IconButton } from '@/components/ui/IconButton';
+import { StateMessage } from '@/components/ui/StateMessage';
 import { NoteBodyEditor, type SaveState } from '@/editor/NoteBodyEditor';
 import { readNote, supportsSelectedEditor } from '@/lib/ipc';
+import type { SelectedRecordState, SelectedRecordStateKind } from '@/lib/generated/workspace';
 import { sha256Hex } from '@/lib/sha256';
 import { useVaultStore } from '@/stores/vaultStore';
+
+/** A selected record's own state, named for a person (BL-25). */
+const RECORD_STATE_TITLE: Record<SelectedRecordStateKind, string> = {
+  needs_reconciliation: 'Changed outside Cerebro',
+  body_missing: 'Page file missing',
+  body_unavailable: 'Page file unavailable',
+  plain_page_candidate: 'Not yet a page in this workspace',
+  conflict: 'Name conflict',
+  unsupported_carrier: 'No reader in this workspace yet',
+};
+
+/** Presentation only: Rust decided the state and wrote its words. */
+export function SelectedRecordStateMessage({
+  state,
+  compact = false,
+}: {
+  state: SelectedRecordState;
+  compact?: boolean;
+}) {
+  return (
+    <div data-testid="selected-record-state" data-record-state={state.kind}>
+      <StateMessage
+        compact={compact}
+        state={compact ? 'partial' : 'unavailable'}
+        title={RECORD_STATE_TITLE[state.kind]}
+      >
+        {state.message}
+        {state.visiblePath != null && <> Visible as {state.visiblePath}.</>}
+      </StateMessage>
+    </div>
+  );
+}
+
+/** Only an ordinary page changed outside Cerebro keeps its editor, whose own
+ * reconcile choices decide; every other state shows no body and offers no writer. */
+function showsBody(entry: Entry): boolean {
+  const state = entry.selectedState;
+  return (
+    state === undefined || (state.kind === 'needs_reconciliation' && entry.parseError === null)
+  );
+}
 
 const SAVE_LABEL: Record<SaveState, string | null> = {
   idle: null,
@@ -36,6 +79,7 @@ export function SelectedDocPage({ entry }: { entry: Entry }) {
   const ready = vault !== null && entriesVault === vault && status === 'ready';
   const fullWidth = entry.properties.full_width === true;
   const saveLabel = SAVE_LABEL[save?.identity === identity ? save.state : 'idle'];
+  const withBody = showsBody(entry);
   return (
     <div className="cb-document cb-page-frame flex-1" data-testid="doc-page">
       <PageToolbar
@@ -54,17 +98,19 @@ export function SelectedDocPage({ entry }: { entry: Entry }) {
           )
         }
         actions={
-          <div ref={menuButton}>
-            <IconButton
-              icon="ellipsis"
-              label="Page options"
-              size="sm"
-              onClick={() => {
-                const rect = menuButton.current?.getBoundingClientRect();
-                setMenu({ x: rect?.right ?? 0, y: rect?.bottom ?? 0 });
-              }}
-            />
-          </div>
+          withBody && target !== null ? (
+            <div ref={menuButton}>
+              <IconButton
+                icon="ellipsis"
+                label="Page options"
+                size="sm"
+                onClick={() => {
+                  const rect = menuButton.current?.getBoundingClientRect();
+                  setMenu({ x: rect?.right ?? 0, y: rect?.bottom ?? 0 });
+                }}
+              />
+            </div>
+          ) : null
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -74,7 +120,10 @@ export function SelectedDocPage({ entry }: { entry: Entry }) {
             fullWidth ? 'cb-document-content cb-document-content-wide' : 'cb-document-content'
           }
         >
-          {!ready ? (
+          {entry.selectedState !== undefined && (
+            <SelectedRecordStateMessage state={entry.selectedState} compact={withBody} />
+          )}
+          {!withBody ? null : !ready ? (
             <div role="status">Loading page body…</div>
           ) : target === null ? (
             <div role="alert" className="section-unavailable">

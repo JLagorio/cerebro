@@ -80,6 +80,10 @@ pub(crate) use editor::{read_editor_snapshot, save_editor_body};
 #[path = "selected_backup.rs"]
 pub(crate) mod backup;
 
+// The frozen shipped store schemas and the exact object comparison (BL-23).
+#[path = "selected_schema.rs"]
+pub(crate) mod schema;
+
 struct Record {
     id: String,
     path: String,
@@ -179,86 +183,8 @@ fn verify_schema_with_journal(
     if mode != expected_journal {
         return Err(invalid("Canonical store journal mode is unsupported."));
     }
-    let schema = if version == rules().schema_version {
-        include_str!("selected_schema.sql")
-    } else if version == metadata::schema_version() {
-        include_str!("selected_schema_v4.sql")
-    } else {
-        include_str!("selected_schema_v3.sql")
-    };
-    let expected: BTreeMap<&str, &str> = schema
-        .split(';')
-        .map(str::trim)
-        .filter(|sql| sql.starts_with("CREATE TABLE "))
-        .map(|sql| {
-            let name = sql
-                .trim_start_matches("CREATE TABLE ")
-                .split_whitespace()
-                .next()
-                .expect("table name");
-            (name, sql)
-        })
-        .collect();
-    let mut seen = BTreeSet::new();
-    let mut automatic = BTreeSet::new();
-    let mut stmt = conn
-        .prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name LIMIT 16")
-        .map_err(|_| invalid("Canonical schema is unreadable."))?;
-    let mut rows = stmt
-        .query([])
-        .map_err(|_| invalid("Canonical schema is unreadable."))?;
-    while let Some(row) = rows
-        .next()
-        .map_err(|_| invalid("Canonical schema is unreadable."))?
-    {
-        let kind = text(row, 0, 32)?;
-        let name = text(row, 1, 128)?;
-        let table = text(row, 2, 128)?;
-        match kind.as_str() {
-            "table" => {
-                let sql = text(row, 3, 8192)?;
-                if table != name
-                    || expected.get(name.as_str()).copied() != Some(sql.as_str())
-                    || !seen.insert(name)
-                {
-                    return Err(invalid("Canonical table definitions are unsupported."));
-                }
-            }
-            "index" if row.get_ref(3).ok() == Some(ValueRef::Null) => {
-                if !(matches!(
-                    (name.as_str(), table.as_str()),
-                    ("sqlite_autoindex_workspace_1", "workspace")
-                        | ("sqlite_autoindex_records_1", "records")
-                        | ("sqlite_autoindex_records_2", "records")
-                ) || (version == metadata::schema_version()
-                    && matches!(
-                        (name.as_str(), table.as_str()),
-                        ("sqlite_autoindex_metadata_requests_1", "metadata_requests")
-                            | ("sqlite_autoindex_metadata_requests_2", "metadata_requests")
-                            | ("sqlite_autoindex_metadata_requests_3", "metadata_requests")
-                    )))
-                    || !automatic.insert(name)
-                {
-                    return Err(invalid("Canonical indexes are unsupported."));
-                }
-            }
-            _ => {
-                return Err(invalid(
-                    "Canonical metadata contains unsupported schema objects.",
-                ))
-            }
-        }
-    }
-    if seen.len() != expected.len()
-        || automatic.len()
-            != if version == metadata::schema_version() {
-                6
-            } else {
-                3
-            }
-    {
-        return Err(invalid("Canonical schema is incomplete."));
-    }
+    // Every object, compared with SQLite's own model of the frozen text.
+    schema::verify(conn, version)?;
     let integrity: String = conn
         .query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
         .map_err(|_| invalid("Canonical metadata integrity is unavailable."))?;
@@ -449,9 +375,102 @@ fn body(binding: &SelectedBinding, record: &Record, cap: u64) -> Result<String, 
     }
     String::from_utf8(bytes).map_err(|_| invalid("The paired page body is not UTF-8."))
 }
-fn check_pairing(binding: &SelectedBinding, snapshot: &Snapshot) -> Result<(), AuthorityError> {
-    let paths: BTreeSet<_> = snapshot.records.iter().map(|r| r.path.as_str()).collect();
-    let mut found = BTreeSet::new();
+/// A name as a folding disk may hear it: NFC, then case and the HFS+
+/// ignorables folded. Two spellings that fold alike may be one file there.
+fn path_fold(path: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    crate::knowledge::disk_folded(&path.nfc().collect::<String>())
+        .nfc()
+        .collect()
+}
+fn record_state(
+    kind: SelectedRecordStateKind,
+    message: &str,
+    visible_path: Option<&str>,
+) -> SelectedRecordState {
+    SelectedRecordState {
+        kind,
+        message: message.into(),
+        visible_path: visible_path.map(str::to_owned),
+    }
+}
+fn needs_reconciliation() -> SelectedRecordState {
+    record_state(
+        SelectedRecordStateKind::NeedsReconciliation,
+        "This page was changed outside Cerebro. Its properties are kept; reconcile the page to keep or discard the outside change.",
+        None,
+    )
+}
+fn body_missing() -> SelectedRecordState {
+    record_state(
+        SelectedRecordStateKind::BodyMissing,
+        "This page's file is missing. Its properties are kept until the file is restored or the page is deleted.",
+        None,
+    )
+}
+fn conflict_state(message: &str, visible_path: Option<&str>) -> SelectedRecordState {
+    record_state(SelectedRecordStateKind::Conflict, message, visible_path)
+}
+
+/// Where one canonical record's visible body stands, from the physical walk
+/// alone (BL-25). Each reader still judges the bytes against the hash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Placement {
+    /// A regular file at exactly the canonical path.
+    Present,
+    /// Nothing at the canonical path.
+    Missing,
+    /// Something at the canonical path that is not a page file.
+    Unavailable(&'static str),
+    /// Renamed by case or Unicode form, or claimed twice.
+    Conflict(SelectedRecordState),
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Visible {
+    Page,
+    Carrier,
+    Link,
+}
+/// The visible page set held against the canonical records: each record's
+/// placement, and each visible page-like file that no record pairs with.
+struct Pairing {
+    placement: BTreeMap<String, Placement>,
+    unpaired: Vec<(String, SelectedRecordState)>,
+}
+impl Pairing {
+    fn of(&self, record: &Record) -> &Placement {
+        self.placement
+            .get(&record.id)
+            .unwrap_or(&Placement::Missing)
+    }
+    /// A writer touches only a record whose visible body is where its
+    /// canonical path says; a neighbor's state is never its refusal.
+    fn writable(&self, record: &Record) -> Result<(), AuthorityError> {
+        let refuse = |message: &str| Err(error(AuthorityErrorKind::SourceChanged, message));
+        match self.of(record) {
+            Placement::Present => Ok(()),
+            Placement::Missing => refuse(&body_missing().message),
+            Placement::Unavailable(reason) => refuse(reason),
+            Placement::Conflict(state) => refuse(&state.message),
+        }
+    }
+}
+
+/// Hold the visible page set against the canonical records (BL-25). Only the
+/// discovery bound or an escape from the root refuses the workspace; every
+/// other finding is one record's or one visible file's state, and the walk
+/// never reads a byte of any file.
+fn check_pairing(
+    binding: &SelectedBinding,
+    snapshot: &Snapshot,
+) -> Result<Pairing, AuthorityError> {
+    let bound = rules()
+        .limits
+        .records
+        .saturating_mul(8)
+        .saturating_add(1024);
+    let mut visible: BTreeMap<String, Visible> = BTreeMap::new();
+    let mut unpaired = Vec::new();
     let mut count = 0usize;
     for item in walkdir::WalkDir::new(&binding.root)
         .follow_links(false)
@@ -465,15 +484,11 @@ fn check_pairing(binding: &SelectedBinding, snapshot: &Snapshot) -> Result<(), A
                 }
         })
     {
-        let item = item.map_err(|_| missing("The complete visible body set is unavailable."))?;
+        // As in the legacy scan, an unreadable entry never aborts discovery;
+        // a record beneath it reads as unavailable on its own.
+        let Ok(item) = item else { continue };
         count += 1;
-        if count
-            > rules()
-                .limits
-                .records
-                .saturating_mul(8)
-                .saturating_add(1024)
-        {
+        if count > bound {
             return Err(error(
                 AuthorityErrorKind::SourceLimit,
                 "Visible body discovery exceeds its bound.",
@@ -482,34 +497,325 @@ fn check_pairing(binding: &SelectedBinding, snapshot: &Snapshot) -> Result<(), A
         if item.depth() == 0 || item.file_type().is_dir() {
             continue;
         }
-        if item.file_type().is_symlink() {
-            return Err(invalid("Visible body discovery cannot follow symlinks."));
+        let name = item.file_name().to_string_lossy();
+        let carrier = name.ends_with(".mmd") || crate::files::kinds::is_whiteboard(&name);
+        if !carrier && !name.ends_with(".md") {
+            continue;
         }
         let relative = item
             .path()
             .strip_prefix(&binding.root)
-            .map_err(|_| invalid("Visible body discovery escaped its root."))?
-            .to_str()
-            .ok_or_else(|| invalid("A visible body path is not UTF-8."))?;
-        if relative.ends_with(".mmd") || crate::files::kinds::is_whiteboard(relative) {
-            return Err(error(
-                AuthorityErrorKind::UnsupportedOperation,
-                "This selected workspace carrier has no read adapter.",
+            .map_err(|_| invalid("Visible body discovery escaped its root."))?;
+        let Some(relative) = relative.to_str() else {
+            unpaired.push((
+                relative.to_string_lossy().into_owned(),
+                conflict_state(
+                    "This file's name is not valid UTF-8, so it cannot be paired.",
+                    None,
+                ),
             ));
-        }
-        if relative.ends_with(".md") {
-            if !paths.contains(relative) {
-                return Err(missing(
-                    "A visible page has no canonical metadata identity.",
-                ));
+            continue;
+        };
+        visible.insert(
+            relative.to_owned(),
+            if item.file_type().is_symlink() {
+                Visible::Link
+            } else if carrier {
+                Visible::Carrier
+            } else {
+                Visible::Page
+            },
+        );
+    }
+    let mut records: BTreeMap<String, Vec<&Record>> = BTreeMap::new();
+    for record in &snapshot.records {
+        records
+            .entry(path_fold(&record.path))
+            .or_default()
+            .push(record);
+    }
+    let mut seen: BTreeMap<String, Vec<(&str, Visible)>> = BTreeMap::new();
+    for (path, kind) in &visible {
+        seen.entry(path_fold(path)).or_default().push((path, *kind));
+    }
+    let mut placement = BTreeMap::new();
+    for (key, claims) in &records {
+        let files = seen.remove(key).unwrap_or_default();
+        if let [record] = claims.as_slice() {
+            let exact = files
+                .iter()
+                .find(|(path, _)| *path == record.path)
+                .map(|(_, kind)| *kind);
+            let others: Vec<&str> = files
+                .iter()
+                .filter(|(path, _)| *path != record.path)
+                .map(|(path, _)| *path)
+                .collect();
+            let found = match (exact, others.as_slice()) {
+                (Some(Visible::Page), []) => Placement::Present,
+                (Some(_), []) => {
+                    Placement::Unavailable("Something other than a page file is at this page's path.")
+                }
+                (Some(_), [other, ..]) => Placement::Conflict(conflict_state(
+                    "Another visible page differs from this page's name only by case or Unicode form; choose which one is this page.",
+                    Some(other),
+                )),
+                (None, []) => match fs::symlink_metadata(binding.root.join(&record.path)) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Placement::Missing,
+                    Err(_) => Placement::Unavailable("This page's file could not be read."),
+                    Ok(meta) if !meta.is_file() => Placement::Unavailable(
+                        "Something other than a page file is at this page's path.",
+                    ),
+                    Ok(_) => Placement::Unavailable("This page's file is there but could not be listed."),
+                },
+                (None, [other]) => Placement::Conflict(conflict_state(
+                    "This page was renamed outside Cerebro by case or Unicode form; rename it back or choose the new name.",
+                    Some(other),
+                )),
+                (None, _) => Placement::Conflict(conflict_state(
+                    "Several visible pages differ from this page's name only by case or Unicode form; choose which one is this page.",
+                    None,
+                )),
+            };
+            placement.insert(record.id.clone(), found);
+        } else {
+            for record in claims {
+                placement.insert(
+                    record.id.clone(),
+                    Placement::Conflict(conflict_state(
+                        "More than one canonical record claims this page's name; choose which one keeps it.",
+                        None,
+                    )),
+                );
             }
-            found.insert(relative.to_owned());
         }
     }
-    if found.len() != paths.len() {
-        return Err(missing("A canonical record has no paired visible page."));
+    for files in seen.into_values() {
+        let twins = files.len() > 1;
+        for (path, kind) in files {
+            let state = match kind {
+                _ if twins => conflict_state(
+                    "Several visible pages share this name but for case or Unicode form; choose one before adopting it.",
+                    None,
+                ),
+                // The governed bundle has its own writer (CV-07); its pages
+                // are retained bytes here, never a plain page to adopt.
+                Visible::Page if crate::knowledge::is_knowledge_path(path) => record_state(
+                    SelectedRecordStateKind::UnsupportedCarrier,
+                    "This knowledge page belongs to its governed writer, which this workspace cannot read yet. The file is kept as it is.",
+                    None,
+                ),
+                Visible::Page => record_state(
+                    SelectedRecordStateKind::PlainPageCandidate,
+                    "This page has no identity in this workspace yet. It carries no properties or grants until a person adopts it.",
+                    None,
+                ),
+                Visible::Carrier => record_state(
+                    SelectedRecordStateKind::UnsupportedCarrier,
+                    "This workspace has no reader for diagrams or boards yet. The file is kept as it is.",
+                    None,
+                ),
+                Visible::Link => conflict_state("A link, not a page file. It is not read.", None),
+            };
+            unpaired.push((path.to_owned(), state));
+        }
     }
-    Ok(())
+    unpaired.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(Pairing {
+        placement,
+        unpaired,
+    })
+}
+
+/// One Present record's visible body as a reader finds it (BL-25).
+enum BodyRead {
+    Paired(String),
+    /// Visible bytes that differ from the canonical hash, and their hash.
+    Changed(Vec<u8>, String),
+    Missing,
+    Unavailable(&'static str),
+}
+/// The size a record's visible file would add to a read, or why it cannot.
+fn readable_size(
+    binding: &SelectedBinding,
+    record: &Record,
+    remaining: usize,
+) -> Result<u64, BodyRead> {
+    let size = match fs::symlink_metadata(binding.root.join(&record.path)) {
+        Ok(meta) if meta.is_file() => meta.len(),
+        Ok(_) => {
+            return Err(BodyRead::Unavailable(
+                "Something other than a page file is at this page's path.",
+            ))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(BodyRead::Missing),
+        Err(_) => return Err(BodyRead::Unavailable("This page's file could not be read.")),
+    };
+    if size > rules().limits.body_bytes {
+        return Err(BodyRead::Unavailable(
+            "This page's file is over the per-page byte bound.",
+        ));
+    }
+    if size > remaining as u64 {
+        return Err(BodyRead::Unavailable(
+            "The workspace's page-body budget runs out before this page.",
+        ));
+    }
+    Ok(size)
+}
+/// Read one record's visible body within `remaining` aggregate bytes. Every
+/// outcome is this record's own; nothing here refuses the workspace.
+fn read_record_body(binding: &SelectedBinding, record: &Record, remaining: usize) -> BodyRead {
+    if let Err(outcome) = readable_size(binding, record, remaining) {
+        return outcome;
+    }
+    let cap = rules().limits.body_bytes.min(remaining as u64);
+    let bytes = match authority::read_bounded(&binding.root, &record.path, cap) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind == AuthorityErrorKind::SourceChanged => {
+            return BodyRead::Unavailable("This page's file changed while it was read.")
+        }
+        Err(_) => return BodyRead::Unavailable("This page's file could not be read."),
+    };
+    let observed = crate::ledger::sha256_hex(&bytes);
+    if observed != record.body_hash {
+        return BodyRead::Changed(bytes, observed);
+    }
+    String::from_utf8(bytes).map_or(
+        BodyRead::Unavailable("This page's file is not UTF-8 text."),
+        BodyRead::Paired,
+    )
+}
+/// A strict reader's view of one record: its paired body, or its state with
+/// the visible hash it observed, and the bytes the read consumed.
+type StrictRead = (Result<String, (SelectedRecordState, Option<String>)>, usize);
+fn strict_read(
+    binding: &SelectedBinding,
+    pairing: &Pairing,
+    record: &Record,
+    remaining: usize,
+) -> StrictRead {
+    let unavailable =
+        |reason: &str| record_state(SelectedRecordStateKind::BodyUnavailable, reason, None);
+    match pairing.of(record) {
+        Placement::Present => match read_record_body(binding, record, remaining) {
+            BodyRead::Paired(text) => {
+                let used = text.len();
+                (Ok(text), used)
+            }
+            BodyRead::Changed(bytes, observed) => {
+                (Err((needs_reconciliation(), Some(observed))), bytes.len())
+            }
+            BodyRead::Missing => (Err((body_missing(), None)), 0),
+            BodyRead::Unavailable(reason) => (Err((unavailable(reason), None)), 0),
+        },
+        Placement::Missing => (Err((body_missing(), None)), 0),
+        Placement::Unavailable(reason) => (Err((unavailable(reason), None)), 0),
+        Placement::Conflict(state) => (Err((state.clone(), None)), 0),
+    }
+}
+fn stem_title(path: &str) -> String {
+    let filename = path.rsplit('/').next().unwrap_or(path);
+    crate::vault::parse::humanize_stem(filename.rsplit_once('.').map_or(filename, |(stem, _)| stem))
+}
+fn file_times(binding: &SelectedBinding, path: &str) -> (String, String) {
+    let meta = fs::symlink_metadata(binding.root.join(path))
+        .ok()
+        .filter(fs::Metadata::is_file);
+    crate::vault::scan::timestamps(meta.as_ref())
+}
+/// The Entry of a canonical record whose visible body is not presented
+/// (BL-25): its canonical metadata, its stem as title, no body text, and its
+/// state as the parse error every legacy reader already treats as unreadable
+/// (CV-05: unavailable, never empty). `observed` is a visible hash it read.
+fn withheld_entry(
+    binding: &SelectedBinding,
+    record: &Record,
+    metadata: EntryMetadata,
+    state: SelectedRecordState,
+    observed: Option<String>,
+) -> Entry {
+    let EntryMetadata {
+        properties,
+        entry_type,
+        canonical_properties,
+    } = metadata;
+    let (created_at, modified_at) = file_times(binding, &record.path);
+    Entry {
+        path: record.path.clone(),
+        filename: record
+            .path
+            .rsplit('/')
+            .next()
+            .unwrap_or(&record.path)
+            .to_owned(),
+        folder: record
+            .path
+            .rsplit_once('/')
+            .map_or("", |(folder, _)| folder)
+            .to_owned(),
+        project: None,
+        title: stem_title(&record.path),
+        entry_type,
+        properties,
+        relationships: BTreeMap::new(),
+        outgoing_links: Vec::new(),
+        snippet: String::new(),
+        created_at,
+        modified_at,
+        parse_error: Some(state.message.clone()),
+        hash: observed.clone(),
+        authority: Some(record_version(binding, record)),
+        canonical_properties: Some(canonical_properties),
+        body_observation: observed.map(|observed_body_hash| SelectedBodyObservation {
+            coherence: EditorBodyCoherence::ExternalChange,
+            observed_body_hash,
+        }),
+        selected_state: Some(state),
+    }
+}
+/// The Entry of a visible file no canonical record pairs with: its path and
+/// stem only. Its bytes are never read here, and nothing in it, a YAML block
+/// included, is ever metadata or a grant.
+fn visible_entry(binding: &SelectedBinding, path: &str, state: SelectedRecordState) -> Entry {
+    let (created_at, modified_at) = file_times(binding, path);
+    Entry {
+        path: path.to_owned(),
+        filename: path.rsplit('/').next().unwrap_or(path).to_owned(),
+        folder: path
+            .rsplit_once('/')
+            .map_or("", |(folder, _)| folder)
+            .to_owned(),
+        project: None,
+        title: stem_title(path),
+        entry_type: None,
+        properties: serde_json::Map::new(),
+        relationships: BTreeMap::new(),
+        outgoing_links: Vec::new(),
+        snippet: String::new(),
+        created_at,
+        modified_at,
+        parse_error: Some(state.message.clone()),
+        hash: None,
+        authority: None,
+        canonical_properties: None,
+        body_observation: None,
+        selected_state: Some(state),
+    }
+}
+/// Every unpaired visible file `include` admits, then all in path order.
+fn with_unpaired(
+    binding: &SelectedBinding,
+    pairing: &Pairing,
+    include: &dyn Fn(&str) -> bool,
+    out: &mut Vec<Entry>,
+) {
+    for (path, state) in &pairing.unpaired {
+        if include(path) {
+            out.push(visible_entry(binding, path, state.clone()));
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
 }
 struct EntryMetadata {
     properties: serde_json::Map<String, serde_json::Value>,
@@ -611,6 +917,7 @@ fn entry_with_metadata(
         authority: Some(record_version(binding, record)),
         canonical_properties: Some(canonical_properties),
         body_observation: None,
+        selected_state: None,
     })
 }
 #[cfg(test)]
@@ -618,7 +925,8 @@ pub(crate) fn scan(root: &Path) -> Result<Vec<Entry>, AuthorityError> {
     scan_filtered(root, |_| true)
 }
 /// Human presentation may observe ordinary schema-3 bodies outside their
-/// canonical pairing. Service scans and corpus reads remain strictly paired.
+/// canonical pairing. Service scans and corpus reads present only paired
+/// bodies; every other record there is its state, never a refusal (BL-25).
 pub(crate) fn scan_presentation(root: &Path) -> Result<Vec<Entry>, AuthorityError> {
     let binding = authority::selected_binding(root)?;
     store::scan_presentation(&binding)
@@ -631,28 +939,32 @@ pub(crate) fn scan_filtered(
     let _guard = store::read_guard(&binding)?;
     scan_filtered_bound(&binding, include)
 }
+/// Strictly paired entries, and one per-record state for everything else
+/// (BL-25): a record whose body changed, went missing or cannot be read keeps
+/// its canonical metadata; a visible file no record pairs is listed, unread.
 fn scan_filtered_bound(
     binding: &SelectedBinding,
     include: impl Fn(&str) -> bool,
 ) -> Result<Vec<Entry>, AuthorityError> {
     let snapshot = read_snapshot(&connection(binding, false)?, binding)?;
-    check_pairing(binding, &snapshot)?;
+    let pairing = check_pairing(binding, &snapshot)?;
     let mut out = Vec::new();
     let mut bytes = 0usize;
     for record in &snapshot.records {
         if include(&record.path) {
-            let remaining = rules().limits.aggregate_body_bytes.saturating_sub(bytes) as u64;
-            let body = body(binding, record, rules().limits.body_bytes.min(remaining))?;
-            bytes = bytes.checked_add(body.len()).ok_or_else(|| {
-                error(
-                    AuthorityErrorKind::SourceLimit,
-                    "Page bodies exceed their aggregate bound.",
-                )
-            })?;
-            out.push(entry(binding, record, &body)?);
+            let remaining = rules().limits.aggregate_body_bytes.saturating_sub(bytes);
+            let (read, used) = strict_read(binding, &pairing, record, remaining);
+            bytes = bytes.saturating_add(used);
+            out.push(match read {
+                Ok(body) => entry(binding, record, &body)?,
+                Err((state, observed)) => {
+                    withheld_entry(binding, record, entry_metadata(record)?, state, observed)
+                }
+            });
         }
     }
     crate::vault::scan::assign_projects(&mut out);
+    with_unpaired(binding, &pairing, &include, &mut out);
     Ok(out)
 }
 pub(crate) fn read_body(root: &Path, path: &str) -> Result<String, AuthorityError> {
@@ -666,6 +978,42 @@ pub(crate) fn read_body(root: &Path, path: &str) -> Result<String, AuthorityErro
         .ok_or_else(|| missing("The canonical record is unavailable."))?;
     body(&binding, record, rules().limits.body_bytes)
 }
+/// Record one committed selected write in runtime.db's `vault_writes` under
+/// `by`'s stamp, after its commit, as the legacy doors do (CV-33, BL-24). The
+/// row holds the visible body's hash: the bytes on disk once the write landed,
+/// which a metadata-only change leaves as they were. Best-effort like every
+/// door's row: recording never fails or changes the write it describes.
+fn record_write(binding: &SelectedBinding, path: &str, body_hash: &str, by: &WriteReceipt<Human>) {
+    record_stamp(
+        binding,
+        path,
+        body_hash,
+        (by.actor(), by.run_id(), by.approved_by()),
+    );
+}
+
+/// The same row under the stamp an original receipt already holds: a paired
+/// save that recovery commits for the person who made it, never a new actor.
+fn record_stamp(
+    binding: &SelectedBinding,
+    path: &str,
+    body_hash: &str,
+    (actor, run_id, approved_by): (&str, Option<&str>, Option<&str>),
+) {
+    crate::runtime::vault_writes::record(
+        &binding.root,
+        &crate::runtime::vault_writes::WriteRow {
+            kind: "vault.write",
+            path,
+            to: None,
+            content_hash: Some(body_hash),
+            actor: Some(actor),
+            run_id,
+            approved_by,
+        },
+    );
+}
+
 pub(crate) fn set_full_width(
     root: &Path,
     path: &str,
@@ -823,6 +1171,8 @@ pub(crate) fn set_full_width(
     }
     tx.commit()
         .map_err(|_| invalid("Canonical metadata transaction could not commit."))?;
+    // Metadata only: the visible body is the one this commit checked.
+    record_write(&binding, path, &record.body_hash, by);
     store::handle_unmoved(&conn)?;
     Ok(SelectedMetadataAck::Applied {
         version: SelectedRecordVersion {
@@ -865,22 +1215,64 @@ pub(crate) struct SelectedCorpus {
     pub identity: String,
     pub corpus: crate::vault::corpus::Corpus,
 }
+/// No searchable text for a record or file whose body is not presented: its
+/// Entry already carries the state (CV-05), as an unreadable legacy file does.
+fn no_text() -> crate::vault::corpus::CorpusText {
+    crate::vault::corpus::CorpusText {
+        search_fields: None,
+        source: None,
+        body: String::new(),
+        capped: false,
+    }
+}
+/// Corpus rows in path order, each entry still beside its own text.
+fn sorted_corpus(
+    rows: Vec<(Entry, crate::vault::corpus::CorpusText)>,
+) -> crate::vault::corpus::Corpus {
+    let mut rows = rows;
+    rows.sort_by(|a, b| a.0.path.cmp(&b.0.path));
+    let (entries, texts) = rows.into_iter().unzip();
+    crate::vault::corpus::Corpus { entries, texts }
+}
 /// Fresh validation precedes any optional reuse of the resulting canonical view.
+/// A record's or a visible file's own state is part of the cache identity, so
+/// a page changed, removed or added outside Cerebro invalidates it (BL-25).
 pub(crate) fn corpus_snapshot(root: &Path) -> Result<SelectedCorpus, AuthorityError> {
     let binding = authority::selected_binding(root)?;
     let _guard = store::read_guard(&binding)?;
     let snapshot = read_snapshot(&connection(&binding, false)?, &binding)?;
-    check_pairing(&binding, &snapshot)?;
+    let pairing = check_pairing(&binding, &snapshot)?;
     let mut entries = Vec::new();
     let mut texts = Vec::new();
     let mut facts = Vec::new();
     let mut bytes = 0usize;
     for record in &snapshot.records {
-        let remaining = rules().limits.aggregate_body_bytes.saturating_sub(bytes) as u64;
-        let text = body(&binding, record, rules().limits.body_bytes.min(remaining))?;
-        bytes += text.len();
-        let entry = entry(&binding, record, &text)?;
-        facts.push(serde_json::json!([
+        let remaining = rules().limits.aggregate_body_bytes.saturating_sub(bytes);
+        let (read, used) = strict_read(&binding, &pairing, record, remaining);
+        bytes = bytes.saturating_add(used);
+        let (entry, text, state) = match read {
+            Ok(text) => {
+                let entry = entry(&binding, record, &text)?;
+                let mut end = text.len().min(crate::vault::corpus::SEARCH_BODY_CAP);
+                while !text.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let searched = crate::vault::corpus::CorpusText {
+                    search_fields: None,
+                    source: None,
+                    body: text[..end].to_owned(),
+                    capped: end < text.len(),
+                };
+                (entry, searched, serde_json::Value::Null)
+            }
+            Err((state, observed)) => {
+                let fact = serde_json::json!([state, observed]);
+                let entry =
+                    withheld_entry(&binding, record, entry_metadata(record)?, state, observed);
+                (entry, no_text(), fact)
+            }
+        };
+        let mut fact = serde_json::json!([
             record.id,
             record.path,
             record.revision.to_string(),
@@ -888,29 +1280,31 @@ pub(crate) fn corpus_snapshot(root: &Path) -> Result<SelectedCorpus, AuthorityEr
             record.body_hash,
             entry.created_at,
             entry.modified_at
-        ]));
-        let mut end = text.len().min(crate::vault::corpus::SEARCH_BODY_CAP);
-        while !text.is_char_boundary(end) {
-            end -= 1;
+        ]);
+        if !state.is_null() {
+            fact.as_array_mut().expect("a fact row").push(state);
         }
-        texts.push(crate::vault::corpus::CorpusText {
-            search_fields: None,
-            source: None,
-            body: text[..end].to_owned(),
-            capped: end < text.len(),
-        });
+        facts.push(fact);
+        texts.push(text);
         entries.push(entry);
     }
     crate::vault::scan::assign_projects(&mut entries);
+    let mut rows: Vec<_> = entries.into_iter().zip(texts).collect();
+    let mut unpaired = Vec::new();
+    for (path, state) in &pairing.unpaired {
+        unpaired.push(serde_json::json!([path, state]));
+        rows.push((visible_entry(&binding, path, state.clone()), no_text()));
+    }
     let identity=serde_json::to_vec(&serde_json::json!({
         "workspaceId":binding.workspace_id,
         "root":binding.root.to_str().ok_or_else(||invalid("Workspace root is not UTF-8."))?,
         "origin":binding.origin.to_str().ok_or_else(||invalid("Workspace metadata origin is not UTF-8."))?,
         "schemaRevision":snapshot.schema_revision.to_string(),"metadataEpoch":snapshot.epoch.to_string(),"records":facts,
+        "unpaired":unpaired,
     })).map_err(|_|invalid("Canonical cache identity cannot be encoded."))?;
     Ok(SelectedCorpus {
         identity: crate::ledger::sha256_hex(&identity),
-        corpus: crate::vault::corpus::Corpus { entries, texts },
+        corpus: sorted_corpus(rows),
     })
 }
 
@@ -1014,11 +1408,12 @@ pub(crate) fn views(root: &Path) -> Result<Vec<crate::vault::write::ViewYaml>, A
     store::handle_unmoved(&conn)?;
     drop(conn);
     if schema == rules().schema_version {
-        // v2 retains its original strict body-pairing check for retained views.
+        // v2 reads its records strictly, each record's state its own (BL-25).
         scan_filtered_bound(&binding, |_| true)?;
     } else {
         // Retained view scope needs known visible membership and canonical
-        // type/path facts, not ordinary bodies' canonical hash agreement.
+        // type/path facts, not ordinary bodies' canonical hash agreement; a
+        // record's own pairing state never hides the retained views (BL-25).
         check_pairing(&binding, &snapshot)?;
     }
     let mut declared_folders = BTreeSet::new();

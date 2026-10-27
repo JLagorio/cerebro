@@ -998,6 +998,10 @@ pub(crate) fn patch_metadata(
             "The original metadata commit could not be confirmed.",
         ));
     }
+    if !unchanged {
+        // Metadata only: the visible body is the one this commit checked.
+        super::record_write(&binding, path, &record.body_hash, by);
+    }
     #[cfg(test)]
     store::after_commit();
     if store::binding_still(&binding, &guard, &conn).is_err() {

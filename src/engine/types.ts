@@ -5,6 +5,7 @@ import type {
   SelectedBodyObservation,
   SelectedEntryProperties,
   SelectedPropertyValue,
+  SelectedRecordState,
   SelectedRecordVersion,
 } from '@/lib/generated/workspace';
 
@@ -40,6 +41,8 @@ export interface Entry {
   canonicalProperties?: SelectedEntryProperties;
   /** Exact visible bytes in a selected human presentation; never a canonical acknowledgement. */
   bodyObservation?: SelectedBodyObservation;
+  /** A selected record's own state (BL-25): absent when its body pairs. Never a permission. */
+  selectedState?: SelectedRecordState;
 }
 
 /**

@@ -99,25 +99,13 @@ pub(crate) fn search_snapshot(root: &Path) -> Result<Corpus, AuthorityError> {
         .unchecked_transaction()
         .map_err(|_| missing("Canonical search snapshot is unavailable."))?;
     let snapshot = read_snapshot(&tx, &binding)?;
-    check_pairing(&binding, &snapshot)?;
-    let mut entries = Vec::new();
-    let mut searched = Vec::new();
+    let pairing = check_pairing(&binding, &snapshot)?;
+    let mut rows = Vec::new();
     let mut total = 0usize;
     for record in &snapshot.records {
         let remaining = rules().limits.aggregate_body_bytes.saturating_sub(total);
-        let cap = u64::try_from(remaining).map_err(|_| {
-            error(
-                AuthorityErrorKind::SourceLimit,
-                "Selected search body budget is unavailable.",
-            )
-        })?;
-        let exact = body(&binding, record, rules().limits.body_bytes.min(cap))?;
-        total = total.checked_add(exact.len()).ok_or_else(|| {
-            error(
-                AuthorityErrorKind::SourceLimit,
-                "Selected search body budget exceeded.",
-            )
-        })?;
+        let (read, used) = strict_read(&binding, &pairing, record, remaining);
+        total = total.saturating_add(used);
         let PropertyValue::Object { value: metadata } = &record.metadata else {
             return Err(invalid("Canonical record properties must be an object."));
         };
@@ -131,6 +119,25 @@ pub(crate) fn search_snapshot(root: &Path) -> Result<Corpus, AuthorityError> {
                 unavailable_legacy_keys: metadata.keys().cloned().collect(),
             },
         };
+        let exact = match read {
+            Ok(exact) => exact,
+            Err((state, observed)) => {
+                // Canonical metadata stays searchable; a body that is not
+                // paired is never searched or located (BL-25).
+                let entry = withheld_entry(&binding, record, projected, state, observed);
+                let search_fields = fields(record, &entry.title, entry.entry_type.as_deref())?;
+                rows.push((
+                    entry,
+                    CorpusText {
+                        search_fields: Some(search_fields),
+                        source: None,
+                        body: String::new(),
+                        capped: false,
+                    },
+                ));
+                continue;
+            }
+        };
         let entry = entry_with_metadata(&binding, record, &exact, projected)?;
         let search_fields = fields(record, &entry.title, entry.entry_type.as_deref())?;
         let mut end = exact
@@ -141,28 +148,32 @@ pub(crate) fn search_snapshot(root: &Path) -> Result<Corpus, AuthorityError> {
             end -= 1;
         }
         let capped = end < exact.len();
-        searched.push(CorpusText {
-            search_fields: Some(search_fields),
-            source: Some(SourceSnapshot {
-                raw_sha256: record.body_hash.clone(),
-                carrier: "markdown",
-                body_start_utf8: 0,
-                searched_body_bytes: end,
+        rows.push((
+            entry,
+            CorpusText {
+                search_fields: Some(search_fields),
+                source: Some(SourceSnapshot {
+                    raw_sha256: record.body_hash.clone(),
+                    carrier: "markdown",
+                    body_start_utf8: 0,
+                    searched_body_bytes: end,
+                    capped,
+                }),
+                body: exact[..end].to_owned(),
                 capped,
-            }),
-            body: exact[..end].to_owned(),
-            capped,
-        });
-        entries.push(entry);
+            },
+        ));
     }
     checked_read(&binding, &guard, &tx)?;
     tx.commit()
         .map_err(|_| missing("Canonical search snapshot could not finish."))?;
+    let (mut entries, texts): (Vec<Entry>, Vec<CorpusText>) = rows.into_iter().unzip();
     crate::vault::scan::assign_projects(&mut entries);
-    Ok(Corpus {
-        entries,
-        texts: searched,
-    })
+    let mut rows: Vec<_> = entries.into_iter().zip(texts).collect();
+    for (path, state) in &pairing.unpaired {
+        rows.push((visible_entry(&binding, path, state.clone()), no_text()));
+    }
+    Ok(sorted_corpus(rows))
 }
 /// Exact selected body read for source resolution. Source admission precedes
 /// this call; canonical pairing and its original verified store are mandatory.

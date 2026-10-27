@@ -220,7 +220,7 @@ fn staged_schema4_reopen_refuses_unrecognized_schema_objects_even_with_resealed_
     let info = staged.manifest.records[0].clone();
     fs::remove_file(f.metadata.join("workspace.db")).unwrap();
     let conn = f.conn();
-    conn.execute_batch(include_str!("../workspace_service/selected_schema_v4.sql"))
+    conn.execute_batch(crate::workspace_service::selected::schema::V4)
         .unwrap();
     conn.execute("INSERT INTO workspace VALUES (1,2,?1,1,1)", [WORKSPACE])
         .unwrap();

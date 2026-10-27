@@ -1465,7 +1465,9 @@ fn replace_body_locked(
             },
         });
     }
-    check_pairing(binding, &snapshot)?;
+    // Only this record's own pairing can refuse its write (BL-25).
+    let pairing = check_pairing(binding, &snapshot)?;
+    pairing.writable(record)?;
     let mut aggregate = 0usize;
     for candidate in &snapshot.records {
         let length = if candidate.id == record.id {
@@ -1475,10 +1477,15 @@ fn replace_body_locked(
                 BodyAdmission::Checked(_) => {
                     body(binding, candidate, rules().limits.body_bytes)?.len()
                 }
-                BodyAdmission::Editor(_) => {
-                    let (bytes, _) = observed_record_body(binding, &snapshot, candidate)?;
-                    bytes.len()
-                }
+                // A neighbor counts what its visible file holds; its own
+                // state is never this save's refusal.
+                BodyAdmission::Editor(_) => match pairing.of(candidate) {
+                    Placement::Present => fs::symlink_metadata(binding.root.join(&candidate.path))
+                        .ok()
+                        .filter(fs::Metadata::is_file)
+                        .map_or(0, |meta| usize::try_from(meta.len()).unwrap_or(usize::MAX)),
+                    _ => 0,
+                },
             }
         };
         aggregate = aggregate
@@ -1656,6 +1663,8 @@ fn replace_body_locked(
     })?;
     tx.commit()
         .map_err(|_| BodyCoreError::after_publication(operation.as_ref(), required()))?;
+    // The visible body now holds `after`, installed before this commit.
+    super::record_write(binding, path, &after_hash, by);
     #[cfg(test)]
     after_commit();
     crate::crash::stop_point("selected-metadata-committed");
@@ -1922,6 +1931,19 @@ fn recover_bound_with_outcome(
                 return Err(conflict());
             }
             tx.commit().map_err(|_| required())?;
+            // Recovery commits the person's original save: its row carries
+            // the receipt that save was made under, never a new stamp.
+            let receipt = &intent.envelope.receipt;
+            super::record_stamp(
+                binding,
+                &intent.envelope.path,
+                &intent.envelope.after_body.hash,
+                (
+                    &receipt.actor,
+                    receipt.run_id.as_deref(),
+                    receipt.approved_by.as_deref(),
+                ),
+            );
             crate::crash::stop_point("selected-editor-redo-metadata-committed");
             if database_state(conn, binding, &intent.envelope)? != PairState::New {
                 return Err(conflict());
@@ -2051,34 +2073,83 @@ pub(super) fn observed_body(
     }
     Ok(bytes)
 }
+/// How the human presentation shows one Present record (BL-25).
+enum Presented {
+    /// Exact visible bytes and what they are against the canonical pairing,
+    /// with the record's state when they differ.
+    Body(
+        Vec<u8>,
+        SelectedBodyObservation,
+        Option<SelectedRecordState>,
+    ),
+    /// Nothing of the body is shown: the record's state, and a visible hash
+    /// when one was read.
+    Withheld(SelectedRecordState, Option<String>),
+}
 /// Only ordinary, independently classified records may be observed outside
-/// their canonical pairing. Protected records and Type dependencies keep their
-/// existing strict body checks. This helper never writes or returns authority.
-fn observed_record_body(
+/// their canonical pairing. A protected record or Type dependency whose body
+/// changed is withheld with its state; nothing here writes or grants.
+fn presented_body(
     binding: &SelectedBinding,
     snapshot: &Snapshot,
     record: &Record,
-) -> Result<(Vec<u8>, SelectedBodyObservation), AuthorityError> {
-    let bytes = observed_body(binding, &record.path)?;
-    let observed_body_hash = crate::ledger::sha256_hex(&bytes);
-    let coherence = if observed_body_hash == record.body_hash {
-        EditorBodyCoherence::Paired
-    } else {
-        ordinary_body_target(binding, snapshot, record)?;
-        EditorBodyCoherence::ExternalChange
+    remaining: usize,
+) -> Presented {
+    let unavailable =
+        |reason: &str| record_state(SelectedRecordStateKind::BodyUnavailable, reason, None);
+    match readable_size(binding, record, remaining) {
+        Ok(_) => {}
+        Err(BodyRead::Missing) => return Presented::Withheld(body_missing(), None),
+        Err(BodyRead::Unavailable(reason)) => {
+            return Presented::Withheld(unavailable(reason), None)
+        }
+        // Sizing reads no body, so it names no other outcome.
+        Err(_) => {
+            return Presented::Withheld(unavailable("This page's file could not be read."), None)
+        }
+    }
+    let Ok(bytes) = observed_body(binding, &record.path) else {
+        return Presented::Withheld(
+            unavailable("This page's file could not be read as one page file."),
+            None,
+        );
     };
-    Ok((
+    let observed_body_hash = crate::ledger::sha256_hex(&bytes);
+    if observed_body_hash == record.body_hash {
+        return Presented::Body(
+            bytes,
+            SelectedBodyObservation {
+                coherence: EditorBodyCoherence::Paired,
+                observed_body_hash,
+            },
+            None,
+        );
+    }
+    if ordinary_body_target(binding, snapshot, record).is_err() {
+        return Presented::Withheld(
+            record_state(
+                SelectedRecordStateKind::NeedsReconciliation,
+                "This page was changed outside Cerebro. It belongs to its own writer, so the outside change is not shown; its properties are kept until it is reconciled.",
+                None,
+            ),
+            Some(observed_body_hash),
+        );
+    }
+    Presented::Body(
         bytes,
         SelectedBodyObservation {
-            coherence,
+            coherence: EditorBodyCoherence::ExternalChange,
             observed_body_hash,
         },
-    ))
+        Some(needs_reconciliation()),
+    )
 }
 
 /// Complete human presentation only. One existing workspace lock and the actual
 /// checked SQLite handle remain held through classification and final binding
 /// validation. A read never repairs a canonical hash or creates an operation.
+/// Each record's pairing is its own (BL-25): a page changed, missing or added
+/// outside Cerebro is one entry's state, and the workspace stays open.
 pub(super) fn scan_presentation(binding: &SelectedBinding) -> Result<Vec<Entry>, AuthorityError> {
     let guard = read_guard(binding)?;
     let conn = connection(binding, false)?;
@@ -2090,27 +2161,40 @@ pub(super) fn scan_presentation(binding: &SelectedBinding) -> Result<Vec<Entry>,
     let guard = guard.ok_or_else(|| missing("This paired workspace has no trusted lock."))?;
     binding_still(binding, &guard, &conn)?;
     let snapshot = read_snapshot(&conn, binding)?;
-    check_pairing(binding, &snapshot)?;
+    let pairing = check_pairing(binding, &snapshot)?;
     let mut entries = Vec::new();
     let mut aggregate = 0usize;
     for record in &snapshot.records {
-        let (bytes, observation) = observed_record_body(binding, &snapshot, record)?;
-        aggregate = aggregate
-            .checked_add(bytes.len())
-            .filter(|length| *length <= rules().limits.aggregate_body_bytes)
-            .ok_or_else(|| {
-                error(
-                    AuthorityErrorKind::SourceLimit,
-                    "Page bodies exceed their aggregate bound.",
-                )
-            })?;
-        let body = std::str::from_utf8(&bytes).map_err(|_| conflict())?;
-        let mut row = entry(binding, record, body)?;
-        row.hash = Some(observation.observed_body_hash.clone());
-        row.body_observation = Some(observation);
-        entries.push(row);
+        let remaining = rules()
+            .limits
+            .aggregate_body_bytes
+            .saturating_sub(aggregate);
+        let presented = match pairing.of(record) {
+            Placement::Present => presented_body(binding, &snapshot, record, remaining),
+            Placement::Missing => Presented::Withheld(body_missing(), None),
+            Placement::Unavailable(reason) => Presented::Withheld(
+                record_state(SelectedRecordStateKind::BodyUnavailable, reason, None),
+                None,
+            ),
+            Placement::Conflict(state) => Presented::Withheld(state.clone(), None),
+        };
+        entries.push(match presented {
+            Presented::Body(bytes, observation, state) => {
+                aggregate = aggregate.saturating_add(bytes.len());
+                let body = std::str::from_utf8(&bytes).map_err(|_| conflict())?;
+                let mut row = entry(binding, record, body)?;
+                row.hash = Some(observation.observed_body_hash.clone());
+                row.body_observation = Some(observation);
+                row.selected_state = state;
+                row
+            }
+            Presented::Withheld(state, observed) => {
+                withheld_entry(binding, record, entry_metadata(record)?, state, observed)
+            }
+        });
     }
     crate::vault::scan::assign_projects(&mut entries);
+    with_unpaired(binding, &pairing, &|_| true, &mut entries);
     binding_still(binding, &guard, &conn)?;
     no_pending(binding)?;
     Ok(entries)

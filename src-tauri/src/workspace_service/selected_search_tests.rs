@@ -243,9 +243,12 @@ fn selected_source_refuses_unpaired_visible_body_even_when_locator_matches_its_f
             resolve(&f, &locator),
             ResolveSourceResult::Unavailable { .. }
         ));
-        assert!(
-            search::vault_search_in(&CorpusCache::new(1), &f.root, "Unpaired quote", 10).is_err()
-        );
+        // BL-25: the workspace stays searchable, and the outside bytes are
+        // never searched, located or adopted.
+        let found =
+            search::vault_search_in(&CorpusCache::new(1), &f.root, "Unpaired quote", 10).unwrap();
+        assert_eq!(found.total, 0);
+        assert!(found.hits.is_empty());
     });
 }
 #[test]

@@ -34,6 +34,7 @@ fn schema_bundle() -> serde_json::Value {
             "EditorReceiptView": schemars::schema_for!(super::selected::EditorReceiptView),
             "SelectedEditorSnapshot": schemars::schema_for!(super::selected::SelectedEditorSnapshot),
             "SelectedBodyObservation": schemars::schema_for!(super::selected::SelectedBodyObservation),
+            "SelectedRecordState": schemars::schema_for!(selected::SelectedRecordState),
             "EditorSaveResult": schemars::schema_for!(super::selected::EditorSaveResult),
 
             "AuthorityError": schemars::schema_for!(selected::AuthorityError),

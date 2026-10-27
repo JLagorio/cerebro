@@ -585,6 +585,9 @@ mod recovery_counts;
 #[path = "selected_external_body_tests.rs"]
 mod external_bodies;
 
+#[path = "selected_write_log_tests.rs"]
+mod write_log;
+
 #[test]
 fn checklist_expected_metadata_revision_refuses_after_fresh_snapshot() {
     let f = fixture("checklist-metadata-interleave");

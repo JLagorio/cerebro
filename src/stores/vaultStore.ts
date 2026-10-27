@@ -984,28 +984,34 @@ export function acceptSelectedEditorVersion(
     return false;
   if (comparison === 0n) return true;
   useVaultStore.setState({
-    entries: state.entries.map((candidate): Entry =>
-      candidate === entry
-        ? {
-            ...candidate,
-            authority: { ...version },
-            // A version acknowledgement does not replace a separately read
-            // body. Keep its observed hash and re-pair only that known image.
-            hash: candidate.bodyObservation?.observedBodyHash ?? version.bodyHash,
-            ...(candidate.bodyObservation === undefined
-              ? {}
-              : {
-                  bodyObservation: {
-                    ...candidate.bodyObservation,
-                    coherence:
-                      candidate.bodyObservation.observedBodyHash === version.bodyHash
-                        ? 'paired'
-                        : 'external_change',
-                  },
-                }),
-          }
-        : candidate,
-    ),
+    entries: state.entries.map((candidate): Entry => {
+      if (candidate !== entry) return candidate;
+      const { selectedState, ...rest } = candidate;
+      // A record this acknowledgement re-pairs no longer needs reconciling
+      // (BL-25); any other state stays until a scan says otherwise.
+      const settled =
+        selectedState?.kind === 'needs_reconciliation' &&
+        candidate.bodyObservation?.observedBodyHash === version.bodyHash;
+      return {
+        ...rest,
+        ...(selectedState === undefined || settled ? {} : { selectedState }),
+        authority: { ...version },
+        // A version acknowledgement does not replace a separately read
+        // body. Keep its observed hash and re-pair only that known image.
+        hash: candidate.bodyObservation?.observedBodyHash ?? version.bodyHash,
+        ...(candidate.bodyObservation === undefined
+          ? {}
+          : {
+              bodyObservation: {
+                ...candidate.bodyObservation,
+                coherence:
+                  candidate.bodyObservation.observedBodyHash === version.bodyHash
+                    ? 'paired'
+                    : 'external_change',
+              },
+            }),
+      };
+    }),
   });
   return true;
 }

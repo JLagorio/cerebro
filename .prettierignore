@@ -77,6 +77,10 @@ shared/run-configuration/metadata-labels.v1.json
 shared/workspace/authority.v2.json
 shared/workspace/staging.v1.json
 
+# Shipped selected-store schemas are frozen bytes, each pinned by a committed
+# SHA-256 the Rust loader asserts (BL-23): a reflow would refuse every store.
+shared/workspace/schema/
+
 # Native restart audits hash these exact column-fixture bytes as columnsDigest.
 src-tauri/fixtures/native-restart-r1-columns.json
 src-tauri/fixtures/native-restart-r2-columns.json

@@ -105,6 +105,9 @@ pub(super) struct Frame {
     pub(super) rows: Vec<Row>,
     pub(super) schema: VaultSchema,
     withheld: usize,
+    /// The canonical types of readable records left out because their own
+    /// pairing is not whole (BL-25): never a silent shortfall, always said.
+    pub(super) unavailable: Vec<Option<String>>,
 }
 fn frame(root: &Path, admits: &dyn Fn(&str) -> bool) -> Result<Frame> {
     policy()?;
@@ -115,8 +118,8 @@ fn frame(root: &Path, admits: &dyn Fn(&str) -> bool) -> Result<Frame> {
         .unchecked_transaction()
         .map_err(|_| missing("Canonical semantic snapshot is unavailable."))?;
     let snapshot = read_snapshot(&tx, &binding)?;
-    check_pairing(&binding, &snapshot)?;
-    let frame = frame_rows(&binding, snapshot.records, admits)?;
+    let pairing = check_pairing(&binding, &snapshot)?;
+    let frame = frame_rows(&binding, snapshot.records, &pairing, admits)?;
     store::handle_unmoved(&tx)?;
     private_database(&binding)?;
     if let Some(guard) = &guard {
@@ -137,11 +140,13 @@ fn frame(root: &Path, admits: &dyn Fn(&str) -> bool) -> Result<Frame> {
 pub(super) fn frame_rows(
     binding: &SelectedBinding,
     records: Vec<Record>,
+    pairing: &Pairing,
     admits: &dyn Fn(&str) -> bool,
 ) -> Result<Frame> {
     policy()?;
     let mut rows = Vec::new();
     let mut withheld = 0usize;
+    let mut unavailable = Vec::new();
     let mut total = 0usize;
     let mut types = BTreeSet::new();
     for record in records {
@@ -157,12 +162,13 @@ pub(super) fn frame_rows(
             Some(PropertyValue::String { value }) => Some(value.clone()),
             _ => return Err(unsupported("Canonical type must be text or null.")),
         };
-        let remaining = u64::try_from(rules().limits.aggregate_body_bytes.saturating_sub(total))
-            .map_err(|_| unsupported("Canonical body budget is unavailable."))?;
-        let exact = body(binding, &record, rules().limits.body_bytes.min(remaining))?;
-        total = total
-            .checked_add(exact.len())
-            .ok_or_else(|| unsupported("Canonical body budget exceeded."))?;
+        let remaining = rules().limits.aggregate_body_bytes.saturating_sub(total);
+        let (read, used) = strict_read(binding, pairing, &record, remaining);
+        total = total.saturating_add(used);
+        let Ok(exact) = read else {
+            unavailable.push(entry_type);
+            continue;
+        };
         let mut projected = Map::new();
         let keys = if entry_type.as_deref() == Some("Type") {
             &["fields", "statuses", "folder", "deadline"][..]
@@ -223,6 +229,7 @@ pub(super) fn frame_rows(
         rows,
         schema,
         withheld,
+        unavailable,
     })
 }
 
@@ -895,11 +902,28 @@ pub(super) fn matches_filter(
     }
 }
 
-fn scope_words(withheld: usize) -> String {
-    if withheld == 0 {
+fn scope_words(frame: &Frame) -> String {
+    let mut words = Vec::new();
+    if frame.withheld > 0 {
+        words.push(format!(
+            "{} notes outside this run's read scope were not read",
+            frame.withheld
+        ));
+    }
+    if !frame.unavailable.is_empty() {
+        words.push(unavailable_words(frame.unavailable.len()));
+    }
+    if words.is_empty() {
         String::new()
     } else {
-        format!(" ({withheld} notes outside this run's read scope were not read)")
+        format!(" ({})", words.join("; "))
+    }
+}
+fn unavailable_words(unavailable: usize) -> String {
+    if unavailable == 1 {
+        "1 record was not read because its page needs a person's attention".into()
+    } else {
+        format!("{unavailable} records were not read because their pages need a person's attention")
     }
 }
 /// An immutable total key, separate from day-wide predicate comparisons.
@@ -1124,7 +1148,7 @@ pub(crate) fn query_records(
     let shown = total.min(request.limit);
     let mut lines = vec![format!(
         "{shown} of {total} readable records{}; canonical present values are tagged.",
-        scope_words(frame.withheld)
+        scope_words(&frame)
     )];
     for row in matched.into_iter().take(request.limit) {
         lines.push(format!(
@@ -1193,13 +1217,13 @@ pub(crate) fn describe_database(
             "Database {label} ({}): {} records{}.",
             doc.entry.path,
             rows.len(),
-            scope_words(frame.withheld)
+            scope_words(&frame)
         )
     } else {
         format!(
             "No Type doc this run can read declares {label}; {} records carry it{}.",
             rows.len(),
-            scope_words(frame.withheld)
+            scope_words(&frame)
         )
     }];
     if let Some(own) = frame.schema.type_named(label) {
@@ -1355,7 +1379,7 @@ pub(crate) fn agenda_text(
         }
     }
     let agenda = agenda::collect(&entries, &frame.schema, wanted.as_deref(), window, zone);
-    Ok(agenda::answer_text(
+    let mut text = agenda::answer_text(
         &agenda,
         window,
         &agenda::Listing {
@@ -1365,7 +1389,14 @@ pub(crate) fn agenda_text(
             withheld: frame.withheld,
             zone,
         },
-    ))
+    );
+    if !frame.unavailable.is_empty() {
+        text.push_str(&format!(
+            "\n{}.",
+            unavailable_words(frame.unavailable.len())
+        ));
+    }
+    Ok(text)
 }
 
 pub(crate) fn suggest_view(

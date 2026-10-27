@@ -44,7 +44,7 @@ pub(super) fn create(root: &Path, workspace_id: &str, records: &[RecordData]) ->
     // Only this explicit create-new staging producer installs a schema. Reads
     // never upgrade an old staged store or an original selected workspace.
     connection
-        .execute_batch(include_str!("../workspace_service/selected_schema_v4.sql"))
+        .execute_batch(crate::workspace_service::selected::schema::V4)
         .map_err(db)?;
     let transaction = connection.transaction().map_err(db)?;
     transaction

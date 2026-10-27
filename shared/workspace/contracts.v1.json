@@ -4567,6 +4567,82 @@
         }
       }
     },
+    "SelectedRecordState": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "SelectedRecordState",
+      "description": "One record's per-record state, carried on its Entry beside parse_error. Descriptive only: it grants nothing and selects no writer.",
+      "type": "object",
+      "required": [
+        "kind",
+        "message"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/SelectedRecordStateKind"
+        },
+        "message": {
+          "description": "What a person reads about this record.",
+          "type": "string"
+        },
+        "visiblePath": {
+          "description": "The visible spelling a conflict found, where it differs from the path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SelectedRecordStateKind": {
+          "description": "What is wrong with one selected record, and only that record (BL-25). Binding, schema and marker faults still refuse the whole workspace; none of these does, and none is adopted without a person's choice.",
+          "oneOf": [
+            {
+              "description": "The visible body differs from its canonical pairing. The canonical metadata is kept and the visible bytes are never adopted silently.",
+              "type": "string",
+              "enum": [
+                "needs_reconciliation"
+              ]
+            },
+            {
+              "description": "The canonical record's visible body is gone. Its metadata is kept.",
+              "type": "string",
+              "enum": [
+                "body_missing"
+              ]
+            },
+            {
+              "description": "Something is at the record's path that cannot be read as its page.",
+              "type": "string",
+              "enum": [
+                "body_unavailable"
+              ]
+            },
+            {
+              "description": "A visible page with no canonical identity: no metadata, no grants. Only an explicit, receipted human adoption can pair it.",
+              "type": "string",
+              "enum": [
+                "plain_page_candidate"
+              ]
+            },
+            {
+              "description": "Two claims on one visible page, or a rename by case or Unicode form.",
+              "type": "string",
+              "enum": [
+                "conflict"
+              ]
+            },
+            {
+              "description": "A diagram or board this workspace has no reader for yet.",
+              "type": "string",
+              "enum": [
+                "unsupported_carrier"
+              ]
+            }
+          ]
+        }
+      }
+    },
     "EditorSaveResult": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "EditorSaveResult",

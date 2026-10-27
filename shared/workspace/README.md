@@ -56,6 +56,31 @@ The legacy locator remains a path selector; the whole-file hash is never renamed
 to a body hash or replaced with a fabricated revision. No read writes a manifest,
 and no new body writer is introduced.
 
+## Shipped store schemas (BL-23)
+
+`schema/` holds the exact text every selected store was built from:
+`selected_schema.sql` (store 2), `selected_schema_v3.sql` and
+`selected_schema_v4.sql`. A shipped schema is frozen. Each file has a committed
+SHA-256 beside it (`selected_schema*.sha256`) that
+`workspace_service::selected::schema::tests::the_loaded_bytes_match_the_committed_digest`
+asserts, so any byte change, a space or a comment included, fails the build.
+Never edit a shipped file or re-anchor its digest; a new store version is a new
+file with its own digest, written by the `#[ignore]`d
+`write_selected_schema_digests`, which only anchors files that have none.
+
+A store is held to SQLite's own model of its shipped text, built once on a
+private in-memory database: every table and automatic index with its stored
+definition, compared object by object (`selected_schema.rs::verify`). Nothing
+splits or trims the text by hand, so a comment between statements cannot drop
+an expected table, and a reformatted or commented definition is refused with a
+reason naming the object. `every_production_statement_prepares_on_each_shipped_store_it_names`
+finds each rusqlite SQL call site in production `workspace_service/` and
+`workspace_migration/` code and prepares its statement on every shipped store
+that has the tables and columns it names; a call site it cannot read fails it,
+save `model_of`, which runs only the shipped texts on its own in-memory database.
+
+`.prettierignore` skips `schema/`.
+
 ## Value prototype (M99.2)
 
 `values.v1.json` is the semantic artifact and case corpus for the native

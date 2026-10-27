@@ -13,9 +13,9 @@ fn fixture(label: &str, schema4: bool) -> Fixture {
     fs::remove_file(&f.db).unwrap();
     let conn = Connection::open(&f.db).unwrap();
     conn.execute_batch(if schema4 {
-        include_str!("selected_schema_v4.sql")
+        crate::workspace_service::selected::schema::V4
     } else {
-        include_str!("selected_schema_v3.sql")
+        crate::workspace_service::selected::schema::V3
     })
     .unwrap();
     conn.execute("INSERT INTO workspace VALUES (1,2,?1,5,11)", [WORKSPACE])
@@ -120,6 +120,31 @@ fn actual_metadata_patch_uses_real_operation_and_preserves_unrelated_tags_and_ex
         assert_eq!(op.version.body_hash, before.body_hash);
         assert_eq!(selected::read_body(&f.root, "page.md").unwrap(), BODY);
     });
+}
+#[test]
+fn metadata_patch_records_its_stamp_after_commit_and_a_replay_or_noop_records_nothing() {
+    let armed = Armed::new("metadata-patch");
+    let f = fixture("write-log", true);
+    f.run(|| {
+        let q = request(&f);
+        applied(patch(&f, &q).unwrap());
+        // Metadata only: the row holds the visible body the commit checked.
+        assert_eq!(
+            written(&f.root),
+            vec![person_wrote("page.md", BODY.as_bytes())]
+        );
+        // The same request replays its original result and writes nothing.
+        patch(&f, &q).unwrap();
+        let mut unchanged = request(&f);
+        unchanged.request_key = KEY2.into();
+        unchanged.expected_version = f.version();
+        assert!(matches!(
+            patch(&f, &unchanged).unwrap(),
+            MetadataPatchResult::Unchanged { .. }
+        ));
+        assert_eq!(written(&f.root).len(), 1);
+    });
+    drop(armed);
 }
 #[test]
 fn tagged_null_and_remove_are_distinct_canonical_metadata_operations() {
@@ -450,7 +475,7 @@ fn original_schema3_pending_intent_is_never_recovered_under_schema4() {
         // Adversarial disposable staging only: an admitted upgrade must itself
         // refuse pending evidence. Simulate bypass so recovery must still bind
         // this exact original envelope to its historical schema, on same inode.
-        let sql=include_str!("selected_schema_v4.sql");
+        let sql=crate::workspace_service::selected::schema::V4;
         let table=|name:&str|sql.split(';').map(str::trim).find(|s|s.starts_with(&format!("CREATE TABLE {name} ("))).unwrap();
         let upgrade=format!("BEGIN IMMEDIATE; ALTER TABLE metadata_receipts RENAME TO old_receipts; {}; INSERT INTO metadata_receipts SELECT * FROM old_receipts; DROP TABLE old_receipts; {}; PRAGMA user_version=4; COMMIT;",table("metadata_receipts"),table("metadata_requests"));
         f.conn().execute_batch(&upgrade).unwrap();

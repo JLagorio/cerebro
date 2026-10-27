@@ -272,6 +272,33 @@ it.each([
   },
 );
 
+// BL-25: a record's own state settles only when this acknowledgement re-pairs
+// the exact bytes it observed; anything else waits for the next scan.
+it.each([
+  { label: 're_paired', observed: 'after', kept: false },
+  { label: 'still_outside', observed: 'outside C', kept: true },
+] as const)('selected_record_state_$label', ({ observed, kept }) => {
+  const hash = sha256Hex(observed);
+  const selectedState = {
+    kind: 'needs_reconciliation' as const,
+    message: 'This page was changed outside Cerebro.',
+  };
+  useVaultStore.setState({
+    entries: [
+      {
+        ...entry(),
+        hash,
+        bodyObservation: { coherence: 'external_change', observedBodyHash: hash },
+        selectedState,
+      },
+    ],
+  });
+  expect(acceptSelectedEditorVersion(vault, path, target, after)).toBe(true);
+  const projected = useVaultStore.getState().entries[0];
+  expect(projected.selectedState).toEqual(kept ? selectedState : undefined);
+  expect('selectedState' in projected).toBe(kept);
+});
+
 it('selected_external_observation_metadata_revision_acceptance_cannot_replace_observed_hash_with_canonical_A', () => {
   const hash = sha256Hex('outside B');
   const observation = { coherence: 'external_change' as const, observedBodyHash: hash };

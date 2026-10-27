@@ -1,7 +1,7 @@
 import { FilePage } from '@/pages/FilePage';
 import { isWhiteboardPath } from '@/engine/fileKinds';
 import { CanvasPage } from '@/pages/CanvasPage';
-import { useLayoutEffect } from 'react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { placeLabel } from '@/engine/place';
@@ -9,7 +9,8 @@ import type { PaneId } from '@/engine/panes';
 import { useMeasuredWidth } from '@/hooks/useMeasuredWidth';
 import { useCommands, useKeyScope } from '@/lib/keys/useKeys';
 import { PaneContext, useNavStore } from '@/stores/navStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useEntry, useVaultStore } from '@/stores/vaultStore';
+import { SelectedDocPage } from '@/pages/SelectedDocPage';
 import { Contained } from './Contained';
 import { installOpenIntent } from './openIntent';
 import { paneCapacity, paneParked, PANE_PARK, PANE_TAB } from './shellLayout';
@@ -202,6 +203,13 @@ export function PaneRow() {
   );
 }
 
+/** A diagram or board in a selected workspace that has its own state (BL-25)
+ * shows that state; no diagram or board writer opens over it. */
+function SelectedCarrierGate({ path, children }: { path: string; children: ReactNode }) {
+  const entry = useEntry(path);
+  return entry?.selectedState !== undefined ? <SelectedDocPage entry={entry} /> : children;
+}
+
 export function PaneOutlet() {
   const selection = useNavStore((s) => s.selection);
   switch (selection.kind) {
@@ -228,10 +236,14 @@ export function PaneOutlet() {
     // path change re-pointed the save at the NEW file before the OLD page's
     // pending edit had flushed — writing A's bytes into B and losing A's edit.
     case 'diagram':
-      return isWhiteboardPath(selection.path) ? (
-        <CanvasPage key={selection.path} selection={selection} />
-      ) : (
-        <DiagramPage key={selection.path} selection={selection} />
+      return (
+        <SelectedCarrierGate path={selection.path}>
+          {isWhiteboardPath(selection.path) ? (
+            <CanvasPage key={selection.path} selection={selection} />
+          ) : (
+            <DiagramPage key={selection.path} selection={selection} />
+          )}
+        </SelectedCarrierGate>
       );
     // M10: a Collection is the container's page; a List is the record canvas.
     case 'collection':

@@ -662,13 +662,14 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   write.
   enforced: `src-tauri/src/mcp.rs::an_ask_first_write_never_lands_without_a_persons_allow`, `src-tauri/src/mcp.rs::a_renderer_cannot_drop_ask_first`, `src-tauri/src/mcp.rs::an_unattended_ask_first_write_waits_in_review_and_nowhere_on_disk`, `src/lib/policy/toolApproval.test.ts::replays the tool-approval goldens`
 - **CV-33 Every vault write carries a receipt** (M58.1). A writer in
-  `vault::write`, the ledger's concept writers and git's discard take a
-  `WriteReceipt<Door>` (Human, Agent, ConceptDoor, System) that only its
+  `vault::write`, the selected workspace writers (M99.7), the ledger's concept
+  writers and git's discard take a `WriteReceipt<Door>` (Human, Agent,
+  ConceptDoor, System) that only its
   door's guard can mint, and record actor and run_id in `vault_writes` under
   the path the scan lists, or are listed in `UNRECORDED` with their reason.
   IPC doors stamp `human:me`; MCP doors stamp the run's grant, and a write a
   person allowed names them as approver; the mock stamps the same doors.
-  enforced: `src-tauri/src/vault/receipt.rs::receipts_are_minted_only_at_their_doors`, `src/lib/mockIpc.test.ts::replays the shared write doors`
+  enforced: `src-tauri/src/vault/receipt.rs::receipts_are_minted_only_at_their_doors`, `src/lib/mockIpc.test.ts::replays the shared write doors`, `src-tauri/src/vault/write.rs::every_writer_records_its_stamp_or_is_declared`
 - **CV-34 A run commits only what it wrote** (M58.3). When a run ends, Rust
   commits exactly the paths its `vault_writes` rows and its own completed
   Write and Edit calls name, its subagents' among them, since a subagent

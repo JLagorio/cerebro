@@ -339,14 +339,30 @@ impl PortableFixture {
         assert_eq!(manifest["schema_revision"], "5");
         assert_eq!(manifest["schema_version"], 3);
         self.selected.run(|| {
-            assert_eq!(
-                selected::scan(&self.selected.root).unwrap_err().kind,
-                AuthorityErrorKind::MetadataUnavailable,
-                "passive export must not grant the unsupported live carrier read"
-            );
+            assert_unadopted_carrier(&self.selected.root);
         });
         bundle
     }
+}
+/// A passive export never grants the live workspace a read of its retained
+/// knowledge carrier: the page stays one unread, unadopted state (BL-25).
+fn assert_unadopted_carrier(root: &Path) {
+    let entries = selected::scan(root).unwrap();
+    let carrier = entries
+        .iter()
+        .find(|entry| entry.path == "knowledge/systems/status-model.md")
+        .expect("the retained carrier is listed with its state");
+    let state = carrier.selected_state.as_ref().unwrap();
+    assert_eq!(state.kind, SelectedRecordStateKind::UnsupportedCarrier);
+    assert!(carrier.authority.is_none() && carrier.hash.is_none());
+    assert!(carrier.parse_error.is_some() && carrier.snippet.is_empty());
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| entry.selected_state.is_some())
+            .count(),
+        1
+    );
 }
 impl Drop for PortableFixture {
     fn drop(&mut self) {
@@ -429,10 +445,7 @@ fn portable_fixture_has_actual_post_edit_receipts_and_an_applied_original_attest
         .exists());
     // A passive export must not widen this existing live authority boundary.
     p.selected.run(|| {
-        assert_eq!(
-            selected::scan(&p.selected.root).unwrap_err().kind,
-            AuthorityErrorKind::MetadataUnavailable
-        );
+        assert_unadopted_carrier(&p.selected.root);
         assert_eq!(authority::context().unwrap().active_root().unwrap(), None);
     });
     assert!(!p.bundle().exists());

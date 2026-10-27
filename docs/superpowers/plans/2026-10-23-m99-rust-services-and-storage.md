@@ -282,6 +282,8 @@ minimum-client release remain activation gates. This slice is not full M99.6.
 - [ ] Stage the selected representation and checksum manifest into a new workspace root; compare every source again immediately before cutover. Ship the format-aware compatibility release and record its tested minimum version before enabling migration. Require successful backup/restore rehearsal from M99.8 before exposing the production command.
 - [ ] Verify clean conversion and each rejection on disposable copies. Copy-only imports must not reconstruct privileged metadata by inference. Record legacy binaries without the format guard as unsupported; do not claim a new marker prevents their same-user file access. Retain the original vault as an archive and require deliberate new registration.
 - [ ] Commit the gated command. Keep user-facing migration disabled until M99.7/M99.8 acceptance completes.
+- [x] **BL-23 (2026-10-27, uncommitted):** the shipped store texts are frozen under `shared/workspace/schema/` with committed SHA-256 digests; a store is compared object by object with SQLite's own model of its shipped text; every production SQL statement in `workspace_service/` and `workspace_migration/` prepares on each shipped store it names (`workspace_service/selected_schema_tests.rs`). A newer store is a new file, never an edit (ladder: BL-112).
+- [x] **BL-25 (2026-10-27, uncommitted):** the scan fails per record: `check_pairing` classifies the visible set (needs reconciliation, body missing or unavailable, plain-page candidate, conflict for fold-equal claims and case/NFC renames, unsupported carrier for `.mmd`, `.canvas` and unpaired `knowledge/`), and only binding, schema and marker faults refuse the workspace (`selected_record_state_tests.rs`). The explicit Adopt mutation for a candidate is not built: the frozen v3/v4 receipts have no adoption operation (owner call).
 
 ### M99.7 — Coordinate files and metadata through crash recovery
 
@@ -297,6 +299,7 @@ staged body hashes, intended metadata revision and original receipt identity.
 - [ ] Implement the selected backend's commit protocol. Hold path locks, revalidate bytes, publish only an agreed revision and retain evidence on conflict; never use SQLite commit alone as file atomicity proof.
 - [ ] Replay each crash point plus changed external bytes during recovery. Require no new verification/grants and no cross-vault mutation.
 - [ ] Commit journal and recovery together; document durability/platform assumptions for native verification.
+- [x] **BL-24 (2026-10-27, uncommitted):** every selected writer records its receipt's stamp in `vault_writes` after its commit (Full width, `metadata.patch`, the paired body writer and recovery's redo under the original stamp), or sits in `UNRECORDED`; the CV-33 rail walks both folders. Best-effort like the legacy doors: a crash between commit and row is BL-111's relay.
 
 ### M99.8 — Complete backup, rollback and remaining YAML carriers
 

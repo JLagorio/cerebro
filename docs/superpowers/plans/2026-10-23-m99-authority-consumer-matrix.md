@@ -75,6 +75,20 @@ rejects non-initial request history; existing old-format staging remains readabl
 No current-vault conversion, active registration or broad selected agent admission
 is authorized or implied.
 
+## Per-record pairing and the selected write log — 2026-10-27
+
+BL-25: scan, corpus, search, semantic frames, saved and retained views and the
+paired writer now fail per record. A changed, missing, unreadable, unpaired,
+renamed (case or NFC) or doubly claimed page, a `.mmd`, a `.canvas` and an
+unpaired `knowledge/` page are each one `Entry.selectedState` beside
+`parse_error`; canonical metadata is never deleted or adopted, and only binding,
+schema and marker faults refuse the workspace. BL-24: Full width,
+`metadata.patch`, the paired body writer (editor, checklist, TitleCell, cutover
+CAS) and recovery's redo record their receipt's stamp in `vault_writes` after
+commit; the readers that consume those rows stay `unsupported_selected`.
+BL-23 froze the three shipped store texts. The Adopt mutation for a plain-page
+candidate and the `metadata_receipts` relay (BL-111) remain open.
+
 ## Earlier bounded checkpoints
 
 Controller-owned native GREEN `/tmp/cerebro-m99-selected-native-green3.log` reports

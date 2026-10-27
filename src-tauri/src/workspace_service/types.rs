@@ -281,6 +281,41 @@ pub(crate) mod selected {
     pub enum SelectedAuthorityKind {
         SqliteMetadata,
     }
+    /// What is wrong with one selected record, and only that record (BL-25).
+    /// Binding, schema and marker faults still refuse the whole workspace;
+    /// none of these does, and none is adopted without a person's choice.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[cfg_attr(test, derive(schemars::JsonSchema))]
+    #[serde(rename_all = "snake_case")]
+    pub(crate) enum SelectedRecordStateKind {
+        /// The visible body differs from its canonical pairing. The canonical
+        /// metadata is kept and the visible bytes are never adopted silently.
+        NeedsReconciliation,
+        /// The canonical record's visible body is gone. Its metadata is kept.
+        BodyMissing,
+        /// Something is at the record's path that cannot be read as its page.
+        BodyUnavailable,
+        /// A visible page with no canonical identity: no metadata, no grants.
+        /// Only an explicit, receipted human adoption can pair it.
+        PlainPageCandidate,
+        /// Two claims on one visible page, or a rename by case or Unicode form.
+        Conflict,
+        /// A diagram or board this workspace has no reader for yet.
+        UnsupportedCarrier,
+    }
+    /// One record's per-record state, carried on its Entry beside parse_error.
+    /// Descriptive only: it grants nothing and selects no writer.
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[cfg_attr(test, derive(schemars::JsonSchema))]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    pub(crate) struct SelectedRecordState {
+        pub(crate) kind: SelectedRecordStateKind,
+        /// What a person reads about this record.
+        pub(crate) message: String,
+        /// The visible spelling a conflict found, where it differs from the path.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub(crate) visible_path: Option<String>,
+    }
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     #[cfg_attr(test, derive(schemars::JsonSchema))]
     #[serde(rename_all = "snake_case")]

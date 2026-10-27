@@ -36,7 +36,7 @@ impl Fixture {
         }
         let db = directory.join("workspace.db");
         let conn = Connection::open(&db).unwrap();
-        conn.execute_batch(include_str!("workspace_service/selected_schema.sql"))
+        conn.execute_batch(crate::workspace_service::selected::schema::V2)
             .unwrap();
         conn.execute("INSERT INTO workspace VALUES (1,2,?1,1,1)", [WORKSPACE])
             .unwrap();
@@ -314,6 +314,43 @@ fn selected_describe_uses_canonical_type_declaration_despite_unrelated_exact_val
         assert!(answer.contains("number"));
     });
     assert_eq!(f.database_bytes(), before);
+}
+#[test]
+fn selected_describe_says_a_record_whose_page_needs_a_person_was_not_read() {
+    // BL-25: one record's missing body is its own state; the answer says so
+    // instead of refusing the workspace or counting the record silently out.
+    let mut f = Fixture::new("describe-unavailable");
+    f.type_doc("types/record.md", "Record", &json!({"value":"number"}));
+    f.insert(
+        "row.md",
+        "Canonical row",
+        json!({"type":{"kind":"string","value":"Record"}}),
+    );
+    f.insert(
+        "gone.md",
+        "Gone row",
+        json!({"type":{"kind":"string","value":"Record"}}),
+    );
+    fs::remove_file(f.root.join("gone.md")).unwrap();
+    f.run(|| {
+        let answer = text(
+            tool_describe_database(
+                &vault::corpus::CorpusCache::new(1),
+                &f.root,
+                json!({"type":"Record"}).as_object().unwrap(),
+                &f.grant(None),
+                chrono_tz::UTC,
+                day(),
+            )
+            .unwrap(),
+        );
+        assert!(
+            answer.contains(
+                "1 records (1 record was not read because its page needs a person's attention)"
+            ),
+            "{answer}"
+        );
+    });
 }
 #[test]
 fn selected_visible_duplicate_type_meaning_refuses_instead_of_picking_scan_order() {

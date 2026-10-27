@@ -1279,6 +1279,16 @@ pub const UNRECORDED: &[(&str, &str)] = &[
         "the CLI's own Write, Edit and shell bypass the doors; the run books partial \
          (runs.writes_booked = 2) and M58.3 names its Write and Edit paths",
     ),
+    (
+        "workspace_service/selected_store_unsupported.rs",
+        "off Unix every selected body writer refuses before it touches a byte, so there \
+         is no write to record",
+    ),
+    (
+        "workspace_service/selected_metadata_unsupported.rs",
+        "off Unix the selected metadata patch refuses before it touches a byte, so there \
+         is no write to record",
+    ),
 ];
 
 /// A file a knowledge projection wrote (M58.1): its path, and whether it was
@@ -3999,10 +4009,11 @@ mod tests {
             .collect()
     }
 
-    // M58.1: every writer here, in the Trash (M60.8) and in the batch writer
-    // (M60.6) takes a receipt, and either records a row under it or is
-    // declared in UNRECORDED with its reason. A writer added with a receipt
-    // and left off this table fails here.
+    // M58.1: every writer here, in the Trash (M60.8), in the batch writer
+    // (M60.6) and in the selected workspace service and migration (BL-24)
+    // takes a receipt, and either records a row under it or is declared in
+    // UNRECORDED with its reason. A writer added with a receipt and left off
+    // these tables fails here.
     #[test]
     fn every_writer_records_its_stamp_or_is_declared() {
         const WRITERS: &[(&str, &str)] = &[
@@ -4126,6 +4137,130 @@ mod tests {
             }
         }
         assert!(UNRECORDED.iter().all(|(_, why)| !why.is_empty()));
+
+        // BL-24: the selected writers take a receipt too, and record its
+        // stamp after their commit or sit in UNRECORDED. Every file in both
+        // folders is walked, so a new one cannot be missed; a name is keyed
+        // by its file, since the non-Unix stubs repeat the Unix writers'.
+        const SELECTED_WRITERS: &[(&str, &str, &str)] = &[
+            ("workspace_service/selected.rs", "record_write", "one row"),
+            (
+                "workspace_service/selected.rs",
+                "set_full_width",
+                "vault.write after its commit, or nothing when unchanged",
+            ),
+            (
+                "workspace_service/selected_metadata.rs",
+                "patch_metadata",
+                "vault.write after its commit, or nothing when unchanged or replayed",
+            ),
+            (
+                "workspace_service/selected_store.rs",
+                "replace_body",
+                "replace_body_core's",
+            ),
+            (
+                "workspace_service/selected_store.rs",
+                "replace_body_with_recovery",
+                "replace_body_core's",
+            ),
+            (
+                "workspace_service/selected_store.rs",
+                "replace_body_core",
+                "replace_body_locked's vault.write after its commit, or nothing when unchanged",
+            ),
+            (
+                "workspace_service/selected_store.rs",
+                "save_editor_body",
+                "replace_body_locked's, or recovery's row under the original stamp",
+            ),
+            (
+                "workspace_service/selected_editor.rs",
+                "save_editor_body",
+                "the store's",
+            ),
+            (
+                "workspace_migration/cutover.rs",
+                "commit_workspace_change",
+                "replace_body's",
+            ),
+            (
+                "workspace_migration/cutover.rs",
+                "commit_workspace_change_with_recovery",
+                "replace_body_with_recovery's",
+            ),
+            (
+                "workspace_service/selected_store_unsupported.rs",
+                "replace_body",
+                "unrecorded",
+            ),
+            (
+                "workspace_service/selected_store_unsupported.rs",
+                "replace_body_with_recovery",
+                "unrecorded",
+            ),
+            (
+                "workspace_service/selected_store_unsupported.rs",
+                "save_editor_body",
+                "unrecorded",
+            ),
+            (
+                "workspace_service/selected_metadata_unsupported.rs",
+                "patch_metadata",
+                "unrecorded",
+            ),
+        ];
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut selected: Vec<String> = Vec::new();
+        for dir in ["workspace_service", "workspace_migration"] {
+            for item in walkdir::WalkDir::new(src.join(dir)).sort_by_file_name() {
+                let item = item.unwrap();
+                if item.path().extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let source = std::fs::read_to_string(item.path()).unwrap();
+                // Out-of-line test modules carry their own compile-time exclusion.
+                if source.starts_with("#![cfg(test)]") {
+                    continue;
+                }
+                let production = source
+                    .find("#[cfg(test)]\nmod tests")
+                    .map_or(source.as_str(), |cut| &source[..cut]);
+                let rel = item
+                    .path()
+                    .strip_prefix(&src)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let mut from = 0;
+                while let Some(i) = production[from..].find("&WriteReceipt<") {
+                    let at = from + i;
+                    let line_start = production[..at].rfind('\n').map_or(0, |n| n + 1);
+                    if !production[line_start..at].trim_start().starts_with("//") {
+                        selected.push(format!("{rel}::{}", fn_at(production, at)));
+                    }
+                    from = at + 1;
+                }
+            }
+        }
+        let mut table: Vec<String> = SELECTED_WRITERS
+            .iter()
+            .map(|(file, name, _)| format!("{file}::{name}"))
+            .collect();
+        selected.sort();
+        table.sort();
+        assert_eq!(
+            selected, table,
+            "every receipt-taking selected writer is on the table, once"
+        );
+        for (file, name, kind) in SELECTED_WRITERS {
+            if *kind == "unrecorded" {
+                assert!(
+                    UNRECORDED.iter().any(|(declared, _)| declared == file),
+                    "{file}::{name} records nothing, so UNRECORDED names it"
+                );
+            }
+        }
     }
 
     #[test]

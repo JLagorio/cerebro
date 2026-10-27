@@ -147,7 +147,7 @@ describe('selected one-key metadata action shared cases', () => {
     });
 });
 
-it('actual selected browser reads and the one-key action refuse a mismatched canonical body pairing', async () => {
+it('actual selected browser scan names a mismatched pairing; reads and the one-key action refuse it', async () => {
   const vault = '/fixture-selected-body-pairing';
   seedSelectedWorkspaceForTest({
     vault,
@@ -162,7 +162,13 @@ it('actual selected browser reads and the one-key action refuse a mismatched can
       },
     ],
   });
-  await expect(mock.scanVault(vault)).rejects.toMatchObject({ kind: 'source_changed' });
+  // BL-25: the scan stays available and the record carries its own state.
+  const [entry] = await mock.scanVault(vault);
+  expect(entry.selectedState?.kind).toBe('needs_reconciliation');
+  expect(entry.parseError).toBe(entry.selectedState?.message);
+  expect(entry.hash).toBe(sha256Hex('# Outside body edit\n'));
+  expect(entry.authority?.bodyHash).toBe('a'.repeat(64));
+  expect(entry.snippet).toBe('');
   await expect(mock.readNote(vault, PATH)).rejects.toMatchObject({ kind: 'source_changed' });
   await expect(
     Promise.resolve().then(() =>

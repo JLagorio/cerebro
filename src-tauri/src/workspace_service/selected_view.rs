@@ -289,7 +289,7 @@ fn read(
         .unchecked_transaction()
         .map_err(|_| missing("Canonical saved-view snapshot is unavailable."))?;
     let snapshot = read_snapshot(&tx, &binding)?;
-    check_pairing(&binding, &snapshot)?;
+    let pairing = check_pairing(&binding, &snapshot)?;
     let declaration = snapshot
         .records
         .iter()
@@ -298,10 +298,21 @@ fn read(
     store::editor_target(&binding, declaration, target)?;
     // Changed Type metadata is stale; a newer view is never selected silently.
     store::expected_record(&binding, declaration, expected)?;
+    // The view's own declaration must pair: its H1 names the database, and an
+    // outside rename is never recomputed into another identity (BL-25).
+    if let (Err((state, _)), _) = strict_read(
+        &binding,
+        &pairing,
+        declaration,
+        rules().limits.aggregate_body_bytes,
+    ) {
+        return Err(error(AuthorityErrorKind::SourceChanged, state.message));
+    }
     let type_id = declaration.id.clone();
     let epoch = snapshot.epoch.to_string();
-    // Every body, the Type's included, is read against its paired hash here.
-    let frame = semantic::frame_rows(&binding, snapshot.records, &|_| true)?;
+    // Every body, the Type's included, is read against its paired hash here;
+    // a record whose own pairing is not whole is left out and counted.
+    let frame = semantic::frame_rows(&binding, snapshot.records, &pairing, &|_| true)?;
     let result = evaluate(
         policy,
         &frame,
@@ -345,6 +356,18 @@ fn evaluate(
         ));
     }
     let database = declaration.entry.title.as_str();
+    // A view never shows fewer rows than its database holds without saying
+    // so; one of its records needing a person refuses this read (BL-25).
+    let waiting = frame
+        .unavailable
+        .iter()
+        .filter(|kind| kind.as_deref() == Some(database))
+        .count();
+    if waiting > 0 {
+        return Err(missing(&format!(
+            "{waiting} records of {database} need a person's attention, so this view cannot be read whole."
+        )));
+    }
     let configuration = exact_view(&declaration.properties, view_id)?;
     let saved = members(Some(configuration), "configuration")?;
     closed(

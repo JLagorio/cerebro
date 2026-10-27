@@ -38,7 +38,7 @@ impl Fixture {
         private_dir(&metadata_dir);
         let db = metadata_dir.join("workspace.db");
         let conn = Connection::open(&db).unwrap();
-        conn.execute_batch(include_str!("selected_schema.sql"))
+        conn.execute_batch(crate::workspace_service::selected::schema::V2)
             .unwrap();
         conn.execute("INSERT INTO workspace VALUES (1,2,?1,1,1)", [WORKSPACE])
             .unwrap();
@@ -140,6 +140,84 @@ fn metadata() -> Value {
         "source_record_id":{"kind":"string","value":"opaque/source"}
     }})
 }
+// BL-24: the runtime sink, read back for the selected writers' rows.
+/// The process-wide runtime sink, armed for one test and disarmed after.
+#[cfg(unix)]
+struct Armed {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    config: PathBuf,
+}
+#[cfg(unix)]
+impl Armed {
+    fn new(label: &str) -> Self {
+        let lock = crate::runtime::sink::test_lock();
+        let config = testutil::temp_vault(&format!("m99-write-log-{label}"));
+        crate::runtime::sink::arm(&config).unwrap();
+        Self {
+            _lock: lock,
+            config,
+        }
+    }
+}
+#[cfg(unix)]
+impl Drop for Armed {
+    fn drop(&mut self) {
+        crate::runtime::sink::disarm();
+        let _ = fs::remove_dir_all(&self.config);
+    }
+}
+
+/// One `vault_writes` row: kind, path, content hash, actor, run, approver.
+#[cfg(unix)]
+type Row = (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+/// The workspace's rows, oldest first, read from the armed sink.
+#[cfg(unix)]
+fn written(root: &Path) -> Vec<Row> {
+    let vault_id = crate::runtime::scope::derive_vault_id(root);
+    crate::runtime::sink::with_sink(|conn| {
+        conn.prepare(
+            "SELECT kind,path,content_hash,actor,run_id,approved_by FROM vault_writes \
+             WHERE vault_id=?1 ORDER BY rowid",
+        )
+        .unwrap()
+        .query_map([vault_id], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    })
+    .unwrap()
+}
+
+/// A person's write of `bytes` to `path`, as every legacy door records one.
+#[cfg(unix)]
+fn person_wrote(path: &str, bytes: &[u8]) -> Row {
+    (
+        "vault.write".into(),
+        path.into(),
+        Some(crate::ledger::sha256_hex(bytes)),
+        Some("human:me".into()),
+        None,
+        None,
+    )
+}
+
 fn typed(error: AuthorityError, kind: AuthorityErrorKind) {
     assert_eq!(error.kind, kind);
     assert_eq!(error.code, StoreErrorCode::CapabilityUnavailable);
@@ -361,7 +439,7 @@ fn actual_scan_never_rounds_or_discards_unrepresentable_property_values() {
     });
 }
 #[test]
-fn actual_scan_and_writer_require_supported_unmodified_store_schema_and_complete_pairing() {
+fn actual_scan_and_writer_require_supported_unmodified_store_schema_and_pair_per_record() {
     let f = Fixture::new("schema");
     f.run(|| {
         let version=f.version();
@@ -370,8 +448,16 @@ fn actual_scan_and_writer_require_supported_unmodified_store_schema_and_complete
         assert!(!f.stored()["value"].as_object().unwrap().contains_key("full_width"));
         f.conn().execute_batch("DROP TRIGGER extra_effect; PRAGMA user_version=1;").unwrap();
         typed(authority_error(crate::scan_vault(f.root.to_str().unwrap().into()).unwrap_err()),AuthorityErrorKind::UnsupportedFormat);
+        // BL-25: a page with no canonical record is that page's state, never a
+        // refused workspace, and its body YAML is never read as metadata.
         f.conn().execute_batch("PRAGMA user_version=2; DELETE FROM records;").unwrap();
-        typed(authority_error(crate::scan_vault(f.root.to_str().unwrap().into()).unwrap_err()),AuthorityErrorKind::MetadataUnavailable);
+        let entries=crate::scan_vault(f.root.to_str().unwrap().into()).unwrap();
+        assert_eq!(entries.len(),1);
+        let page=&entries[0];
+        assert_eq!(page.path,"page.md");
+        assert_eq!(page.selected_state.as_ref().unwrap().kind,SelectedRecordStateKind::PlainPageCandidate);
+        assert!(page.authority.is_none()&&page.hash.is_none()&&page.entry_type.is_none()&&page.properties.is_empty());
+        assert!(page.parse_error.is_some());
         typed(mutate(&f,version,SelectedMode::Wide).unwrap_err(),AuthorityErrorKind::MetadataUnavailable);
         assert_eq!(fs::read(f.root.join("page.md")).unwrap(),BODY.as_bytes());
     });
@@ -1006,7 +1092,7 @@ fn startup_portable_v3_refuses_without_creating_a_lock_or_changing_evidence() {
     let f = Fixture::new("startup-portable-v3");
     fs::remove_file(&f.db).unwrap();
     let conn = Connection::open(&f.db).unwrap();
-    conn.execute_batch(include_str!("selected_schema_v3.sql"))
+    conn.execute_batch(crate::workspace_service::selected::schema::V3)
         .unwrap();
     drop(conn);
     let database = fs::read(&f.db).unwrap();

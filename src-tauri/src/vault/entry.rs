@@ -44,6 +44,11 @@ pub struct Entry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) body_observation:
         Option<crate::workspace_service::selected::SelectedBodyObservation>,
+    /// A selected record's per-record state (BL-25): absent when its visible
+    /// body pairs with its canonical metadata. Never a permission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) selected_state:
+        Option<crate::workspace_service::types::selected::SelectedRecordState>,
 }
 
 impl Entry {
@@ -72,6 +77,7 @@ impl Entry {
             authority: None,
             canonical_properties: None,
             body_observation: None,
+            selected_state: None,
         }
     }
 }
@@ -147,6 +153,7 @@ pub fn build_entry(
             authority: None,
             canonical_properties: None,
             body_observation: None,
+            selected_state: None,
         };
     }
     // M29.20: a `.mmd` file is RAW mermaid source, end to end. Mermaid's own
@@ -173,6 +180,7 @@ pub fn build_entry(
             authority: None,
             canonical_properties: None,
             body_observation: None,
+            selected_state: None,
         };
     }
     let stem = filename
@@ -240,6 +248,7 @@ pub fn build_entry(
         authority: None,
         canonical_properties: None,
         body_observation: None,
+        selected_state: None,
     }
 }
 
