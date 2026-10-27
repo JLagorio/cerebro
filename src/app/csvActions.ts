@@ -131,8 +131,12 @@ export async function exportViewCsv(
       useUiStore.getState().toast(surface.unavailable.message);
       return false;
     }
-    if (surface.entries.some(entry => entry.authority?.kind === 'sqlite_metadata')) {
-      useUiStore.getState().toast('Exporting this selected view needs its canonical export reader. No file was created.');
+    if (surface.entries.some((entry) => entry.authority?.kind === 'sqlite_metadata')) {
+      useUiStore
+        .getState()
+        .toast(
+          'Exporting this selected view needs its canonical export reader. No file was created.',
+        );
       return false;
     }
     const source =

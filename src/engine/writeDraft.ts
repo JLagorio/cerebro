@@ -67,12 +67,19 @@ export function parseDraft(text: string): Draft | null {
 /** Conservative editor capability: a token must survive the JS object seam
  * exactly. This is not native schema validation or canonicalization. */
 export function editableJsonNumber(text: string): boolean {
-  return /^-?(?:0|[1-9]\d*)$/.test(text) && Number.isSafeInteger(Number(text)) && String(Number(text)) === text;
+  return (
+    /^-?(?:0|[1-9]\d*)$/.test(text) &&
+    Number.isSafeInteger(Number(text)) &&
+    String(Number(text)) === text
+  );
 }
 /** Skip complete string tokens; callers separately validate JSON syntax. */
 export function editableJsonNumbers(text: string): boolean {
-  const tokens = text.matchAll(/("(?:[^"\\]|\\.)*")|(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/g);
-  for (const token of tokens) if (token[2] !== undefined && !editableJsonNumber(token[2])) return false;
+  const tokens = text.matchAll(
+    /("(?:[^"\\]|\\.)*")|(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+  );
+  for (const token of tokens)
+    if (token[2] !== undefined && !editableJsonNumber(token[2])) return false;
   return true;
 }
 

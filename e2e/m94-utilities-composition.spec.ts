@@ -206,44 +206,60 @@ for (const theme of ['light', 'dark'] as const) {
     );
   }
 
-  test('Library End keeps focus on its current last tab across owners in ' + theme, async ({ page }, info) => {
-    await page.setViewportSize({ width: 1600, height: 1000 });
-    await page.addInitScript((mode) => localStorage.setItem('cerebro.themeMode', mode), theme);
-    await boot(page, { preserveTheme: true });
-    await openDestination(page, 'Library');
-    const original = page.getByTestId('library-page');
-    await expect(original).toBeVisible();
-    await sizeHost(original, 360);
-    await original.getByTestId('library-tab-skill').focus();
-    await page.keyboard.press('End');
+  test(
+    'Library End keeps focus on its current last tab across owners in ' + theme,
+    async ({ page }, info) => {
+      await page.setViewportSize({ width: 1600, height: 1000 });
+      await page.addInitScript((mode) => localStorage.setItem('cerebro.themeMode', mode), theme);
+      await boot(page, { preserveTheme: true });
+      await openDestination(page, 'Library');
+      const original = page.getByTestId('library-page');
+      await expect(original).toBeVisible();
+      await sizeHost(original, 360);
+      await original.getByTestId('library-tab-skill').focus();
+      await page.keyboard.press('End');
 
-    // End selects the actual final tab, whose owner replaces LibraryIndex.
-    // Observe the new strip without restoring focus or adopting the old owner.
-    const workflow = page.getByTestId('workflow-library');
-    await expect(workflow).toBeVisible();
-    await sizeHost(workflow, 360);
-    const strip = page.getByRole('tablist', { name: 'Library section' });
-    const last = strip.getByRole('tab', { name: 'Workflows', exact: true });
-    await expect(last).toHaveAttribute('aria-selected', 'true');
-    await info.attach('library-end-owner-observation', {
-      body: JSON.stringify(await page.evaluate(() => {
-        const active = document.activeElement;
-        const selected = document.querySelector('[role="tablist"][aria-label="Library section"] [role="tab"][aria-selected="true"]');
-        return { activeTag: active?.tagName ?? null, activeRole: active?.getAttribute('role') ?? null, activeTestId: active?.getAttribute('data-testid') ?? null, activeText: active?.textContent ?? null, selectedText: selected?.textContent ?? null, selectedHasFocus: active === selected };
-      })),
-      contentType: 'application/json',
-    });
-    await expect(last).toBeFocused();
-    const frame = (await strip.boundingBox())!;
-    const selected = (await last.boundingBox())!;
-    expect(selected.x).toBeGreaterThanOrEqual(frame.x - 2);
-    expect(selected.x + selected.width).toBeLessThanOrEqual(frame.x + frame.width + 2);
+      // End selects the actual final tab, whose owner replaces LibraryIndex.
+      // Observe the new strip without restoring focus or adopting the old owner.
+      const workflow = page.getByTestId('workflow-library');
+      await expect(workflow).toBeVisible();
+      await sizeHost(workflow, 360);
+      const strip = page.getByRole('tablist', { name: 'Library section' });
+      const last = strip.getByRole('tab', { name: 'Workflows', exact: true });
+      await expect(last).toHaveAttribute('aria-selected', 'true');
+      await info.attach('library-end-owner-observation', {
+        body: JSON.stringify(
+          await page.evaluate(() => {
+            const active = document.activeElement;
+            const selected = document.querySelector(
+              '[role="tablist"][aria-label="Library section"] [role="tab"][aria-selected="true"]',
+            );
+            return {
+              activeTag: active?.tagName ?? null,
+              activeRole: active?.getAttribute('role') ?? null,
+              activeTestId: active?.getAttribute('data-testid') ?? null,
+              activeText: active?.textContent ?? null,
+              selectedText: selected?.textContent ?? null,
+              selectedHasFocus: active === selected,
+            };
+          }),
+        ),
+        contentType: 'application/json',
+      });
+      await expect(last).toBeFocused();
+      const frame = (await strip.boundingBox())!;
+      const selected = (await last.boundingBox())!;
+      expect(selected.x).toBeGreaterThanOrEqual(frame.x - 2);
+      expect(selected.x + selected.width).toBeLessThanOrEqual(frame.x + frame.width + 2);
 
-    await page.keyboard.press('Home');
-    const first = page.getByRole('tablist', { name: 'Library section' }).getByRole('tab', { name: /^Skills(?:\s|$)/ });
-    await expect(first).toHaveAttribute('aria-selected', 'true');
-    await expect(first).toBeFocused();
-  });
+      await page.keyboard.press('Home');
+      const first = page
+        .getByRole('tablist', { name: 'Library section' })
+        .getByRole('tab', { name: /^Skills(?:\s|$)/ });
+      await expect(first).toHaveAttribute('aria-selected', 'true');
+      await expect(first).toBeFocused();
+    },
+  );
 
   test(
     'compact Settings retains an invalid draft through repair navigation in ' + theme,

@@ -1410,16 +1410,21 @@ describe('M95 cached generation metadata has no execution authority', () => {
   });
 });
 
-
 describe('M95 cached messages cannot retain an original native reply selector', () => {
-  const reply = { ...msg('assistant', 'Original reply'), nativeRecoveryRoot: { runId: 'original-native-root', vaultPath: '/vault', opening: 4 } };
+  const reply = {
+    ...msg('assistant', 'Original reply'),
+    nativeRecoveryRoot: { runId: 'original-native-root', vaultPath: '/vault', opening: 4 },
+  };
   it('strips the captured selector when saving a thread', () => {
     saveConversations([{ ...newConversation(), messages: [msg('user', 'Question'), reply] }]);
     expect(localStorage.getItem('cerebro.conversations')).not.toContain('nativeRecoveryRoot');
     expect(Reflect.get(loadConversations()[0].messages[1], 'nativeRecoveryRoot')).toBeUndefined();
   });
   it('drops a well-formed selector injected into cached history', () => {
-    localStorage.setItem('cerebro.conversations', JSON.stringify([{ ...newConversation(), messages: [msg('user', 'Question'), reply] }]));
+    localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([{ ...newConversation(), messages: [msg('user', 'Question'), reply] }]),
+    );
     expect(Reflect.get(loadConversations()[0].messages[1], 'nativeRecoveryRoot')).toBeUndefined();
   });
 });

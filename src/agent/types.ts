@@ -630,7 +630,14 @@ export interface NativeRecoveryRoot {
 export interface ChatMessage {
   /** Archive-derived content stays memory-only in the browser cache. */
   archiveAttachmentRefs?: readonly string[];
-  archiveRecord?: { attemptId: string; expiresAt: string | null; persistence: import('@/lib/generated/conversations').PersistenceState; origin?: import('@/lib/generated/conversations').ContentOrigin; importedAt?: string | null; completedAt?: string | null };
+  archiveRecord?: {
+    attemptId: string;
+    expiresAt: string | null;
+    persistence: import('@/lib/generated/conversations').PersistenceState;
+    origin?: import('@/lib/generated/conversations').ContentOrigin;
+    importedAt?: string | null;
+    completedAt?: string | null;
+  };
   id: string;
   role: 'user' | 'assistant';
   text: string;

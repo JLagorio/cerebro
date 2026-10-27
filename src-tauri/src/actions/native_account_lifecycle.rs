@@ -61,19 +61,26 @@ impl NativeOwnerState {
         committed: impl FnOnce(&T),
     ) -> Outcome<T> {
         if !self.registration.live.load(Ordering::SeqCst) {
-            self.action_cancellations.cancel_all(); self.credential_cancellations.cancel_all();
+            self.action_cancellations.cancel_all();
+            self.credential_cancellations.cancel_all();
             return Outcome::NotCommitted(ConnectionError::Unavailable);
         }
         let mut storage = match self.storage.lock() {
             Ok(storage) => storage,
-            Err(_) => { self.action_cancellations.cancel_all(); self.credential_cancellations.cancel_all(); return Outcome::NotCommitted(ConnectionError::Unavailable); },
+            Err(_) => {
+                self.action_cancellations.cancel_all();
+                self.credential_cancellations.cancel_all();
+                return Outcome::NotCommitted(ConnectionError::Unavailable);
+            }
         };
         if storage.failed || !self.registration.live.load(Ordering::SeqCst) {
-            self.action_cancellations.cancel_all(); self.credential_cancellations.cancel_all();
+            self.action_cancellations.cancel_all();
+            self.credential_cancellations.cancel_all();
             return Outcome::NotCommitted(ConnectionError::Unavailable);
         }
         let Some(owner) = storage.owner.as_mut() else {
-            self.action_cancellations.cancel_all(); self.credential_cancellations.cancel_all();
+            self.action_cancellations.cancel_all();
+            self.credential_cancellations.cancel_all();
             return Outcome::NotCommitted(ConnectionError::Unavailable);
         };
         owner.credential_cancellations = Arc::downgrade(&self.credential_cancellations);
@@ -98,11 +105,19 @@ impl NativeOwnerState {
         let retired = owner.retired;
         if retired {
             storage.failed = true;
-            self.action_cancellations.cancel_all(); self.credential_cancellations.cancel_all();
+            self.action_cancellations.cancel_all();
+            self.credential_cancellations.cancel_all();
         }
         match result {
-            RuntimeTransactionOutcome::Committed(value) => { committed(&value); Outcome::Committed(value) },
-            RuntimeTransactionOutcome::CommitUncertain => { self.action_cancellations.cancel_all(); self.credential_cancellations.cancel_all(); Outcome::CommitUncertain },
+            RuntimeTransactionOutcome::Committed(value) => {
+                committed(&value);
+                Outcome::Committed(value)
+            }
+            RuntimeTransactionOutcome::CommitUncertain => {
+                self.action_cancellations.cancel_all();
+                self.credential_cancellations.cancel_all();
+                Outcome::CommitUncertain
+            }
             RuntimeTransactionOutcome::NotCommitted(_) => Outcome::NotCommitted(
                 if retired || !self.registration.live.load(Ordering::SeqCst) {
                     ConnectionError::Unavailable
@@ -162,7 +177,8 @@ impl NativeOwnerState {
         });
         if owner.retired {
             storage.failed = true;
-            self.action_cancellations.cancel_all(); self.credential_cancellations.cancel_all();
+            self.action_cancellations.cancel_all();
+            self.credential_cancellations.cancel_all();
         }
         let mut items = result.map_err(|_| ConnectionError::Unavailable)?;
         let next_cursor = if items.len() > cap {
@@ -204,15 +220,18 @@ impl NativeOwnerState {
         {
             return Err(ConnectionError::InvalidSelection);
         }
-        self.account_transaction_after(|tx, owner_key| {
-            account_metadata::disable(tx, owner_key, id, expected_revision)?;
-            // The shared decoder overlays the real pending cleanup queue. No
-            // OS cleanup, provider call or implicit retry follows this commit.
-            Ok(account_metadata::load(tx, owner_key, id)?.status)
-        }, |_| {
-            self.action_cancellations.cancel_connection(id);
-            self.credential_cancellations.cancel_connection(id);
-        })
+        self.account_transaction_after(
+            |tx, owner_key| {
+                account_metadata::disable(tx, owner_key, id, expected_revision)?;
+                // The shared decoder overlays the real pending cleanup queue. No
+                // OS cleanup, provider call or implicit retry follows this commit.
+                Ok(account_metadata::load(tx, owner_key, id)?.status)
+            },
+            |_| {
+                self.action_cancellations.cancel_connection(id);
+                self.credential_cancellations.cancel_connection(id);
+            },
+        )
         .into_result()
     }
 }

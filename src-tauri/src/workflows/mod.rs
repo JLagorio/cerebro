@@ -1,6 +1,9 @@
 //! Rust-owned workflow definitions. Publishing never grants execution authority.
 // The definition boundary lands before the native workflow service.
-#![expect(dead_code, reason = "M98 definition boundary precedes native service wiring")]
+#![expect(
+    dead_code,
+    reason = "M98 definition boundary precedes native service wiring"
+)]
 
 mod definition;
 #[cfg(test)]
@@ -9,8 +12,8 @@ mod tests;
 mod files;
 mod mapping;
 
-mod runner;
 mod read;
+mod runner;
 
 pub(crate) mod native_definition;
 

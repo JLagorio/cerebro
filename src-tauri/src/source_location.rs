@@ -160,20 +160,38 @@ fn candidates(text: &str, locator: &SourceLocator) -> Vec<usize> {
 
 fn resolve_body_window(locator: &SourceLocator, body: &str, hash: String) -> ResolveSourceResult {
     let mut cap = body.len().min(rules().max_body_bytes);
-    while !body.is_char_boundary(cap) { cap -= 1; }
+    while !body.is_char_boundary(cap) {
+        cap -= 1;
+    }
     let body = &body[..cap];
     let same = hash == locator.source_hash;
-    let mut resolved = locator.clone(); resolved.source_hash = hash;
+    let mut resolved = locator.clone();
+    resolved.source_hash = hash;
     if same {
-        let range = locator.body_utf8_range.as_ref().expect("validated body range");
-        if body.get(range.start as usize..range.end as usize) != Some(locator.quote.as_str()) { return changed(locator); }
+        let range = locator
+            .body_utf8_range
+            .as_ref()
+            .expect("validated body range");
+        if body.get(range.start as usize..range.end as usize) != Some(locator.quote.as_str()) {
+            return changed(locator);
+        }
     } else {
         let found = candidates(body, locator);
-        if found.len() != 1 { return changed(locator); }
-        resolved.body_utf8_range = Some(Utf8Range { start: found[0] as u32, end: (found[0] + locator.quote.len()) as u32 });
+        if found.len() != 1 {
+            return changed(locator);
+        }
+        resolved.body_utf8_range = Some(Utf8Range {
+            start: found[0] as u32,
+            end: (found[0] + locator.quote.len()) as u32,
+        });
     }
-    if same { ResolveSourceResult::Exact { locator: resolved } } else {
-        ResolveSourceResult::Relocated { locator: resolved, previous_hash: locator.source_hash.clone() }
+    if same {
+        ResolveSourceResult::Exact { locator: resolved }
+    } else {
+        ResolveSourceResult::Relocated {
+            locator: resolved,
+            previous_hash: locator.source_hash.clone(),
+        }
     }
 }
 
@@ -207,18 +225,26 @@ pub fn resolve_source(
     }
     match crate::workspace_service::authority::resolve(scope.vault) {
         Ok(crate::workspace_service::authority::Authority::Selected) => {
-            if crate::runtime::scope::derive_vault_id(scope.vault) != scope.vault_id { return Ok(unavailable()); }
+            if crate::runtime::scope::derive_vault_id(scope.vault) != scope.vault_id {
+                return Ok(unavailable());
+            }
             if locator.kind == "property" {
                 return Ok(ResolveSourceResult::Unsupported { reason: "Canonical metadata passage locations are unavailable; body YAML is not metadata.".into() });
             }
-            let Ok(exact) = crate::workspace_service::selected::source_body(scope.vault, &locator.path) else { return Ok(unavailable()); };
+            let Ok(exact) =
+                crate::workspace_service::selected::source_body(scope.vault, &locator.path)
+            else {
+                return Ok(unavailable());
+            };
             let hash = crate::ledger::sha256_hex(exact.as_bytes());
             return Ok(resolve_body_window(locator, &exact, hash));
-        },
-        Ok(crate::workspace_service::authority::Authority::Legacy) => {},
+        }
+        Ok(crate::workspace_service::authority::Authority::Legacy) => {}
         Err(_) => return Ok(unavailable()),
     }
-    let Ok(opened) = crate::workspace_service::boundary::open_legacy_source(scope.vault, &locator.path) else {
+    let Ok(opened) =
+        crate::workspace_service::boundary::open_legacy_source(scope.vault, &locator.path)
+    else {
         return Ok(unavailable());
     };
     // open_in pins an O_NOFOLLOW descriptor beneath an anchored root. Scope
@@ -267,7 +293,11 @@ pub fn resolve_source(
     let mut resolved = locator.clone();
     resolved.source_hash = hash;
     if locator.kind == "body" {
-        return Ok(resolve_body_window(locator, crate::vault::parse::split_frontmatter(&raw).1, resolved.source_hash));
+        return Ok(resolve_body_window(
+            locator,
+            crate::vault::parse::split_frontmatter(&raw).1,
+            resolved.source_hash,
+        ));
     }
     {
         let entry =

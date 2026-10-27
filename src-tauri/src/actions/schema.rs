@@ -363,7 +363,11 @@ fn normalize_number(text: &str) -> Result<String, ActionError> {
 pub(super) fn parse_bounded(text: &str, bytes: usize) -> Result<Node, ActionError> {
     parse_bounded_with_depth(text, bytes, limits().depth)
 }
-fn parse_bounded_with_depth(text: &str, bytes: usize, depth_limit: usize) -> Result<Node, ActionError> {
+fn parse_bounded_with_depth(
+    text: &str,
+    bytes: usize,
+    depth_limit: usize,
+) -> Result<Node, ActionError> {
     if text.len() > bytes {
         return Err(limit());
     }
@@ -653,7 +657,11 @@ pub(super) fn validate_output(
 
 /// Reuse the action boundary's duplicate-key refusal, exact decimals and allocation
 /// limits for workflow definitions; do not introduce a second schema evaluator.
-pub(crate) fn workflow_canonical_json(text: &str, bytes: usize, depth: usize) -> Result<String, ActionError> {
+pub(crate) fn workflow_canonical_json(
+    text: &str,
+    bytes: usize,
+    depth: usize,
+) -> Result<String, ActionError> {
     Ok(parse_bounded_with_depth(text, bytes, depth)?.canonical())
 }
 pub(crate) fn workflow_schema_digest(text: &str) -> Result<String, ActionError> {
@@ -663,7 +671,11 @@ pub(crate) fn workflow_schema_digest(text: &str) -> Result<String, ActionError> 
 pub(crate) fn workflow_validate_input(schema: &str, input: &str) -> Result<(), ActionError> {
     validate(&compile_schema(schema)?, input).map(|_| ())
 }
-pub(crate) fn workflow_parse_value(text: &str, bytes: usize, depth: usize) -> Result<Node, ActionError> {
+pub(crate) fn workflow_parse_value(
+    text: &str,
+    bytes: usize,
+    depth: usize,
+) -> Result<Node, ActionError> {
     parse_bounded_with_depth(text, bytes, depth)
 }
 pub(crate) fn workflow_schema(text: &str) -> Result<Node, ActionError> {
@@ -674,10 +686,15 @@ pub(crate) fn workflow_matches(schema: &Node, value: &Node) -> bool {
 }
 /// Declaration hints for the workflow interpreter and its static validator.
 /// The caller passes a schema produced by workflow_schema, not arbitrary JSON.
-pub(crate) fn workflow_property<'a>(schema: Option<&'a Node>, key: &str) -> Option<(&'a Node, bool)> {
+pub(crate) fn workflow_property<'a>(
+    schema: Option<&'a Node>,
+    key: &str,
+) -> Option<(&'a Node, bool)> {
     let schema = schema?.object()?;
     let property = schema.get("properties")?.object()?.get(key)?;
-    let required = schema.get("required").and_then(Node::array)
+    let required = schema
+        .get("required")
+        .and_then(Node::array)
         .is_some_and(|fields| fields.iter().any(|field| field.string() == Some(key)));
     Some((property, required))
 }

@@ -2234,7 +2234,7 @@ CREATE TABLE action_output_handoffs (
 "#;
 
 /// M98: original workflow action request selectors; original input bytes remain in V43.
-pub const SCHEMA_V45:&str=r#"
+pub const SCHEMA_V45: &str = r#"
 CREATE TABLE workflow_action_inputs (
  run_id TEXT NOT NULL, step_id TEXT NOT NULL, ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 9007199254740991),
  act_scope_digest TEXT NOT NULL CHECK(length(act_scope_digest)=64 AND NOT act_scope_digest GLOB '*[^0-9a-f]*'),
@@ -2255,7 +2255,7 @@ CREATE TABLE workflow_action_inputs (
 "#;
 
 /// Fixed physical namespace pins: never auto-rebind after directory/file replacement.
-pub const SCHEMA_V46:&str=r#"
+pub const SCHEMA_V46: &str = r#"
 CREATE TABLE action_submission_namespace (
     singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),
     protocol INTEGER NOT NULL CHECK(protocol=1),
@@ -2275,7 +2275,7 @@ CREATE TABLE action_submission_files (
 "#;
 
 /// M98: immutable workflow-owned operation and current narrowed admission.
-pub const SCHEMA_V47:&str=r#"
+pub const SCHEMA_V47: &str = r#"
 CREATE TABLE workflow_run_origins (
  workflow_run_id TEXT PRIMARY KEY NOT NULL REFERENCES workflow_runs(run_id) ON DELETE RESTRICT,
  native_run_id TEXT NOT NULL UNIQUE REFERENCES action_native_runs(run_id) ON DELETE RESTRICT,
@@ -2338,7 +2338,7 @@ CREATE TABLE workflow_submission_files (
 "#;
 
 /// M98: explicit awake activations, request receipts and occurrence identity.
-pub const SCHEMA_V48:&str=r#"
+pub const SCHEMA_V48: &str = r#"
 CREATE TABLE workflow_activations (
  activation_id TEXT PRIMARY KEY NOT NULL CHECK(length(activation_id)=32 AND NOT activation_id GLOB '*[^0-9a-f]*'),
  owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
@@ -2517,9 +2517,8 @@ WHEN EXISTS(SELECT 1 FROM conversation_bindings b JOIN conversation_threads t US
 BEGIN SELECT RAISE(ABORT,'conversation content is tombstoned or already terminal'); END;
 "#;
 
-
 /// Explicit browser-cache imports have no execution generation or run identity.
-pub const SCHEMA_V50:&str=r#"
+pub const SCHEMA_V50: &str = r#"
 CREATE TABLE conversation_legacy_attempts (
  attempt_id TEXT PRIMARY KEY NOT NULL CHECK(length(attempt_id) BETWEEN 1 AND 128),
  owner_person TEXT NOT NULL CHECK(owner_person='human:me'),

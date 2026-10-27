@@ -1753,19 +1753,108 @@ export function setManagedActionAccess(
   });
 }
 
-
 /** Archive commands remain inside the existing native IPC adapter. */
 function archiveUnavailable(): Promise<never> {
-  return Promise.reject({code:'unavailable',message:'Conversation archive is available in the desktop app.'});
+  return Promise.reject({
+    code: 'unavailable',
+    message: 'Conversation archive is available in the desktop app.',
+  });
 }
-function archiveAnswer<T>(type:string,read:Promise<unknown>):Promise<T>{return read.then((value)=>checkedArchive<T>(type,value));}
-export function archiveContext(){return archiveAnswer<import('@/lib/generated/conversations').ArchiveContext>('ArchiveContext',inTauri()?invokeTauri('conversation_context'):faulted('conversation_context',archiveUnavailable));}
-export function archiveSetting(context:import('@/lib/generated/conversations').ArchiveContext){return archiveAnswer<import('@/lib/generated/conversations').ArchiveSetting>('ArchiveSetting',inTauri()?invokeTauri('conversation_retention',{context}):faulted('conversation_retention',archiveUnavailable));}
-export function setArchiveRetention(context:import('@/lib/generated/conversations').ArchiveContext,choice:import('@/lib/generated/conversations').RetentionChoice,expectedRevision:number){return archiveAnswer<import('@/lib/generated/conversations').ArchiveSetting>('ArchiveSetting',inTauri()?invokeTauri('conversation_set_retention',{context,choice,expectedRevision}):faulted('conversation_set_retention',archiveUnavailable));}
-export function archiveThreads(context:import('@/lib/generated/conversations').ArchiveContext,query='',after:string|null=null){return archiveAnswer<import('@/lib/generated/conversations').ThreadPage>('ThreadPage',inTauri()?invokeTauri('conversation_list',{context,query:query||null,after,limit:50}):faulted('conversation_list',archiveUnavailable));}
-export function archiveMessages(context:import('@/lib/generated/conversations').ArchiveContext,threadId:string,before:string|null=null){return archiveAnswer<import('@/lib/generated/conversations').MessagePage>('MessagePage',inTauri()?invokeTauri('conversation_messages',{context,threadId,before,limit:20}):faulted('conversation_messages',archiveUnavailable));}
-export function deleteArchivedThread(context:import('@/lib/generated/conversations').ArchiveContext,threadId:string){return archiveAnswer<import('@/lib/generated/conversations').DeleteResult>('DeleteResult',inTauri()?invokeTauri('conversation_delete',{context,threadId}):faulted('conversation_delete',archiveUnavailable));}
-export function pruneArchive(context:import('@/lib/generated/conversations').ArchiveContext){return archiveAnswer<import('@/lib/generated/conversations').PruneResult>('PruneResult',inTauri()?invokeTauri('conversation_prune',{context}):faulted('conversation_prune',archiveUnavailable));}
-export function exportArchivedThread(context:import('@/lib/generated/conversations').ArchiveContext,threadId:string,format:import('@/lib/generated/conversations').ExportFormat){return archiveAnswer<import('@/lib/generated/conversations').ExportResult>('ExportResult',inTauri()?invokeTauri('conversation_export',{context,threadId,format}):faulted('conversation_export',archiveUnavailable));}
+function archiveAnswer<T>(type: string, read: Promise<unknown>): Promise<T> {
+  return read.then((value) => checkedArchive<T>(type, value));
+}
+export function archiveContext() {
+  return archiveAnswer<import('@/lib/generated/conversations').ArchiveContext>(
+    'ArchiveContext',
+    inTauri()
+      ? invokeTauri('conversation_context')
+      : faulted('conversation_context', archiveUnavailable),
+  );
+}
+export function archiveSetting(context: import('@/lib/generated/conversations').ArchiveContext) {
+  return archiveAnswer<import('@/lib/generated/conversations').ArchiveSetting>(
+    'ArchiveSetting',
+    inTauri()
+      ? invokeTauri('conversation_retention', { context })
+      : faulted('conversation_retention', archiveUnavailable),
+  );
+}
+export function setArchiveRetention(
+  context: import('@/lib/generated/conversations').ArchiveContext,
+  choice: import('@/lib/generated/conversations').RetentionChoice,
+  expectedRevision: number,
+) {
+  return archiveAnswer<import('@/lib/generated/conversations').ArchiveSetting>(
+    'ArchiveSetting',
+    inTauri()
+      ? invokeTauri('conversation_set_retention', { context, choice, expectedRevision })
+      : faulted('conversation_set_retention', archiveUnavailable),
+  );
+}
+export function archiveThreads(
+  context: import('@/lib/generated/conversations').ArchiveContext,
+  query = '',
+  after: string | null = null,
+) {
+  return archiveAnswer<import('@/lib/generated/conversations').ThreadPage>(
+    'ThreadPage',
+    inTauri()
+      ? invokeTauri('conversation_list', { context, query: query || null, after, limit: 50 })
+      : faulted('conversation_list', archiveUnavailable),
+  );
+}
+export function archiveMessages(
+  context: import('@/lib/generated/conversations').ArchiveContext,
+  threadId: string,
+  before: string | null = null,
+) {
+  return archiveAnswer<import('@/lib/generated/conversations').MessagePage>(
+    'MessagePage',
+    inTauri()
+      ? invokeTauri('conversation_messages', { context, threadId, before, limit: 20 })
+      : faulted('conversation_messages', archiveUnavailable),
+  );
+}
+export function deleteArchivedThread(
+  context: import('@/lib/generated/conversations').ArchiveContext,
+  threadId: string,
+) {
+  return archiveAnswer<import('@/lib/generated/conversations').DeleteResult>(
+    'DeleteResult',
+    inTauri()
+      ? invokeTauri('conversation_delete', { context, threadId })
+      : faulted('conversation_delete', archiveUnavailable),
+  );
+}
+export function pruneArchive(context: import('@/lib/generated/conversations').ArchiveContext) {
+  return archiveAnswer<import('@/lib/generated/conversations').PruneResult>(
+    'PruneResult',
+    inTauri()
+      ? invokeTauri('conversation_prune', { context })
+      : faulted('conversation_prune', archiveUnavailable),
+  );
+}
+export function exportArchivedThread(
+  context: import('@/lib/generated/conversations').ArchiveContext,
+  threadId: string,
+  format: import('@/lib/generated/conversations').ExportFormat,
+) {
+  return archiveAnswer<import('@/lib/generated/conversations').ExportResult>(
+    'ExportResult',
+    inTauri()
+      ? invokeTauri('conversation_export', { context, threadId, format })
+      : faulted('conversation_export', archiveUnavailable),
+  );
+}
 
-export function importCachedConversation(context:import('@/lib/generated/conversations').ArchiveContext,batch:import('@/lib/generated/conversations').ImportBatch){return archiveAnswer<import('@/lib/generated/conversations').ImportResult>('ImportResult',inTauri()?invokeTauri('conversation_import',{context,batch}):faulted('conversation_import',archiveUnavailable));}
+export function importCachedConversation(
+  context: import('@/lib/generated/conversations').ArchiveContext,
+  batch: import('@/lib/generated/conversations').ImportBatch,
+) {
+  return archiveAnswer<import('@/lib/generated/conversations').ImportResult>(
+    'ImportResult',
+    inTauri()
+      ? invokeTauri('conversation_import', { context, batch })
+      : faulted('conversation_import', archiveUnavailable),
+  );
+}

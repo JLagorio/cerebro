@@ -68,17 +68,17 @@ pub(super) fn publish_linked<'state>(
         }
     };
     if let Some((run_id, _)) = seat {
-        let seat=seat_for(run_id,vault,request,session,approval).with_generation(generation);
-        if let Some(answer)=answer {
-            if let Err(error)=state.interactions.open_answer_seat(seat,answer) {
+        let seat = seat_for(run_id, vault, request, session, approval).with_generation(generation);
+        if let Some(answer) = answer {
+            if let Err(error) = state.interactions.open_answer_seat(seat, answer) {
                 drop(guard);
-                configuration::retire(configuration_mcp,request);
+                configuration::retire(configuration_mcp, request);
                 return Err(error);
             }
         } else {
-            if let Err(error)=state.interactions.open_unlinked_seat(seat,pending) {
+            if let Err(error) = state.interactions.open_unlinked_seat(seat, pending) {
                 drop(guard);
-                configuration::retire(configuration_mcp,request);
+                configuration::retire(configuration_mcp, request);
                 return Err(error);
             }
         }
@@ -303,30 +303,84 @@ impl AgentState {
 }
 
 impl AgentState {
-    fn events_for_publication(&self,receipt:&Arc<NativePublicationReceipt>)->Option<Arc<super::run_events::RunEvents>>{
-        if !receipt.is_live(){return None;}
-        let slots=receipt.slots.upgrade()?;if !Arc::ptr_eq(&slots,&self.slots){return None;}
-        let cancelled=receipt.cancelled.upgrade()?;let slots=lock(&self.slots);let slot=slots.get(&receipt.run)?;
-        if !Arc::ptr_eq(&slot.cancelled,&cancelled)||slot.cancelled.load(Ordering::SeqCst)||!slot.handle.alive()||slot.vault!=receipt.vault||crate::mcp::normalize_actor(slot.actor.as_deref())!=receipt.actor{return None;}
+    fn events_for_publication(
+        &self,
+        receipt: &Arc<NativePublicationReceipt>,
+    ) -> Option<Arc<super::run_events::RunEvents>> {
+        if !receipt.is_live() {
+            return None;
+        }
+        let slots = receipt.slots.upgrade()?;
+        if !Arc::ptr_eq(&slots, &self.slots) {
+            return None;
+        }
+        let cancelled = receipt.cancelled.upgrade()?;
+        let slots = lock(&self.slots);
+        let slot = slots.get(&receipt.run)?;
+        if !Arc::ptr_eq(&slot.cancelled, &cancelled)
+            || slot.cancelled.load(Ordering::SeqCst)
+            || !slot.handle.alive()
+            || slot.vault != receipt.vault
+            || crate::mcp::normalize_actor(slot.actor.as_deref()) != receipt.actor
+        {
+            return None;
+        }
         slot.events.clone()
     }
-    pub(crate) fn native_action_read_for_publication(&self,receipt:&Arc<NativePublicationReceipt>)->Option<Arc<crate::actions::native_owner::NativeActionReadOrigin>>{
+    pub(crate) fn native_action_read_for_publication(
+        &self,
+        receipt: &Arc<NativePublicationReceipt>,
+    ) -> Option<Arc<crate::actions::native_owner::NativeActionReadOrigin>> {
         // The native caller additionally compares its retained exact receipt.
         // Only the original successful publication supplies this run number.
-        self.events_for_publication(receipt)?;self.native_action_read(receipt.run)
-    }
-    pub(crate) fn managed_card_for_publication(&self,receipt:&Arc<NativePublicationReceipt>,mut card:interaction::InteractionCard)->Option<interaction::InteractionCard>{
         self.events_for_publication(receipt)?;
-        if !matches!(card.kind,interaction::Kind::ManagedAction|interaction::Kind::ManagedAccess)||!card.tool_id.is_empty()||card.id.len()!=32||card.session_id!=receipt.cli_session_id{return None;}
-        card.run=Some(crate::actions::SafeCounter::new(receipt.run).ok()?);card.answering=Some(false);Some(card)
+        self.native_action_read(receipt.run)
     }
-    pub(crate) fn publish_managed_interaction(&self,receipt:&Arc<NativePublicationReceipt>,card:interaction::InteractionCard)->bool{
-        let Some(card)=self.managed_card_for_publication(receipt,card)else{return false;};
-        let Some(events)=self.events_for_publication(receipt)else{return false;};
-        events.send(AgentEvent::Interaction{interaction:card})
+    pub(crate) fn managed_card_for_publication(
+        &self,
+        receipt: &Arc<NativePublicationReceipt>,
+        mut card: interaction::InteractionCard,
+    ) -> Option<interaction::InteractionCard> {
+        self.events_for_publication(receipt)?;
+        if !matches!(
+            card.kind,
+            interaction::Kind::ManagedAction | interaction::Kind::ManagedAccess
+        ) || !card.tool_id.is_empty()
+            || card.id.len() != 32
+            || card.session_id != receipt.cli_session_id
+        {
+            return None;
+        }
+        card.run = Some(crate::actions::SafeCounter::new(receipt.run).ok()?);
+        card.answering = Some(false);
+        Some(card)
     }
-    pub(crate) fn publish_managed_closed(&self,receipt:&Arc<NativePublicationReceipt>,id:&str)->bool{
-        if id.len()!=32{return false;}let Some(events)=self.events_for_publication(receipt)else{return false;};
-        events.send(AgentEvent::InteractionClosed{interaction_id:id.into()})
+    pub(crate) fn publish_managed_interaction(
+        &self,
+        receipt: &Arc<NativePublicationReceipt>,
+        card: interaction::InteractionCard,
+    ) -> bool {
+        let Some(card) = self.managed_card_for_publication(receipt, card) else {
+            return false;
+        };
+        let Some(events) = self.events_for_publication(receipt) else {
+            return false;
+        };
+        events.send(AgentEvent::Interaction { interaction: card })
+    }
+    pub(crate) fn publish_managed_closed(
+        &self,
+        receipt: &Arc<NativePublicationReceipt>,
+        id: &str,
+    ) -> bool {
+        if id.len() != 32 {
+            return false;
+        }
+        let Some(events) = self.events_for_publication(receipt) else {
+            return false;
+        };
+        events.send(AgentEvent::InteractionClosed {
+            interaction_id: id.into(),
+        })
     }
 }

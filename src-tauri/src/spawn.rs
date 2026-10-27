@@ -383,20 +383,28 @@ pub struct Handle {
     pgid: i32,
 }
 
-#[cfg(all(target_os="macos",any(test,feature="native-action-smoke")))]
-#[derive(Debug,Clone,Copy,serde::Serialize)]
-pub(crate) struct NativeActionChildIdentity{pub(crate) pid:u32,pub(crate) parent_pid:u32,pub(crate) group_pid:u32,pub(crate) uid:u32,pub(crate) start_seconds:u64,pub(crate) start_micros:u64}
+#[cfg(all(target_os = "macos", any(test, feature = "native-action-smoke")))]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub(crate) struct NativeActionChildIdentity {
+    pub(crate) pid: u32,
+    pub(crate) parent_pid: u32,
+    pub(crate) group_pid: u32,
+    pub(crate) uid: u32,
+    pub(crate) start_seconds: u64,
+    pub(crate) start_micros: u64,
+}
 
 impl Handle {
     /// Finite metadata from this retained owning Child only. No arbitrary PID,
     /// waiter, signal or native/action authority is accepted or returned.
-    #[cfg(all(target_os="macos",any(test,feature="native-action-smoke")))]
+    #[cfg(all(target_os = "macos", any(test, feature = "native-action-smoke")))]
     pub(crate) fn native_action_identity(&self) -> io::Result<NativeActionChildIdentity> {
         // This mutex retains the actual Child across the observation. Its PID is
         // never accepted from a caller. Do not consume status via try_wait/wait.
-        let child = self.child.lock().map_err(|_| {
-            io::Error::other("Original child ownership is unavailable.")
-        })?;
+        let child = self
+            .child
+            .lock()
+            .map_err(|_| io::Error::other("Original child ownership is unavailable."))?;
         let pid = child.id();
         let requested = i32::try_from(pid)
             .map_err(|_| io::Error::other("Original child identity is unavailable."))?;
@@ -643,23 +651,52 @@ mod tests {
         (supervised, first.trim().to_string(), reader)
     }
 
-    #[cfg(target_os="macos")]
+    #[cfg(target_os = "macos")]
     #[test]
-    fn native_action_identity_observes_only_the_genuine_retained_child_without_consuming_it(){
-        let(supervised,announced,reader)=started("echo $$; exec sleep 30");
-        let handle=supervised.handle();let actual=handle.id();let first=handle.native_action_identity();let second=handle.native_action_identity();let still_alive=handle.alive();
+    fn native_action_identity_observes_only_the_genuine_retained_child_without_consuming_it() {
+        let (supervised, announced, reader) = started("echo $$; exec sleep 30");
+        let handle = supervised.handle();
+        let actual = handle.id();
+        let first = handle.native_action_identity();
+        let second = handle.native_action_identity();
+        let still_alive = handle.alive();
         // All assertions follow real owned cleanup even while the API is RED.
-        handle.terminate(Duration::from_millis(100));drop(reader);let(status,_)=supervised.finish(Duration::from_secs(1));
-        assert!(status.is_some());assert!(still_alive,"identity read must not wait/reap/stop the original child");assert_eq!(announced.parse::<u32>().unwrap(),actual);
-        let first=first.expect("owning Handle must provide exact original BSD start identity");let second=second.unwrap();
-        assert_eq!(first.pid,actual);assert_eq!(first.parent_pid,std::process::id());assert_eq!(first.group_pid,actual);assert!(first.start_seconds>0);assert!(first.start_micros<1_000_000);assert_eq!((first.pid,first.start_seconds,first.start_micros),(second.pid,second.start_seconds,second.start_micros));
+        handle.terminate(Duration::from_millis(100));
+        drop(reader);
+        let (status, _) = supervised.finish(Duration::from_secs(1));
+        assert!(status.is_some());
+        assert!(
+            still_alive,
+            "identity read must not wait/reap/stop the original child"
+        );
+        assert_eq!(announced.parse::<u32>().unwrap(), actual);
+        let first = first.expect("owning Handle must provide exact original BSD start identity");
+        let second = second.unwrap();
+        assert_eq!(first.pid, actual);
+        assert_eq!(first.parent_pid, std::process::id());
+        assert_eq!(first.group_pid, actual);
+        assert!(first.start_seconds > 0);
+        assert!(first.start_micros < 1_000_000);
+        assert_eq!(
+            (first.pid, first.start_seconds, first.start_micros),
+            (second.pid, second.start_seconds, second.start_micros)
+        );
     }
-    #[cfg(target_os="macos")]
+    #[cfg(target_os = "macos")]
     #[test]
-    fn native_action_identity_refuses_changed_group_metadata_without_targeting_or_stopping_it(){
-        let(supervised,_,reader)=started("echo $$; exec sleep 30");let handle=supervised.handle();let mut changed=handle.clone();changed.pgid=changed.pgid.checked_add(1).unwrap();
-        let refused=changed.native_action_identity().is_err();let alive=handle.alive();handle.terminate(Duration::from_millis(100));drop(reader);let(status,_)=supervised.finish(Duration::from_secs(1));
-        assert!(status.is_some());assert!(refused);assert!(alive,"metadata refusal must leave the genuine owner alive");
+    fn native_action_identity_refuses_changed_group_metadata_without_targeting_or_stopping_it() {
+        let (supervised, _, reader) = started("echo $$; exec sleep 30");
+        let handle = supervised.handle();
+        let mut changed = handle.clone();
+        changed.pgid = changed.pgid.checked_add(1).unwrap();
+        let refused = changed.native_action_identity().is_err();
+        let alive = handle.alive();
+        handle.terminate(Duration::from_millis(100));
+        drop(reader);
+        let (status, _) = supervised.finish(Duration::from_secs(1));
+        assert!(status.is_some());
+        assert!(refused);
+        assert!(alive, "metadata refusal must leave the genuine owner alive");
     }
 
     #[test]

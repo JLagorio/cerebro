@@ -115,6 +115,17 @@ it('keeps unscanned attachments until a byte probe proves absence', () => {
 });
 
 it('restores a workflow Library visit without interpreting its ID as a vault markdown path', () => {
- expect(readSelection({ kind: 'library', tab: 'workflow', workflowId: 'example', path: 'unrelated.md' })).toEqual({ kind: 'library', tab: 'workflow', workflowId: 'example' });
- expect(restorablePlace({ kind: 'library', tab: 'workflow', workflowId: 'example' })).toEqual({ kind: 'library', tab: 'workflow', workflowId: 'example' });
+  expect(
+    readSelection({
+      kind: 'library',
+      tab: 'workflow',
+      workflowId: 'example',
+      path: 'unrelated.md',
+    }),
+  ).toEqual({ kind: 'library', tab: 'workflow', workflowId: 'example' });
+  expect(restorablePlace({ kind: 'library', tab: 'workflow', workflowId: 'example' })).toEqual({
+    kind: 'library',
+    tab: 'workflow',
+    workflowId: 'example',
+  });
 });

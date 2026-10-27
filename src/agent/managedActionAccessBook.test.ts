@@ -16,14 +16,12 @@ const view = (run = 41, request = 'request-a'): RunActionAccessView => ({
 function api() {
   return {
     read: vi.fn<RunActionAccessApi['read']>().mockImplementation(async (run) => view(run)),
-    set: vi
-      .fn<RunActionAccessApi['set']>()
-      .mockImplementation(async (run) => ({
-        state: 'changed',
-        view: { ...view(run), accessRequestId: null },
-        sourceCurrent: true,
-        requestClosed: true,
-      })),
+    set: vi.fn<RunActionAccessApi['set']>().mockImplementation(async (run) => ({
+      state: 'changed',
+      view: { ...view(run), accessRequestId: null },
+      sourceCurrent: true,
+      requestClosed: true,
+    })),
   };
 }
 function deferred<T>() {
@@ -143,18 +141,25 @@ describe('original access sheet ownership', () => {
 });
 
 it('retains the first genuine zero-run access owner through an unknown save without borrowing another run', async () => {
-  const book = createRunActionAccessBook(); const source = api();
-  const pending = deferred<SetRunActionAccessResult>(); source.set.mockReturnValueOnce(pending.promise);
-  const original = book.acquire(0, 'request-a', source); const other = book.acquire(1, 'request-a', source);
-  expect(original).not.toBeNull(); expect(other).not.toBeNull();
+  const book = createRunActionAccessBook();
+  const source = api();
+  const pending = deferred<SetRunActionAccessResult>();
+  source.set.mockReturnValueOnce(pending.promise);
+  const original = book.acquire(0, 'request-a', source);
+  const other = book.acquire(1, 'request-a', source);
+  expect(original).not.toBeNull();
+  expect(other).not.toBeNull();
   if (original === null || other === null) return;
-  await original.refresh(); const saving = original.save();
+  await original.refresh();
+  const saving = original.save();
   expect(book.acquire(0, 'request-a', api())).toBe(original);
   expect(original.getSnapshot().phase).toBe('saving');
   expect(other.getSnapshot().phase).toBe('idle');
-  pending.resolve({ state: 'commit_unknown', message: 'lost acknowledgement' }); await saving;
+  pending.resolve({ state: 'commit_unknown', message: 'lost acknowledgement' });
+  await saving;
   expect(original.getSnapshot().phase).toBe('unknown');
   expect(book.acquire(0, 'request-a', api())).toBe(original);
-  await original.save(); expect(source.set).toHaveBeenCalledTimes(1);
+  await original.save();
+  expect(source.set).toHaveBeenCalledTimes(1);
   expect(source.read).toHaveBeenCalledExactlyOnceWith(0);
 });

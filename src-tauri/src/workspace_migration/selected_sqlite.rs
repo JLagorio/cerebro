@@ -1,9 +1,9 @@
 //! Separate selected workspace metadata. Never opens the app-global runtime DB.
 use super::stage::{error, read_bounded, rules, sync_dir, RecordData, RecordInfo, StageResult};
 use crate::workspace_service::{types::values::PropertyValue, value};
-use rusqlite::{Connection, OpenFlags};
 #[cfg(unix)]
 use rusqlite::params;
+use rusqlite::{Connection, OpenFlags};
 use std::{collections::BTreeSet, fs, path::Path};
 fn db(e: rusqlite::Error) -> super::stage::StageError {
     error("metadata_unavailable", e.to_string())
@@ -36,10 +36,16 @@ pub(super) fn create(root: &Path, workspace_id: &str, records: &[RecordData]) ->
     let mut connection =
         Connection::open_with_flags(&path, flags() | OpenFlags::SQLITE_OPEN_READ_WRITE)
             .map_err(db)?;
-    connection.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA trusted_schema=OFF;").map_err(db)?;
+    connection
+        .execute_batch(
+            "PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA trusted_schema=OFF;",
+        )
+        .map_err(db)?;
     // Only this explicit create-new staging producer installs a schema. Reads
     // never upgrade an old staged store or an original selected workspace.
-    connection.execute_batch(include_str!("../workspace_service/selected_schema_v4.sql")).map_err(db)?;
+    connection
+        .execute_batch(include_str!("../workspace_service/selected_schema_v4.sql"))
+        .map_err(db)?;
     let transaction = connection.transaction().map_err(db)?;
     transaction
         .execute("INSERT INTO workspace VALUES (1,2,?1,1,1)", [workspace_id])
@@ -65,32 +71,109 @@ pub(super) fn create(root: &Path, workspace_id: &str, records: &[RecordData]) ->
     sync_dir(root)
 }
 #[cfg(not(unix))]
-pub(super) fn create(_root:&Path,_workspace_id:&str,_records:&[RecordData])->StageResult<()> {
-    Err(error("unsupported_format","Fresh selected staging requires the supported native SQLite validation adapter."))
+pub(super) fn create(
+    _root: &Path,
+    _workspace_id: &str,
+    _records: &[RecordData],
+) -> StageResult<()> {
+    Err(error(
+        "unsupported_format",
+        "Fresh selected staging requires the supported native SQLite validation adapter.",
+    ))
 }
 #[cfg(unix)]
-fn read_fresh(root:&Path,workspace_id:&str,before:&[u8])->StageResult<Vec<RecordData>> {
+fn read_fresh(root: &Path, workspace_id: &str, before: &[u8]) -> StageResult<Vec<RecordData>> {
     use crate::workspace_service::types::selected::AuthorityErrorKind;
-    let facts=crate::workspace_service::selected::backup::read_fresh_stage_offline(before,workspace_id,rules().limits.database_bytes)
-        .map_err(|e|error(match e.kind{AuthorityErrorKind::SourceLimit=>"source_limit",AuthorityErrorKind::WrongIdentity=>"wrong_binding",_=>"invalid_metadata"},e.message))?;
-    let policy:serde_json::Value=serde_json::from_str(include_str!("../../../shared/workspace/metadata-patch.v1.json")).map_err(|_|error("invalid_metadata","Selected staging schema policy is unavailable."))?;
-    let expected=policy["selectedSchemaVersion"].as_i64().ok_or_else(||error("invalid_metadata","Selected staging schema policy is invalid."))?;
-    if facts.schema_version!=expected || facts.schema_revision!=1 || facts.epoch!=1 {
-        return Err(error("unsupported_format","This is not an initial supported inactive selected stage."));
+    let facts = crate::workspace_service::selected::backup::read_fresh_stage_offline(
+        before,
+        workspace_id,
+        rules().limits.database_bytes,
+    )
+    .map_err(|e| {
+        error(
+            match e.kind {
+                AuthorityErrorKind::SourceLimit => "source_limit",
+                AuthorityErrorKind::WrongIdentity => "wrong_binding",
+                _ => "invalid_metadata",
+            },
+            e.message,
+        )
+    })?;
+    let policy: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../shared/workspace/metadata-patch.v1.json"
+    ))
+    .map_err(|_| {
+        error(
+            "invalid_metadata",
+            "Selected staging schema policy is unavailable.",
+        )
+    })?;
+    let expected = policy["selectedSchemaVersion"].as_i64().ok_or_else(|| {
+        error(
+            "invalid_metadata",
+            "Selected staging schema policy is invalid.",
+        )
+    })?;
+    if facts.schema_version != expected || facts.schema_revision != 1 || facts.epoch != 1 {
+        return Err(error(
+            "unsupported_format",
+            "This is not an initial supported inactive selected stage.",
+        ));
     }
-    if facts.records.len()>rules().limits.files {return Err(error("source_limit","Staged database record count exceeds its bound."));}
-    let mut result=Vec::new();let mut total=0usize;
+    if facts.records.len() > rules().limits.files {
+        return Err(error(
+            "source_limit",
+            "Staged database record count exceeds its bound.",
+        ));
+    }
+    let mut result = Vec::new();
+    let mut total = 0usize;
     for record in facts.records {
-        total=total.checked_add(record.metadata.len()).filter(|n|*n<=rules().limits.metadata_bytes).ok_or_else(||error("source_limit","Staged metadata exceeds its aggregate bound."))?;
-        if record.revision!=1 {return Err(error("invalid_metadata","Inactive stage record revision is unsupported."));}
-        let decoded=value::decode_tagged(&record.metadata).map_err(|e|error("invalid_metadata",e.message))?;
-        if !matches!(decoded,PropertyValue::Object{..}) || serde_json::to_string(&decoded).map_err(|_|error("invalid_metadata","Invalid staged tagged metadata."))?!=record.metadata {
-            return Err(error("invalid_metadata","Staged metadata must retain its exact canonical tagged encoding."));
+        total = total
+            .checked_add(record.metadata.len())
+            .filter(|n| *n <= rules().limits.metadata_bytes)
+            .ok_or_else(|| {
+                error(
+                    "source_limit",
+                    "Staged metadata exceeds its aggregate bound.",
+                )
+            })?;
+        if record.revision != 1 {
+            return Err(error(
+                "invalid_metadata",
+                "Inactive stage record revision is unsupported.",
+            ));
         }
-        result.push(RecordData{info:RecordInfo{id:record.id,path:record.path,revision:1,body_start:0,body_hash:record.body_hash,metadata_hash:crate::ledger::sha256_hex(record.metadata.as_bytes()),required_parts:Vec::new()},metadata:record.metadata});
+        let decoded = value::decode_tagged(&record.metadata)
+            .map_err(|e| error("invalid_metadata", e.message))?;
+        if !matches!(decoded, PropertyValue::Object { .. })
+            || serde_json::to_string(&decoded)
+                .map_err(|_| error("invalid_metadata", "Invalid staged tagged metadata."))?
+                != record.metadata
+        {
+            return Err(error(
+                "invalid_metadata",
+                "Staged metadata must retain its exact canonical tagged encoding.",
+            ));
+        }
+        result.push(RecordData {
+            info: RecordInfo {
+                id: record.id,
+                path: record.path,
+                revision: 1,
+                body_start: 0,
+                body_hash: record.body_hash,
+                metadata_hash: crate::ledger::sha256_hex(record.metadata.as_bytes()),
+                required_parts: Vec::new(),
+            },
+            metadata: record.metadata,
+        });
     }
-    if before!=read_bounded(root,&rules().database,rules().limits.database_bytes)? {
-        return Err(error("stage_part_changed","SQLite bytes changed while validating the inactive stage."));
+    if before != read_bounded(root, &rules().database, rules().limits.database_bytes)? {
+        return Err(error(
+            "stage_part_changed",
+            "SQLite bytes changed while validating the inactive stage.",
+        ));
     }
     Ok(result)
 }
@@ -101,10 +184,22 @@ pub(super) fn read(root: &Path, workspace_id: &str) -> StageResult<Vec<RecordDat
     // Historical staged format1 has SQLite user_version zero. New versioned
     // stages are validated from this exact bounded byte slice without opening
     // a second SQLite descriptor by pathname. Unknown versions never fall back.
-    let version=before.get(60..64).and_then(|bytes|<[u8;4]>::try_from(bytes).ok()).map(u32::from_be_bytes);
-    if version.is_some_and(|version|version!=0) {
-        #[cfg(unix)] {return read_fresh(root,workspace_id,&before);}
-        #[cfg(not(unix))] {return Err(error("unsupported_format","Versioned selected stages are unavailable on this platform."));}
+    let version = before
+        .get(60..64)
+        .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+        .map(u32::from_be_bytes);
+    if version.is_some_and(|version| version != 0) {
+        #[cfg(unix)]
+        {
+            return read_fresh(root, workspace_id, &before);
+        }
+        #[cfg(not(unix))]
+        {
+            return Err(error(
+                "unsupported_format",
+                "Versioned selected stages are unavailable on this platform.",
+            ));
+        }
     }
     let connection = Connection::open_with_flags(
         root.join(&rules().database),

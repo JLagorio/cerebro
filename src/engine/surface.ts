@@ -45,7 +45,7 @@ export function resolveTypeView(
   schema: Schema,
 ): Surface {
   const { filters, presentation } = view;
-  const inSource = entries.filter(entry => entry.type === name && !isTemplate(entry));
+  const inSource = entries.filter((entry) => entry.type === name && !isTemplate(entry));
   const unavailable = selectedViewIssue(inSource, schema, presentation, filters, name);
   if (unavailable) return { title: name, entries: [], presentation, unavailable };
   return {

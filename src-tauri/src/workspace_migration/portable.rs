@@ -1235,7 +1235,9 @@ pub(super) fn step(name: &'static str, first: &Path, second: &Path) {
 #[cfg(target_os = "macos")]
 pub(super) fn create_backup(source_root: &Path, destination: &Path) -> Result<super::BackupReport> {
     let source = selected::Source::open(source_root).map_err(authority_error)?;
-    create_backup_inner(source, destination, None).map(|report| super::BackupReport { workspace_id: report.workspace_id })
+    create_backup_inner(source, destination, None).map(|report| super::BackupReport {
+        workspace_id: report.workspace_id,
+    })
 }
 #[cfg(target_os = "macos")]
 pub(super) fn create_reserved_backup(
@@ -1363,14 +1365,20 @@ fn create_backup_inner(
         ));
     }
     // Footprint-only check: never reacquire ActiveRoot under SQLite/ledger.
-    if let Some(lease) = reserved.as_deref() { lease.validate().map_err(authority_error)?; }
+    if let Some(lease) = reserved.as_deref() {
+        lease.validate().map_err(authority_error)?;
+    }
     output.validate()?;
     // Readiness is create-new and last. Any preceding failure leaves no complete manifest.
     let summary = compact_summary(&manifest)?;
-    if let Some(lease) = reserved.as_deref() { lease.publication_attempted(); }
+    if let Some(lease) = reserved.as_deref() {
+        lease.publication_attempted();
+    }
     step("export_publication_attempt", &bodies.path, &output.path);
     output.write_new(&rules().manifest, &bytes)?;
-    if let Some(lease) = reserved.as_deref() { lease.published(); }
+    if let Some(lease) = reserved.as_deref() {
+        lease.published();
+    }
     step("export_published", &bodies.path, &output.path);
     Ok(super::NativeCopyReport {
         workspace_id: manifest.workspace_id,
@@ -1406,11 +1414,16 @@ pub(super) fn validate_bundle(path: &Path) -> Result<Verified> {
     validate_held_root(Root::open(path)?, None)
 }
 fn manifest_changed() -> BackupError {
-    error(K::SourceChanged, "The original input manifest changed identity or bytes.")
+    error(
+        K::SourceChanged,
+        "The original input manifest changed identity or bytes.",
+    )
 }
 fn same_manifest_bytes(root: &Root, identity: Identity, hash: Option<&str>) -> Result<Vec<u8>> {
     root.validate()?;
-    if root.identity(&rules().manifest)? != identity { return Err(manifest_changed()); }
+    if root.identity(&rules().manifest)? != identity {
+        return Err(manifest_changed());
+    }
     let (bytes, stamp) = root.read(&rules().manifest, limits()?.manifest)?;
     if stamp.identity != identity
         || root.identity(&rules().manifest)? != identity
@@ -1437,12 +1450,25 @@ fn validate_held_root(root: Root, expected: Option<((u64, u64), &str)>) -> Resul
     // The verification hook/metadata validator may have yielded to an external
     // replacement. Never bless its new inode even when its bytes are identical.
     same_manifest_bytes(&root, identity, Some(&manifest_hash))?;
-    Ok(Verified { root, manifest, manifest_hash, manifest_identity: identity })
+    Ok(Verified {
+        root,
+        manifest,
+        manifest_hash,
+        manifest_identity: identity,
+    })
 }
 fn unchanged(verified: &Verified) -> Result<()> {
-    same_manifest_bytes(&verified.root, verified.manifest_identity, Some(&verified.manifest_hash))?;
+    same_manifest_bytes(
+        &verified.root,
+        verified.manifest_identity,
+        Some(&verified.manifest_hash),
+    )?;
     verify(&verified.root, &verified.manifest, true)?;
-    same_manifest_bytes(&verified.root, verified.manifest_identity, Some(&verified.manifest_hash))?;
+    same_manifest_bytes(
+        &verified.root,
+        verified.manifest_identity,
+        Some(&verified.manifest_hash),
+    )?;
     Ok(())
 }
 fn destination_part(key: &Key) -> (bool, String) {
@@ -1555,12 +1581,24 @@ pub(in crate::workspace_migration) fn restore_bundle(
         &body_destination,
         &metadata_destination,
     ])?;
-    restore_verified(verified, |metadata| {
-        Root::create(if metadata { &metadata_destination } else { &body_destination })
-    }, None)
+    restore_verified(
+        verified,
+        |metadata| {
+            Root::create(if metadata {
+                &metadata_destination
+            } else {
+                &body_destination
+            })
+        },
+        None,
+    )
 }
-fn validate_restore_lease(reserved: Option<&crate::workspace_service::authority::OutputReservation>) -> Result<()> {
-    if let Some(output) = reserved { output.validate().map_err(authority_error)?; }
+fn validate_restore_lease(
+    reserved: Option<&crate::workspace_service::authority::OutputReservation>,
+) -> Result<()> {
+    if let Some(output) = reserved {
+        output.validate().map_err(authority_error)?;
+    }
     Ok(())
 }
 /// Shared writer: both path-library and native-held entrypoints use identical
@@ -1676,12 +1714,16 @@ fn restore_verified(
         ));
     }
     validate_restore_lease(reserved)?;
-    if let Some(lease) = reserved { lease.publication_attempted(); }
+    if let Some(lease) = reserved {
+        lease.publication_attempted();
+    }
     step("restore_publication_attempt", &bodies.path, &metadata.path);
     metadata.finish_marker(&stage::rules().marker, metadata_marker, &marker_bytes)?;
     validate_restore_lease(reserved)?;
     bodies.finish_marker(&stage::rules().marker, marker, &marker_bytes)?;
-    if let Some(lease) = reserved { lease.published(); }
+    if let Some(lease) = reserved {
+        lease.published();
+    }
     step("restore_published", &bodies.path, &metadata.path);
     Ok(crate::workspace_migration::restore::RestoreReport {
         workspace_id: verified.manifest.workspace_id,
@@ -1705,27 +1747,54 @@ pub(crate) struct CheckedBackupSummary {
     pub total_bytes: String,
 }
 impl CheckedBackupInput {
-    pub(crate) fn path(&self) -> &Path { &self.root.path }
-    pub(crate) fn summary(&self) -> &CheckedBackupSummary { &self.summary }
+    pub(crate) fn path(&self) -> &Path {
+        &self.root.path
+    }
+    pub(crate) fn summary(&self) -> &CheckedBackupSummary {
+        &self.summary
+    }
 }
 fn compact_summary(manifest: &Manifest) -> Result<CheckedBackupSummary> {
     let total = manifest.parts.iter().try_fold(0u64, |total, part| {
-        total.checked_add(number(&part.bytes)?).ok_or_else(|| error(K::SourceLimit, "Summary byte total overflow."))
+        total
+            .checked_add(number(&part.bytes)?)
+            .ok_or_else(|| error(K::SourceLimit, "Summary byte total overflow."))
     })?;
-    Ok(CheckedBackupSummary { workspace_id: manifest.workspace_id.clone(), format: manifest.format, schema_version: manifest.schema_version, part_count: manifest.parts.len(), total_bytes: total.to_string() })
+    Ok(CheckedBackupSummary {
+        workspace_id: manifest.workspace_id.clone(),
+        format: manifest.format,
+        schema_version: manifest.schema_version,
+        part_count: manifest.parts.len(),
+        total_bytes: total.to_string(),
+    })
 }
 pub(super) fn check_input(path: &Path) -> Result<CheckedBackupInput> {
-    let Verified { root, manifest, manifest_hash, manifest_identity } = validate_bundle(path)?;
+    let Verified {
+        root,
+        manifest,
+        manifest_hash,
+        manifest_identity,
+    } = validate_bundle(path)?;
     let summary = compact_summary(&manifest)?;
     let manifest_identity = (manifest_identity.dev, manifest_identity.ino);
     // Manifest/parts and transient offline database bytes drop before returning.
-    Ok(CheckedBackupInput { root, manifest_identity, manifest_hash, summary })
+    Ok(CheckedBackupInput {
+        root,
+        manifest_identity,
+        manifest_hash,
+        summary,
+    })
 }
 pub(super) fn restore_reserved(
     input: CheckedBackupInput,
     output: &mut crate::workspace_service::authority::OutputReservation,
 ) -> Result<crate::workspace_migration::restore::RestoreReport> {
-    let CheckedBackupInput { root, manifest_identity, manifest_hash, summary: _ } = input;
+    let CheckedBackupInput {
+        root,
+        manifest_identity,
+        manifest_hash,
+        summary: _,
+    } = input;
     let verified = validate_held_root(root, Some((manifest_identity, &manifest_hash)))?;
     let destination = output.path().map_err(authority_error)?;
     separate(&[&verified.root.path, &destination])?;
@@ -1733,8 +1802,16 @@ pub(super) fn restore_reserved(
     let container = output.create_root().map_err(authority_error)?.into_root();
     // Container and child descriptors remain inside the outer lease owner.
     // The kernel never reconstructs these choices from renderer paths.
-    restore_verified(verified, |metadata| {
-        container.validate()?;
-        container.create_child(if metadata { &children.metadata } else { &children.bodies })
-    }, Some(output))
+    restore_verified(
+        verified,
+        |metadata| {
+            container.validate()?;
+            container.create_child(if metadata {
+                &children.metadata
+            } else {
+                &children.bodies
+            })
+        },
+        Some(output),
+    )
 }

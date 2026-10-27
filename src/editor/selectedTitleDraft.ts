@@ -17,7 +17,12 @@ export function selectedTitleText(body: string, fallback = ''): string {
  * as its child payload and blocks flush instead of creating another writer. */
 export function prepareSelectedTitle(owner: DocumentOwner): void {
   const state = owner.snapshot();
-  if (state.generation === state.acknowledgedGeneration || owner.recoveryBusy() || state.selectedSave !== undefined) return;
+  if (
+    state.generation === state.acknowledgedGeneration ||
+    owner.recoveryBusy() ||
+    state.selectedSave !== undefined
+  )
+    return;
   const held = state.childDrafts?.[TITLE_CHILD];
   if (held !== undefined) return;
   const title = selectedTitleText(state.latestDraft).trim();

@@ -987,8 +987,9 @@ impl McpState {
         let handler = running.clone();
         let app = app.clone();
         let dispatch = Arc::new(move |bearer: Option<&str>, body: &str| {
-            let resolved=bearer.and_then(|presented|handler.resolve_with_publication(presented,Instant::now()));
-            routed_publication(&app,resolved,body)
+            let resolved = bearer
+                .and_then(|presented| handler.resolve_with_publication(presented, Instant::now()));
+            routed_publication(&app, resolved, body)
         });
         let workers = serve_loopback(
             Arc::new(server),
@@ -1312,7 +1313,10 @@ enum Reply {
     Json(Value),
     /// The exact original request keeps its cancellation/id ownership until
     /// response serialization, synchronous write and disposal have finished.
-    Managed { answer: Value, owner: managed_call::Registration },
+    Managed {
+        answer: Value,
+        owner: managed_call::Registration,
+    },
 }
 
 /// The grant `bearer` resolves to now, or `None` (M53.11). A worker resolves
@@ -1463,11 +1467,12 @@ fn calls_the_ask_seam(body: &str) -> bool {
     let Ok(call) = serde_json::from_str::<Call>(body) else {
         return false;
     };
-    call.method.as_deref() == Some("notifications/cancelled") || call.method.as_deref() == Some("tools/call")
-        && call
-            .params
-            .and_then(|params| params.name)
-            .is_some_and(|name| name == GATE_TOOL || name == HOST_TOOL)
+    call.method.as_deref() == Some("notifications/cancelled")
+        || call.method.as_deref() == Some("tools/call")
+            && call
+                .params
+                .and_then(|params| params.name)
+                .is_some_and(|name| name == GATE_TOOL || name == HOST_TOOL)
 }
 
 /// Both loopback transports isolate a failed request and keep their worker
@@ -1719,10 +1724,18 @@ fn handle_rpc_with_publication(
         Err(error) => return Reply::Json(error),
     };
     let native = if request.get("method").and_then(Value::as_str) == Some("tools/call")
-        && request.get("params").and_then(|params| params.get("name"))
-            .and_then(Value::as_str).is_some_and(managed_tool_name)
+        && request
+            .get("params")
+            .and_then(|params| params.get("name"))
+            .and_then(Value::as_str)
+            .is_some_and(managed_tool_name)
     {
-        NativeManagedCall::capture(app, grant, receipt, request.get("id").unwrap_or(&Value::Null))
+        NativeManagedCall::capture(
+            app,
+            grant,
+            receipt,
+            request.get("id").unwrap_or(&Value::Null),
+        )
     } else {
         None
     };
@@ -1733,17 +1746,31 @@ fn handle_rpc_with_publication(
     // the unwinding frame. Even an error reply owns it through actual disposal.
     let answer = catch_unwind(AssertUnwindSafe(|| {
         answer_value_with_managed(app, grant, &request, Some(&native))
-    })).unwrap_or_else(|_| {
-        rpc_error(request.get("id").cloned().unwrap_or(Value::Null), -32603,
-            "internal error: the call failed inside Cerebro")
+    }))
+    .unwrap_or_else(|_| {
+        rpc_error(
+            request.get("id").cloned().unwrap_or(Value::Null),
+            -32603,
+            "internal error: the call failed inside Cerebro",
+        )
     });
-    Reply::Managed { answer, owner: native.control }
+    Reply::Managed {
+        answer,
+        owner: native.control,
+    }
 }
 
 /// Dispatch one parsed request under a server-minted grant. Both transports
 /// take this same path through the tool, scope and knowledge guards.
-pub(crate) fn answer_value(app:&AppHandle,grant:&RunGrant,request:&Value)->Value{answer_value_with_managed(app,grant,request,None)}
-fn answer_value_with_managed(app:&AppHandle,grant:&RunGrant,request:&Value,native:Option<&NativeManagedCall>)->Value{
+pub(crate) fn answer_value(app: &AppHandle, grant: &RunGrant, request: &Value) -> Value {
+    answer_value_with_managed(app, grant, request, None)
+}
+fn answer_value_with_managed(
+    app: &AppHandle,
+    grant: &RunGrant,
+    request: &Value,
+    native: Option<&NativeManagedCall>,
+) -> Value {
     if let Some(vault) = grant.vault.as_deref() {
         if let Err(error) =
             crate::workspace_service::boundary::guard_legacy_scope(vault, None, true)
@@ -1795,7 +1822,10 @@ fn answer_value_with_managed(app:&AppHandle,grant:&RunGrant,request:&Value,nativ
             };
             match hook {
                 Some(answer) => Ok(answer),
-                None => match native{Some(native)=>call_tool_with_managed(app,grant,name,&args,Some(native)),None=>call_tool(app,grant,name,&args)},
+                None => match native {
+                    Some(native) => call_tool_with_managed(app, grant, name, &args, Some(native)),
+                    None => call_tool(app, grant, name, &args),
+                },
             }
         }
         // `answer_protocol` answered every other method.
@@ -2854,8 +2884,15 @@ fn tools_list(
     book: Option<&crate::agent::interaction::Interactions>,
 ) -> Vec<Value> {
     let mut tools = listed_tools(grant, proposals_enabled);
-    let show_managed=original_attended_grant(grant)&&book.is_some_and(|book|book.lists_prompt_tool(&grant.run_id));
-    tools.retain(|tool|show_managed||!tool.get("name").and_then(Value::as_str).is_some_and(managed_tool_name));
+    let show_managed = original_attended_grant(grant)
+        && book.is_some_and(|book| book.lists_prompt_tool(&grant.run_id));
+    tools.retain(|tool| {
+        show_managed
+            || !tool
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(managed_tool_name)
+    });
     let client = grant
         .actor
         .starts_with(crate::client_access::CLIENT_ACTOR_PREFIX);
@@ -3910,8 +3947,21 @@ fn bound_vault(grant: &RunGrant) -> Result<PathBuf, String> {
         .ok_or_else(|| "This bearer is bound to no vault, so it can call no tool.".to_string())
 }
 
-fn call_tool(app:&AppHandle,grant:&RunGrant,name:&str,args:&Map<String,Value>)->Result<Value,String>{call_tool_with_managed(app,grant,name,args,None)}
-fn call_tool_with_managed(app:&AppHandle,grant:&RunGrant,name:&str,args:&Map<String,Value>,native:Option<&NativeManagedCall>)->Result<Value,String>{
+fn call_tool(
+    app: &AppHandle,
+    grant: &RunGrant,
+    name: &str,
+    args: &Map<String, Value>,
+) -> Result<Value, String> {
+    call_tool_with_managed(app, grant, name, args, None)
+}
+fn call_tool_with_managed(
+    app: &AppHandle,
+    grant: &RunGrant,
+    name: &str,
+    args: &Map<String, Value>,
+    native: Option<&NativeManagedCall>,
+) -> Result<Value, String> {
     // M31.2b — counted at the top so a REFUSED call is still a call the run
     // chose to make: scope- and grant-refusals are dispatches too. Counted
     // here rather than per-arm so a new tool cannot be added uncounted.
@@ -5012,8 +5062,19 @@ fn tool_describe_database(
     zone: chrono_tz::Tz,
     today: chrono::NaiveDate,
 ) -> Result<Value, String> {
-    if matches!(crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?, crate::workspace_service::authority::Authority::Selected) {
-        return crate::workspace_service::selected::describe_database(vault, &|path| grant.may_read(path), &Value::Object(args.clone()), zone, today).map(text_result).map_err(|error| error.message);
+    if matches!(
+        crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?,
+        crate::workspace_service::authority::Authority::Selected
+    ) {
+        return crate::workspace_service::selected::describe_database(
+            vault,
+            &|path| grant.may_read(path),
+            &Value::Object(args.clone()),
+            zone,
+            today,
+        )
+        .map(text_result)
+        .map_err(|error| error.message);
     }
     let corpus = cache.snapshot(vault)?;
     let (readable, withheld) = readable_entries(&corpus, grant);
@@ -5050,8 +5111,18 @@ pub(crate) fn scoped_query_records(
     zone: chrono_tz::Tz,
     today: chrono::NaiveDate,
 ) -> Result<String, String> {
-    if matches!(crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?, crate::workspace_service::authority::Authority::Selected) {
-        return crate::workspace_service::selected::query_records(vault, &|path| grant.may_read(path), &Value::Object(args.clone()), zone, today).map_err(|error| error.message);
+    if matches!(
+        crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?,
+        crate::workspace_service::authority::Authority::Selected
+    ) {
+        return crate::workspace_service::selected::query_records(
+            vault,
+            &|path| grant.may_read(path),
+            &Value::Object(args.clone()),
+            zone,
+            today,
+        )
+        .map_err(|error| error.message);
     }
     let corpus = cache.snapshot(vault)?;
     let (readable, withheld) = readable_entries(&corpus, grant);
@@ -5074,8 +5145,17 @@ fn tool_suggest_view(
 ) -> Result<Value, String> {
     let vocabulary = vault::views::table()?;
     let args = vault::views::parse_args(&Value::Object(args.clone()), vocabulary)?;
-    let checked = if matches!(crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?, crate::workspace_service::authority::Authority::Selected) {
-        crate::workspace_service::selected::suggest_view(vault, &|path| grant.may_read(path), &args, vocabulary).map_err(|error| error.message)
+    let checked = if matches!(
+        crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?,
+        crate::workspace_service::authority::Authority::Selected
+    ) {
+        crate::workspace_service::selected::suggest_view(
+            vault,
+            &|path| grant.may_read(path),
+            &args,
+            vocabulary,
+        )
+        .map_err(|error| error.message)
     } else {
         let corpus = cache.snapshot(vault)?;
         let (readable, _) = readable_entries(&corpus, grant);
@@ -5113,8 +5193,21 @@ fn tool_list_agenda(
         Some(Value::String(name)) => wanted_type(Some(name)),
         Some(_) => return Err("type must be a database name".into()),
     };
-    if matches!(crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?, crate::workspace_service::authority::Authority::Selected) {
-        return crate::workspace_service::selected::agenda_text(vault, &|path| grant.may_read(path), wanted, &window, zone, limit, limit_cut).map(text_result).map_err(|error| error.message);
+    if matches!(
+        crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?,
+        crate::workspace_service::authority::Authority::Selected
+    ) {
+        return crate::workspace_service::selected::agenda_text(
+            vault,
+            &|path| grant.may_read(path),
+            wanted,
+            &window,
+            zone,
+            limit,
+            limit_cut,
+        )
+        .map(text_result)
+        .map_err(|error| error.message);
     }
     let corpus = cache.snapshot(vault)?;
     let (readable, withheld) = readable_entries(&corpus, grant);
@@ -21891,82 +21984,265 @@ impl McpState {
 #[path = "mcp_selected_semantic_tests.rs"]
 mod selected_semantic_reads;
 
-#[path="mcp_managed_call.rs"]
+#[path = "mcp_managed_call.rs"]
 mod managed_call;
 
 /// Test observations of controls bound to an actual successful publication.
 /// This returns no RunGrant, person/window/origin or action-execution capability.
 #[cfg(test)]
-pub(crate) mod managed_call_test_support{
- use super::*;
- pub(crate) struct Book(Arc<managed_call::ControlBook>);
- pub(crate) struct Call(managed_call::Registration);
- impl Book{
-  pub(crate) fn new()->Self{Self(Arc::new(managed_call::ControlBook::default()))}
-  pub(crate) fn register(&self,mcp:&McpState,slot:&NativeSlotWitness,id:&Value,deadline:Instant)->Option<Call>{let actual=mcp.current_native_observation(slot)?;self.0.register(actual.grant(),actual.receipt(),id,deadline).map(Call)}
-  pub(crate) fn cancel(&self,mcp:&McpState,slot:&NativeSlotWitness,id:&Value)->bool{let Some(actual)=mcp.current_native_observation(slot)else{return false;};self.0.cancel(actual.grant(),actual.receipt(),id)}
-  pub(crate) fn cancel_descriptive_clone(&self,mcp:&McpState,slot:&NativeSlotWitness,id:&Value)->bool{let Some(actual)=mcp.current_native_observation(slot)else{return false;};self.0.cancel(actual.grant(),&Arc::new((**actual.receipt()).clone()),id)}
-  pub(crate) fn poison(&self){self.0.poison();}
- }
- impl Call{pub(crate) fn flag(&self)->Arc<std::sync::atomic::AtomicBool>{self.0.flag()}pub(crate) fn stopped_at(&self,now:Instant)->bool{self.0.stopped_at(now)}pub(crate) fn respond_with<T>(self,body:Value,respond:impl FnOnce(&Value)->T)->T{self.0.respond_with(body,respond)}}
+pub(crate) mod managed_call_test_support {
+    use super::*;
+    pub(crate) struct Book(Arc<managed_call::ControlBook>);
+    pub(crate) struct Call(managed_call::Registration);
+    impl Book {
+        pub(crate) fn new() -> Self {
+            Self(Arc::new(managed_call::ControlBook::default()))
+        }
+        pub(crate) fn register(
+            &self,
+            mcp: &McpState,
+            slot: &NativeSlotWitness,
+            id: &Value,
+            deadline: Instant,
+        ) -> Option<Call> {
+            let actual = mcp.current_native_observation(slot)?;
+            self.0
+                .register(actual.grant(), actual.receipt(), id, deadline)
+                .map(Call)
+        }
+        pub(crate) fn cancel(&self, mcp: &McpState, slot: &NativeSlotWitness, id: &Value) -> bool {
+            let Some(actual) = mcp.current_native_observation(slot) else {
+                return false;
+            };
+            self.0.cancel(actual.grant(), actual.receipt(), id)
+        }
+        pub(crate) fn cancel_descriptive_clone(
+            &self,
+            mcp: &McpState,
+            slot: &NativeSlotWitness,
+            id: &Value,
+        ) -> bool {
+            let Some(actual) = mcp.current_native_observation(slot) else {
+                return false;
+            };
+            self.0
+                .cancel(actual.grant(), &Arc::new((**actual.receipt()).clone()), id)
+        }
+        pub(crate) fn poison(&self) {
+            self.0.poison();
+        }
+    }
+    impl Call {
+        pub(crate) fn flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+            self.0.flag()
+        }
+        pub(crate) fn stopped_at(&self, now: Instant) -> bool {
+            self.0.stopped_at(now)
+        }
+        pub(crate) fn respond_with<T>(self, body: Value, respond: impl FnOnce(&Value) -> T) -> T {
+            self.0.respond_with(body, respond)
+        }
+    }
 }
 
 #[cfg(test)]
-pub(crate) fn managed_tools_list_names_for_source_probe(mcp:&McpState,slot:&NativeSlotWitness,book:&crate::agent::interaction::Interactions)->Vec<String>{
- let Some(actual)=mcp.current_native_observation(slot)else{return Vec::new();};tools_list(actual.grant(),false,Some(book)).into_iter().filter_map(|tool|tool.get("name").and_then(Value::as_str).map(str::to_owned)).collect()
+pub(crate) fn managed_tools_list_names_for_source_probe(
+    mcp: &McpState,
+    slot: &NativeSlotWitness,
+    book: &crate::agent::interaction::Interactions,
+) -> Vec<String> {
+    let Some(actual) = mcp.current_native_observation(slot) else {
+        return Vec::new();
+    };
+    tools_list(actual.grant(), false, Some(book))
+        .into_iter()
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
+        .collect()
 }
 
 // Sole production constructor below receives only the actual original loopback
 // resolver result. This carrier is neither serializable nor a renderer selector.
-pub(crate) struct NativeManagedCall{grant:RunGrant,receipt:Arc<crate::agent::NativePublicationReceipt>,origin:Arc<crate::actions::native_owner::NativeActionReadOrigin>,control:managed_call::Registration}
-impl NativeManagedCall{
- fn capture(app:&AppHandle,grant:&RunGrant,receipt:&Arc<crate::agent::NativePublicationReceipt>,id:&Value)->Option<Self>{
-  use tauri::Manager;
-  if !original_attended_grant(grant){return None;}
-  let agents=app.try_state::<crate::agent::AgentState>()?;
-  let origin=agents.native_action_read_for_publication(receipt)?;
-  let(_,lifetime)=crate::actions::native_owner::managed_call_limits();
-  let control=managed_controls().register(grant,receipt,id,Instant::now().checked_add(lifetime)?)?;
-  Some(Self{grant:grant.clone(),receipt:receipt.clone(),origin,control})
- }
- pub(crate) fn grant(&self)->&RunGrant{&self.grant}
- pub(crate) fn receipt(&self)->&Arc<crate::agent::NativePublicationReceipt>{&self.receipt}
- pub(crate) fn origin(&self)->&Arc<crate::actions::native_owner::NativeActionReadOrigin>{&self.origin}
- pub(crate) fn rpc_key(&self)->&str{self.control.rpc_key()}
- pub(crate) fn stopped(&self)->bool{self.control.stopped_at(Instant::now())}
+pub(crate) struct NativeManagedCall {
+    grant: RunGrant,
+    receipt: Arc<crate::agent::NativePublicationReceipt>,
+    origin: Arc<crate::actions::native_owner::NativeActionReadOrigin>,
+    control: managed_call::Registration,
 }
-fn managed_controls()->&'static Arc<managed_call::ControlBook>{static BOOK:std::sync::OnceLock<Arc<managed_call::ControlBook>>=std::sync::OnceLock::new();BOOK.get_or_init(||Arc::new(managed_call::ControlBook::default()))}
-fn original_attended_grant(grant:&RunGrant)->bool{matches!(&grant.asks.kind,crate::policy::tool_approval::RunKind::Attended)&&grant.chain.len()==1&&!grant.actor.starts_with(crate::client_access::CLIENT_ACTOR_PREFIX)}
-fn managed_tool_name(name:&str)->bool{crate::policy::tools::manifest().tools.iter().any(|row|row.name==name&&row.toolset.as_deref()==Some("managed"))}
-fn routed_publication(app:&AppHandle,resolved:Option<ResolvedPublication>,body:&str)->Reply{
- let Some((grant,receipt))=resolved else{return Reply::Json(rpc_error(Value::Null,-32001,"unauthorized"));};
- let Some(receipt)=receipt else{return routed(Some(grant),body,|grant,body|handle_rpc(app,grant,body));};
- if is_notification(body){
-  if let Ok(request)=serde_json::from_str::<Value>(body){
-   if request.get("jsonrpc").and_then(Value::as_str)==Some("2.0")&&request.get("method").and_then(Value::as_str)==Some("notifications/cancelled"){
-    if let Some(id)=request.get("params").and_then(|params|params.get("requestId")){
-     if managed_controls().cancel(&grant,&receipt,id){
-      use tauri::Manager;
-      if let(Some(key),Some(agents))=(managed_call::request_key(id),app.try_state::<crate::agent::AgentState>()){agents.interactions().cancel_managed_rpc(&grant.run_id,&key);}
-     }
+impl NativeManagedCall {
+    fn capture(
+        app: &AppHandle,
+        grant: &RunGrant,
+        receipt: &Arc<crate::agent::NativePublicationReceipt>,
+        id: &Value,
+    ) -> Option<Self> {
+        use tauri::Manager;
+        if !original_attended_grant(grant) {
+            return None;
+        }
+        let agents = app.try_state::<crate::agent::AgentState>()?;
+        let origin = agents.native_action_read_for_publication(receipt)?;
+        let (_, lifetime) = crate::actions::native_owner::managed_call_limits();
+        let control = managed_controls().register(
+            grant,
+            receipt,
+            id,
+            Instant::now().checked_add(lifetime)?,
+        )?;
+        Some(Self {
+            grant: grant.clone(),
+            receipt: receipt.clone(),
+            origin,
+            control,
+        })
     }
-   }
-  }
-  return Reply::Accepted;
- }
- handle_rpc_with_publication(app,&grant,&receipt,body)
+    pub(crate) fn grant(&self) -> &RunGrant {
+        &self.grant
+    }
+    pub(crate) fn receipt(&self) -> &Arc<crate::agent::NativePublicationReceipt> {
+        &self.receipt
+    }
+    pub(crate) fn origin(&self) -> &Arc<crate::actions::native_owner::NativeActionReadOrigin> {
+        &self.origin
+    }
+    pub(crate) fn rpc_key(&self) -> &str {
+        self.control.rpc_key()
+    }
+    pub(crate) fn stopped(&self) -> bool {
+        self.control.stopped_at(Instant::now())
+    }
 }
-fn managed_tool_result(result:Result<Value,crate::actions::read_types::ActionError>)->Result<Value,String>{
- match result{Ok(value)=>typed_result(value),Err(error)=>{let mut result=text_result(serde_json::to_string(&serde_json::json!({"error":error})).map_err(|_|"Action response is unavailable.".to_owned())?);result["isError"]=Value::Bool(true);Ok(result)}}
+fn managed_controls() -> &'static Arc<managed_call::ControlBook> {
+    static BOOK: std::sync::OnceLock<Arc<managed_call::ControlBook>> = std::sync::OnceLock::new();
+    BOOK.get_or_init(|| Arc::new(managed_call::ControlBook::default()))
+}
+fn original_attended_grant(grant: &RunGrant) -> bool {
+    matches!(
+        &grant.asks.kind,
+        crate::policy::tool_approval::RunKind::Attended
+    ) && grant.chain.len() == 1
+        && !grant
+            .actor
+            .starts_with(crate::client_access::CLIENT_ACTOR_PREFIX)
+}
+fn managed_tool_name(name: &str) -> bool {
+    crate::policy::tools::manifest()
+        .tools
+        .iter()
+        .any(|row| row.name == name && row.toolset.as_deref() == Some("managed"))
+}
+fn routed_publication(app: &AppHandle, resolved: Option<ResolvedPublication>, body: &str) -> Reply {
+    let Some((grant, receipt)) = resolved else {
+        return Reply::Json(rpc_error(Value::Null, -32001, "unauthorized"));
+    };
+    let Some(receipt) = receipt else {
+        return routed(Some(grant), body, |grant, body| {
+            handle_rpc(app, grant, body)
+        });
+    };
+    if is_notification(body) {
+        if let Ok(request) = serde_json::from_str::<Value>(body) {
+            if request.get("jsonrpc").and_then(Value::as_str) == Some("2.0")
+                && request.get("method").and_then(Value::as_str) == Some("notifications/cancelled")
+            {
+                if let Some(id) = request
+                    .get("params")
+                    .and_then(|params| params.get("requestId"))
+                {
+                    if managed_controls().cancel(&grant, &receipt, id) {
+                        use tauri::Manager;
+                        if let (Some(key), Some(agents)) = (
+                            managed_call::request_key(id),
+                            app.try_state::<crate::agent::AgentState>(),
+                        ) {
+                            agents
+                                .interactions()
+                                .cancel_managed_rpc(&grant.run_id, &key);
+                        }
+                    }
+                }
+            }
+        }
+        return Reply::Accepted;
+    }
+    handle_rpc_with_publication(app, &grant, &receipt, body)
+}
+fn managed_tool_result(
+    result: Result<Value, crate::actions::read_types::ActionError>,
+) -> Result<Value, String> {
+    match result {
+        Ok(value) => typed_result(value),
+        Err(error) => {
+            let mut result = text_result(
+                serde_json::to_string(&serde_json::json!({"error":error}))
+                    .map_err(|_| "Action response is unavailable.".to_owned())?,
+            );
+            result["isError"] = Value::Bool(true);
+            Ok(result)
+        }
+    }
 }
 
 #[cfg(test)]
-mod managed_listing_tests{
- use super::*;
- fn fixture()->(RunGrant,crate::agent::interaction::Interactions){let mut grant=RunGrant::unrestricted(DEFAULT_ACTOR);grant.vault=Some(std::path::PathBuf::from("/vault"));grant.asks=WriteAsks{kind:crate::policy::tool_approval::RunKind::Attended,ask_first:false};let request:crate::agent::AgentRequest=serde_json::from_value(serde_json::json!({"message":"","system_prompt":"","attended":true})).unwrap();let book=crate::agent::interaction::Interactions::with_asks(vec![]);book.open_seat(crate::agent::interaction::Seat::new(&grant.run_id,"session",std::path::Path::new("/vault"),&request),None);book.hand_prompt_tool(&grant.run_id);(grant,book)}
- fn names(grant:&RunGrant,book:Option<&crate::agent::interaction::Interactions>)->Vec<String>{tools_list(grant,false,book).into_iter().filter_map(|tool|tool["name"].as_str().map(str::to_owned)).filter(|name|managed_tool_name(name)).collect()}
- #[test]
- fn managed_manifest_names_require_original_attended_seat_metadata(){let(grant,book)=fixture();let expected=crate::policy::tools::manifest().tools.iter().filter(|row|row.toolset.as_deref()==Some("managed")).map(|row|row.name.clone()).collect::<Vec<_>>();assert!(!expected.is_empty());assert_eq!(names(&grant,Some(&book)),expected);assert!(names(&grant,None).is_empty());}
- #[test]
- fn managed_manifest_names_are_absent_for_client_child_and_unattended_metadata(){let(mut grant,book)=fixture();let original=grant.clone();grant.actor=format!("{}fixture",crate::client_access::CLIENT_ACTOR_PREFIX);assert!(names(&grant,Some(&book)).is_empty());grant=original.clone();grant.chain.push("child".into());assert!(names(&grant,Some(&book)).is_empty());grant=original;grant.asks=WriteAsks::UNASKED;assert!(names(&grant,Some(&book)).is_empty());}
+mod managed_listing_tests {
+    use super::*;
+    fn fixture() -> (RunGrant, crate::agent::interaction::Interactions) {
+        let mut grant = RunGrant::unrestricted(DEFAULT_ACTOR);
+        grant.vault = Some(std::path::PathBuf::from("/vault"));
+        grant.asks = WriteAsks {
+            kind: crate::policy::tool_approval::RunKind::Attended,
+            ask_first: false,
+        };
+        let request: crate::agent::AgentRequest = serde_json::from_value(
+            serde_json::json!({"message":"","system_prompt":"","attended":true}),
+        )
+        .unwrap();
+        let book = crate::agent::interaction::Interactions::with_asks(vec![]);
+        book.open_seat(
+            crate::agent::interaction::Seat::new(
+                &grant.run_id,
+                "session",
+                std::path::Path::new("/vault"),
+                &request,
+            ),
+            None,
+        );
+        book.hand_prompt_tool(&grant.run_id);
+        (grant, book)
+    }
+    fn names(
+        grant: &RunGrant,
+        book: Option<&crate::agent::interaction::Interactions>,
+    ) -> Vec<String> {
+        tools_list(grant, false, book)
+            .into_iter()
+            .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+            .filter(|name| managed_tool_name(name))
+            .collect()
+    }
+    #[test]
+    fn managed_manifest_names_require_original_attended_seat_metadata() {
+        let (grant, book) = fixture();
+        let expected = crate::policy::tools::manifest()
+            .tools
+            .iter()
+            .filter(|row| row.toolset.as_deref() == Some("managed"))
+            .map(|row| row.name.clone())
+            .collect::<Vec<_>>();
+        assert!(!expected.is_empty());
+        assert_eq!(names(&grant, Some(&book)), expected);
+        assert!(names(&grant, None).is_empty());
+    }
+    #[test]
+    fn managed_manifest_names_are_absent_for_client_child_and_unattended_metadata() {
+        let (mut grant, book) = fixture();
+        let original = grant.clone();
+        grant.actor = format!("{}fixture", crate::client_access::CLIENT_ACTOR_PREFIX);
+        assert!(names(&grant, Some(&book)).is_empty());
+        grant = original.clone();
+        grant.chain.push("child".into());
+        assert!(names(&grant, Some(&book)).is_empty());
+        grant = original;
+        grant.asks = WriteAsks::UNASKED;
+        assert!(names(&grant, Some(&book)).is_empty());
+    }
 }

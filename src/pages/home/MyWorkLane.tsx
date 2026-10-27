@@ -13,7 +13,14 @@ import { TaskRow } from './TaskRow';
 import { SelectedTaskRecovery } from '@/editor/SelectedTaskRecovery';
 
 export function MyWorkLane({ now, ctx }: { now: Date; ctx: BandContext }) {
-  const { tasks, loading, toggle, unreadable = [], recovering = [], toggleUnavailable } = useDocTasks();
+  const {
+    tasks,
+    loading,
+    toggle,
+    unreadable = [],
+    recovering = [],
+    toggleUnavailable,
+  } = useDocTasks();
   const entries = useVaultStore((s) => s.entries);
   const status = useVaultStore((s) => s.status);
   const schema = useSchema();
@@ -77,50 +84,56 @@ export function MyWorkLane({ now, ctx }: { now: Date; ctx: BandContext }) {
   );
   return (
     <>
-    {recovering.map(owner => <SelectedTaskRecovery key={owner.key.ownerId} owner={owner} />)}
-    <Lane
-      id="mywork"
-      state={state}
-      data={data}
-      sections={sections}
-      door="Open My work"
-      onDoor={() => useNavStore.getState().navigate({ kind: 'mywork' })}
-      controls={
-        <div className="mb-1 flex items-center gap-2">
-          {done.length > 0 && (
-            <button
-              type="button"
-              data-testid="home-tasks-show-done"
-              aria-pressed={showDone}
-              onClick={() => setShowDone((value) => !value)}
-              className="border-0 bg-transparent p-0 text-xs text-n-500 underline decoration-dotted underline-offset-2"
-            >
-              {done.length} done
-            </button>
-          )}
-          {assignees.length > 0 && (
-            <div className="ml-auto">
-              <Dropdown
-                size="sm"
-                label="Task assignee"
-                options={[
-                  { value: '', label: 'Everyone' },
-                  { value: '__unassigned__', label: 'Unassigned' },
-                  ...assignees,
-                ]}
-                value={filter}
-                onChange={setFilter}
-              />
-            </div>
-          )}
-        </div>
-      }
-      renderRow={(row) =>
-        row.task === undefined ? undefined : (
-          <TaskRow task={row.task} disabledReason={toggleUnavailable?.(row.task)} onToggle={(value) => void toggle(row.task!, value)} />
-        )
-      }
-    />
+      {recovering.map((owner) => (
+        <SelectedTaskRecovery key={owner.key.ownerId} owner={owner} />
+      ))}
+      <Lane
+        id="mywork"
+        state={state}
+        data={data}
+        sections={sections}
+        door="Open My work"
+        onDoor={() => useNavStore.getState().navigate({ kind: 'mywork' })}
+        controls={
+          <div className="mb-1 flex items-center gap-2">
+            {done.length > 0 && (
+              <button
+                type="button"
+                data-testid="home-tasks-show-done"
+                aria-pressed={showDone}
+                onClick={() => setShowDone((value) => !value)}
+                className="border-0 bg-transparent p-0 text-xs text-n-500 underline decoration-dotted underline-offset-2"
+              >
+                {done.length} done
+              </button>
+            )}
+            {assignees.length > 0 && (
+              <div className="ml-auto">
+                <Dropdown
+                  size="sm"
+                  label="Task assignee"
+                  options={[
+                    { value: '', label: 'Everyone' },
+                    { value: '__unassigned__', label: 'Unassigned' },
+                    ...assignees,
+                  ]}
+                  value={filter}
+                  onChange={setFilter}
+                />
+              </div>
+            )}
+          </div>
+        }
+        renderRow={(row) =>
+          row.task === undefined ? undefined : (
+            <TaskRow
+              task={row.task}
+              disabledReason={toggleUnavailable?.(row.task)}
+              onToggle={(value) => void toggle(row.task!, value)}
+            />
+          )
+        }
+      />
     </>
   );
 }

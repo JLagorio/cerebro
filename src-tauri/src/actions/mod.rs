@@ -9,11 +9,11 @@ mod types;
 
 #[cfg(test)]
 mod approval;
+mod effect_kernel;
 #[cfg(test)]
 mod recovery;
 #[cfg(test)]
 mod service;
-mod effect_kernel;
 
 #[cfg(test)]
 mod admission;

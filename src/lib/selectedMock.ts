@@ -170,21 +170,40 @@ export function projectSelectedValue(value: PropertyValue): unknown {
   }
 }
 /** Per-key compatibility parity for the actual selected scan carrier. */
-export function projectSelectedMetadata(metadata: PropertyValue): { properties: Record<string, unknown>; type: string | null; canonicalProperties: SelectedEntryProperties } {
-  if (metadata.kind !== 'object') throw refusal('invalid_metadata', 'Canonical metadata must be an object.');
+export function projectSelectedMetadata(metadata: PropertyValue): {
+  properties: Record<string, unknown>;
+  type: string | null;
+  canonicalProperties: SelectedEntryProperties;
+} {
+  if (metadata.kind !== 'object')
+    throw refusal('invalid_metadata', 'Canonical metadata must be an object.');
   const declaredType = Object.hasOwn(metadata.value, 'type') ? metadata.value.type : undefined;
-  if (declaredType && declaredType.kind !== 'string' && declaredType.kind !== 'null') throw refusal('unsupported_projection', 'Canonical page type must be text or absent.');
+  if (declaredType && declaredType.kind !== 'string' && declaredType.kind !== 'null')
+    throw refusal('unsupported_projection', 'Canonical page type must be text or absent.');
   const properties: Record<string, unknown> = Object.create(null);
   const unavailableLegacyKeys: string[] = [];
   for (const [key, value] of Object.entries(metadata.value)) {
-    try { properties[key] = projectSelectedValue(value); }
-    catch (error) {
-      if (!error || typeof error !== 'object' || !('kind' in error) || error.kind !== 'unsupported_projection') throw error;
+    try {
+      properties[key] = projectSelectedValue(value);
+    } catch (error) {
+      if (
+        !error ||
+        typeof error !== 'object' ||
+        !('kind' in error) ||
+        error.kind !== 'unsupported_projection'
+      )
+        throw error;
       unavailableLegacyKeys.push(key);
     }
   }
-  return { properties, type: declaredType?.kind === 'string' ? declaredType.value : null,
-    canonicalProperties: { value: structuredClone(metadata), unavailableLegacyKeys: unavailableLegacyKeys.sort(unicodeOrder) } };
+  return {
+    properties,
+    type: declaredType?.kind === 'string' ? declaredType.value : null,
+    canonicalProperties: {
+      value: structuredClone(metadata),
+      unavailableLegacyKeys: unavailableLegacyKeys.sort(unicodeOrder),
+    },
+  };
 }
 
 function unicodeOrder(left: string, right: string): number {

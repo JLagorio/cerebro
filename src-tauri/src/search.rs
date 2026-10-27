@@ -411,23 +411,41 @@ pub fn searchable_fields(
 /// decompose to an ASCII letter followed only by marks. Other scripts and
 /// original source bytes stay unchanged; this is not general transliteration.
 fn latin_alias(text: &str) -> Cow<'_, str> {
-    if text.is_ascii() { return Cow::Borrowed(text); }
+    if text.is_ascii() {
+        return Cow::Borrowed(text);
+    }
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        if c.is_ascii() { out.push(c); continue; }
+        if c.is_ascii() {
+            out.push(c);
+            continue;
+        }
         let mut decomposition = Vec::new();
         unicode_normalization::char::decompose_canonical(c, |part| decomposition.push(part));
         if decomposition.len() > 1
             && decomposition[0].is_ascii_alphabetic()
-            && decomposition[1..].iter().all(|part| unicode_normalization::char::is_combining_mark(*part))
-        { out.push(decomposition[0]); } else { out.push(c); }
+            && decomposition[1..]
+                .iter()
+                .all(|part| unicode_normalization::char::is_combining_mark(*part))
+        {
+            out.push(decomposition[0]);
+        } else {
+            out.push(c);
+        }
     }
-    if out == text { Cow::Borrowed(text) } else { Cow::Owned(out) }
+    if out == text {
+        Cow::Borrowed(text)
+    } else {
+        Cow::Owned(out)
+    }
 }
 fn fold_words(tokens: &mut [String]) -> bool {
     let mut changed = false;
     for token in tokens {
-        if let Cow::Owned(alias) = latin_alias(token) { *token = alias; changed = true; }
+        if let Cow::Owned(alias) = latin_alias(token) {
+            *token = alias;
+            changed = true;
+        }
     }
     changed
 }
@@ -436,8 +454,12 @@ fn folded_query(query: &Query) -> Query {
     fold_words(&mut folded.terms);
     let mut seen = HashSet::new();
     folded.terms.retain(|term| seen.insert(term.clone()));
-    for phrase in &mut folded.phrases { fold_words(phrase); }
-    if let Some(implicit) = &mut folded.implicit { fold_words(implicit); }
+    for phrase in &mut folded.phrases {
+        fold_words(phrase);
+    }
+    if let Some(implicit) = &mut folded.implicit {
+        fold_words(implicit);
+    }
     folded
 }
 
@@ -578,13 +600,20 @@ pub fn rank_query(query: &Query, docs: &[Doc], limit: usize) -> Ranked {
 /// | content |       | yes  | yes         | but its title H1 | frontmatter, body |
 /// | all     | yes   | yes  | yes         | yes              | frontmatter, body |
 pub fn rank_scoped(query: &Query, docs: &[Doc], limit: usize, scope: Scope) -> Ranked {
-    if query.terms.is_empty() || docs.is_empty() { return Ranked::default(); }
+    if query.terms.is_empty() || docs.is_empty() {
+        return Ranked::default();
+    }
     let bodies: Vec<Cow<str>> = docs.iter().map(|doc| scoped_body(doc, scope)).collect();
-    let mut fields: Vec<Fields> = docs.iter().zip(&bodies)
-        .map(|(doc, body)| Fields::of(doc, body, scope)).collect();
+    let mut fields: Vec<Fields> = docs
+        .iter()
+        .zip(&bodies)
+        .map(|(doc, body)| Fields::of(doc, body, scope))
+        .collect();
     let mut ranked = score_fields(query, docs, &fields);
     let mut exact = vec![false; docs.len()];
-    for hit in &ranked.hits { exact[hit.index] = true; }
+    for hit in &ranked.hits {
+        exact[hit.index] = true;
+    }
     // Reuse the existing transient token allocation after exact scoring. Never
     // rescan the vault or normalize the source that locators/excerpts address.
     let mut changed = false;
@@ -592,18 +621,31 @@ pub fn rank_scoped(query: &Query, docs: &[Doc], limit: usize, scope: Scope) -> R
         changed |= fold_words(&mut field.title);
         changed |= fold_words(&mut field.kind);
         changed |= fold_words(&mut field.body);
-        for meta in &mut field.meta { changed |= fold_words(meta); }
+        for meta in &mut field.meta {
+            changed |= fold_words(meta);
+        }
     }
     let folded = folded_query(query);
     if changed || folded.terms != query.terms {
         let aliases = score_fields(&folded, docs, &fields);
-        if ranked.hits.is_empty() { ranked.widened = aliases.widened; }
+        if ranked.hits.is_empty() {
+            ranked.widened = aliases.widened;
+        }
         for mut hit in aliases.hits {
-            if exact[hit.index] { continue; }
+            if exact[hit.index] {
+                continue;
+            }
             ranked.widened |= aliases.widened;
-            hit.matched = query.terms.iter()
-                .filter(|term| hit.matched.iter().any(|matched| matched == latin_alias(term).as_ref()))
-                .cloned().collect();
+            hit.matched = query
+                .terms
+                .iter()
+                .filter(|term| {
+                    hit.matched
+                        .iter()
+                        .any(|matched| matched == latin_alias(term).as_ref())
+                })
+                .cloned()
+                .collect();
             ranked.hits.push(hit);
         }
     }
@@ -614,7 +656,12 @@ pub fn rank_scoped(query: &Query, docs: &[Doc], limit: usize, scope: Scope) -> R
             hit.excerpt = if exact[hit.index] {
                 excerpt(docs[hit.index].meta, &bodies[hit.index], &query.terms)
             } else {
-                excerpt_matching(docs[hit.index].meta, &bodies[hit.index], &folded.terms, true)
+                excerpt_matching(
+                    docs[hit.index].meta,
+                    &bodies[hit.index],
+                    &folded.terms,
+                    true,
+                )
             };
         }
     }
@@ -723,13 +770,19 @@ fn score_fields(query: &Query, docs: &[Doc], fields: &[Fields]) -> Ranked {
     } else {
         (strict, false)
     };
-    Ranked { total: hits.len(), hits, widened }
+    Ranked {
+        total: hits.len(),
+        hits,
+        widened,
+    }
 }
 
 /// How many distinct `terms` `text` holds.
 fn distinct_held(text: &str, terms: &[String], aliases: bool) -> usize {
     let mut tokens = words(text);
-    if aliases { fold_words(&mut tokens); }
+    if aliases {
+        fold_words(&mut tokens);
+    }
     terms
         .iter()
         .filter(|term| tokens.iter().any(|t| t == *term))
@@ -748,7 +801,12 @@ pub fn excerpt(meta: &[MetaField], body: &str, terms: &[String]) -> Option<Excer
     excerpt_matching(meta, body, terms, false)
 }
 
-fn excerpt_matching(meta: &[MetaField], body: &str, terms: &[String], aliases: bool) -> Option<Excerpt> {
+fn excerpt_matching(
+    meta: &[MetaField],
+    body: &str,
+    terms: &[String],
+    aliases: bool,
+) -> Option<Excerpt> {
     let mut best: Option<(usize, ExcerptAt, &str, Option<usize>)> = None;
     let fields = meta.iter().enumerate().map(|(index, m)| {
         (
@@ -814,11 +872,17 @@ fn excerpt_window_raw(text: &str, terms: &[String]) -> (String, Vec<Range<usize>
     excerpt_window_matching(text, terms, false)
 }
 
-fn excerpt_window_matching(text: &str, terms: &[String], aliases: bool) -> (String, Vec<Range<usize>>, Range<usize>) {
+fn excerpt_window_matching(
+    text: &str,
+    terms: &[String],
+    aliases: bool,
+) -> (String, Vec<Range<usize>>, Range<usize>) {
     let matches: Vec<Token> = token_spans(text)
         .into_iter()
         .map(|mut token| {
-            if aliases { token.text = latin_alias(&token.text).into_owned(); }
+            if aliases {
+                token.text = latin_alias(&token.text).into_owned();
+            }
             token
         })
         .filter(|t| terms.iter().any(|term| term == cut_term(&t.text)))
@@ -956,12 +1020,15 @@ pub fn docs_of(corpus: &Corpus, keep: impl Fn(&Entry) -> bool) -> Kept<'_> {
         if !keep(entry) {
             continue;
         }
-        kept.metas.push(text.search_fields.clone().unwrap_or_else(|| searchable_fields(
-            &entry.title,
-            entry.entry_type.as_deref(),
-            &entry.properties,
-            &entry.relationships,
-        )));
+        kept.metas
+            .push(text.search_fields.clone().unwrap_or_else(|| {
+                searchable_fields(
+                    &entry.title,
+                    entry.entry_type.as_deref(),
+                    &entry.properties,
+                    &entry.relationships,
+                )
+            }));
         kept.entries.push(entry);
         kept.bodies.push(&text.body);
         kept.sources.push(text.source.as_ref());
@@ -1191,7 +1258,9 @@ fn source_location(
         ExcerptAt::Field(key) => {
             // A selected property is canonical metadata, never body YAML. Its
             // revision-bearing locator is a separate, still unsupported carrier.
-            if entry.authority.is_some() { return None; }
+            if entry.authority.is_some() {
+                return None;
+            }
             let field = kept.metas[hit.index].get(excerpt.field_index?)?;
             (
                 field.text.as_str(),

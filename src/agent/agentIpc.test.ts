@@ -623,7 +623,6 @@ describe('a mock run says what it reaches (M92.8)', () => {
   });
 });
 
-
 describe('native held managed-action acknowledgement (M96)', () => {
   const id = 'c'.repeat(32);
   beforeEach(() => {
@@ -644,9 +643,14 @@ describe('native held managed-action acknowledgement (M96)', () => {
       });
       expect(starts).toEqual([]);
       expect(invokeSpy).toHaveBeenCalledWith('answer_interaction', {
-        vault: VAULT, id, answer: { kind: 'allow', remember: undefined }, updatedInput: null,
+        vault: VAULT,
+        id,
+        answer: { kind: 'allow', remember: undefined },
+        updatedInput: null,
       });
-    } finally { off(); }
+    } finally {
+      off();
+    }
   });
   it.each([
     { answered: null },
@@ -662,6 +666,8 @@ describe('native held managed-action acknowledgement (M96)', () => {
       invokeSpy.mockResolvedValueOnce(wire);
       await expect(answerInteraction(VAULT, id, { kind: 'deny' })).rejects.toThrow();
       expect(starts).toEqual([]);
-    } finally { off(); }
+    } finally {
+      off();
+    }
   });
 });

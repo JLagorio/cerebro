@@ -9,7 +9,13 @@ import { announceExternalWrites, heldOpenPages } from '@/editor/openPages';
 import { subscribeRecovery } from '@/editor/deletedDraftRecovery';
 import type { DocumentOwner } from '@/editor/documentOwner';
 import { recoveryOutcomeText } from '@/editor/RecoverySaveStatus';
-import { flushAnnouncedTask, retireRefusedTask, selectedTaskOwner, selectedTaskOwners, selectedTaskRefusalMessage } from '@/editor/selectedTaskOwner';
+import {
+  flushAnnouncedTask,
+  retireRefusedTask,
+  selectedTaskOwner,
+  selectedTaskOwners,
+  selectedTaskRefusalMessage,
+} from '@/editor/selectedTaskOwner';
 import { sameSelectedObservation, selectedSnapshotFor } from '@/editor/selectedSnapshot';
 import type { SelectedEditorSnapshot } from '@/lib/generated/workspace';
 import { sha256Hex } from '@/lib/sha256';
@@ -33,13 +39,19 @@ function selectedRows(path: string, source: SelectedEditorSnapshot): DocTask[] {
 }
 async function selectedRead(vault: string, entry: Entry): Promise<SelectedEditorSnapshot> {
   const version = entry.authority;
-  if (version === undefined || !supportsSelectedEditor()) throw new Error('selected_task_read_unavailable');
+  if (version === undefined || !supportsSelectedEditor())
+    throw new Error('selected_task_read_unavailable');
   const target = { workspaceId: version.workspaceId, recordId: version.recordId };
   const snapshot = await readEditorBody(vault, entry.path, target);
-  if (!selectedSnapshotFor(snapshot, entry.path, target)) throw new Error('selected_task_snapshot_changed');
+  if (!selectedSnapshotFor(snapshot, entry.path, target))
+    throw new Error('selected_task_snapshot_changed');
   const difference = BigInt(snapshot.version.metadataRevision) - BigInt(version.metadataRevision);
-  if (difference < 0n || (difference === 0n &&
-    (snapshot.version.metadataHash !== version.metadataHash || snapshot.version.bodyHash !== version.bodyHash)))
+  if (
+    difference < 0n ||
+    (difference === 0n &&
+      (snapshot.version.metadataHash !== version.metadataHash ||
+        snapshot.version.bodyHash !== version.bodyHash))
+  )
     throw new Error('selected_task_snapshot_superseded');
   return snapshot;
 }
@@ -64,7 +76,7 @@ export function useDocTasks(): {
   const startAction = useVaultActionGuard(vaultPath ?? '');
   const schema = useSchema();
   const [, updateOwners] = useState(0);
-  useEffect(() => subscribeRecovery(() => updateOwners(value => value + 1)), []);
+  useEffect(() => subscribeRecovery(() => updateOwners((value) => value + 1)), []);
   const [read, setRead] = useState<TaskRead>({
     vault: null,
     tasks: [],
@@ -80,31 +92,42 @@ export function useDocTasks(): {
       const results: { tasks: DocTask[]; unreadable: string[] }[] = new Array(sources.length);
       let cursor = 0;
       await Promise.all(
-        Array.from({ length: Math.min(sources.some(entry => entry.authority !== undefined) ? 1 : 8, sources.length) }, async () => {
-          while (live && cursor < sources.length) {
-            const index = cursor++,
-              entry = sources[index],
-              key = keyOf(vaultPath, entry.path);
-            const hit = cache.get(key);
-            try {
-              let tasks: DocTask[];
-              if (entry.authority !== undefined) {
-                // Always read canonical selected metadata/observation. A body
-                // hash cache cannot hide independent metadata-only changes.
-                tasks = selectedRows(entry.path, await selectedRead(vaultPath, entry));
+        Array.from(
+          {
+            length: Math.min(
+              sources.some((entry) => entry.authority !== undefined) ? 1 : 8,
+              sources.length,
+            ),
+          },
+          async () => {
+            while (live && cursor < sources.length) {
+              const index = cursor++,
+                entry = sources[index],
+                key = keyOf(vaultPath, entry.path);
+              const hit = cache.get(key);
+              try {
+                let tasks: DocTask[];
+                if (entry.authority !== undefined) {
+                  // Always read canonical selected metadata/observation. A body
+                  // hash cache cannot hide independent metadata-only changes.
+                  tasks = selectedRows(entry.path, await selectedRead(vaultPath, entry));
+                } else if (entry.hash !== null && hit?.version === entry.hash) tasks = hit.tasks;
+                else {
+                  const source = await readNoteSource(vaultPath, entry.path);
+                  tasks = parseTasks(
+                    entry.path,
+                    splitFrontmatter(source.content).body,
+                    source.hash,
+                  );
+                  if (live) cache.set(key, { version: source.hash, tasks });
+                }
+                results[index] = { tasks, unreadable: [] };
+              } catch {
+                results[index] = { tasks: [], unreadable: [entry.path] };
               }
-              else if (entry.hash !== null && hit?.version === entry.hash) tasks = hit.tasks;
-              else {
-                const source = await readNoteSource(vaultPath, entry.path);
-                tasks = parseTasks(entry.path, splitFrontmatter(source.content).body, source.hash);
-                if (live) cache.set(key, { version: source.hash, tasks });
-              }
-              results[index] = { tasks, unreadable: [] };
-            } catch {
-              results[index] = { tasks: [], unreadable: [entry.path] };
             }
-          }
-        }),
+          },
+        ),
       );
       if (live)
         setRead({
@@ -135,7 +158,8 @@ export function useDocTasks(): {
         useUiStore
           .getState()
           .toast(
-            message ?? `“${task.text}” changed since this list was read, so the tick wasn't saved. The list is refreshed — tick it again.`,
+            message ??
+              `“${task.text}” changed since this list was read, so the tick wasn't saved. The list is refreshed — tick it again.`,
           );
         await useVaultStore.getState().rescan();
       };
@@ -144,26 +168,52 @@ export function useDocTasks(): {
         // failures here so a refused write cannot disappear into that seam.
         const selected = selectedSources.get(task);
         const entryState = useVaultStore.getState();
-        const entry = entryState.entriesVault === vaultPath
-          ? entryState.entries.find(entry => entry.path === task.sourcePath) : undefined;
+        const entry =
+          entryState.entriesVault === vaultPath
+            ? entryState.entries.find((entry) => entry.path === task.sourcePath)
+            : undefined;
         if (selected !== undefined || entry?.authority !== undefined) {
           try {
-            if (selected === undefined || entry?.authority === undefined ||
+            if (
+              selected === undefined ||
+              entry?.authority === undefined ||
               entry.authority.workspaceId !== selected.target.workspaceId ||
-              entry.authority.recordId !== selected.target.recordId) { await refresh(); return; }
-            const fresh = await selectedRead(vaultPath, entry);
-            if (!current()) return;
-            if (!sameSelectedObservation(selected, fresh)) { await refresh(); return; }
-            if (!fresh.editable || fresh.coherence !== 'paired') {
-              useUiStore.getState().toast(fresh.readOnlyReason ?? 'Open this page to resolve its selected body before ticking tasks.');
+              entry.authority.recordId !== selected.target.recordId
+            ) {
+              await refresh();
               return;
             }
-            const row = parseTasks(task.sourcePath, fresh.body, fresh.observedBodyHash).find(row => row.line === task.line);
-            const next = row?.text === task.text ? toggleTaskLine(fresh.body, task.line, done) : null;
-            if (next === null || !current()) { if (current()) await refresh(); return; }
+            const fresh = await selectedRead(vaultPath, entry);
+            if (!current()) return;
+            if (!sameSelectedObservation(selected, fresh)) {
+              await refresh();
+              return;
+            }
+            if (!fresh.editable || fresh.coherence !== 'paired') {
+              useUiStore
+                .getState()
+                .toast(
+                  fresh.readOnlyReason ??
+                    'Open this page to resolve its selected body before ticking tasks.',
+                );
+              return;
+            }
+            const row = parseTasks(task.sourcePath, fresh.body, fresh.observedBodyHash).find(
+              (row) => row.line === task.line,
+            );
+            const next =
+              row?.text === task.text ? toggleTaskLine(fresh.body, task.line, done) : null;
+            if (next === null || !current()) {
+              if (current()) await refresh();
+              return;
+            }
             const owner = selectedTaskOwner(vaultPath, fresh);
             if (!owner.expectSelectedVersion(fresh.version)) {
-              useUiStore.getState().toast('The earlier task save is still owned. Check that save before ticking again.');
+              useUiStore
+                .getState()
+                .toast(
+                  'The earlier task save is still owned. Check that save before ticking again.',
+                );
               return;
             }
             owner.edit(next, 'source');
@@ -176,8 +226,12 @@ export function useDocTasks(): {
               if (current()) await refresh(message);
               return;
             }
-            if (outcome.kind !== 'acknowledged' ||
-              (outcome.write.kind !== 'selected_applied' && outcome.write.kind !== 'selected_unchanged')) return;
+            if (
+              outcome.kind !== 'acknowledged' ||
+              (outcome.write.kind !== 'selected_applied' &&
+                outcome.write.kind !== 'selected_unchanged')
+            )
+              return;
             const ack = outcome.write;
             if (!current()) return;
             if (ack.kind === 'selected_applied' && ack.recovery != null) {
@@ -190,19 +244,52 @@ export function useDocTasks(): {
                 await useVaultStore.getState().rescan();
                 if (current()) {
                   const observed = await selectedRead(vaultPath, entry);
-                  if (current()) { owner.finishReconcile(); setRead(prev => prev.vault !== vaultPath ? prev :
-                    { ...prev, tasks: [...prev.tasks.filter(row => row.sourcePath !== task.sourcePath), ...selectedRows(task.sourcePath, observed)] }); }
+                  if (current()) {
+                    owner.finishReconcile();
+                    setRead((prev) =>
+                      prev.vault !== vaultPath
+                        ? prev
+                        : {
+                            ...prev,
+                            tasks: [
+                              ...prev.tasks.filter((row) => row.sourcePath !== task.sourcePath),
+                              ...selectedRows(task.sourcePath, observed),
+                            ],
+                          },
+                    );
+                  }
                 }
-              } catch { if (current()) useUiStore.getState().toast("Task saved, but the list couldn't refresh."); }
+              } catch {
+                if (current())
+                  useUiStore.getState().toast("Task saved, but the list couldn't refresh.");
+              }
               return;
             }
             acceptSelectedEditorVersion(vaultPath, task.sourcePath, fresh.target, version);
-            const accepted = { ...fresh, body: next, version, observedBodyHash: sha256Hex(next), coherence: 'paired' as const };
-            setRead(prev => prev.vault !== vaultPath ? prev : {
-              ...prev, tasks: [...prev.tasks.filter(row => row.sourcePath !== task.sourcePath), ...selectedRows(task.sourcePath, accepted)],
-            });
-            try { await useVaultStore.getState().rescan(); }
-            catch { if (current()) useUiStore.getState().toast("Task saved, but the list couldn't refresh."); }
+            const accepted = {
+              ...fresh,
+              body: next,
+              version,
+              observedBodyHash: sha256Hex(next),
+              coherence: 'paired' as const,
+            };
+            setRead((prev) =>
+              prev.vault !== vaultPath
+                ? prev
+                : {
+                    ...prev,
+                    tasks: [
+                      ...prev.tasks.filter((row) => row.sourcePath !== task.sourcePath),
+                      ...selectedRows(task.sourcePath, accepted),
+                    ],
+                  },
+            );
+            try {
+              await useVaultStore.getState().rescan();
+            } catch {
+              if (current())
+                useUiStore.getState().toast("Task saved, but the list couldn't refresh.");
+            }
           } catch {
             if (current()) useUiStore.getState().toast("Couldn't update task");
           }
@@ -266,12 +353,17 @@ export function useDocTasks(): {
     const snapshot = selectedSources.get(task);
     if (snapshot === undefined) return undefined;
     if (!snapshot.editable || snapshot.coherence !== 'paired')
-      return snapshot.readOnlyReason ?? 'Open this page to resolve its selected body before ticking tasks.';
-    if (recovering.some(owner => owner.key.path === task.sourcePath)) return 'Check the earlier task save before ticking again.';
+      return (
+        snapshot.readOnlyReason ??
+        'Open this page to resolve its selected body before ticking tasks.'
+      );
+    if (recovering.some((owner) => owner.key.path === task.sourcePath))
+      return 'Check the earlier task save before ticking again.';
     return undefined;
   };
   return {
-    recovering, toggleUnavailable,
+    recovering,
+    toggleUnavailable,
     tasks: current ? read.tasks : [],
     unreadable: current ? read.unreadable : [],
     loading: !current || read.loading,

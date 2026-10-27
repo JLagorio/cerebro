@@ -316,7 +316,12 @@ function App() {
   if (quitting) return <QuitScreen />;
 
   if (!vaultPath) {
-    return booted ? <><VaultChooser /><RetainedSavesHost /></> : null;
+    return booted ? (
+      <>
+        <VaultChooser />
+        <RetainedSavesHost />
+      </>
+    ) : null;
   }
 
   return (

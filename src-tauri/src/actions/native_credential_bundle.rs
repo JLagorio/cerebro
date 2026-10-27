@@ -1,19 +1,29 @@
 //! Fixed native import bundle. No IPC field selects a backend or authority.
-use super::{NativeOwnerState, credential_cancel::CancellationRegistration};
+use super::{credential_cancel::CancellationRegistration, NativeOwnerState};
 use crate::connections::{ConnectionError, CredentialAcquisition};
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 static OCCUPIED: AtomicBool = AtomicBool::new(false);
 struct Permit;
 impl Permit {
     fn acquire() -> Result<Self, ConnectionError> {
-        OCCUPIED.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .map(|_| Self).map_err(|_| ConnectionError::Unavailable)
+        OCCUPIED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| Self)
+            .map_err(|_| ConnectionError::Unavailable)
     }
 }
-impl Drop for Permit { fn drop(&mut self) { OCCUPIED.store(false, Ordering::Release); } }
+impl Drop for Permit {
+    fn drop(&mut self) {
+        OCCUPIED.store(false, Ordering::Release);
+    }
+}
 
 pub(super) fn run(
-    owner: &Arc<NativeOwnerState>, ticket: &CredentialAcquisition,
+    owner: &Arc<NativeOwnerState>,
+    ticket: &CredentialAcquisition,
     registration: &CancellationRegistration,
     #[cfg(test)] fixture: Option<super::native_account_worker_fixture::CredentialImportFixture>,
 ) -> Result<(), ConnectionError> {
@@ -27,7 +37,9 @@ pub(super) fn run(
         // This entire block is absent from normal/packaged builds.
         let fixture = fixture.ok_or(ConnectionError::Unavailable)?;
         let _permit = Permit::acquire()?;
-        owner.import_account(ticket, &fixture, &fixture, &fixture).map(|_| ())
+        owner
+            .import_account(ticket, &fixture, &fixture, &fixture)
+            .map(|_| ())
     }
     #[cfg(not(test))]
     {
@@ -39,12 +51,16 @@ pub(super) fn run(
         let process_window = owner.registration.clone();
         let identity_flag = registration.flag.clone();
         let identity_window = owner.registration.clone();
-        let process = crate::connections::gh_native::NativeGhProcess::new(move ||
-            process_flag.stopped() || !process_window.live.load(Ordering::SeqCst));
-        let identity = crate::connections::github_identity::native_reader(move ||
-            identity_flag.stopped() || !identity_window.live.load(Ordering::SeqCst));
+        let process = crate::connections::gh_native::NativeGhProcess::new(move || {
+            process_flag.stopped() || !process_window.live.load(Ordering::SeqCst)
+        });
+        let identity = crate::connections::github_identity::native_reader(move || {
+            identity_flag.stopped() || !identity_window.live.load(Ordering::SeqCst)
+        });
         let store = crate::connections::secrets::platform_secret_store();
-        owner.import_account(ticket, &process, identity.as_ref(), store.as_ref()).map(|_| ())
+        owner
+            .import_account(ticket, &process, identity.as_ref(), store.as_ref())
+            .map(|_| ())
     }
 }
 #[cfg(test)]
@@ -56,9 +72,18 @@ pub(super) fn fixture() -> Option<super::native_account_worker_fixture::Credenti
     FIXTURE.with(|slot| slot.borrow().clone())
 }
 #[cfg(test)]
-pub(super) fn with_fixture<T>(fixture: super::native_account_worker_fixture::CredentialImportFixture, work: impl FnOnce() -> T) -> T {
+pub(super) fn with_fixture<T>(
+    fixture: super::native_account_worker_fixture::CredentialImportFixture,
+    work: impl FnOnce() -> T,
+) -> T {
     struct Reset(Option<super::native_account_worker_fixture::CredentialImportFixture>);
-    impl Drop for Reset { fn drop(&mut self) { FIXTURE.with(|slot| { slot.replace(self.0.take()); }); } }
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FIXTURE.with(|slot| {
+                slot.replace(self.0.take());
+            });
+        }
+    }
     let previous = FIXTURE.with(|slot| slot.replace(Some(fixture)));
     let _reset = Reset(previous);
     work()

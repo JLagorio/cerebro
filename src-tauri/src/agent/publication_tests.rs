@@ -2894,44 +2894,324 @@ mod child_lifetime_publication_tests;
 
 // Control tests use the actual published original process/receipt fixture.
 // They create no native window, ActionSubject or callable provider authority.
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_rpc_control_cancels_only_exact_original_request(){m95_with_delegation_parent("m96-rpc-exact",None,|_,_,_,_,parent|{let book=crate::mcp::managed_call_test_support::Book::new();let now=Instant::now();let first=book.register(parent.mcp,parent.slot,&serde_json::json!("original"),now+Duration::from_secs(30)).expect("original actual call control");let other=book.register(parent.mcp,parent.slot,&serde_json::json!("other"),now+Duration::from_secs(30)).unwrap();assert!(!book.cancel(parent.mcp,parent.slot,&serde_json::json!("unknown")));assert!(!first.stopped_at(now));assert!(book.cancel(parent.mcp,parent.slot,&serde_json::json!("original")));assert!(first.stopped_at(now));assert!(!other.stopped_at(now));});}
-#[cfg(target_os="macos")]
+fn managed_rpc_control_cancels_only_exact_original_request() {
+    m95_with_delegation_parent("m96-rpc-exact", None, |_, _, _, _, parent| {
+        let book = crate::mcp::managed_call_test_support::Book::new();
+        let now = Instant::now();
+        let first = book
+            .register(
+                parent.mcp,
+                parent.slot,
+                &serde_json::json!("original"),
+                now + Duration::from_secs(30),
+            )
+            .expect("original actual call control");
+        let other = book
+            .register(
+                parent.mcp,
+                parent.slot,
+                &serde_json::json!("other"),
+                now + Duration::from_secs(30),
+            )
+            .unwrap();
+        assert!(!book.cancel(parent.mcp, parent.slot, &serde_json::json!("unknown")));
+        assert!(!first.stopped_at(now));
+        assert!(book.cancel(parent.mcp, parent.slot, &serde_json::json!("original")));
+        assert!(first.stopped_at(now));
+        assert!(!other.stopped_at(now));
+    });
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_rpc_control_distinguishes_numeric_and_string_request_ids(){m95_with_delegation_parent("m96-rpc-id-types",None,|_,_,_,_,parent|{let book=crate::mcp::managed_call_test_support::Book::new();let now=Instant::now();let number=book.register(parent.mcp,parent.slot,&serde_json::json!(1),now+Duration::from_secs(30)).unwrap();let string=book.register(parent.mcp,parent.slot,&serde_json::json!("1"),now+Duration::from_secs(30)).unwrap();assert!(book.cancel(parent.mcp,parent.slot,&serde_json::json!(1)));assert!(number.stopped_at(now));assert!(!string.stopped_at(now));});}
-#[cfg(target_os="macos")]
+fn managed_rpc_control_distinguishes_numeric_and_string_request_ids() {
+    m95_with_delegation_parent("m96-rpc-id-types", None, |_, _, _, _, parent| {
+        let book = crate::mcp::managed_call_test_support::Book::new();
+        let now = Instant::now();
+        let number = book
+            .register(
+                parent.mcp,
+                parent.slot,
+                &serde_json::json!(1),
+                now + Duration::from_secs(30),
+            )
+            .unwrap();
+        let string = book
+            .register(
+                parent.mcp,
+                parent.slot,
+                &serde_json::json!("1"),
+                now + Duration::from_secs(30),
+            )
+            .unwrap();
+        assert!(book.cancel(parent.mcp, parent.slot, &serde_json::json!(1)));
+        assert!(number.stopped_at(now));
+        assert!(!string.stopped_at(now));
+    });
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_rpc_control_rejects_same_id_from_another_actual_publication_or_clone(){m95_with_delegation_parent("m96-rpc-owner",None,|fixture,scope,_,_,parent|{let book=crate::mcp::managed_call_test_support::Book::new();let now=Instant::now();let original=book.register(parent.mcp,parent.slot,&serde_json::json!(1),now+Duration::from_secs(30)).unwrap();assert!(!book.cancel_descriptive_clone(parent.mcp,parent.slot,&serde_json::json!(1)));m95_with_delegation_parent("m96-rpc-other-owner",Some((fixture,scope)),|_,_,_,_,other|{assert!(!book.cancel(other.mcp,other.slot,&serde_json::json!(1)));});assert!(!original.stopped_at(now));assert!(book.cancel(parent.mcp,parent.slot,&serde_json::json!(1)));});}
-#[cfg(target_os="macos")]
+fn managed_rpc_control_rejects_same_id_from_another_actual_publication_or_clone() {
+    m95_with_delegation_parent("m96-rpc-owner", None, |fixture, scope, _, _, parent| {
+        let book = crate::mcp::managed_call_test_support::Book::new();
+        let now = Instant::now();
+        let original = book
+            .register(
+                parent.mcp,
+                parent.slot,
+                &serde_json::json!(1),
+                now + Duration::from_secs(30),
+            )
+            .unwrap();
+        assert!(!book.cancel_descriptive_clone(parent.mcp, parent.slot, &serde_json::json!(1)));
+        m95_with_delegation_parent(
+            "m96-rpc-other-owner",
+            Some((fixture, scope)),
+            |_, _, _, _, other| {
+                assert!(!book.cancel(other.mcp, other.slot, &serde_json::json!(1)));
+            },
+        );
+        assert!(!original.stopped_at(now));
+        assert!(book.cancel(parent.mcp, parent.slot, &serde_json::json!(1)));
+    });
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_rpc_control_keeps_active_duplicate_closed_until_actual_owner_drop(){m95_with_delegation_parent("m96-rpc-drop",None,|_,_,_,_,parent|{let book=crate::mcp::managed_call_test_support::Book::new();let deadline=Instant::now()+Duration::from_secs(30);let original=book.register(parent.mcp,parent.slot,&serde_json::json!(1),deadline).unwrap();assert!(book.register(parent.mcp,parent.slot,&serde_json::json!(1),deadline).is_none());let flag=original.flag();drop(original);assert!(flag.load(Ordering::SeqCst));let replacement=book.register(parent.mcp,parent.slot,&serde_json::json!(1),deadline).unwrap();assert!(!replacement.stopped_at(Instant::now()));});}
-#[cfg(target_os="macos")]
+fn managed_rpc_control_keeps_active_duplicate_closed_until_actual_owner_drop() {
+    m95_with_delegation_parent("m96-rpc-drop", None, |_, _, _, _, parent| {
+        let book = crate::mcp::managed_call_test_support::Book::new();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let original = book
+            .register(parent.mcp, parent.slot, &serde_json::json!(1), deadline)
+            .unwrap();
+        assert!(book
+            .register(parent.mcp, parent.slot, &serde_json::json!(1), deadline)
+            .is_none());
+        let flag = original.flag();
+        drop(original);
+        assert!(flag.load(Ordering::SeqCst));
+        let replacement = book
+            .register(parent.mcp, parent.slot, &serde_json::json!(1), deadline)
+            .unwrap();
+        assert!(!replacement.stopped_at(Instant::now()));
+    });
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_rpc_control_deadline_stops_but_does_not_release_active_original_ownership(){m95_with_delegation_parent("m96-rpc-deadline",None,|_,_,_,_,parent|{let book=crate::mcp::managed_call_test_support::Book::new();let now=Instant::now();let deadline=now+Duration::from_secs(30);let original=book.register(parent.mcp,parent.slot,&serde_json::json!(1),deadline).unwrap();assert!(!original.stopped_at(now));assert!(original.stopped_at(deadline));assert!(original.flag().load(Ordering::SeqCst));assert!(book.register(parent.mcp,parent.slot,&serde_json::json!(1),now+Duration::from_secs(60)).is_none());});}
-#[cfg(target_os="macos")]
+fn managed_rpc_control_deadline_stops_but_does_not_release_active_original_ownership() {
+    m95_with_delegation_parent("m96-rpc-deadline", None, |_, _, _, _, parent| {
+        let book = crate::mcp::managed_call_test_support::Book::new();
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(30);
+        let original = book
+            .register(parent.mcp, parent.slot, &serde_json::json!(1), deadline)
+            .unwrap();
+        assert!(!original.stopped_at(now));
+        assert!(original.stopped_at(deadline));
+        assert!(original.flag().load(Ordering::SeqCst));
+        assert!(book
+            .register(
+                parent.mcp,
+                parent.slot,
+                &serde_json::json!(1),
+                now + Duration::from_secs(60)
+            )
+            .is_none());
+    });
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_rpc_control_poison_publishes_raw_cancel_to_existing_workers(){m95_with_delegation_parent("m96-rpc-poison",None,|_,_,_,_,parent|{let book=crate::mcp::managed_call_test_support::Book::new();let original=book.register(parent.mcp,parent.slot,&serde_json::json!(1),Instant::now()+Duration::from_secs(30)).unwrap();let raw=original.flag();book.poison();assert!(!book.cancel(parent.mcp,parent.slot,&serde_json::json!(1)));assert!(raw.load(Ordering::SeqCst));assert!(original.stopped_at(Instant::now()));assert!(book.register(parent.mcp,parent.slot,&serde_json::json!(2),Instant::now()+Duration::from_secs(30)).is_none());});}
-#[cfg(target_os="macos")]
+fn managed_rpc_control_poison_publishes_raw_cancel_to_existing_workers() {
+    m95_with_delegation_parent("m96-rpc-poison", None, |_, _, _, _, parent| {
+        let book = crate::mcp::managed_call_test_support::Book::new();
+        let original = book
+            .register(
+                parent.mcp,
+                parent.slot,
+                &serde_json::json!(1),
+                Instant::now() + Duration::from_secs(30),
+            )
+            .unwrap();
+        let raw = original.flag();
+        book.poison();
+        assert!(!book.cancel(parent.mcp, parent.slot, &serde_json::json!(1)));
+        assert!(raw.load(Ordering::SeqCst));
+        assert!(original.stopped_at(Instant::now()));
+        assert!(book
+            .register(
+                parent.mcp,
+                parent.slot,
+                &serde_json::json!(2),
+                Instant::now() + Duration::from_secs(30)
+            )
+            .is_none());
+    });
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_rpc_control_refuses_missing_complex_oversized_and_ambiguous_request_ids(){m95_with_delegation_parent("m96-rpc-malformed",None,|_,_,_,_,parent|{let book=crate::mcp::managed_call_test_support::Book::new();let deadline=Instant::now()+Duration::from_secs(30);let policy:Value=serde_json::from_str(include_str!("../../../shared/policy/actions.v1.json")).unwrap();let max_id=usize::try_from(policy["historyInspection"]["maxIdBytes"].as_u64().unwrap()).unwrap();for id in [Value::Null,serde_json::json!(true),serde_json::json!({"id":1}),serde_json::json!([1]),serde_json::json!(""),serde_json::json!("x".repeat(max_id+1)),serde_json::json!(1.5),serde_json::json!(9007199254740992_u64)]{assert!(book.register(parent.mcp,parent.slot,&id,deadline).is_none());}});}
-#[cfg(target_os="macos")]
+fn managed_rpc_control_refuses_missing_complex_oversized_and_ambiguous_request_ids() {
+    m95_with_delegation_parent("m96-rpc-malformed", None, |_, _, _, _, parent| {
+        let book = crate::mcp::managed_call_test_support::Book::new();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let policy: Value =
+            serde_json::from_str(include_str!("../../../shared/policy/actions.v1.json")).unwrap();
+        let max_id =
+            usize::try_from(policy["historyInspection"]["maxIdBytes"].as_u64().unwrap()).unwrap();
+        for id in [
+            Value::Null,
+            serde_json::json!(true),
+            serde_json::json!({"id":1}),
+            serde_json::json!([1]),
+            serde_json::json!(""),
+            serde_json::json!("x".repeat(max_id + 1)),
+            serde_json::json!(1.5),
+            serde_json::json!(9007199254740992_u64),
+        ] {
+            assert!(book
+                .register(parent.mcp, parent.slot, &id, deadline)
+                .is_none());
+        }
+    });
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_rpc_control_refuses_an_already_elapsed_deadline(){m95_with_delegation_parent("m96-rpc-expired",None,|_,_,_,_,parent|{let book=crate::mcp::managed_call_test_support::Book::new();assert!(book.register(parent.mcp,parent.slot,&serde_json::json!(1),Instant::now()).is_none());});}
+fn managed_rpc_control_refuses_an_already_elapsed_deadline() {
+    m95_with_delegation_parent("m96-rpc-expired", None, |_, _, _, _, parent| {
+        let book = crate::mcp::managed_call_test_support::Book::new();
+        assert!(book
+            .register(
+                parent.mcp,
+                parent.slot,
+                &serde_json::json!(1),
+                Instant::now()
+            )
+            .is_none());
+    });
+}
 
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_names_are_present_in_early_original_attended_tools_list_before_native_install(){m95_with_delegation_parent("m96-early-tool-cache",None,|_,_,_,_,parent|{let names=crate::mcp::managed_tools_list_names_for_source_probe(parent.mcp,parent.slot,parent.agents.interactions());let policy:Value=serde_json::from_str(include_str!("../../../shared/policy/actions.v1.json")).unwrap();for name in policy["reservedTools"].as_array().unwrap(){assert!(names.iter().any(|listed|Some(listed.as_str())==name.as_str()),"early manifest cache silently hid a supported managed tool");}assert!(parent.agents.native_action_read_for_publication(parent.receipt).is_none());});}
-#[cfg(target_os="macos")]
+fn managed_names_are_present_in_early_original_attended_tools_list_before_native_install() {
+    m95_with_delegation_parent("m96-early-tool-cache", None, |_, _, _, _, parent| {
+        let names = crate::mcp::managed_tools_list_names_for_source_probe(
+            parent.mcp,
+            parent.slot,
+            parent.agents.interactions(),
+        );
+        let policy: Value =
+            serde_json::from_str(include_str!("../../../shared/policy/actions.v1.json")).unwrap();
+        for name in policy["reservedTools"].as_array().unwrap() {
+            assert!(
+                names
+                    .iter()
+                    .any(|listed| Some(listed.as_str()) == name.as_str()),
+                "early manifest cache silently hid a supported managed tool"
+            );
+        }
+        assert!(parent
+            .agents
+            .native_action_read_for_publication(parent.receipt)
+            .is_none());
+    });
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_original_call_source_admission_refuses_until_actual_native_install(){m95_with_delegation_parent("m96-early-call-refusal",None,|_,_,_,_,parent|{assert!(parent.mcp.current_native_publication(parent.slot).is_some(),"actual published MCP receipt precondition");assert!(parent.agents.native_action_read_for_publication(parent.receipt).is_none(),"publication/seat metadata alone must not yield the actual installed original native origin");});}
+fn managed_original_call_source_admission_refuses_until_actual_native_install() {
+    m95_with_delegation_parent("m96-early-call-refusal", None, |_, _, _, _, parent| {
+        assert!(
+            parent.mcp.current_native_publication(parent.slot).is_some(),
+            "actual published MCP receipt precondition"
+        );
+        assert!(parent.agents.native_action_read_for_publication(parent.receipt).is_none(),"publication/seat metadata alone must not yield the actual installed original native origin");
+    });
+}
 
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_rpc_owner_remains_registered_through_actual_response_callback(){m95_with_delegation_parent("m96-rpc-response-owner",None,|_,_,_,_,parent|{let book=crate::mcp::managed_call_test_support::Book::new();let id=serde_json::json!("response");let deadline=Instant::now()+Duration::from_secs(30);let owner=book.register(parent.mcp,parent.slot,&id,deadline).unwrap();let flag=owner.flag();owner.respond_with(serde_json::json!({"result":"bounded"}),|body|{assert_eq!(body["result"],"bounded");assert!(!flag.load(Ordering::SeqCst),"RPC control dropped before serialization/respond disposal");assert!(book.register(parent.mcp,parent.slot,&id,deadline).is_none(),"old response still owns this exact request id");assert!(book.cancel(parent.mcp,parent.slot,&id));assert!(flag.load(Ordering::SeqCst));});assert!(book.register(parent.mcp,parent.slot,&id,deadline).is_some());});}
-#[cfg(target_os="macos")]
+fn managed_rpc_owner_remains_registered_through_actual_response_callback() {
+    m95_with_delegation_parent("m96-rpc-response-owner", None, |_, _, _, _, parent| {
+        let book = crate::mcp::managed_call_test_support::Book::new();
+        let id = serde_json::json!("response");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let owner = book
+            .register(parent.mcp, parent.slot, &id, deadline)
+            .unwrap();
+        let flag = owner.flag();
+        owner.respond_with(serde_json::json!({"result":"bounded"}), |body| {
+            assert_eq!(body["result"], "bounded");
+            assert!(
+                !flag.load(Ordering::SeqCst),
+                "RPC control dropped before serialization/respond disposal"
+            );
+            assert!(
+                book.register(parent.mcp, parent.slot, &id, deadline)
+                    .is_none(),
+                "old response still owns this exact request id"
+            );
+            assert!(book.cancel(parent.mcp, parent.slot, &id));
+            assert!(flag.load(Ordering::SeqCst));
+        });
+        assert!(book
+            .register(parent.mcp, parent.slot, &id, deadline)
+            .is_some());
+    });
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_rpc_owner_survives_response_error_until_callback_returns(){m95_with_delegation_parent("m96-rpc-response-error",None,|_,_,_,_,parent|{let book=crate::mcp::managed_call_test_support::Book::new();let id=serde_json::json!("response-error");let deadline=Instant::now()+Duration::from_secs(30);let owner=book.register(parent.mcp,parent.slot,&id,deadline).unwrap();let flag=owner.flag();let result:Result<(),()>=owner.respond_with(serde_json::json!({}),|_|{assert!(book.register(parent.mcp,parent.slot,&id,deadline).is_none(),"write error occurs while old response is owned");Err(())});assert!(result.is_err());assert!(flag.load(Ordering::SeqCst));let replacement=book.register(parent.mcp,parent.slot,&id,deadline).unwrap();assert!(!replacement.stopped_at(Instant::now()));});}
-#[cfg(target_os="macos")]
+fn managed_rpc_owner_survives_response_error_until_callback_returns() {
+    m95_with_delegation_parent("m96-rpc-response-error", None, |_, _, _, _, parent| {
+        let book = crate::mcp::managed_call_test_support::Book::new();
+        let id = serde_json::json!("response-error");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let owner = book
+            .register(parent.mcp, parent.slot, &id, deadline)
+            .unwrap();
+        let flag = owner.flag();
+        let result: Result<(), ()> = owner.respond_with(serde_json::json!({}), |_| {
+            assert!(
+                book.register(parent.mcp, parent.slot, &id, deadline)
+                    .is_none(),
+                "write error occurs while old response is owned"
+            );
+            Err(())
+        });
+        assert!(result.is_err());
+        assert!(flag.load(Ordering::SeqCst));
+        let replacement = book
+            .register(parent.mcp, parent.slot, &id, deadline)
+            .unwrap();
+        assert!(!replacement.stopped_at(Instant::now()));
+    });
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn managed_rpc_owner_is_disposed_only_after_response_unwinds(){m95_with_delegation_parent("m96-rpc-response-panic",None,|_,_,_,_,parent|{let book=crate::mcp::managed_call_test_support::Book::new();let id=serde_json::json!("response-panic");let deadline=Instant::now()+Duration::from_secs(30);let owner=book.register(parent.mcp,parent.slot,&id,deadline).unwrap();let flag=owner.flag();let reached=std::cell::Cell::new(false);let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||owner.respond_with(serde_json::json!({}),|_|{assert!(book.register(parent.mcp,parent.slot,&id,deadline).is_none(),"response still owns control before unwind");reached.set(true);panic!("controlled response disposal");})));assert!(result.is_err());assert!(reached.get(),"the controlled response callback must reach its own panic, not an earlier ownership assertion");assert!(flag.load(Ordering::SeqCst));assert!(book.register(parent.mcp,parent.slot,&id,deadline).is_some());});}
+fn managed_rpc_owner_is_disposed_only_after_response_unwinds() {
+    m95_with_delegation_parent("m96-rpc-response-panic", None, |_, _, _, _, parent| {
+        let book = crate::mcp::managed_call_test_support::Book::new();
+        let id = serde_json::json!("response-panic");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let owner = book
+            .register(parent.mcp, parent.slot, &id, deadline)
+            .unwrap();
+        let flag = owner.flag();
+        let reached = std::cell::Cell::new(false);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            owner.respond_with(serde_json::json!({}), |_| {
+                assert!(
+                    book.register(parent.mcp, parent.slot, &id, deadline)
+                        .is_none(),
+                    "response still owns control before unwind"
+                );
+                reached.set(true);
+                panic!("controlled response disposal");
+            })
+        }));
+        assert!(result.is_err());
+        assert!(reached.get(),"the controlled response callback must reach its own panic, not an earlier ownership assertion");
+        assert!(flag.load(Ordering::SeqCst));
+        assert!(book
+            .register(parent.mcp, parent.slot, &id, deadline)
+            .is_some());
+    });
+}

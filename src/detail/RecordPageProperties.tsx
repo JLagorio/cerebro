@@ -38,7 +38,8 @@ export function recordPageSummary(entry: Entry, schema: Schema, entries: Entry[]
         .filter((field) => {
           if (field.visibility === 'hide') return false;
           const value = schema.resolveField(entry, field.name);
-          if (value.selectedValue?.kind === 'present' || value.unavailableReason) return value.display !== '';
+          if (value.selectedValue?.kind === 'present' || value.unavailableReason)
+            return value.display !== '';
           return (
             value.raw !== null &&
             value.raw !== undefined &&
@@ -51,10 +52,9 @@ export function recordPageSummary(entry: Entry, schema: Schema, entries: Entry[]
         .slice(0, 3);
   const declared = new Set(type?.fields.map((field) => field.name) ?? []);
   const undeclared = new Set(
-    visibleProperties([
-      ...selectedPropertyKeys(entry),
-      ...Object.keys(entry.relationships),
-    ]).filter((name) => !declared.has(name) && name !== 'type' && name !== 'key'),
+    visibleProperties([...selectedPropertyKeys(entry), ...Object.keys(entry.relationships)]).filter(
+      (name) => !declared.has(name) && name !== 'type' && name !== 'key',
+    ),
   );
   return { automatic: !explicit, fields, count: declared.size + undeclared.size };
 }
@@ -100,7 +100,13 @@ export function RecordPageProperties({ entry, schema }: { entry: Entry; schema: 
   };
   return (
     <section className="cb-record-page-properties" aria-label="Record properties">
-      {(selectedEntryIssue(entry) ?? (entry.type ? schema.types.get(entry.type)?.unavailableReason : undefined)) && <p role="status" className="section-unavailable text-xs text-n-600">{selectedEntryIssue(entry) ?? (entry.type ? schema.types.get(entry.type)?.unavailableReason : undefined)}</p>}
+      {(selectedEntryIssue(entry) ??
+        (entry.type ? schema.types.get(entry.type)?.unavailableReason : undefined)) && (
+        <p role="status" className="section-unavailable text-xs text-n-600">
+          {selectedEntryIssue(entry) ??
+            (entry.type ? schema.types.get(entry.type)?.unavailableReason : undefined)}
+        </p>
+      )}
       {summary.automatic ? (
         <div className="cb-record-summary" data-testid="record-summary">
           {summary.fields.map((field) => (

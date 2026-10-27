@@ -62,15 +62,16 @@ export function ViewSuggestionCard({
     () => (view === null ? null : resolveTypeView(database, view, entries, schema)),
     [view, database, entries, schema],
   );
-  const state = unavailable || surface?.unavailable !== undefined
-    ? 'unavailable'
-    : doc === null
-      ? 'gone'
-      : problem
-        ? 'problems'
-        : saved !== undefined
-          ? 'added'
-          : 'ready';
+  const state =
+    unavailable || surface?.unavailable !== undefined
+      ? 'unavailable'
+      : doc === null
+        ? 'gone'
+        : problem
+          ? 'problems'
+          : saved !== undefined
+            ? 'added'
+            : 'ready';
   const fields = useMemo(
     () =>
       surface === null
@@ -120,7 +121,8 @@ export function ViewSuggestionCard({
         )}
         {state === 'unavailable' ? (
           <p className="text-xs text-n-500">
-            {surface?.unavailable?.message ?? "This suggestion can't be shown any more. Ask again if you still want it."}
+            {surface?.unavailable?.message ??
+              "This suggestion can't be shown any more. Ask again if you still want it."}
           </p>
         ) : state === 'gone' ? (
           <p className="text-xs text-n-500">{database} is gone, so this view has nowhere to go.</p>

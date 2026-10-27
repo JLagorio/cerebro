@@ -99,9 +99,12 @@ impl NativeOwnerState {
         // Reservation is durable, but authority may have changed before OS
         // dispatch. A refused check has not put a secret; only this exact new
         // unused reservation is eligible for cleanup.
-        if let Err(error) = self.account_transaction(|tx, owner_key| {
-            account_metadata::import_selection(tx, owner_key, ticket).map(|_| ())
-        }).into_result() {
+        if let Err(error) = self
+            .account_transaction(|tx, owner_key| {
+                account_metadata::import_selection(tx, owner_key, ticket).map(|_| ())
+            })
+            .into_result()
+        {
             self.discard_uncommitted_import(ticket, &reservation, store, Some(error))?;
             return Err(error);
         }
@@ -111,9 +114,13 @@ impl NativeOwnerState {
             self.discard_uncommitted_import(ticket, &reservation, store, Some(error))?;
             return Err(error);
         }
-        match self.account_transaction_after(|tx, owner_key| {
-            account_metadata::complete_import(tx, owner_key, ticket, &reservation)
-        }, |_| self.action_cancellations.cancel_connection(&ticket.connection_id)) {
+        match self.account_transaction_after(
+            |tx, owner_key| account_metadata::complete_import(tx, owner_key, ticket, &reservation),
+            |_| {
+                self.action_cancellations
+                    .cancel_connection(&ticket.connection_id)
+            },
+        ) {
             Outcome::Committed(old_reference) => {
                 if let Some(reference) = old_reference {
                     self.cleanup_committed_reference(&ticket.connection_id, &reference, store)?;

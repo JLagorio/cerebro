@@ -189,9 +189,13 @@ pub(super) struct OpeningAnchors {
 }
 impl OpeningAnchors {
     pub(super) fn revalidate(&self) -> Result<(), AuthorityError> {
-        for witness in &self.witnesses { witness.validate()?; }
+        for witness in &self.witnesses {
+            witness.validate()?;
+        }
         for (requested, actual) in &self.aliases {
-            if target(requested)? != *actual { return Err(changed()); }
+            if target(requested)? != *actual {
+                return Err(changed());
+            }
         }
         Ok(())
     }
@@ -210,21 +214,36 @@ impl Inspection {
             paths.insert(requested.clone());
             paths.extend(actual.ancestors().map(Path::to_path_buf));
         }
-        let witnesses = paths.into_iter().map(|path| {
-            let mut witness = self.witnesses.get(&path).ok_or_else(changed)?.clone();
-            witness.directory_modified = None;
-            #[cfg(unix)] { witness.directory_ctime = None; }
-            Ok(witness)
-        }).collect::<Result<Vec<_>, AuthorityError>>()?;
-        Ok(OpeningAnchors { witnesses, aliases: self.aliases.clone() })
+        let witnesses = paths
+            .into_iter()
+            .map(|path| {
+                let mut witness = self.witnesses.get(&path).ok_or_else(changed)?.clone();
+                witness.directory_modified = None;
+                #[cfg(unix)]
+                {
+                    witness.directory_ctime = None;
+                }
+                Ok(witness)
+            })
+            .collect::<Result<Vec<_>, AuthorityError>>()?;
+        Ok(OpeningAnchors {
+            witnesses,
+            aliases: self.aliases.clone(),
+        })
     }
 
     /// Already bounded P1 inventory; used only for deny-only output intersections.
     pub(super) fn opening_directories(&self) -> Vec<PathBuf> {
-        self.witnesses.iter().filter(|(_, witness)| witness.identity.kind == 2)
-            .map(|(path, _)| path.clone()).filter(|path| {
-                self.aliases.iter().any(|(_, actual)| path.starts_with(actual))
-            }).collect()
+        self.witnesses
+            .iter()
+            .filter(|(_, witness)| witness.identity.kind == 2)
+            .map(|(path, _)| path.clone())
+            .filter(|path| {
+                self.aliases
+                    .iter()
+                    .any(|(_, actual)| path.starts_with(actual))
+            })
+            .collect()
     }
     // Per-file checks use the held inventory; they never repeat a recursive walk
     // or reread the selected registry for every note.
@@ -656,7 +675,8 @@ pub(crate) fn open_legacy_file(root: &Path, relative: &str) -> Result<fs::File, 
     inspect_legacy_scope(root, Some(relative), false)?.open_file(&root.join(relative))
 }
 pub(crate) fn open_legacy_source(
-    root: &Path, relative: &str,
+    root: &Path,
+    relative: &str,
 ) -> Result<crate::files::bytes::OpenedFile, AuthorityError> {
     let inspection = inspect_legacy_scope(root, Some(relative), false)?;
     let canonical_root = authority::canonical_root(root)?;
@@ -667,10 +687,16 @@ pub(crate) fn open_legacy_source(
     let file = inspection.open_file(&requested)?;
     inspection.revalidate()?;
     if authority::canonical_root(root)? != canonical_root
-        || target(&requested)? != path || !path.starts_with(&canonical_root) {
+        || target(&requested)? != path
+        || !path.starts_with(&canonical_root)
+    {
         return Err(changed());
     }
-    Ok(crate::files::bytes::OpenedFile { root: canonical_root, path, file })
+    Ok(crate::files::bytes::OpenedFile {
+        root: canonical_root,
+        path,
+        file,
+    })
 }
 pub(crate) fn guard_legacy_targets_with_limits(
     root: &Path,

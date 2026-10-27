@@ -2213,7 +2213,6 @@ fn portable_restore_final_database_capture_must_match_the_manifest_with_unchange
 #[path = "nested_format_boundary_tests.rs"]
 mod nested_format_boundary;
 
-
 #[test]
 fn admitted_native_export_keeps_original_source_while_unrelated_open_publishes() {
     let f = PortableFixture::new("admitted-original-source");
@@ -2224,28 +2223,58 @@ fn admitted_native_export_keeps_original_source_while_unrelated_open_publishes()
     f.selected.run(|| {
         let context = authority::context().unwrap();
         let opening = context.request_open(&f.selected.root).unwrap();
-        crate::run_open_attempt(&context, &opening, || {
-            context.publish_attempt_with(&opening, || Ok(())).map_err(|e| e.message)
-        }, || Ok(())).unwrap();
-        let ticket = context.capture_selected_backup_opening(&f.selected.root).unwrap();
+        crate::run_open_attempt(
+            &context,
+            &opening,
+            || {
+                context
+                    .publish_attempt_with(&opening, || Ok(()))
+                    .map_err(|e| e.message)
+            },
+            || Ok(()),
+        )
+        .unwrap();
+        let ticket = context
+            .capture_selected_backup_opening(&f.selected.root)
+            .unwrap();
         let choice = backup::NewDirectoryChoice::new(&f.output, "native-bundle").unwrap();
-        let (lease, source) = context.reserve_selected_output(ticket, choice, || Ok(())).unwrap();
+        let (lease, source) = context
+            .reserve_selected_output(ticket, choice, || Ok(()))
+            .unwrap();
         let concurrent = context.clone();
         let other_for_hook = other.clone();
         let enclosing = f.output.clone();
-        backup::with_step_for_test("export_publish", move |_, _| {
-            // This thread owns no source/SQLite/ledger resource; never enter
-            // ActiveRoot on the copier thread while its source locks are held.
-            std::thread::spawn(move || {
-                assert!(concurrent.request_open(&enclosing).is_err());
-                let next = concurrent.request_open(&other_for_hook).unwrap();
-                crate::run_open_attempt(&concurrent, &next, || {
-                    concurrent.publish_attempt_with(&next, || Ok(())).map_err(|e| e.message)
-                }, || Ok(())).unwrap();
-            }).join().unwrap();
-        }, || backup::backup_admitted(source, lease)).unwrap();
+        backup::with_step_for_test(
+            "export_publish",
+            move |_, _| {
+                // This thread owns no source/SQLite/ledger resource; never enter
+                // ActiveRoot on the copier thread while its source locks are held.
+                std::thread::spawn(move || {
+                    assert!(concurrent.request_open(&enclosing).is_err());
+                    let next = concurrent.request_open(&other_for_hook).unwrap();
+                    crate::run_open_attempt(
+                        &concurrent,
+                        &next,
+                        || {
+                            concurrent
+                                .publish_attempt_with(&next, || Ok(()))
+                                .map_err(|e| e.message)
+                        },
+                        || Ok(()),
+                    )
+                    .unwrap();
+                })
+                .join()
+                .unwrap();
+            },
+            || backup::backup_admitted(source, lease),
+        )
+        .unwrap();
         assert_eq!(context.active_root().unwrap(), Some(other.clone()));
-        assert_eq!(fs::read(bundle.join("bodies/page.md")).unwrap(), fs::read(f.selected.root.join("page.md")).unwrap());
+        assert_eq!(
+            fs::read(bundle.join("bodies/page.md")).unwrap(),
+            fs::read(f.selected.root.join("page.md")).unwrap()
+        );
         backup::validate_backup(&bundle).unwrap();
         // All copy readers/writers have returned before the outer lease drops.
         let fresh = backup::NewDirectoryChoice::new(&f.output, "after-copy").unwrap();
@@ -2259,12 +2288,24 @@ fn admitted_native_export_refuses_replaced_database_before_any_output() {
     f.selected.run(|| {
         let context = authority::context().unwrap();
         let opening = context.request_open(&f.selected.root).unwrap();
-        crate::run_open_attempt(&context, &opening, || {
-            context.publish_attempt_with(&opening, || Ok(())).map_err(|e| e.message)
-        }, || Ok(())).unwrap();
-        let ticket = context.capture_selected_backup_opening(&f.selected.root).unwrap();
+        crate::run_open_attempt(
+            &context,
+            &opening,
+            || {
+                context
+                    .publish_attempt_with(&opening, || Ok(()))
+                    .map_err(|e| e.message)
+            },
+            || Ok(()),
+        )
+        .unwrap();
+        let ticket = context
+            .capture_selected_backup_opening(&f.selected.root)
+            .unwrap();
         let choice = backup::NewDirectoryChoice::new(&f.output, "native-bundle").unwrap();
-        let (lease, source) = context.reserve_selected_output(ticket, choice, || Ok(())).unwrap();
+        let (lease, source) = context
+            .reserve_selected_output(ticket, choice, || Ok(()))
+            .unwrap();
         let old = f.selected.db.with_extension("original");
         fs::rename(&f.selected.db, &old).unwrap();
         fs::copy(&old, &f.selected.db).unwrap();
@@ -2284,8 +2325,12 @@ fn copy_valid_portable_tree(from: &Path, to: &Path) {
     for entry in walkdir::WalkDir::new(from).min_depth(1) {
         let entry = entry.unwrap();
         let target = to.join(entry.path().strip_prefix(from).unwrap());
-        if entry.file_type().is_dir() { fs::create_dir(&target).unwrap(); }
-        else { assert!(entry.file_type().is_file()); fs::copy(entry.path(), target).unwrap(); }
+        if entry.file_type().is_dir() {
+            fs::create_dir(&target).unwrap();
+        } else {
+            assert!(entry.file_type().is_file());
+            fs::copy(entry.path(), target).unwrap();
+        }
     }
 }
 
@@ -2297,13 +2342,20 @@ fn checked_native_input_returns_compact_validated_facts_without_output() {
     let input = backup::check_backup_input(&bundle).unwrap();
     let facts: &backup::CheckedBackupSummary = input.summary();
     let manifest = read_manifest(&bundle);
-    let total: u64 = manifest["parts"].as_array().unwrap().iter()
-        .map(|part| part["bytes"].as_str().unwrap().parse::<u64>().unwrap()).sum();
+    let total: u64 = manifest["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|part| part["bytes"].as_str().unwrap().parse::<u64>().unwrap())
+        .sum();
     assert_eq!(input.path(), fs::canonicalize(&bundle).unwrap());
     assert_eq!(facts.workspace_id, WORKSPACE);
     assert_eq!(facts.format, 1);
     assert_eq!(facts.schema_version, 3);
-    assert_eq!(facts.part_count, manifest["parts"].as_array().unwrap().len());
+    assert_eq!(
+        facts.part_count,
+        manifest["parts"].as_array().unwrap().len()
+    );
     assert_eq!(facts.total_bytes, total.to_string());
     assert_eq!(file_tree(&f.output), before);
 }
@@ -2321,7 +2373,9 @@ fn admitted_restore_refuses_an_otherwise_valid_replacement_input_root_before_out
     f.selected.run(|| {
         let context = authority::context().unwrap();
         let choice = backup::NewDirectoryChoice::new(&f.output, "Restored copy").unwrap();
-        let (lease, ()) = context.reserve_output(choice, &[bundle.clone()], || Ok(())).unwrap();
+        let (lease, ()) = context
+            .reserve_output(choice, &[bundle.clone()], || Ok(()))
+            .unwrap();
         let error = backup::restore_admitted(input, lease).unwrap_err();
         assert_eq!(error.kind, BackupErrorKind::SourceChanged);
         assert!(!f.output.join("Restored copy").exists());
@@ -2343,8 +2397,13 @@ fn admitted_restore_refuses_same_bytes_manifest_object_replacement_before_output
     f.selected.run(|| {
         let context = authority::context().unwrap();
         let choice = backup::NewDirectoryChoice::new(&f.output, "Restored copy").unwrap();
-        let (lease, ()) = context.reserve_output(choice, &[bundle], || Ok(())).unwrap();
-        assert_eq!(backup::restore_admitted(input, lease).unwrap_err().kind, BackupErrorKind::SourceChanged);
+        let (lease, ()) = context
+            .reserve_output(choice, &[bundle], || Ok(()))
+            .unwrap();
+        assert_eq!(
+            backup::restore_admitted(input, lease).unwrap_err().kind,
+            BackupErrorKind::SourceChanged
+        );
         assert!(!f.output.join("Restored copy").exists());
         assert_eq!(file_tree(&f.output), before);
     });
@@ -2361,12 +2420,20 @@ fn admitted_restore_parent_replacement_reaches_no_substitute_or_moved_parent() {
     f.selected.run(|| {
         let context = authority::context().unwrap();
         let choice = backup::NewDirectoryChoice::new(&parent, "Restored copy").unwrap();
-        let (lease, ()) = context.reserve_output(choice, &[bundle], || Ok(())).unwrap();
+        let (lease, ()) = context
+            .reserve_output(choice, &[bundle], || Ok(()))
+            .unwrap();
         fs::rename(&parent, &moved).unwrap();
         fs::create_dir(&parent).unwrap();
         fs::write(parent.join("foreign"), b"substitute sentinel").unwrap();
-        assert_eq!(backup::restore_admitted(input, lease).unwrap_err().kind, BackupErrorKind::SourceChanged);
-        assert_eq!(fs::read(parent.join("foreign")).unwrap(), b"substitute sentinel");
+        assert_eq!(
+            backup::restore_admitted(input, lease).unwrap_err().kind,
+            BackupErrorKind::SourceChanged
+        );
+        assert_eq!(
+            fs::read(parent.join("foreign")).unwrap(),
+            b"substitute sentinel"
+        );
         assert!(!parent.join("Restored copy").exists());
         assert!(!moved.join("Restored copy").exists());
     });
@@ -2385,36 +2452,72 @@ fn admitted_restore_holds_real_output_lease_through_publication_and_leaves_both_
     f.selected.run(|| {
         let context = authority::context().unwrap();
         let choice = backup::NewDirectoryChoice::new(&f.output, "Restored copy").unwrap();
-        let (lease, ()) = context.reserve_output(choice, &[bundle.clone()], || Ok(())).unwrap();
+        let (lease, ()) = context
+            .reserve_output(choice, &[bundle.clone()], || Ok(()))
+            .unwrap();
         let concurrent = context.clone();
         let output = f.output.clone();
         let other_for_hook = other.clone();
         let reached = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let reached_hook = reached.clone();
-        let result = backup::with_step_for_test("restore_publish", move |_, _| {
-            reached_hook.store(true, std::sync::atomic::Ordering::SeqCst);
-            std::thread::spawn(move || {
-                let next_output = backup::NewDirectoryChoice::new(&output, "must-stay-busy").unwrap();
-                assert_eq!(concurrent.reserve_output(next_output, &[], || Ok(())).err().unwrap().kind, AuthorityErrorKind::Busy);
-                assert!(concurrent.request_open(&output).is_err());
-                let attempt = concurrent.request_open(&other_for_hook).unwrap();
-                crate::run_open_attempt(&concurrent, &attempt, || {
-                    concurrent.publish_attempt_with(&attempt, || Ok(())).map_err(|e| e.message)
-                }, || Ok(())).unwrap();
-            }).join().unwrap();
-        }, || backup::restore_admitted(input, lease));
-        assert!(reached.load(std::sync::atomic::Ordering::SeqCst), "real restore publication seam was never reached");
+        let result = backup::with_step_for_test(
+            "restore_publish",
+            move |_, _| {
+                reached_hook.store(true, std::sync::atomic::Ordering::SeqCst);
+                std::thread::spawn(move || {
+                    let next_output =
+                        backup::NewDirectoryChoice::new(&output, "must-stay-busy").unwrap();
+                    assert_eq!(
+                        concurrent
+                            .reserve_output(next_output, &[], || Ok(()))
+                            .err()
+                            .unwrap()
+                            .kind,
+                        AuthorityErrorKind::Busy
+                    );
+                    assert!(concurrent.request_open(&output).is_err());
+                    let attempt = concurrent.request_open(&other_for_hook).unwrap();
+                    crate::run_open_attempt(
+                        &concurrent,
+                        &attempt,
+                        || {
+                            concurrent
+                                .publish_attempt_with(&attempt, || Ok(()))
+                                .map_err(|e| e.message)
+                        },
+                        || Ok(()),
+                    )
+                    .unwrap();
+                })
+                .join()
+                .unwrap();
+            },
+            || backup::restore_admitted(input, lease),
+        );
+        assert!(
+            reached.load(std::sync::atomic::Ordering::SeqCst),
+            "real restore publication seam was never reached"
+        );
         assert_eq!(result.unwrap().workspace_id, WORKSPACE);
         assert_eq!(context.active_root().unwrap(), Some(other));
         let next = backup::NewDirectoryChoice::new(&f.output, "after-restore").unwrap();
         drop(context.reserve_output(next, &[], || Ok(())).unwrap());
     });
     for name in ["Pages", "Workspace data"] {
-        let marker: Value = serde_json::from_slice(&fs::read(container.join(name).join(".cerebro/workspace-format.json")).unwrap()).unwrap();
+        let marker: Value = serde_json::from_slice(
+            &fs::read(container.join(name).join(".cerebro/workspace-format.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(marker["state"], "restored_inactive");
     }
-    assert_eq!(fs::read(container.join("Pages/page.md")).unwrap(), fs::read(bundle.join("bodies/page.md")).unwrap());
-    assert_eq!(database_facts(&container.join("Workspace data/workspace.db")), f.db_facts);
+    assert_eq!(
+        fs::read(container.join("Pages/page.md")).unwrap(),
+        fs::read(bundle.join("bodies/page.md")).unwrap()
+    );
+    assert_eq!(
+        database_facts(&container.join("Workspace data/workspace.db")),
+        f.db_facts
+    );
     assert_eq!(file_tree(&bundle), original_input);
 }
 
@@ -2428,10 +2531,21 @@ fn admitted_restore_error_retains_preparing_bytes_then_releases_lease_after_reso
     f.selected.run(|| {
         let context = authority::context().unwrap();
         let choice = backup::NewDirectoryChoice::new(&f.output, "Restored copy").unwrap();
-        let (lease, ()) = context.reserve_output(choice, &[bundle.clone()], || Ok(())).unwrap();
-        let error = backup::with_step_for_test("restore_publish", |bodies, _| {
-            fs::write(bodies.join(".cerebro/restored-manifest.json"), b"changed owned provenance").unwrap();
-        }, || backup::restore_admitted(input, lease)).unwrap_err();
+        let (lease, ()) = context
+            .reserve_output(choice, &[bundle.clone()], || Ok(()))
+            .unwrap();
+        let error = backup::with_step_for_test(
+            "restore_publish",
+            |bodies, _| {
+                fs::write(
+                    bodies.join(".cerebro/restored-manifest.json"),
+                    b"changed owned provenance",
+                )
+                .unwrap();
+            },
+            || backup::restore_admitted(input, lease),
+        )
+        .unwrap_err();
         assert_eq!(error.kind, BackupErrorKind::PartMismatch);
         assert_no_ready(&container.join("Pages"));
         assert_no_ready(&container.join("Workspace data"));
@@ -2451,19 +2565,38 @@ fn admitted_restore_unwind_keeps_partial_output_and_releases_only_after_worker_u
     f.selected.run(|| {
         let context = authority::context().unwrap();
         let choice = backup::NewDirectoryChoice::new(&f.output, "Restored copy").unwrap();
-        let (lease, ()) = context.reserve_output(choice, &[bundle], || Ok(())).unwrap();
+        let (lease, ()) = context
+            .reserve_output(choice, &[bundle], || Ok(()))
+            .unwrap();
         let concurrent = context.clone();
         let output = f.output.clone();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            backup::with_step_for_test("restore_publish", move |_, _| {
-                std::thread::spawn(move || {
-                    let next = backup::NewDirectoryChoice::new(&output, "must-stay-busy").unwrap();
-                    assert_eq!(concurrent.reserve_output(next, &[], || Ok(())).err().unwrap().kind, AuthorityErrorKind::Busy);
-                }).join().unwrap();
-                panic!("synthetic restore worker panic");
-            }, || backup::restore_admitted(input, lease))
+            backup::with_step_for_test(
+                "restore_publish",
+                move |_, _| {
+                    std::thread::spawn(move || {
+                        let next =
+                            backup::NewDirectoryChoice::new(&output, "must-stay-busy").unwrap();
+                        assert_eq!(
+                            concurrent
+                                .reserve_output(next, &[], || Ok(()))
+                                .err()
+                                .unwrap()
+                                .kind,
+                            AuthorityErrorKind::Busy
+                        );
+                    })
+                    .join()
+                    .unwrap();
+                    panic!("synthetic restore worker panic");
+                },
+                || backup::restore_admitted(input, lease),
+            )
         }));
-        assert!(result.is_err(), "RED refused before the actual publication/unwind boundary");
+        assert!(
+            result.is_err(),
+            "RED refused before the actual publication/unwind boundary"
+        );
         assert_no_ready(&container.join("Pages"));
         assert!(container.join("Pages/page.md").is_file());
         let next = backup::NewDirectoryChoice::new(&f.output, "after-unwind").unwrap();
@@ -2476,15 +2609,24 @@ fn checked_native_input_refuses_same_bytes_manifest_swap_during_actual_validatio
     let f = PortableFixture::new("checked-manifest-swap-during-validation");
     let bundle = f.export();
     let moved = f.output.join("original-checked-manifest.json");
-    let result = backup::with_step_for_test("validate_database_captured", move |root, _| {
-        let manifest = root.join("manifest.json");
-        fs::rename(&manifest, &moved).unwrap();
-        fs::write(&manifest, fs::read(&moved).unwrap()).unwrap();
-    }, || backup::check_backup_input(&bundle));
+    let result = backup::with_step_for_test(
+        "validate_database_captured",
+        move |root, _| {
+            let manifest = root.join("manifest.json");
+            fs::rename(&manifest, &moved).unwrap();
+            fs::write(&manifest, fs::read(&moved).unwrap()).unwrap();
+        },
+        || backup::check_backup_input(&bundle),
+    );
     // The replacement is valid and has identical bytes; identity continuity is
     // the missing requirement, not an invalid fixture or incomplete manifest.
     backup::validate_backup(&bundle).unwrap();
-    assert_eq!(result.expect_err("Check blessed a new manifest object during validation").kind, BackupErrorKind::SourceChanged);
+    assert_eq!(
+        result
+            .expect_err("Check blessed a new manifest object during validation")
+            .kind,
+        BackupErrorKind::SourceChanged
+    );
 }
 
 #[path = "portable_progress_tests.rs"]

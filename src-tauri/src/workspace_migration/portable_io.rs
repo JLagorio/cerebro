@@ -89,7 +89,12 @@ fn stat_at(parent: &File, value: &str) -> Result<libc::stat> {
 fn mkdir_at(parent: &File, value: &str, absent: bool) -> Result<()> {
     mkdir_at_observed(parent, value, absent, None)
 }
-fn mkdir_at_observed(parent: &File, value: &str, absent: bool, observed: Option<(&super::super::OutputFacts, &Path)>) -> Result<()> {
+fn mkdir_at_observed(
+    parent: &File,
+    value: &str,
+    absent: bool,
+    observed: Option<(&super::super::OutputFacts, &Path)>,
+) -> Result<()> {
     let value = name(value)?;
     if let Some((facts, target)) = observed {
         facts.creation_attempted();
@@ -165,39 +170,85 @@ impl Root {
     pub(crate) fn create_child(&self, leaf: &str) -> Result<Self> {
         self.create_child_inner(leaf, None)
     }
-    pub(crate) fn create_child_observed(&self, leaf: &str, facts: &super::super::OutputFacts) -> Result<Self> {
+    pub(crate) fn create_child_observed(
+        &self,
+        leaf: &str,
+        facts: &super::super::OutputFacts,
+    ) -> Result<Self> {
         self.create_child_inner(leaf, Some(facts))
     }
-    fn create_child_inner(&self, leaf: &str, facts: Option<&super::super::OutputFacts>) -> Result<Self> {
+    fn create_child_inner(
+        &self,
+        leaf: &str,
+        facts: Option<&super::super::OutputFacts>,
+    ) -> Result<Self> {
         super::checked_path(leaf)?;
         if Path::new(leaf).components().count() != 1 {
-            return Err(error(K::InvalidPath, "One child directory name is required."));
+            return Err(error(
+                K::InvalidPath,
+                "One child directory name is required.",
+            ));
         }
         self.validate()?;
         let target = self.path.join(leaf);
-        mkdir_at_observed(&self.directory, leaf, true, facts.map(|facts| (facts, target.as_path())))?;
+        mkdir_at_observed(
+            &self.directory,
+            leaf,
+            true,
+            facts.map(|facts| (facts, target.as_path())),
+        )?;
         let created = stat_at(&self.directory, leaf)?;
         let directory = open_at(&self.directory, leaf, libc::O_RDONLY | libc::O_DIRECTORY, 0)?;
-        let metadata = directory.metadata().map_err(|_| error(K::SourceChanged, "Created directory identity is unavailable."))?;
-        if !metadata.is_dir() || Identity::of(&metadata) != (Identity { dev: created.st_dev as u64, ino: created.st_ino as u64 }) {
-            return Err(error(K::SourceChanged, "Created directory changed identity."));
+        let metadata = directory.metadata().map_err(|_| {
+            error(
+                K::SourceChanged,
+                "Created directory identity is unavailable.",
+            )
+        })?;
+        if !metadata.is_dir()
+            || Identity::of(&metadata)
+                != (Identity {
+                    dev: created.st_dev as u64,
+                    ino: created.st_ino as u64,
+                })
+        {
+            return Err(error(
+                K::SourceChanged,
+                "Created directory changed identity.",
+            ));
         }
         self.validate()?;
-        let root = Self { path: self.path.join(leaf), identity: Identity::of(&metadata), directory };
+        let root = Self {
+            path: self.path.join(leaf),
+            identity: Identity::of(&metadata),
+            directory,
+        };
         root.validate()?;
-        if facts.is_some() { super::step("output_root_handoff", &root.path, &root.path); }
+        if facts.is_some() {
+            super::step("output_root_handoff", &root.path, &root.path);
+        }
         Ok(root)
     }
     /// Observe the already-held directory, never reopen its pathname.
     pub(crate) fn held_identity(&self) -> Result<(u64, u64)> {
-        let metadata = self.directory.metadata().map_err(|_| error(K::SourceChanged, "Held directory identity is unavailable."))?;
+        let metadata = self
+            .directory
+            .metadata()
+            .map_err(|_| error(K::SourceChanged, "Held directory identity is unavailable."))?;
         let identity = Identity::of(&metadata);
-        if !metadata.is_dir() || identity != self.identity { return Err(error(K::SourceChanged, "Held directory identity changed.")); }
+        if !metadata.is_dir() || identity != self.identity {
+            return Err(error(K::SourceChanged, "Held directory identity changed."));
+        }
         Ok((identity.dev, identity.ino))
     }
     /// Read-only descriptor proof, no Root/write API is retained by observer.
     pub(crate) fn passive_directory(&self) -> Result<File> {
-        self.directory.try_clone().map_err(|_| error(K::SourceChanged, "Passive directory identity is unavailable."))
+        self.directory.try_clone().map_err(|_| {
+            error(
+                K::SourceChanged,
+                "Passive directory identity is unavailable.",
+            )
+        })
     }
     pub(crate) fn validate(&self) -> Result<()> {
         let current = fs::symlink_metadata(&self.path)

@@ -7,10 +7,10 @@ use super::{
 };
 use super::{
     catalog::ActionCatalog,
+    effect_record::{Binding, PrepareAction},
     native_db::AuthorityDb,
     read_types::*,
     schema::{admission_rules, digest, validate_input, POLICY},
-    effect_record::{Binding, PrepareAction},
 };
 use crate::{
     connections::metadata::{self, AccountBinding, ConnectionHealth},
@@ -549,17 +549,25 @@ impl AuthoritySource for NativeAuthoritySource {
         request: &PrepareAction,
         definition: &ActionDefinition,
     ) -> Result<Binding, ActionError> {
-        self.with_scoped(db, |catalog| catalog.checked_binding(db, scope, request, definition))
+        self.with_scoped(db, |catalog| {
+            catalog.checked_binding(db, scope, request, definition)
+        })
     }
 }
 
 fn binding_denied() -> ActionError {
-    error(ActionErrorCode::Denied, "Native action authority was not admitted.")
+    error(
+        ActionErrorCode::Denied,
+        "Native action authority was not admitted.",
+    )
 }
 impl ScopedCatalog<'_> {
     /// Borrowed, same-snapshot account/grant binding. This projection never
     /// authenticates callers, mints capabilities or resolves credentials.
-    #[cfg_attr(not(test), expect(dead_code, reason = "native mutation owner is composed next"))]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "native mutation owner is composed next")
+    )]
     pub(super) fn checked_binding(
         &self,
         db: AuthorityDb<'_>,

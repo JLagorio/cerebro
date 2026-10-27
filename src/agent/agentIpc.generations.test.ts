@@ -114,14 +114,20 @@ it.each([
   },
 );
 
-
 describe('M95 display-only archive binding IPC', () => {
   it('carries the visible question separately from the assembled request', async () => {
     native();
     const archiveBinding = {
-      threadId: 'thread-original', userMessageId: 'user-original', assistantMessageId: 'answer-original',
-      parentThreadId: null, branchMessageId: null,
-      displayMessage: { text: 'Visible question', addressedLabel: 'Researcher', attachmentRefs: ['files/report.pdf'] },
+      threadId: 'thread-original',
+      userMessageId: 'user-original',
+      assistantMessageId: 'answer-original',
+      parentThreadId: null,
+      branchMessageId: null,
+      displayMessage: {
+        text: 'Visible question',
+        addressedLabel: 'Researcher',
+        attachmentRefs: ['files/report.pdf'],
+      },
     };
     invoke.mockResolvedValueOnce({ run: 8, run_id: receipt.firstRunId, session_id: 'session-1' });
     await runAgent('/vault', { ...keyed(), message: 'ASSEMBLED_OUTGOING', ...{ archiveBinding } });

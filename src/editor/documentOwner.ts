@@ -305,11 +305,15 @@ export class DocumentOwner {
   /** Optional dependent-transform CAS evidence; never a permission. */
   expectSelectedVersion(version: SelectedRecordVersion): boolean {
     if (
-      this.retired || this.selectedTarget === undefined ||
+      this.retired ||
+      this.selectedTarget === undefined ||
       !sameSelectedTarget(version, this.selectedTarget) ||
-      version.kind !== 'sqlite_metadata' || this.recoveryBusy() ||
-      this.state.generation !== this.state.acknowledgedGeneration || this.state.failure !== null
-    ) return false;
+      version.kind !== 'sqlite_metadata' ||
+      this.recoveryBusy() ||
+      this.state.generation !== this.state.acknowledgedGeneration ||
+      this.state.failure !== null
+    )
+      return false;
     this.selectedExpectedVersion = Object.freeze({ ...version });
     return true;
   }
@@ -500,8 +504,9 @@ export class DocumentOwner {
       observed.observedBodyHash !== sha256Hex(observed.body) ||
       (observed.coherence === 'paired' &&
         observed.version.bodyHash !== observed.observedBodyHash) ||
-      (choice.choice === 'mine' && (!observed.editable ||
-        (this.selectedExpectedVersion !== undefined && observed.coherence !== 'paired')))
+      (choice.choice === 'mine' &&
+        (!observed.editable ||
+          (this.selectedExpectedVersion !== undefined && observed.coherence !== 'paired')))
     )
       return false;
     if (this.selectedExpectedVersion !== undefined)
@@ -527,22 +532,40 @@ export class DocumentOwner {
   /** Explicit comparison of a definitely refused dependent transform. */
   compareSelectedRefusal(): boolean {
     const retry = this.selectedRetry;
-    if (this.retired || this.selectedExpectedVersion === undefined ||
-      this.selectedAttempt !== null || retry === null || this.recoveryBusy() ||
-      this.renameHeld || this.recoveryHeld || Object.keys(this.state.childDrafts ?? {}).length > 0 ||
-      this.state.failure === null || this.state.failure.generation !== retry.generation ||
-      this.state.generation !== retry.generation || this.state.latestDraft !== retry.body ||
-      this.state.bodyFormat !== retry.bodyFormat || retry.destination.path !== this.key.path ||
-      retry.destination.vaultId !== this.key.vaultId || retry.request.phase !== 'start' ||
-      retry.request.original != null || !sameSelectedTarget(retry.request.target, this.selectedTarget))
+    if (
+      this.retired ||
+      this.selectedExpectedVersion === undefined ||
+      this.selectedAttempt !== null ||
+      retry === null ||
+      this.recoveryBusy() ||
+      this.renameHeld ||
+      this.recoveryHeld ||
+      Object.keys(this.state.childDrafts ?? {}).length > 0 ||
+      this.state.failure === null ||
+      this.state.failure.generation !== retry.generation ||
+      this.state.generation !== retry.generation ||
+      this.state.latestDraft !== retry.body ||
+      this.state.bodyFormat !== retry.bodyFormat ||
+      retry.destination.path !== this.key.path ||
+      retry.destination.vaultId !== this.key.vaultId ||
+      retry.request.phase !== 'start' ||
+      retry.request.original != null ||
+      !sameSelectedTarget(retry.request.target, this.selectedTarget)
+    )
       return false;
     // This is a local comparison of a definitely refused authored draft. The
     // frozen native payload/expectation is unchanged and no request is sent.
     retry.status = 'reconcile';
-    this.selectedAttempt = retry; this.selectedRetry = null;
-    this.state.failure = null; this.state.reconcileRequired = true;
-    this.state.selectedSave = { status: 'reconcile', generation: retry.generation,
-      requestKey: retry.request.requestKey, reason: 'refused' };
+    this.selectedAttempt = retry;
+    this.selectedRetry = null;
+    this.state.failure = null;
+    this.state.reconcileRequired = true;
+    this.state.selectedSave = {
+      status: 'reconcile',
+      generation: retry.generation,
+      requestKey: retry.request.requestKey,
+      reason: 'refused',
+    };
     this.publish();
     return true;
   }
@@ -703,9 +726,13 @@ export class DocumentOwner {
             status: 'dispatch',
             ...(intent === null ? {} : { presentationCanon: intent.canon }),
             request: {
-              target: { ...target }, requestKey, phase: 'start', original: null,
-              ...(this.selectedExpectedVersion === undefined ? {} :
-                { expectedVersion: { ...this.selectedExpectedVersion } }),
+              target: { ...target },
+              requestKey,
+              phase: 'start',
+              original: null,
+              ...(this.selectedExpectedVersion === undefined
+                ? {}
+                : { expectedVersion: { ...this.selectedExpectedVersion } }),
             },
           };
         }

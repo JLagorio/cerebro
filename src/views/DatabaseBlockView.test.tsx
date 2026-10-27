@@ -300,7 +300,6 @@ describe('DatabaseBlockView pickers', () => {
     expect(screen.queryByTestId('database-block-view-pick')).toBeNull();
   });
 
-
   it('opens and cancels a missing-source repair without changing its pointer', () => {
     const onChange = editable('Wine cellar', 'stack');
     const missing = screen.getByTestId('database-block-missing');

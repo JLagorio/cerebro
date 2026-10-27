@@ -35,14 +35,12 @@ function deferred<T>() {
 function setup() {
   const api = {
     read: vi.fn<RunActionAccessApi['read']>().mockResolvedValue(view),
-    set: vi
-      .fn<RunActionAccessApi['set']>()
-      .mockResolvedValue({
-        state: 'changed',
-        view: { ...view, accessRequestId: null, accessRevision: 'access-b' },
-        sourceCurrent: true,
-        requestClosed: true,
-      }),
+    set: vi.fn<RunActionAccessApi['set']>().mockResolvedValue({
+      state: 'changed',
+      view: { ...view, accessRequestId: null, accessRevision: 'access-b' },
+      sourceCurrent: true,
+      requestClosed: true,
+    }),
   };
   return { api, session: createRunActionAccessSession(41, 'request-a', api) };
 }

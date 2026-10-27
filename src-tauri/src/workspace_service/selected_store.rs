@@ -1199,7 +1199,9 @@ fn cleanup_retired(path: &Path, intent: &CheckedIntent) -> Result<(), AuthorityE
     sync_directory(path.parent().ok_or_else(conflict)?)
 }
 fn apply_rows(conn: &Connection, e: &IntentEnvelope) -> Result<(), AuthorityError> {
-    if schema_version(conn)? != e.selected_schema { return Err(conflict()); }
+    if schema_version(conn)? != e.selected_schema {
+        return Err(conflict());
+    }
     let changed = conn.execute("UPDATE records SET revision=?1,body_hash=?2 WHERE id=?3 AND path=?4 AND revision=?5 AND body_hash=?6 AND metadata=?7",
         rusqlite::params![e.after_revision,e.after_body.hash,e.record_id,e.path,e.before_revision,e.old_body_hash(),e.metadata_source])
         .map_err(|_| invalid("The paired record could not be staged."))?;
@@ -1433,7 +1435,7 @@ fn replace_body_locked(
             } else {
                 record_version(binding, record)
             }
-        },
+        }
     };
     ordinary_body_target(binding, &snapshot, record)?;
     let before = match admission {
@@ -1441,11 +1443,13 @@ fn replace_body_locked(
         BodyAdmission::Editor(_) => observed_body(binding, path)?,
     };
     let before_hash = crate::ledger::sha256_hex(&before);
-    if matches!(admission, BodyAdmission::Editor(request) if request.expected_version.as_ref().is_some_and(|expected| expected.body_hash != before_hash)) {
+    if matches!(admission, BodyAdmission::Editor(request) if request.expected_version.as_ref().is_some_and(|expected| expected.body_hash != before_hash))
+    {
         return Err(error(
             AuthorityErrorKind::SourceChanged,
             "The visible task body changed since its checked snapshot.",
-        ).into());
+        )
+        .into());
     }
     if before == after && before_hash == record.body_hash {
         if protection
@@ -1723,7 +1727,9 @@ fn database_state(
     binding: &SelectedBinding,
     e: &IntentEnvelope,
 ) -> Result<PairState, AuthorityError> {
-    if schema_version(conn)? != e.selected_schema { return Err(conflict()); }
+    if schema_version(conn)? != e.selected_schema {
+        return Err(conflict());
+    }
     let snapshot = read_snapshot(conn, binding).map_err(|_| conflict())?;
     let row = snapshot
         .records
@@ -2008,7 +2014,10 @@ pub(super) fn editor_target(
 }
 /// Retain the identity of the actual opened body handle through the bounded
 /// read. This opens no additional SQLite fd and requires no private file mode.
-pub(super) fn observed_body(binding: &SelectedBinding, path: &str) -> Result<Vec<u8>, AuthorityError> {
+pub(super) fn observed_body(
+    binding: &SelectedBinding,
+    path: &str,
+) -> Result<Vec<u8>, AuthorityError> {
     use std::os::unix::fs::MetadataExt;
     let opened = crate::files::bytes::open_in(&binding.root, "selected-editor", path)
         .map_err(|_| conflict())?;
@@ -2336,7 +2345,12 @@ pub(super) fn validate_receipts(
                 receipt.metadata_before_hash == receipt.metadata_after_hash
             }
             "page.full_width" => receipt.body_before_hash == receipt.body_after_hash,
-            operation if operation == metadata::policy_operation() && schema_version(conn)? == metadata::schema_version() => receipt.body_before_hash == receipt.body_after_hash,
+            operation
+                if operation == metadata::policy_operation()
+                    && schema_version(conn)? == metadata::schema_version() =>
+            {
+                receipt.body_before_hash == receipt.body_after_hash
+            }
             _ => false,
         };
         if !supported {

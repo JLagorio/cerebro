@@ -39,22 +39,18 @@ function fixture() {
     restore: vi
       .fn<BackupWorkflowDeps['api']['restore']>()
       .mockResolvedValue({ kind: 'review', review: review('restore') }),
-    commit: vi
-      .fn<BackupWorkflowDeps['api']['commit']>()
-      .mockResolvedValue({
-        kind: 'started',
-        operationId: 'op1',
-        mode: 'create',
-        labels: review().labels,
-      }),
-    commitRestore: vi
-      .fn<BackupWorkflowDeps['api']['commitRestore']>()
-      .mockResolvedValue({
-        kind: 'started',
-        operationId: 'op1',
-        mode: 'restore',
-        labels: review('restore').labels,
-      }),
+    commit: vi.fn<BackupWorkflowDeps['api']['commit']>().mockResolvedValue({
+      kind: 'started',
+      operationId: 'op1',
+      mode: 'create',
+      labels: review().labels,
+    }),
+    commitRestore: vi.fn<BackupWorkflowDeps['api']['commitRestore']>().mockResolvedValue({
+      kind: 'started',
+      operationId: 'op1',
+      mode: 'restore',
+      labels: review('restore').labels,
+    }),
     cancel: vi.fn<BackupWorkflowDeps['api']['cancel']>().mockResolvedValue({ kind: 'cancelled' }),
     operation: vi.fn<BackupWorkflowDeps['api']['operation']>().mockResolvedValue({ kind: 'none' }),
   };

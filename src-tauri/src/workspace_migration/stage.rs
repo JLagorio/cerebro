@@ -1192,7 +1192,7 @@ fn stage_with_failure(
     result
 }
 
-#[cfg(all(test,unix))]
+#[cfg(all(test, unix))]
 #[path = "stage_schema4_tests.rs"]
 mod schema4_tests;
 

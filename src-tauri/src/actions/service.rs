@@ -1,8 +1,11 @@
 //! Durable broker foundation. No IPC/MCP door or provider is registered here.
+use super::effect_kernel::{
+    self, db, decode, denied, encode, new_approval, now, oid, target_preview as preview,
+    unavailable,
+};
 use super::effect_record::{ActionInvocation, RetryDecisionReceipt};
 pub(super) use super::effect_record::{AdapterTarget, Binding};
 use super::{catalog::ActionCatalog, schema::*, types::*};
-use super::effect_kernel::{self, db, decode, denied, encode, new_approval, now, oid, target_preview as preview, unavailable};
 use crate::runtime::{action_invocations as store, ReadOnly};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::{path::PathBuf, sync::Arc};
@@ -16,7 +19,9 @@ pub(super) struct ActionSubject {
 impl ActionSubject {
     /// Read-only view of an already minted capability; never constructs one.
     #[cfg(test)]
-    pub(super) fn view(&self) -> &ActionSubjectView { &self.scope }
+    pub(super) fn view(&self) -> &ActionSubjectView {
+        &self.scope
+    }
 }
 pub(super) struct PersonActionDecision {
     person_id: String,
@@ -153,7 +158,12 @@ impl DurableActionService {
         effect_kernel::load(conn, id)
     }
 
-    fn save(&self, conn: &Connection, record: &mut ActionInvocation, expected: u64) -> Result<(), ActionError> {
+    fn save(
+        &self,
+        conn: &Connection,
+        record: &mut ActionInvocation,
+        expected: u64,
+    ) -> Result<(), ActionError> {
         effect_kernel::save(conn, record, expected)
     }
 
@@ -209,11 +219,21 @@ impl DurableActionService {
         self.readable(AuthorityDb::Reader(&reader), subject, record)
             .map_err(read_error)
     }
-    fn readable(&self, db: AuthorityDb<'_>, subject: &ActionSubject, record: ActionInvocation) -> Result<ActionInvocation, ActionError> {
+    fn readable(
+        &self,
+        db: AuthorityDb<'_>,
+        subject: &ActionSubject,
+        record: ActionInvocation,
+    ) -> Result<ActionInvocation, ActionError> {
         effect_kernel::readable(self, db, &subject.scope, record)
     }
 
-    fn preview(&self, definition: &ActionDefinition, input: &ValidatedInput, target: &AdapterTarget) -> Result<SafeEffectPreview, ActionError> {
+    fn preview(
+        &self,
+        definition: &ActionDefinition,
+        input: &ValidatedInput,
+        target: &AdapterTarget,
+    ) -> Result<SafeEffectPreview, ActionError> {
         effect_kernel::preview(self, definition, input, target)
     }
 
@@ -229,7 +249,10 @@ impl DurableActionService {
         db(tx.commit())?;
         match disposition {
             effect_kernel::ClaimDisposition::CommitRefusal(refusal) => Err(refusal),
-            effect_kernel::ClaimDisposition::Claimed { attempt_id, canonical_input } => {
+            effect_kernel::ClaimDisposition::Claimed {
+                attempt_id,
+                canonical_input,
+            } => {
                 checkpoint("action-claimed");
                 Ok((attempt_id, canonical_input))
             }
@@ -357,7 +380,11 @@ impl ActionService for DurableActionService {
         self.authority
             .definition(AuthorityDb::Reader(&conn), &subject.scope, id, digest)
     }
-    fn prepare(&self, subject: ActionSubject, request: PrepareAction) -> Result<PreparedAction, ActionError> {
+    fn prepare(
+        &self,
+        subject: ActionSubject,
+        request: PrepareAction,
+    ) -> Result<PreparedAction, ActionError> {
         let mut conn = self.writer()?;
         let tx = db(conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate))?;
         let rows = effect_kernel::prepare_rows(&tx, self, &subject.scope, request)?;
@@ -371,15 +398,19 @@ impl ActionService for DurableActionService {
     fn answer(&self, person: PersonActionDecision) -> Result<ActionEffectRef, ActionError> {
         let mut conn = self.writer()?;
         let tx = db(conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate))?;
-        let effect = effect_kernel::answer_rows(&tx, self, effect_kernel::AnswerInput {
-            person_id: person.person_id,
-            scope: person.subject.scope,
-            approval_id: person.approval_id,
-            allow: person.allow,
-            edited_input: person.edited_input,
-            expected_invocation_revision: person.expected_invocation_revision,
-            expected_approval_revision: person.expected_approval_revision,
-        })?;
+        let effect = effect_kernel::answer_rows(
+            &tx,
+            self,
+            effect_kernel::AnswerInput {
+                person_id: person.person_id,
+                scope: person.subject.scope,
+                approval_id: person.approval_id,
+                allow: person.allow,
+                edited_input: person.edited_input,
+                expected_invocation_revision: person.expected_invocation_revision,
+                expected_approval_revision: person.expected_approval_revision,
+            },
+        )?;
         db(tx.commit())?;
         checkpoint("action-approved");
         Ok(effect)
@@ -528,18 +559,40 @@ impl ActionService for DurableActionService {
         let mut conn = self.writer()?;
         let tx = db(conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate))?;
         let rows = effect_kernel::cancel_rows(
-            &tx, self, &subject.scope, &id, revision,
-            if owner.is_some() { effect_kernel::SubmissionAccess::Held } else { effect_kernel::SubmissionAccess::Busy },
+            &tx,
+            self,
+            &subject.scope,
+            &id,
+            revision,
+            if owner.is_some() {
+                effect_kernel::SubmissionAccess::Held
+            } else {
+                effect_kernel::SubmissionAccess::Busy
+            },
         )?;
         db(tx.commit())?;
         let record = rows.record;
         if rows.request_provider_cancel {
             if let Some(owner) = owner.as_ref() {
                 self.check(&self.writer()?, &record)?;
-                let attempt = record.details.attempts.last().ok_or_else(denied)?.attempt_id.clone();
-                let observation = self.adapter.cancel(&id, &attempt, &record.binding, &record.definition);
+                let attempt = record
+                    .details
+                    .attempts
+                    .last()
+                    .ok_or_else(denied)?
+                    .attempt_id
+                    .clone();
+                let observation =
+                    self.adapter
+                        .cancel(&id, &attempt, &record.binding, &record.definition);
                 if !matches!(observation, Observation::Unknown) {
-                    return self.observe(&id, &attempt, Some(record.revision()), observation, owner);
+                    return self.observe(
+                        &id,
+                        &attempt,
+                        Some(record.revision()),
+                        observation,
+                        owner,
+                    );
                 }
             }
         }
@@ -550,19 +603,43 @@ impl ActionService for DurableActionService {
 // Borrowed mutation facade. Provider execution remains in this test-only
 // service; the shared mutation context can only check authority/derive previews.
 impl super::effect_kernel::MutationContext for DurableActionService {
-    fn definition(&self, id: &ActionId, digest: &DefinitionDigest) -> Result<ActionDefinition, ActionError> {
+    fn definition(
+        &self,
+        id: &ActionId,
+        digest: &DefinitionDigest,
+    ) -> Result<ActionDefinition, ActionError> {
         self.catalog.resolve(id, digest)
     }
-    fn check(&self, db: AuthorityDb<'_>, scope: &ActionSubjectView, request: &PrepareAction, definition: &ActionDefinition) -> Result<Binding, ActionError> {
+    fn check(
+        &self,
+        db: AuthorityDb<'_>,
+        scope: &ActionSubjectView,
+        request: &PrepareAction,
+        definition: &ActionDefinition,
+    ) -> Result<Binding, ActionError> {
         self.authority.check(db, scope, request, definition)
     }
-    fn read_access(&self, db: AuthorityDb<'_>, scope: &ActionSubjectView, account: &AccountId) -> Result<(), ActionError> {
+    fn read_access(
+        &self,
+        db: AuthorityDb<'_>,
+        scope: &ActionSubjectView,
+        account: &AccountId,
+    ) -> Result<(), ActionError> {
         self.authority.read_access(db, scope, account)
     }
-    fn target(&self, definition: &ActionDefinition, input: &ValidatedInput) -> Result<AdapterTarget, ActionError> {
+    fn target(
+        &self,
+        definition: &ActionDefinition,
+        input: &ValidatedInput,
+    ) -> Result<AdapterTarget, ActionError> {
         self.adapter.target(definition, input)
     }
-    fn preview(&self, definition: &ActionDefinition, input: &ValidatedInput, target: &AdapterTarget) -> Result<SafeEffectPreview, ActionError> {
+    fn preview(
+        &self,
+        definition: &ActionDefinition,
+        input: &ValidatedInput,
+        target: &AdapterTarget,
+    ) -> Result<SafeEffectPreview, ActionError> {
         self.adapter.preview(definition, input, target)
     }
 }
@@ -1021,7 +1098,9 @@ pub(in crate::actions) mod test_support {
         pub(in crate::actions) fn expire(&self) {
             let service = self.service();
             let mut conn = service.writer().unwrap();
-            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
             let id: String = tx
                 .query_row("SELECT invocation_id FROM action_invocations", [], |r| {
                     r.get(0)
@@ -1231,7 +1310,9 @@ pub(in crate::actions) mod test_support {
         pub(in crate::actions) fn expire_id(&self, id: &InvocationId) {
             let service = self.service();
             let mut conn = service.writer().unwrap();
-            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
             let mut record = service.load(&tx, id).unwrap();
             record.approval.as_mut().unwrap().view.expires_at = "2000-01-01T00:00:00.000Z".into();
             let revision = record.revision();
@@ -1255,7 +1336,10 @@ pub(in crate::actions) mod test_support {
             *self.observation.lock().unwrap() = value.into();
         }
     }
-    fn kernel_decision(harness: &Harness, id: &InvocationId) -> super::super::effect_kernel::AnswerInput {
+    fn kernel_decision(
+        harness: &Harness,
+        id: &InvocationId,
+    ) -> super::super::effect_kernel::AnswerInput {
         let person = harness.decision(id, true, None);
         super::super::effect_kernel::AnswerInput {
             person_id: person.person_id,
@@ -1275,15 +1359,22 @@ pub(in crate::actions) mod test_support {
         let conn = service.writer().unwrap();
         assert!(conn.is_autocommit());
         let refusal = super::super::effect_kernel::prepare_rows(
-            &conn, &service, &harness.subject().scope, harness.request("outside-tx", "outside"),
-        ).unwrap_err();
+            &conn,
+            &service,
+            &harness.subject().scope,
+            harness.request("outside-tx", "outside"),
+        )
+        .unwrap_err();
         assert_eq!(refusal.code, ActionErrorCode::Unavailable);
         assert!(harness.raw_action_rows().is_empty());
         let prepared = harness.prepare("seed-approved", "seed").unwrap();
         let before = harness.raw_action_rows();
         let refusal = super::super::effect_kernel::answer_rows(
-            &conn, &service, kernel_decision(&harness, &prepared.effect.invocation_id),
-        ).unwrap_err();
+            &conn,
+            &service,
+            kernel_decision(&harness, &prepared.effect.invocation_id),
+        )
+        .unwrap_err();
         assert_eq!(refusal.code, ActionErrorCode::Unavailable);
         assert_eq!(harness.raw_action_rows(), before);
     }
@@ -1293,17 +1384,47 @@ pub(in crate::actions) mod test_support {
         let harness = Harness::new("kernel-prepare-rollback");
         let service = harness.service();
         let mut conn = service.writer().unwrap();
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
         let prepared = super::super::effect_kernel::prepare_rows(
-            &tx, &service, &harness.subject().scope, harness.request("held-prepare", "held"),
-        ).expect("prepare rows inside the caller transaction");
+            &tx,
+            &service,
+            &harness.subject().scope,
+            harness.request("held-prepare", "held"),
+        )
+        .expect("prepare rows inside the caller transaction");
         assert!(prepared.inserted);
-        assert_eq!(prepared.prepared.effect.state, InvocationState::AwaitingApproval);
-        assert!(!tx.is_autocommit(), "kernel cannot commit the caller's transaction");
-        assert_eq!(tx.query_row("SELECT count(*) FROM action_invocations", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(tx.query_row("SELECT count(*) FROM action_approvals", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(tx.query_row("SELECT count(*) FROM action_attempts", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-        assert!(harness.raw_action_rows().is_empty(), "another connection sees no uncommitted prepare");
+        assert_eq!(
+            prepared.prepared.effect.state,
+            InvocationState::AwaitingApproval
+        );
+        assert!(
+            !tx.is_autocommit(),
+            "kernel cannot commit the caller's transaction"
+        );
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM action_invocations", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM action_approvals", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM action_attempts", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(
+            harness.raw_action_rows().is_empty(),
+            "another connection sees no uncommitted prepare"
+        );
         tx.rollback().unwrap();
         assert!(harness.raw_action_rows().is_empty());
     }
@@ -1317,15 +1438,30 @@ pub(in crate::actions) mod test_support {
         let person = kernel_decision(&harness, &id);
         let before = harness.raw_action_rows();
         let mut conn = service.writer().unwrap();
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
         let effect = super::super::effect_kernel::answer_rows(&tx, &service, person)
             .expect("answer rows inside the caller transaction");
         assert_eq!(effect.state, InvocationState::Ready);
-        assert!(!tx.is_autocommit(), "kernel cannot commit the caller's transaction");
+        assert!(
+            !tx.is_autocommit(),
+            "kernel cannot commit the caller's transaction"
+        );
         let inside = service.load(&tx, &id).unwrap();
         assert_eq!(inside.details.effect.state, InvocationState::Ready);
-        assert!(inside.approval.as_ref().unwrap().view.approved_input_digest.is_some());
-        assert_eq!(harness.raw_action_rows(), before, "another connection still sees the original waiting approval");
+        assert!(inside
+            .approval
+            .as_ref()
+            .unwrap()
+            .view
+            .approved_input_digest
+            .is_some());
+        assert_eq!(
+            harness.raw_action_rows(),
+            before,
+            "another connection still sees the original waiting approval"
+        );
         tx.rollback().unwrap();
         assert_eq!(harness.raw_action_rows(), before);
     }
@@ -1349,9 +1485,11 @@ pub(in crate::actions) mod test_support {
         let effect = harness.service().answer(person).unwrap();
         assert_eq!(super::super::effect_kernel::test_probe::counts(), (0, 1));
         assert_eq!(effect.state, InvocationState::Ready);
-        assert_eq!(harness.details(&effect.invocation_id).effect.state, InvocationState::Ready);
+        assert_eq!(
+            harness.details(&effect.invocation_id).effect.state,
+            InvocationState::Ready
+        );
     }
-
 
     fn check_claim_commit_refusal(case: &str) {
         use super::super::effect_kernel::{claim_rows, ClaimDisposition};
@@ -1365,7 +1503,9 @@ pub(in crate::actions) mod test_support {
             let owner = service.submission_owner(&ready).unwrap().unwrap();
             service.require_owner(&id, &owner).unwrap();
             match case {
-                "cancel" => { h.cancel(&id).unwrap(); }
+                "cancel" => {
+                    h.cancel(&id).unwrap();
+                }
                 "authority" => h.change_authority("revocation"),
                 "approval" => h.expire_id(&id),
                 _ => unreachable!(),
@@ -1374,19 +1514,47 @@ pub(in crate::actions) mod test_support {
             let original = service.load(&service.writer().unwrap(), &id).unwrap();
             assert_eq!(original.details.effect.state, InvocationState::Ready);
             let mut conn = service.writer().unwrap();
-            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
-            let outcome = claim_rows(&tx, &service, &id).expect("changed refusal is a transaction value");
-            let ClaimDisposition::CommitRefusal(refusal) = outcome else { panic!("refused claim cannot submit") };
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            let outcome =
+                claim_rows(&tx, &service, &id).expect("changed refusal is a transaction value");
+            let ClaimDisposition::CommitRefusal(refusal) = outcome else {
+                panic!("refused claim cannot submit")
+            };
             assert_eq!(refusal.code, ActionErrorCode::Denied);
-            assert_eq!(refusal.retry_disposition, if case == "cancel" { RetryDisposition::Never } else { RetryDisposition::Refresh });
+            assert_eq!(
+                refusal.retry_disposition,
+                if case == "cancel" {
+                    RetryDisposition::Never
+                } else {
+                    RetryDisposition::Refresh
+                }
+            );
             let changed = service.load(&tx, &id).unwrap();
-            assert_eq!(changed.details.effect.state, if case == "cancel" { InvocationState::Cancelled } else { InvocationState::AwaitingApproval });
+            assert_eq!(
+                changed.details.effect.state,
+                if case == "cancel" {
+                    InvocationState::Cancelled
+                } else {
+                    InvocationState::AwaitingApproval
+                }
+            );
             assert_eq!(changed.revision(), original.revision() + 1);
             assert!(changed.approval.as_ref().unwrap().retired);
             assert!(changed.details.effect.approval_id.is_none());
-            assert_eq!(tx.query_row("SELECT count(*) FROM action_attempts", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+            assert_eq!(
+                tx.query_row("SELECT count(*) FROM action_attempts", [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
             assert!(!tx.is_autocommit());
-            assert_eq!(h.raw_action_rows(), before, "kernel cannot publish its own refusal");
+            assert_eq!(
+                h.raw_action_rows(),
+                before,
+                "kernel cannot publish its own refusal"
+            );
             if commit {
                 tx.commit().unwrap();
                 let persisted = service.load(&service.writer().unwrap(), &id).unwrap();
@@ -1395,7 +1563,11 @@ pub(in crate::actions) mod test_support {
                 assert!(persisted.approval.unwrap().retired);
             } else {
                 tx.rollback().unwrap();
-                assert_eq!(h.raw_action_rows(), before, "caller rollback restores every refusal row");
+                assert_eq!(
+                    h.raw_action_rows(),
+                    before,
+                    "caller rollback restores every refusal row"
+                );
             }
             assert_eq!(h.attempts(), 0);
             assert_eq!(h.submissions(), 0);
@@ -1422,7 +1594,9 @@ pub(in crate::actions) mod test_support {
         let before = h.raw_action_rows();
         let service = h.service();
         let conn = service.writer().unwrap();
-        let refusal = super::super::effect_kernel::claim_rows(&conn, &service, &p.effect.invocation_id).unwrap_err();
+        let refusal =
+            super::super::effect_kernel::claim_rows(&conn, &service, &p.effect.invocation_id)
+                .unwrap_err();
         assert_eq!(refusal.code, ActionErrorCode::Unavailable);
         assert_eq!(h.raw_action_rows(), before);
         assert_eq!(h.submissions(), 0);
@@ -1439,15 +1613,32 @@ pub(in crate::actions) mod test_support {
         let owner = service.submission_owner(&record).unwrap().unwrap();
         service.require_owner(&id, &owner).unwrap();
         let mut conn = service.writer().unwrap();
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
-        let outcome = super::super::effect_kernel::claim_rows(&tx, &service, &id).expect("claim rows in caller transaction");
-        let super::super::effect_kernel::ClaimDisposition::Claimed { attempt_id, canonical_input } = outcome else { panic!("ready approved action must claim") };
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let outcome = super::super::effect_kernel::claim_rows(&tx, &service, &id)
+            .expect("claim rows in caller transaction");
+        let super::super::effect_kernel::ClaimDisposition::Claimed {
+            attempt_id,
+            canonical_input,
+        } = outcome
+        else {
+            panic!("ready approved action must claim")
+        };
         let changed = service.load(&tx, &id).unwrap();
         assert_eq!(canonical_input, record.canonical_input);
         assert_eq!(changed.details.effect.state, InvocationState::Dispatched);
-        assert_eq!(changed.details.attempts.last().unwrap().attempt_id, attempt_id);
+        assert_eq!(
+            changed.details.attempts.last().unwrap().attempt_id,
+            attempt_id
+        );
         assert!(changed.approval.as_ref().unwrap().consumed);
-        assert_eq!(tx.query_row("SELECT count(*) FROM action_attempts", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM action_attempts", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
         assert_eq!(h.raw_action_rows(), before);
         tx.rollback().unwrap();
         assert_eq!(h.raw_action_rows(), before);
@@ -1460,11 +1651,19 @@ pub(in crate::actions) mod test_support {
         let p = h.prepare("request", "first").unwrap();
         h.allow(&p.effect.invocation_id).unwrap();
         let service = h.service();
-        let record = service.load(&service.writer().unwrap(), &p.effect.invocation_id).unwrap();
+        let record = service
+            .load(&service.writer().unwrap(), &p.effect.invocation_id)
+            .unwrap();
         let owner = service.submission_owner(&record).unwrap().unwrap();
         super::super::effect_kernel::claim_probe::reset();
-        service.claim_dispatch(&p.effect.invocation_id, &owner).unwrap();
-        assert_eq!(super::super::effect_kernel::claim_probe::count(), 1, "original wrapper must run the shared algorithm");
+        service
+            .claim_dispatch(&p.effect.invocation_id, &owner)
+            .unwrap();
+        assert_eq!(
+            super::super::effect_kernel::claim_probe::count(),
+            1,
+            "original wrapper must run the shared algorithm"
+        );
         assert_eq!(h.attempts(), 1);
         assert_eq!(h.submissions(), 0);
     }
@@ -1472,52 +1671,162 @@ pub(in crate::actions) mod test_support {
     fn check_cancel_rows_before_dispatch(held: bool) {
         use super::super::effect_kernel::{cancel_rows, SubmissionAccess};
         for commit in [false, true] {
-            let h=Harness::new(&format!("kernel-cancel-{held}-{commit}"));
-            let p=h.prepare("request","first").unwrap(); let id=p.effect.invocation_id;
-            h.allow(&id).unwrap(); let service=h.service();
-            let original=service.load(&service.writer().unwrap(),&id).unwrap();
-            let owner=service.submission_owner(&original).unwrap().unwrap();
-            if held { service.require_owner(&id,&owner).unwrap(); }
-            else { assert!(service.submission_owner(&original).unwrap().is_none(),"a separate caller cannot acquire the held lease"); }
-            let before=h.raw_action_rows();let mut conn=service.writer().unwrap();
-            let outer=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
-            let result=cancel_rows(&outer,&service,&h.subject().scope,&id,original.revision(),if held{SubmissionAccess::Held}else{SubmissionAccess::Busy}).expect("cancellation rows inside caller transaction");
-            assert!(result.record.cancel_requested);assert!(!result.request_provider_cancel);
-            assert_eq!(result.record.details.effect.state,if held{InvocationState::Cancelled}else{InvocationState::Ready});
-            assert_eq!(result.record.approval.as_ref().unwrap().retired,held);
-            assert_eq!(result.record.revision(),original.revision()+1);
-            assert_eq!(h.raw_action_rows(),before,"row kernel cannot commit its own cancellation");
-            assert_eq!(h.attempts(),0);assert_eq!(h.submissions(),0);
-            if commit { outer.commit().unwrap();let stored=service.load(&service.writer().unwrap(),&id).unwrap();assert!(stored.cancel_requested);assert_eq!(stored.details.effect.state,result.record.details.effect.state); }
-            else { outer.rollback().unwrap();assert_eq!(h.raw_action_rows(),before); }
+            let h = Harness::new(&format!("kernel-cancel-{held}-{commit}"));
+            let p = h.prepare("request", "first").unwrap();
+            let id = p.effect.invocation_id;
+            h.allow(&id).unwrap();
+            let service = h.service();
+            let original = service.load(&service.writer().unwrap(), &id).unwrap();
+            let owner = service.submission_owner(&original).unwrap().unwrap();
+            if held {
+                service.require_owner(&id, &owner).unwrap();
+            } else {
+                assert!(
+                    service.submission_owner(&original).unwrap().is_none(),
+                    "a separate caller cannot acquire the held lease"
+                );
+            }
+            let before = h.raw_action_rows();
+            let mut conn = service.writer().unwrap();
+            let outer = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            let result = cancel_rows(
+                &outer,
+                &service,
+                &h.subject().scope,
+                &id,
+                original.revision(),
+                if held {
+                    SubmissionAccess::Held
+                } else {
+                    SubmissionAccess::Busy
+                },
+            )
+            .expect("cancellation rows inside caller transaction");
+            assert!(result.record.cancel_requested);
+            assert!(!result.request_provider_cancel);
+            assert_eq!(
+                result.record.details.effect.state,
+                if held {
+                    InvocationState::Cancelled
+                } else {
+                    InvocationState::Ready
+                }
+            );
+            assert_eq!(result.record.approval.as_ref().unwrap().retired, held);
+            assert_eq!(result.record.revision(), original.revision() + 1);
+            assert_eq!(
+                h.raw_action_rows(),
+                before,
+                "row kernel cannot commit its own cancellation"
+            );
+            assert_eq!(h.attempts(), 0);
+            assert_eq!(h.submissions(), 0);
+            if commit {
+                outer.commit().unwrap();
+                let stored = service.load(&service.writer().unwrap(), &id).unwrap();
+                assert!(stored.cancel_requested);
+                assert_eq!(
+                    stored.details.effect.state,
+                    result.record.details.effect.state
+                );
+            } else {
+                outer.rollback().unwrap();
+                assert_eq!(h.raw_action_rows(), before);
+            }
         }
     }
     #[test]
-    fn shared_cancel_kernel_held_predispatch_cancellation_has_outer_commit_and_rollback_ownership() { check_cancel_rows_before_dispatch(true); }
+    fn shared_cancel_kernel_held_predispatch_cancellation_has_outer_commit_and_rollback_ownership()
+    {
+        check_cancel_rows_before_dispatch(true);
+    }
     #[test]
-    fn shared_cancel_kernel_busy_predispatch_records_intent_without_fake_cancellation() { check_cancel_rows_before_dispatch(false); }
+    fn shared_cancel_kernel_busy_predispatch_records_intent_without_fake_cancellation() {
+        check_cancel_rows_before_dispatch(false);
+    }
     #[test]
     fn shared_cancel_kernel_dispatched_intent_returns_only_postcommit_provider_work() {
-        use super::super::effect_kernel::{cancel_rows,SubmissionAccess};
-        let h=Harness::new("kernel-cancel-dispatched");let p=h.prepare("request","first").unwrap();let id=p.effect.invocation_id;
-        h.allow(&id).unwrap();h.claim_without_receipt(&id);let service=h.service();
-        let original=service.load(&service.writer().unwrap(),&id).unwrap();let owner=service.submission_owner(&original).unwrap().unwrap();service.require_owner(&id,&owner).unwrap();
-        let before=h.raw_action_rows();let mut conn=service.writer().unwrap();let outer=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
-        let result=cancel_rows(&outer,&service,&h.subject().scope,&id,original.revision(),SubmissionAccess::Held).expect("persist intent only");
-        assert!(result.request_provider_cancel);assert!(result.record.cancel_requested);assert_eq!(result.record.details.effect.state,InvocationState::Dispatched);
-        assert_eq!(result.record.details.attempts.len(),1);assert!(result.record.details.attempts.last().unwrap().receipt_id.is_none());assert_eq!(h.submissions(),0);
-        assert_eq!(h.raw_action_rows(),before);outer.rollback().unwrap();assert_eq!(h.raw_action_rows(),before);
+        use super::super::effect_kernel::{cancel_rows, SubmissionAccess};
+        let h = Harness::new("kernel-cancel-dispatched");
+        let p = h.prepare("request", "first").unwrap();
+        let id = p.effect.invocation_id;
+        h.allow(&id).unwrap();
+        h.claim_without_receipt(&id);
+        let service = h.service();
+        let original = service.load(&service.writer().unwrap(), &id).unwrap();
+        let owner = service.submission_owner(&original).unwrap().unwrap();
+        service.require_owner(&id, &owner).unwrap();
+        let before = h.raw_action_rows();
+        let mut conn = service.writer().unwrap();
+        let outer = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let result = cancel_rows(
+            &outer,
+            &service,
+            &h.subject().scope,
+            &id,
+            original.revision(),
+            SubmissionAccess::Held,
+        )
+        .expect("persist intent only");
+        assert!(result.request_provider_cancel);
+        assert!(result.record.cancel_requested);
+        assert_eq!(
+            result.record.details.effect.state,
+            InvocationState::Dispatched
+        );
+        assert_eq!(result.record.details.attempts.len(), 1);
+        assert!(result
+            .record
+            .details
+            .attempts
+            .last()
+            .unwrap()
+            .receipt_id
+            .is_none());
+        assert_eq!(h.submissions(), 0);
+        assert_eq!(h.raw_action_rows(), before);
+        outer.rollback().unwrap();
+        assert_eq!(h.raw_action_rows(), before);
     }
     #[test]
     fn shared_cancel_kernel_refuses_autocommit_without_mutating_intent_or_lease() {
-        let h=Harness::new("kernel-cancel-no-tx");let p=h.prepare("request","first").unwrap();let service=h.service();let before=h.raw_action_rows();let conn=service.writer().unwrap();
-        let error=super::super::effect_kernel::cancel_rows(&conn,&service,&h.subject().scope,&p.effect.invocation_id,1,super::super::effect_kernel::SubmissionAccess::Held).err().expect("autocommit refused");
-        assert_eq!(error.code,ActionErrorCode::Unavailable);assert_eq!(h.raw_action_rows(),before);assert_eq!(h.submissions(),0);
+        let h = Harness::new("kernel-cancel-no-tx");
+        let p = h.prepare("request", "first").unwrap();
+        let service = h.service();
+        let before = h.raw_action_rows();
+        let conn = service.writer().unwrap();
+        let error = super::super::effect_kernel::cancel_rows(
+            &conn,
+            &service,
+            &h.subject().scope,
+            &p.effect.invocation_id,
+            1,
+            super::super::effect_kernel::SubmissionAccess::Held,
+        )
+        .err()
+        .expect("autocommit refused");
+        assert_eq!(error.code, ActionErrorCode::Unavailable);
+        assert_eq!(h.raw_action_rows(), before);
+        assert_eq!(h.submissions(), 0);
     }
     #[test]
     fn shared_cancel_kernel_is_used_by_existing_service_wrapper() {
-        let h=Harness::new("kernel-cancel-wrapper");let p=h.prepare("request","first").unwrap();
-        super::super::effect_kernel::cancel_probe::reset();assert_eq!(h.cancel(&p.effect.invocation_id).unwrap().state,InvocationState::Cancelled);
-        assert_eq!(super::super::effect_kernel::cancel_probe::count(),1,"existing wrapper must delegate durable mutations");assert_eq!(h.submissions(),0);
+        let h = Harness::new("kernel-cancel-wrapper");
+        let p = h.prepare("request", "first").unwrap();
+        super::super::effect_kernel::cancel_probe::reset();
+        assert_eq!(
+            h.cancel(&p.effect.invocation_id).unwrap().state,
+            InvocationState::Cancelled
+        );
+        assert_eq!(
+            super::super::effect_kernel::cancel_probe::count(),
+            1,
+            "existing wrapper must delegate durable mutations"
+        );
+        assert_eq!(h.submissions(), 0);
     }
 }

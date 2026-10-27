@@ -105,11 +105,22 @@ export interface ViewCanvasProps {
 }
 
 export function SelectedViewUnavailable({ message }: { message: string }) {
-  return <div data-testid="selected-view-unavailable" role="status" className="section-unavailable flex min-w-0 flex-col gap-1 px-5 py-4 text-ui text-n-700"><strong>This selected view is unavailable</strong><span>{message}</span></div>;
+  return (
+    <div
+      data-testid="selected-view-unavailable"
+      role="status"
+      className="section-unavailable flex min-w-0 flex-col gap-1 px-5 py-4 text-ui text-n-700"
+    >
+      <strong>This selected view is unavailable</strong>
+      <span>{message}</span>
+    </div>
+  );
 }
 
 export function ViewCanvas(props: ViewCanvasProps): React.ReactElement {
-  const issue = props.unavailable ?? selectedViewIssue(props.entries, props.schema, props.presentation, props.viewFilters);
+  const issue =
+    props.unavailable ??
+    selectedViewIssue(props.entries, props.schema, props.presentation, props.viewFilters);
   if (issue) return <SelectedViewUnavailable message={issue.message} />;
   return <AvailableViewCanvas {...props} />;
 }

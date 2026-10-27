@@ -1,14 +1,83 @@
-.cb-workflow-runtime{margin:20px 0;display:flex;flex-direction:column;gap:28px;min-width:0}
-.cb-workflow-runtime h3{font:600 var(--fs-md)/1.5 var(--font-ui);margin:0 0 12px;color:var(--n-900)}
-.cb-workflow-runtime h4{font:600 var(--fs-sm)/1.5 var(--font-ui);color:var(--n-800)}
-.cb-workflow-run-start,.cb-workflow-run-detail{border:1px solid var(--n-200);border-radius:var(--r-md);padding:20px;background:var(--n-0);min-width:0}
-.cb-workflow-permissions{display:flex;flex-direction:column;gap:12px;border:1px solid var(--n-200);border-radius:var(--r-md);padding:16px;margin:16px 0}
-.cb-workflow-permissions legend{font:600 var(--fs-sm)/1.5 var(--font-ui);padding:0 6px;color:var(--n-800)}
-.cb-workflow-permissions>label{font:400 var(--fs-sm)/1.6 var(--font-ui);color:var(--n-700)}
-.cb-workflow-permissions input[type=checkbox],.cb-workflow-run-detail input[type=checkbox]{accent-color:var(--cortex-500);margin-right:8px}
-.cb-workflow-run-step{padding:16px 0;border-bottom:1px solid var(--n-200);min-width:0}
-.cb-workflow-value-row{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:8px 0;color:var(--n-600);font-size:var(--fs-xs)}
-.cb-workflow-mono,.cb-workflow-runtime pre{font:400 var(--fs-xs)/1.6 var(--font-mono);overflow-wrap:anywhere}
-.cb-workflow-runtime pre{max-height:360px;overflow:auto;white-space:pre-wrap;background:var(--n-50);padding:12px;border-radius:var(--r-md)}
-.cb-workflow-runtime details>summary{cursor:pointer;font:500 var(--fs-sm)/1.6 var(--font-ui);color:var(--n-700)}
-.cb-workflow-runtime details>summary:focus-visible{outline:2px solid var(--cortex-500);outline-offset:3px}
+.cb-workflow-runtime {
+  margin: 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+}
+.cb-workflow-runtime h3 {
+  font: 600 var(--fs-md)/1.5 var(--font-ui);
+  margin: 0 0 12px;
+  color: var(--n-900);
+}
+.cb-workflow-runtime h4 {
+  font: 600 var(--fs-sm)/1.5 var(--font-ui);
+  color: var(--n-800);
+}
+.cb-workflow-run-start,
+.cb-workflow-run-detail {
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  padding: 20px;
+  background: var(--n-0);
+  min-width: 0;
+}
+.cb-workflow-permissions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  padding: 16px;
+  margin: 16px 0;
+}
+.cb-workflow-permissions legend {
+  font: 600 var(--fs-sm)/1.5 var(--font-ui);
+  padding: 0 6px;
+  color: var(--n-800);
+}
+.cb-workflow-permissions > label {
+  font: 400 var(--fs-sm)/1.6 var(--font-ui);
+  color: var(--n-700);
+}
+.cb-workflow-permissions input[type='checkbox'],
+.cb-workflow-run-detail input[type='checkbox'] {
+  accent-color: var(--cortex-500);
+  margin-right: 8px;
+}
+.cb-workflow-run-step {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--n-200);
+  min-width: 0;
+}
+.cb-workflow-value-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0;
+  color: var(--n-600);
+  font-size: var(--fs-xs);
+}
+.cb-workflow-mono,
+.cb-workflow-runtime pre {
+  font: 400 var(--fs-xs)/1.6 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.cb-workflow-runtime pre {
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  background: var(--n-50);
+  padding: 12px;
+  border-radius: var(--r-md);
+}
+.cb-workflow-runtime details > summary {
+  cursor: pointer;
+  font: 500 var(--fs-sm)/1.6 var(--font-ui);
+  color: var(--n-700);
+}
+.cb-workflow-runtime details > summary:focus-visible {
+  outline: 2px solid var(--cortex-500);
+  outline-offset: 3px;
+}

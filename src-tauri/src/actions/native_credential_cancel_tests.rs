@@ -1,7 +1,18 @@
 use super::*;
 use crate::connections::AcquisitionState;
 fn ticket(attempt: &str, connection: &str) -> CredentialAcquisition {
-    CredentialAcquisition { attempt_id: AttemptId(attempt.into()), connection_id: ConnectionId(connection.into()), person: "human:fixture".into(), host: "github.com".into(), login: "alice".into(), expected_revision: 2, revocation_generation: 0, state: AcquisitionState::Pending, error: None, observed_at: "fixture".into() }
+    CredentialAcquisition {
+        attempt_id: AttemptId(attempt.into()),
+        connection_id: ConnectionId(connection.into()),
+        person: "human:fixture".into(),
+        host: "github.com".into(),
+        login: "alice".into(),
+        expected_revision: 2,
+        revocation_generation: 0,
+        state: AcquisitionState::Pending,
+        error: None,
+        observed_at: "fixture".into(),
+    }
 }
 #[test]
 fn exact_attempt_cancel_does_not_cancel_another_connection() {
@@ -37,10 +48,16 @@ fn ambiguous_owner_outcome_cancels_all_without_severing_worker_flags() {
 fn terminal_worker_drop_prunes_entry_and_duplicate_registration_is_refused() {
     let book = Arc::new(CancellationBook::default());
     let first = book.register(&ticket("a", "one")).unwrap();
-    assert_eq!(book.register(&ticket("a", "one")).err(), Some(ConnectionError::Unavailable));
+    assert_eq!(
+        book.register(&ticket("a", "one")).err(),
+        Some(ConnectionError::Unavailable)
+    );
     let adapter_flag = first.flag.clone();
     drop(first);
-    assert!(adapter_flag.stopped(), "pruning cannot sever cancellation of surviving adapter clones");
+    assert!(
+        adapter_flag.stopped(),
+        "pruning cannot sever cancellation of surviving adapter clones"
+    );
     assert!(book.entries.lock().unwrap().is_empty());
     drop(book.register(&ticket("a", "one")).unwrap());
 }

@@ -304,7 +304,11 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
       aria-label="Document properties"
       className="pt-1"
     >
-      {(selectedEntryIssue(entry) ?? typeDef?.unavailableReason) && <p role="status" className="section-unavailable text-xs text-n-600">{selectedEntryIssue(entry) ?? typeDef?.unavailableReason}</p>}
+      {(selectedEntryIssue(entry) ?? typeDef?.unavailableReason) && (
+        <p role="status" className="section-unavailable text-xs text-n-600">
+          {selectedEntryIssue(entry) ?? typeDef?.unavailableReason}
+        </p>
+      )}
       <div className="flex flex-col gap-1">
         {/* Not a property — a doc's type is the one thing on this list that
             is not in `fields:` — so it takes an explicit icon rather than a
@@ -420,11 +424,20 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             </span>
           </button>
         )}
-        {undeclaredScalars.map((name) => (
-          entry.authority?.kind === 'sqlite_metadata'
-            ? <PropertyRow key={name} kind="text" name={name}><FieldEditor entry={entry} def={{ name, kind: 'text' }} schema={schema} chrome="panel" /></PropertyRow>
-            : <UndeclaredRow key={name} entry={entry} name={name} />
-        ))}
+        {undeclaredScalars.map((name) =>
+          entry.authority?.kind === 'sqlite_metadata' ? (
+            <PropertyRow key={name} kind="text" name={name}>
+              <FieldEditor
+                entry={entry}
+                def={{ name, kind: 'text' }}
+                schema={schema}
+                chrome="panel"
+              />
+            </PropertyRow>
+          ) : (
+            <UndeclaredRow key={name} entry={entry} name={name} />
+          ),
+        )}
         {undeclaredRelations.map((name) => (
           <PropertyRow key={name} kind="relation" name={name}>
             <span className="block p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">

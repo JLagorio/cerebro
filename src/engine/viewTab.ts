@@ -218,8 +218,13 @@ export function resolveViewTab(
   }
 
   if (surface.unavailable) return broken(surface.unavailable.message);
-  if (tab.scope === 'related' && surface.entries.some(entry => entry.authority?.kind === 'sqlite_metadata')) {
-    return broken('This related selected view needs its canonical relation reader. Its result is unavailable here.');
+  if (
+    tab.scope === 'related' &&
+    surface.entries.some((entry) => entry.authority?.kind === 'sqlite_metadata')
+  ) {
+    return broken(
+      'This related selected view needs its canonical relation reader. Its result is unavailable here.',
+    );
   }
   const sourceLabel = `${sourceName} · ${active.name}`;
   const filtered = active.filters !== null;

@@ -1,9 +1,15 @@
 //! Shared transaction-owned action mutations. No path opener, identity mint,
 //! provider executor, transaction owner or checkpoint is defined here.
-#![cfg_attr(not(test), expect(dead_code, reason = "the retained native mutation bridge is integrated after the shared row kernel"))]
+#![cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the retained native mutation bridge is integrated after the shared row kernel"
+    )
+)]
 use super::effect_record::{
     legacy_request_digest, legacy_scope_key, request_digest, scope_key, ActionApproval,
-    ActionInvocation, ApprovalDecision, AdapterTarget, Binding, PrepareAction,
+    ActionInvocation, AdapterTarget, ApprovalDecision, Binding, PrepareAction,
 };
 use super::{effect_types::*, native_db::AuthorityDb, schema::*};
 use crate::runtime::action_invocations as store;
@@ -13,11 +19,35 @@ use serde::Serialize;
 /// Borrowed checks and pure semantics only. Scope views do not grant authority;
 /// the caller must supply its authenticated same-transaction native checks.
 pub(super) trait MutationContext {
-    fn definition(&self, id: &ActionId, digest: &DefinitionDigest) -> Result<ActionDefinition, ActionError>;
-    fn check(&self, db: AuthorityDb<'_>, scope: &ActionSubjectView, request: &PrepareAction, definition: &ActionDefinition) -> Result<Binding, ActionError>;
-    fn read_access(&self, db: AuthorityDb<'_>, scope: &ActionSubjectView, account: &AccountId) -> Result<(), ActionError>;
-    fn target(&self, definition: &ActionDefinition, input: &ValidatedInput) -> Result<AdapterTarget, ActionError>;
-    fn preview(&self, definition: &ActionDefinition, input: &ValidatedInput, target: &AdapterTarget) -> Result<SafeEffectPreview, ActionError>;
+    fn definition(
+        &self,
+        id: &ActionId,
+        digest: &DefinitionDigest,
+    ) -> Result<ActionDefinition, ActionError>;
+    fn check(
+        &self,
+        db: AuthorityDb<'_>,
+        scope: &ActionSubjectView,
+        request: &PrepareAction,
+        definition: &ActionDefinition,
+    ) -> Result<Binding, ActionError>;
+    fn read_access(
+        &self,
+        db: AuthorityDb<'_>,
+        scope: &ActionSubjectView,
+        account: &AccountId,
+    ) -> Result<(), ActionError>;
+    fn target(
+        &self,
+        definition: &ActionDefinition,
+        input: &ValidatedInput,
+    ) -> Result<AdapterTarget, ActionError>;
+    fn preview(
+        &self,
+        definition: &ActionDefinition,
+        input: &ValidatedInput,
+        target: &AdapterTarget,
+    ) -> Result<SafeEffectPreview, ActionError>;
 }
 
 /// Checked human-decision data, not a mintable native person capability.
@@ -32,7 +62,11 @@ pub(super) struct AnswerInput {
 }
 
 fn require_transaction(conn: &Connection) -> Result<(), ActionError> {
-    if conn.is_autocommit() { Err(unavailable()) } else { Ok(()) }
+    if conn.is_autocommit() {
+        Err(unavailable())
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -75,7 +109,9 @@ pub(super) fn oid() -> String {
 pub(super) fn now() -> String {
     crate::runtime::now_utc()
 }
-pub(super) fn approval_lifetime()->chrono::Duration{chrono::Duration::minutes(15)}
+pub(super) fn approval_lifetime() -> chrono::Duration {
+    chrono::Duration::minutes(15)
+}
 
 pub(super) fn new_approval(input_digest: String) -> ActionApproval {
     ActionApproval {
@@ -161,7 +197,11 @@ pub(super) fn save(
     }
     Ok(())
 }
-pub(super) fn check(conn: &Connection, context: &dyn MutationContext, record: &ActionInvocation) -> Result<(), ActionError> {
+pub(super) fn check(
+    conn: &Connection,
+    context: &dyn MutationContext,
+    record: &ActionInvocation,
+) -> Result<(), ActionError> {
     let current = context.check(
         AuthorityDb::Writer(conn),
         &record.scope,
@@ -195,14 +235,8 @@ pub(super) fn readable(
     if &record.scope != scope {
         return Err(denied());
     }
-    context
-        .read_access(db, scope, &record.request.account_id)?;
-    let current = context.check(
-        db,
-        scope,
-        &record.authority_request(),
-        &record.definition,
-    );
+    context.read_access(db, scope, &record.request.account_id)?;
+    let current = context.check(db, scope, &record.authority_request(), &record.definition);
     let usable = match current {
         Ok(binding) => binding == record.binding,
         Err(ref e)
@@ -305,12 +339,8 @@ pub(super) fn prepare_rows(
     let lookup_scope = scope_key(scope)?;
     let current =
         store::by_request(conn, &lookup_scope, &request.request_key).map_err(|_| unavailable())?;
-    let legacy = store::by_request(
-        conn,
-        &legacy_scope_key(scope)?,
-        &request.request_key,
-    )
-    .map_err(|_| unavailable())?;
+    let legacy = store::by_request(conn, &legacy_scope_key(scope)?, &request.request_key)
+        .map_err(|_| unavailable())?;
     // One immediate transaction arbitrates both formats. Never choose one
     // of two historical rows, silently migrate, or allocate around ambiguity.
     // Coexisting v0 writers are unsupported: they cannot see v1 keys. This
@@ -355,12 +385,7 @@ pub(super) fn prepare_rows(
         return Err(denied());
     }
     let input = validate_input(&definition, &request.input)?;
-    let binding = context.check(
-        AuthorityDb::Writer(conn),
-        scope,
-        &request,
-        &definition,
-    )?;
+    let binding = context.check(AuthorityDb::Writer(conn), scope, &request, &definition)?;
     if binding.account_label.is_empty()
         || binding.account_label.len() > 512
         || binding.account_label.chars().any(char::is_control)
@@ -572,16 +597,33 @@ pub(in crate::actions) mod test_probe {
     std::thread_local! {
         static COUNTS: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
     }
-    pub(in crate::actions) fn reset() { COUNTS.with(|counts| counts.set((0, 0))); }
-    pub(in crate::actions) fn counts() -> (usize, usize) { COUNTS.with(Cell::get) }
-    pub(super) fn record_prepare() { COUNTS.with(|counts| { let (prepare, answer) = counts.get(); counts.set((prepare + 1, answer)); }); }
-    pub(super) fn record_answer() { COUNTS.with(|counts| { let (prepare, answer) = counts.get(); counts.set((prepare, answer + 1)); }); }
+    pub(in crate::actions) fn reset() {
+        COUNTS.with(|counts| counts.set((0, 0)));
+    }
+    pub(in crate::actions) fn counts() -> (usize, usize) {
+        COUNTS.with(Cell::get)
+    }
+    pub(super) fn record_prepare() {
+        COUNTS.with(|counts| {
+            let (prepare, answer) = counts.get();
+            counts.set((prepare + 1, answer));
+        });
+    }
+    pub(super) fn record_answer() {
+        COUNTS.with(|counts| {
+            let (prepare, answer) = counts.get();
+            counts.set((prepare, answer + 1));
+        });
+    }
 }
 
 /// An Ok refusal must commit its changed rows before becoming a domain error.
 #[derive(Debug)]
 pub(super) enum ClaimDisposition {
-    Claimed { attempt_id: AttemptId, canonical_input: String },
+    Claimed {
+        attempt_id: AttemptId,
+        canonical_input: String,
+    },
     CommitRefusal(ActionError),
 }
 
@@ -624,8 +666,7 @@ pub(super) fn claim_rows(
         approval.consumed
             || approval.retired
             || approval.view.expires_at <= now()
-            || approval.view.approved_input_digest.as_deref()
-                != Some(&record.details.input_digest)
+            || approval.view.approved_input_digest.as_deref() != Some(&record.details.input_digest)
             || approval.approved_input.as_deref() != Some(&record.canonical_input)
     });
     if unusable {
@@ -677,16 +718,25 @@ pub(super) fn claim_rows(
     record.bump()?;
     super::output_handoff::pin_claim_rows(conn, &record, &attempt)?;
     save(conn, &mut record, revision)?;
-    Ok(ClaimDisposition::Claimed { attempt_id: attempt, canonical_input: record.canonical_input })
+    Ok(ClaimDisposition::Claimed {
+        attempt_id: attempt,
+        canonical_input: record.canonical_input,
+    })
 }
 
 #[cfg(test)]
 pub(in crate::actions) mod claim_probe {
     use std::cell::Cell;
     std::thread_local! { static CLAIMS: Cell<usize> = const { Cell::new(0) }; }
-    pub(in crate::actions) fn reset() { CLAIMS.with(|value| value.set(0)); }
-    pub(in crate::actions) fn count() -> usize { CLAIMS.with(Cell::get) }
-    pub(super) fn record() { CLAIMS.with(|value| value.set(value.get() + 1)); }
+    pub(in crate::actions) fn reset() {
+        CLAIMS.with(|value| value.set(0));
+    }
+    pub(in crate::actions) fn count() -> usize {
+        CLAIMS.with(Cell::get)
+    }
+    pub(super) fn record() {
+        CLAIMS.with(|value| value.set(value.get() + 1));
+    }
 }
 
 pub(super) enum Observation {
@@ -699,8 +749,15 @@ pub(super) enum Observation {
     Unknown,
 }
 
-pub(super) fn observe_rows(conn:&Connection,id:&InvocationId,attempt:&AttemptId,expected:Option<u64>,observation:Observation)->Result<ActionEffectRef,ActionError>{
- observe_completed_rows(conn,id,attempt,expected,observation).map(|completed|completed.effect)
+pub(super) fn observe_rows(
+    conn: &Connection,
+    id: &InvocationId,
+    attempt: &AttemptId,
+    expected: Option<u64>,
+    observation: Observation,
+) -> Result<ActionEffectRef, ActionError> {
+    observe_completed_rows(conn, id, attempt, expected, observation)
+        .map(|completed| completed.effect)
 }
 
 pub(super) fn observe_completed_rows(
@@ -741,18 +798,22 @@ pub(super) fn observe_completed_rows(
                 remote_reference = remote_effect_reference;
             }
 
-            let validated = if invalid_reference { None } else { validate_output(&record.definition, &output).ok() };
+            let validated = if invalid_reference {
+                None
+            } else {
+                validate_output(&record.definition, &output).ok()
+            };
             if let Some(validated) = validated {
                 successful_output = Some(validated);
                 (InvocationState::Succeeded, "Action completed.")
             } else {
-                (InvocationState::OutcomeUnknown, "Response could not establish the outcome.")
+                (
+                    InvocationState::OutcomeUnknown,
+                    "Response could not establish the outcome.",
+                )
             }
         }
-        Observation::ConfirmedNotApplied => (
-            InvocationState::Failed,
-            "No effect was applied.",
-        ),
+        Observation::ConfirmedNotApplied => (InvocationState::Failed, "No effect was applied."),
         Observation::ConfirmedCancelled => (
             InvocationState::Cancelled,
             "Provider confirmed cancellation without an effect.",
@@ -776,20 +837,30 @@ pub(super) fn observe_completed_rows(
     if let Some(output) = &successful_output {
         super::output_handoff::retain_rows(conn, &record, output)?;
     }
-    Ok(CompletedObservation{effect:record.details.effect,output:successful_output})
+    Ok(CompletedObservation {
+        effect: record.details.effect,
+        output: successful_output,
+    })
 }
 
 /// Private control data from the caller's real physical lease acquisition.
 /// It is never deserialized and is not a native authority capability.
 #[derive(Clone, Copy)]
-pub(super) enum SubmissionAccess { Held, Busy }
+pub(super) enum SubmissionAccess {
+    Held,
+    Busy,
+}
 pub(super) struct CancelRows {
     pub(super) record: ActionInvocation,
     pub(super) request_provider_cancel: bool,
 }
 pub(super) fn cancel_rows(
-    conn: &Connection, context: &dyn MutationContext, scope: &ActionSubjectView,
-    id: &InvocationId, revision: u64, submission: SubmissionAccess,
+    conn: &Connection,
+    context: &dyn MutationContext,
+    scope: &ActionSubjectView,
+    id: &InvocationId,
+    revision: u64,
+    submission: SubmissionAccess,
 ) -> Result<CancelRows, ActionError> {
     require_transaction(conn)?;
     #[cfg(test)]
@@ -805,35 +876,49 @@ pub(super) fn cancel_rows(
         &record.authority_request(),
         &record.definition,
     )?;
-    cancel_recorded_rows(conn,scope,id,revision,submission)
+    cancel_recorded_rows(conn, scope, id, revision, submission)
 }
 #[cfg(test)]
 pub(in crate::actions) mod cancel_probe {
     use std::cell::Cell;
     std::thread_local! { static CALLS: Cell<usize> = const { Cell::new(0) }; }
-    pub(in crate::actions) fn reset() { CALLS.with(|value| value.set(0)); }
-    pub(in crate::actions) fn count() -> usize { CALLS.with(Cell::get) }
-    pub(super) fn record() { CALLS.with(|value| value.set(value.get()+1)); }
+    pub(in crate::actions) fn reset() {
+        CALLS.with(|value| value.set(0));
+    }
+    pub(in crate::actions) fn count() -> usize {
+        CALLS.with(Cell::get)
+    }
+    pub(super) fn record() {
+        CALLS.with(|value| value.set(value.get() + 1));
+    }
 }
 
 /// Same transaction observation result. Canonical output is transient and is
 /// disclosed only by an original native caller after known commit + read checks.
-pub(super) struct CompletedObservation{pub(super) effect:ActionEffectRef,pub(super) output:Option<ValidatedInput>}
-
+pub(super) struct CompletedObservation {
+    pub(super) effect: ActionEffectRef,
+    pub(super) output: Option<ValidatedInput>,
+}
 
 /// Recorded cancellation only. Native coordinator must prove original retained
 /// owner/store/native and immutable invocation binding in the same transaction;
 /// these scope/id/revision values are selectors, never execution authority.
-pub(super) fn cancel_recorded_rows(conn:&Connection,scope:&ActionSubjectView,id:&InvocationId,revision:u64,submission:SubmissionAccess)->Result<CancelRows,ActionError>{
+pub(super) fn cancel_recorded_rows(
+    conn: &Connection,
+    scope: &ActionSubjectView,
+    id: &InvocationId,
+    revision: u64,
+    submission: SubmissionAccess,
+) -> Result<CancelRows, ActionError> {
     require_transaction(conn)?;
-    let mut record=load(conn,id)?;
-    if &record.scope!=scope{return Err(denied());}
-    check_revision(&record,revision)?;
+    let mut record = load(conn, id)?;
+    if &record.scope != scope {
+        return Err(denied());
+    }
+    check_revision(&record, revision)?;
     record.cancel_requested = true;
     match record.details.effect.state {
-        InvocationState::Prepared
-        | InvocationState::AwaitingApproval
-        | InvocationState::Ready => {
+        InvocationState::Prepared | InvocationState::AwaitingApproval | InvocationState::Ready => {
             if matches!(submission, SubmissionAccess::Held) {
                 record.details.effect.state = InvocationState::Cancelled;
                 if let Some(a) = &mut record.approval {
@@ -848,6 +933,12 @@ pub(super) fn cancel_recorded_rows(conn:&Connection,scope:&ActionSubjectView,id:
     save(conn, &mut record, revision)?;
     let request_provider_cancel = matches!(submission, SubmissionAccess::Held)
         && record.definition.cancel
-        && matches!(record.details.effect.state, InvocationState::Dispatched | InvocationState::OutcomeUnknown);
-    Ok(CancelRows { record, request_provider_cancel })
+        && matches!(
+            record.details.effect.state,
+            InvocationState::Dispatched | InvocationState::OutcomeUnknown
+        );
+    Ok(CancelRows {
+        record,
+        request_provider_cancel,
+    })
 }

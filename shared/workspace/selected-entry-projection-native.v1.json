@@ -6,10 +6,7 @@
     "field": "flag"
   },
   "provenance": "actual_disposable_native_scan_read_property_patch_request_ack",
-  "sanitizedPresentationFields": [
-    "Entry.createdAt",
-    "Entry.modifiedAt"
-  ],
+  "sanitizedPresentationFields": ["Entry.createdAt", "Entry.modifiedAt"],
   "originalStamp": "cfg(test) scoped at actual mint before native transaction, not rewritten after commit",
   "samples": {
     "number": {
@@ -100,9 +97,7 @@
               "type": "Task"
             },
             "relationships": {},
-            "outgoingLinks": [
-              "body-link"
-            ],
+            "outgoingLinks": ["body-link"],
             "snippet": "type: Agent tools: ['writenote'] A body-link stays body.",
             "createdAt": "2000-01-01T00:00:00Z",
             "modifiedAt": "2000-01-01T00:00:00Z",
@@ -253,9 +248,7 @@
               "type": "Task"
             },
             "relationships": {},
-            "outgoingLinks": [
-              "body-link"
-            ],
+            "outgoingLinks": ["body-link"],
             "snippet": "type: Agent tools: ['writenote'] A body-link stays body.",
             "createdAt": "2000-01-01T00:00:00Z",
             "modifiedAt": "2000-01-01T00:00:00Z",
@@ -287,9 +280,7 @@
                   }
                 }
               },
-              "unavailableLegacyKeys": [
-                "flag"
-              ]
+              "unavailableLegacyKeys": ["flag"]
             },
             "bodyObservation": {
               "coherence": "paired",
@@ -483,9 +474,7 @@
               "type": "Task"
             },
             "relationships": {},
-            "outgoingLinks": [
-              "body-link"
-            ],
+            "outgoingLinks": ["body-link"],
             "snippet": "type: Agent tools: ['writenote'] A body-link stays body.",
             "createdAt": "2000-01-01T00:00:00Z",
             "modifiedAt": "2000-01-01T00:00:00Z",
@@ -637,9 +626,7 @@
               "type": "Task"
             },
             "relationships": {},
-            "outgoingLinks": [
-              "body-link"
-            ],
+            "outgoingLinks": ["body-link"],
             "snippet": "type: Agent tools: ['writenote'] A body-link stays body.",
             "createdAt": "2000-01-01T00:00:00Z",
             "modifiedAt": "2000-01-01T00:00:00Z",

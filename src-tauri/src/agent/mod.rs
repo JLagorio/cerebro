@@ -15,9 +15,9 @@ pub(crate) mod child_jobs;
 pub(crate) use child_jobs::types::ChildJobSpec;
 mod configuration;
 mod publication;
-mod run_events;
 #[cfg(all(test, unix))]
 mod publication_tests;
+mod run_events;
 pub(crate) use admission::{EntryWitness, RetainedPublicationEntry, RunPreparation};
 pub(crate) use publication::NativePublicationReceipt;
 
@@ -294,7 +294,9 @@ pub enum AgentEvent {
         interaction: interaction::InteractionCard,
     },
     /// Exact original held card closed after known commit; no run replacement.
-    InteractionClosed { interaction_id:String },
+    InteractionClosed {
+        interaction_id: String,
+    },
     /// The run was stopped on purpose (M57.5): a person's Stop or Steer, the
     /// run list, a vault switch, or quit. Emitted once, right before Done,
     /// and never for a run that ended on its own or one the elapsed watchdog
@@ -350,9 +352,11 @@ pub(crate) struct RunClose<'a> {
 /// Cerebro quit leaves git alone; every other run commits what it wrote
 /// (`git::changeset::settle_run`), so its Done waits on that commit, bounded
 /// by the repository's busy wait and git's local deadline.
-fn close_run_projection(close:&RunClose<'_>)->(crate::git::changeset::RunChangeset,Vec<AgentEvent>) {
+fn close_run_projection(
+    close: &RunClose<'_>,
+) -> (crate::git::changeset::RunChangeset, Vec<AgentEvent>) {
     use crate::git::changeset::{self, RunChangeset, SettleRun};
-    let changeset=match close.meter {
+    let changeset = match close.meter {
         None => RunChangeset::NotRecorded {
             kept_out_of_git: Some(0),
             run_id: None,
@@ -379,11 +383,11 @@ fn close_run_projection(close:&RunClose<'_>)->(crate::git::changeset::RunChanges
             }
         }
     };
-    (changeset,closing_events(close.cancelled,close.aborted))
+    (changeset, closing_events(close.cancelled, close.aborted))
 }
 #[cfg(test)]
 pub(crate) fn close_run(close: RunClose<'_>, emit: &mut dyn FnMut(AgentEvent)) {
-    let (changeset,closing)=close_run_projection(&close);
+    let (changeset, closing) = close_run_projection(&close);
     emit(AgentEvent::Changeset { changeset });
     for event in closing {
         emit(event);
@@ -1089,7 +1093,7 @@ pub(crate) fn connector_setup_lock() -> Result<MutexGuard<'static, ()>, String> 
 
 /// One live run (M53.10), attributed until the child is reaped (M63.5).
 struct RunSlot {
-    events:Option<Arc<run_events::RunEvents>>,
+    events: Option<Arc<run_events::RunEvents>>,
     native_action_read: Option<Arc<crate::actions::native_owner::NativeActionReadOrigin>>,
     /// The CLI, the leader of its own process group.
     handle: crate::spawn::Handle,
@@ -1155,13 +1159,19 @@ impl Books {
     #[cfg(test)]
     fn open(count: &Arc<AtomicUsize>) -> Self {
         count.fetch_add(1, Ordering::SeqCst);
-        Self { count: count.clone(), scope: None }
+        Self {
+            count: count.clone(),
+            scope: None,
+        }
     }
     fn open_for_vault(state: &AgentState, vault: &Path) -> Self {
         let vault = vault_key(vault);
         state.books.fetch_add(1, Ordering::SeqCst);
         *lock(&state.book_scopes).entry(vault.clone()).or_default() += 1;
-        Self { count: state.books.clone(), scope: Some((state.book_scopes.clone(), vault)) }
+        Self {
+            count: state.books.clone(),
+            scope: Some((state.book_scopes.clone(), vault)),
+        }
     }
 }
 impl Drop for Books {
@@ -1171,7 +1181,9 @@ impl Drop for Books {
             let mut scopes = lock(scopes);
             if let Some(count) = scopes.get_mut(vault) {
                 *count -= 1;
-                if *count == 0 { scopes.remove(vault); }
+                if *count == 0 {
+                    scopes.remove(vault);
+                }
             }
         }
         self.count.fetch_sub(1, Ordering::SeqCst);
@@ -2436,7 +2448,17 @@ pub(crate) fn stream(
     done: Option<std::sync::mpsc::SyncSender<meter::RunEnd>>,
     preparation: &RunPreparation,
 ) -> Result<Spawned, String> {
-    stream_linked(app,state,vault,req,config_dir,meter,done,preparation,LaunchLink::default())
+    stream_linked(
+        app,
+        state,
+        vault,
+        req,
+        config_dir,
+        meter,
+        done,
+        preparation,
+        LaunchLink::default(),
+    )
 }
 
 #[derive(Default)]
@@ -2445,7 +2467,10 @@ pub(crate) struct LaunchLink {
     pub answer: Option<interaction::AnswerLink>,
 }
 
-#[expect(clippy::too_many_arguments, reason = "the launch carries its original entry and optional generation/held-answer link")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the launch carries its original entry and optional generation/held-answer link"
+)]
 pub(crate) fn stream_linked(
     app: AppHandle,
     state: &AgentState,
@@ -2482,9 +2507,9 @@ pub(crate) fn stream_linked(
         }
     };
     let session_id = session.id().to_string();
-    if let Some(generation)=link.generation.as_mut() {
-        if let Err(error)=generation.bind_session(&session_id,preparation,vault) {
-            revoke_bearer(&app,bearer.as_deref(),Duration::ZERO);
+    if let Some(generation) = link.generation.as_mut() {
+        if let Err(error) = generation.bind_session(&session_id, preparation, vault) {
+            revoke_bearer(&app, bearer.as_deref(), Duration::ZERO);
             return Err(error);
         }
     }
@@ -2566,7 +2591,13 @@ pub(crate) fn stream_linked(
                 agents: &agents,
             };
             if link.generation.is_some() || link.answer.is_some() {
-                publication::publish_linked(input,link.answer.as_ref(),link.generation.as_ref().map(|generation|generation.tracker()))
+                publication::publish_linked(
+                    input,
+                    link.answer.as_ref(),
+                    link.generation
+                        .as_ref()
+                        .map(|generation| generation.tracker()),
+                )
             } else {
                 publication::publish(input)
             }
@@ -2597,7 +2628,9 @@ pub(crate) fn stream_linked(
         }
     };
 
-    if let Some(generation)=link.generation.as_mut() {generation.published();}
+    if let Some(generation) = link.generation.as_mut() {
+        generation.published();
+    }
 
     // M96 publication metadata only: the same actual stream/reader remains
     // owner. No database, account grant, action subject or opening ticket is
@@ -2689,14 +2722,30 @@ pub(crate) fn stream_linked(
     // reads the first one.
     let journal = state.journal.clone();
     let journaled = journals(&req, meter.is_some());
-    let event_app=app.clone();
-    let events=Arc::new(run_events::RunEvents::new(run,journal.clone(),journaled,move|tagged|{let _=event_app.emit(AGENT_EVENT,tagged);}));
+    let event_app = app.clone();
+    let events = Arc::new(run_events::RunEvents::new(
+        run,
+        journal.clone(),
+        journaled,
+        move |tagged| {
+            let _ = event_app.emit(AGENT_EVENT, tagged);
+        },
+    ));
     // Installation precedes the actual reader. The original publication can
     // publish a held card only through this same run/sequence/journal owner.
-    {let mut slots=lock(&state.slots);if let Some(slot)=slots.get_mut(&run){if Arc::ptr_eq(&slot.cancelled,&cancelled){slot.events=Some(events.clone());}}}
+    {
+        let mut slots = lock(&state.slots);
+        if let Some(slot) = slots.get_mut(&run) {
+            if Arc::ptr_eq(&slot.cancelled, &cancelled) {
+                slot.events = Some(events.clone());
+            }
+        }
+    }
     std::thread::spawn(move || {
         let _books = books;
-        let mut send=|event:AgentEvent|{events.send(event);};
+        let mut send = |event: AgentEvent| {
+            events.send(event);
+        };
         // M58.3: each path the run's own Write and Edit calls wrote is noted
         // on its claim, for its commit, once the call completes, its
         // subagents' calls included (M91.3b); a resumed run starts holding
@@ -2707,12 +2756,18 @@ pub(crate) fn stream_linked(
         let reply = std::cell::RefCell::new(ReplyCollector::default());
         // Observes the existing fold before any webview callback. A detached
         // original generation retains its same bounded completion producer.
-        let archive=std::cell::RefCell::new(link.generation.as_ref().map(|_|archive_codec::Collector::default()));
+        let archive = std::cell::RefCell::new(
+            link.generation
+                .as_ref()
+                .map(|_| archive_codec::Collector::default()),
+        );
         // M57.1: a deferral this run's gate registered is announced as a card
         // just before it.
         let mut emit = |event: AgentEvent| {
             reply.borrow_mut().observe(&event);
-            if let Some(archive)=archive.borrow_mut().as_mut() {archive.observe(&event);}
+            if let Some(archive) = archive.borrow_mut().as_mut() {
+                archive.observe(&event);
+            }
             if let (Some(claim), Some(path)) = (claim.as_ref(), cli_writes.observe(&event)) {
                 claim.note_cli_write(&path);
             }
@@ -2768,7 +2823,9 @@ pub(crate) fn stream_linked(
         if let Some(settings) = &run_settings {
             let _ = std::fs::remove_file(settings);
         }
-        let restored_answer = seat.as_ref().is_some_and(|run_id|interactions.close_seat(run_id));
+        let restored_answer = seat
+            .as_ref()
+            .is_some_and(|run_id| interactions.close_seat(run_id));
         let was_aborted = aborted.load(Ordering::SeqCst);
         let was_cancelled = cancelled.load(Ordering::SeqCst);
         if let Some(recording) = recording {
@@ -2811,17 +2868,34 @@ pub(crate) fn stream_linked(
         }
         // Commit through the existing run-owned changeset reader before final
         // archive projection, so artifact refs come from actual settled files.
-        let (changeset,closing)=close_run_projection(&RunClose {
-            quitting:reaper.closing(),meter:meter.as_ref(),claim:claim.as_ref(),vault:&run_vault,
-            summary,cancelled:was_cancelled,aborted:was_aborted,
+        let (changeset, closing) = close_run_projection(&RunClose {
+            quitting: reaper.closing(),
+            meter: meter.as_ref(),
+            claim: claim.as_ref(),
+            vault: &run_vault,
+            summary,
+            cancelled: was_cancelled,
+            aborted: was_aborted,
         });
-        emit(AgentEvent::Changeset {changeset});
-        if let Some(generation)=link.generation.as_mut() {
-            let end=generation_end(&tally,was_aborted,was_cancelled);
-            let turn=archive.borrow_mut().take().map(archive_codec::Collector::finish);
-            let recorded=if restored_answer {generation.restore_waiting()} else {generation.finish_with_archive(end,turn.as_ref())};
-            if let Err(message)=recorded {
-                emit(AgentEvent::Error {message,code:None,notice:None,parent:None});
+        emit(AgentEvent::Changeset { changeset });
+        if let Some(generation) = link.generation.as_mut() {
+            let end = generation_end(&tally, was_aborted, was_cancelled);
+            let turn = archive
+                .borrow_mut()
+                .take()
+                .map(archive_codec::Collector::finish);
+            let recorded = if restored_answer {
+                generation.restore_waiting()
+            } else {
+                generation.finish_with_archive(end, turn.as_ref())
+            };
+            if let Err(message) = recorded {
+                emit(AgentEvent::Error {
+                    message,
+                    code: None,
+                    notice: None,
+                    parent: None,
+                });
             }
         }
         // Free the slot BEFORE the terminal Done, so anything that reacts to
@@ -2843,7 +2917,9 @@ pub(crate) fn stream_linked(
                 failure,
             });
         }
-        for event in closing {emit(event);}
+        for event in closing {
+            emit(event);
+        }
         // M57.6: the journal's retention starts once the run has said its
         // last event.
         journal.finish(run, std::time::Instant::now());
@@ -2852,16 +2928,24 @@ pub(crate) fn stream_linked(
     Ok(Spawned { run, session_id })
 }
 
-fn generation_end(tally:&meter::Tally,aborted:bool,cancelled:bool)->crate::runtime::chat_generations::End {
-    use crate::runtime::{chat_generations::End,dispatch::RunOutcome};
+fn generation_end(
+    tally: &meter::Tally,
+    aborted: bool,
+    cancelled: bool,
+) -> crate::runtime::chat_generations::End {
+    use crate::runtime::{chat_generations::End, dispatch::RunOutcome};
     if tally.deferred().is_some() && !aborted {
-        if cancelled { End::Cancelled } else { End::Deferred }
+        if cancelled {
+            End::Cancelled
+        } else {
+            End::Deferred
+        }
     } else {
-        match tally.ended(aborted,cancelled).0 {
-            RunOutcome::Succeeded=>End::Completed,
-            RunOutcome::Cancelled=>End::Cancelled,
-            RunOutcome::AbandonedUsageUnknown=>End::Interrupted,
-            _=>End::Failed,
+        match tally.ended(aborted, cancelled).0 {
+            RunOutcome::Succeeded => End::Completed,
+            RunOutcome::Cancelled => End::Cancelled,
+            RunOutcome::AbandonedUsageUnknown => End::Interrupted,
+            _ => End::Failed,
         }
     }
 }
@@ -3400,7 +3484,7 @@ fn spawn_run(
     let cancelled = Arc::new(AtomicBool::new(false));
     let slot = RunSlot {
         native_action_read: None,
-            events:None,
+        events: None,
         handle: supervised.handle(),
         vault: vault_key(vault),
         strict_mcp,
@@ -5833,7 +5917,7 @@ mod tests {
         reaped.0.push(handle.clone());
         RunSlot {
             native_action_read: None,
-            events:None,
+            events: None,
             handle,
             vault: PathBuf::from(vault),
             strict_mcp: true,
@@ -6026,7 +6110,7 @@ mod tests {
                 1,
                 RunSlot {
                     native_action_read: None,
-            events:None,
+                    events: None,
                     handle: supervised.handle(),
                     vault: PathBuf::from("/vaults/a"),
                     strict_mcp: true,
@@ -11876,7 +11960,7 @@ echo closed > closed.txt";
                 FAKE_RUN,
                 RunSlot {
                     native_action_read: None,
-            events:None,
+                    events: None,
                     handle: fake.supervised.handle(),
                     vault: dir.clone(),
                     strict_mcp: true,
@@ -11971,33 +12055,61 @@ exec sleep 30";
     #[test]
     fn generation_stop_after_deferred_result_cancels_the_wait_not_a_completed_answer() {
         use crate::runtime::chat_generations::End;
-        let events:Vec<Value>=serde_json::from_str(include_str!("../../fixtures/cli-stream/transcript-deferred.stream.json")).unwrap();
-        let mut tally=meter::Tally::default();
-        for event in events {tally.observe(&event);}
+        let events: Vec<Value> = serde_json::from_str(include_str!(
+            "../../fixtures/cli-stream/transcript-deferred.stream.json"
+        ))
+        .unwrap();
+        let mut tally = meter::Tally::default();
+        for event in events {
+            tally.observe(&event);
+        }
         assert!(tally.deferred().is_some());
-        assert!(matches!(generation_end(&tally,false,false),End::Deferred));
-        assert!(matches!(generation_end(&tally,false,true),End::Cancelled));
-        let mut completed=meter::Tally::default();
+        assert!(matches!(
+            generation_end(&tally, false, false),
+            End::Deferred
+        ));
+        assert!(matches!(
+            generation_end(&tally, false, true),
+            End::Cancelled
+        ));
+        let mut completed = meter::Tally::default();
         completed.observe(&serde_json::json!({"type":"result","subtype":"success","is_error":false,"result":"done"}));
-        assert!(matches!(generation_end(&completed,false,true),End::Completed));
+        assert!(matches!(
+            generation_end(&completed, false, true),
+            End::Completed
+        ));
     }
-
 }
 
 impl AgentState {
-    pub(crate) fn wait_opening_readers(&self, keep: Option<&Path>, timeout: Duration) -> Result<(), String> {
+    pub(crate) fn wait_opening_readers(
+        &self,
+        keep: Option<&Path>,
+        timeout: Duration,
+    ) -> Result<(), String> {
         let keep = keep.map(vault_key);
         let deadline = std::time::Instant::now() + timeout;
         loop {
             let settled = {
-                let scopes = self.book_scopes.lock().map_err(|_| "Reader completion ownership is unavailable.".to_owned())?;
+                let scopes = self
+                    .book_scopes
+                    .lock()
+                    .map_err(|_| "Reader completion ownership is unavailable.".to_owned())?;
                 let total = scopes.values().copied().sum::<usize>();
                 total == self.books.load(Ordering::SeqCst)
-                    && scopes.iter().all(|(vault, count)| *count == 0 || keep.as_ref() == Some(vault))
+                    && scopes
+                        .iter()
+                        .all(|(vault, count)| *count == 0 || keep.as_ref() == Some(vault))
             };
-            let slots_settled = self.slots.lock().map_err(|_| "Reader process ownership is unavailable.".to_owned())?
-                .values().all(|slot| keep.as_ref() == Some(&slot.vault));
-            if settled && slots_settled { return Ok(()); }
+            let slots_settled = self
+                .slots
+                .lock()
+                .map_err(|_| "Reader process ownership is unavailable.".to_owned())?
+                .values()
+                .all(|slot| keep.as_ref() == Some(&slot.vault));
+            if settled && slots_settled {
+                return Ok(());
+            }
             if std::time::Instant::now() >= deadline {
                 return Err("The previous workspace still has readers closing their writes. Opening is unavailable until they finish.".into());
             }
@@ -12019,7 +12131,10 @@ mod opening_reader_lifetime_tests {
         drop(old);
         let settled = state.wait_opening_readers(None, Duration::ZERO);
         assert!(same_vault.is_ok(), "same-vault reload retains its runs");
-        assert!(other_vault.is_err(), "removed process slots do not prove close_run finished");
+        assert!(
+            other_vault.is_err(),
+            "removed process slots do not prove close_run finished"
+        );
         assert!(selected.is_err());
         assert!(settled.is_ok());
     }

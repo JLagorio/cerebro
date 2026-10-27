@@ -18,13 +18,12 @@ pub mod client_access;
 mod comment_tools;
 pub mod conflict;
 mod connections;
-mod conversations;
-mod conversation_commands;
 pub mod connectors;
 pub mod convergence;
+mod conversation_commands;
+mod conversations;
 pub mod crash;
 mod credential_commands;
-mod workflow_commands;
 pub mod demo;
 #[cfg(test)]
 #[path = "../build_support/demo_resources.rs"]
@@ -68,9 +67,10 @@ pub mod spawn;
 pub mod starter;
 pub mod trigger;
 pub mod vault;
+mod workflow_commands;
+mod workflows;
 pub mod workspace_migration;
 mod workspace_service;
-mod workflows;
 
 use std::path::{Path, PathBuf};
 
@@ -577,8 +577,11 @@ fn read_selected_property(
     path: String,
     target: workspace_service::selected::SelectedEditorTarget,
     field: String,
-) -> Result<workspace_service::selected::SelectedPropertySnapshot,workspace_service::types::selected::AuthorityError> {
-    workspace_service::selected::read_property(Path::new(&vault),&path,&target,&field)
+) -> Result<
+    workspace_service::selected::SelectedPropertySnapshot,
+    workspace_service::types::selected::AuthorityError,
+> {
+    workspace_service::selected::read_property(Path::new(&vault), &path, &target, &field)
 }
 
 /// The generated original request is data, never permission to select a store.
@@ -587,14 +590,27 @@ fn patch_selected_metadata(
     vault: String,
     path: String,
     request: workspace_service::selected::MetadataPatchRequest,
-) -> Result<workspace_service::selected::MetadataPatchResult,workspace_service::selected::MetadataPatchRefusal> {
-    use workspace_service::{selected::MetadataPatchRefusal,types::{selected::*,StoreErrorCode}};
-    let cleared=knowledge::guard_human_write(&path).map_err(|message|MetadataPatchRefusal::MetadataRefused{error:AuthorityError{
-        code:StoreErrorCode::CapabilityUnavailable,kind:AuthorityErrorKind::UnsupportedOperation,message,retryable:false,
-    }})?;
-    let by=WriteReceipt::ipc(cleared);
-    workspace_service::selected::patch_metadata(Path::new(&vault),&path,&request,&by)
-        .map_err(|error|MetadataPatchRefusal::MetadataRefused{error})
+) -> Result<
+    workspace_service::selected::MetadataPatchResult,
+    workspace_service::selected::MetadataPatchRefusal,
+> {
+    use workspace_service::{
+        selected::MetadataPatchRefusal,
+        types::{selected::*, StoreErrorCode},
+    };
+    let cleared = knowledge::guard_human_write(&path).map_err(|message| {
+        MetadataPatchRefusal::MetadataRefused {
+            error: AuthorityError {
+                code: StoreErrorCode::CapabilityUnavailable,
+                kind: AuthorityErrorKind::UnsupportedOperation,
+                message,
+                retryable: false,
+            },
+        }
+    })?;
+    let by = WriteReceipt::ipc(cleared);
+    workspace_service::selected::patch_metadata(Path::new(&vault), &path, &request, &by)
+        .map_err(|error| MetadataPatchRefusal::MetadataRefused { error })
 }
 
 fn save_note_write(
@@ -3035,7 +3051,9 @@ pub(crate) fn start_handoff_run(
 #[serde(untagged)]
 enum RunStart {
     Started(RunHandle),
-    Observed { observed_generation: runtime::chat_generations::Receipt },
+    Observed {
+        observed_generation: runtime::chat_generations::Receipt,
+    },
     Deferred {
         deferred: Vec<String>,
         words: Vec<String>,
@@ -3071,7 +3089,10 @@ impl RunStart {
 
 /// Returns the run's id — the tag on every event this run emits.
 #[tauri::command(async)]
-#[expect(clippy::too_many_arguments, reason = "the existing start also accepts an optional idempotence key")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the existing start also accepts an optional idempotence key"
+)]
 fn run_agent(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
@@ -3091,10 +3112,16 @@ fn run_agent(
     // endpoint and any lease, so a refused run leaves no token, lease or row.
     agent::run_options::validate_request(&request)?;
     if archive_binding.is_some() && generation_request_key.is_none() {
-        return Err("A conversation display binding requires its original generation request key.".into());
+        return Err(
+            "A conversation display binding requires its original generation request key.".into(),
+        );
     }
     if generation_request_key.is_some()
-        && (request.attended!=Some(true)||request.internal||wake.is_some()||followup.is_some()) {
+        && (request.attended != Some(true)
+            || request.internal
+            || wake.is_some()
+            || followup.is_some())
+    {
         return Err("A generation request key is valid only for an attended native turn.".into());
     }
     // Optional app-owned provenance; the injected window is observed before
@@ -3104,18 +3131,21 @@ fn run_agent(
         && wake.is_none()
         && followup.is_none()
     {
-        let entry=actions::native_owner::prepare_root_entry(
+        let entry = actions::native_owner::prepare_root_entry(
             &app,
             &window,
             Path::new(&vault),
             state.inner(),
             &preparation,
             mcp_state.inner(),
-        )
-        ;
+        );
         if generation_request_key.is_some() {
-            Some(entry.map_err(|_|"Generation admission is unavailable. Nothing was started.".to_owned())?)
-        } else {entry.ok()}
+            Some(entry.map_err(|_| {
+                "Generation admission is unavailable. Nothing was started.".to_owned()
+            })?)
+        } else {
+            entry.ok()
+        }
     } else {
         None
     };
@@ -3163,14 +3193,24 @@ fn run_agent(
     // M25.2: attended chat is METERED and never gated. The run is recorded
     // with its tokens; no reservation, no lease, and no ceiling can refuse it.
     let scope = runtime::open_vault(Path::new(&vault));
-    let generation=if let Some(key)=generation_request_key.as_deref() {
-        let entry=native_entry.as_ref().ok_or("Generation admission is unavailable. Nothing was started.")?;
-        let scope=scope.as_ref().ok_or("Generation admission is unavailable. Nothing was started.")?;
-        match entry.begin_generation_with_archive(scope,key,&request,archive_binding.as_ref())? {
-            actions::native_owner::GenerationStart::New(ticket)=>Some(ticket),
-            actions::native_owner::GenerationStart::Observed(receipt)=>return Ok(RunStart::Observed {observed_generation:receipt}),
+    let generation = if let Some(key) = generation_request_key.as_deref() {
+        let entry = native_entry
+            .as_ref()
+            .ok_or("Generation admission is unavailable. Nothing was started.")?;
+        let scope = scope
+            .as_ref()
+            .ok_or("Generation admission is unavailable. Nothing was started.")?;
+        match entry.begin_generation_with_archive(scope, key, &request, archive_binding.as_ref())? {
+            actions::native_owner::GenerationStart::New(ticket) => Some(ticket),
+            actions::native_owner::GenerationStart::Observed(receipt) => {
+                return Ok(RunStart::Observed {
+                    observed_generation: receipt,
+                })
+            }
         }
-    } else {None};
+    } else {
+        None
+    };
     // M33b.5 — the fleet pause gate every agent-attributed run passes is not a
     // budget question. Every frontend path that starts a CLI child funnels
     // here (the job runner's schedules and triggers, and the panel addressing
@@ -3396,7 +3436,10 @@ fn run_agent(
         also,
         parent_run_id,
         native_entry,
-        agent::LaunchLink {generation,answer:None},
+        agent::LaunchLink {
+            generation,
+            answer: None,
+        },
     )
     .map(RunStart::Started);
     if result.is_err() {
@@ -3528,10 +3571,12 @@ async fn read_managed_action_access(
         actions::native_owner::read_managed_action_access(&app, &window, run)
     })
     .await
-    .map_err(|_| actions::read_types::error(
-        actions::read_types::ActionErrorCode::Unavailable,
-        "Run access is unavailable.",
-    ))?
+    .map_err(|_| {
+        actions::read_types::error(
+            actions::read_types::ActionErrorCode::Unavailable,
+            "Run access is unavailable.",
+        )
+    })?
 }
 #[tauri::command]
 async fn set_managed_action_access(
@@ -3617,10 +3662,15 @@ fn spawn_requested_run(
     // was minted by the CLAIM, which already opened its row; an attended
     // run's row is opened by `agent::stream` just before the child spawns
     // (M49.9), so what the run books during its life has a row to land on.
-    let generation_id=launch.generation.as_ref().map(|g|g.generation_id().to_owned());
-    let run_id = launch.generation.as_ref().map(|g|g.run_id().to_owned()).or_else(|| lease
+    let generation_id = launch
+        .generation
         .as_ref()
-        .map(|l| l.run_id.clone()))
+        .map(|g| g.generation_id().to_owned());
+    let run_id = launch
+        .generation
+        .as_ref()
+        .map(|g| g.run_id().to_owned())
+        .or_else(|| lease.as_ref().map(|l| l.run_id.clone()))
         .unwrap_or_else(ledger::new_run_id);
     // M33.7: the renderer gets this id back, so its device-local run log and
     // the durable `runs` row can finally name the same run. Cloned rather
@@ -3906,7 +3956,10 @@ fn agent_events_since(
 /// stops every run on quit (`RunEvent::Exit`) and the old vault's runs on a
 /// vault switch (`start_watcher`), so nothing has to call this for either.
 #[tauri::command(async)]
-fn stop_all_agents(app: tauri::AppHandle, state: tauri::State<'_, agent::AgentState>) -> Result<Vec<u64>, String> {
+fn stop_all_agents(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, agent::AgentState>,
+) -> Result<Vec<u64>, String> {
     actions::native_owner::stop_action_workers(&app);
     state.stop_all()
 }
@@ -3924,7 +3977,9 @@ struct HeldAnswered {
 #[serde(untagged)]
 enum AnswerResult {
     Resumed(RunHandle),
-    Answered { answered: HeldAnswered },
+    Answered {
+        answered: HeldAnswered,
+    },
     Refused {
         refused: agent::interaction::Refusal,
     },
@@ -3943,7 +3998,10 @@ enum AnswerResult {
 /// judges it under the grant the resume will run with (`answer_grant`); a
 /// refusal comes back to the card, which keeps waiting, and records nothing.
 #[tauri::command(async)]
-#[expect(clippy::too_many_arguments, reason = "held generation admission authenticates the injected native window")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "held generation admission authenticates the injected native window"
+)]
 fn answer_interaction(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
@@ -3957,10 +4015,17 @@ fn answer_interaction(
     let book = state.interactions();
     let answer = agent::interaction::PersonAnswer::from_ipc(answer);
     if let Some(result) = actions::native_owner::answer_held_managed_interaction(
-        &app, &window, Path::new(&vault), &id, &answer, updated_input.as_ref(),
+        &app,
+        &window,
+        Path::new(&vault),
+        &id,
+        &answer,
+        updated_input.as_ref(),
     ) {
         return Ok(match result {
-            Ok(()) => AnswerResult::Answered { answered: HeldAnswered { interaction_id: id } },
+            Ok(()) => AnswerResult::Answered {
+                answered: HeldAnswered { interaction_id: id },
+            },
             Err(refused) => AnswerResult::Refused { refused },
         });
     }
@@ -3998,12 +4063,23 @@ fn answer_interaction(
         request.session_id = Some(resume.session_id.clone());
         request.attended = Some(true);
         let cause = runtime::cause::admit(true, None)?;
-        let generation=if resume.link.generation_bound() {
-            let entry=actions::native_owner::prepare_root_entry(&app,&window,vault_path,state.inner(),&preparation,mcp_state.inner())
-                .map_err(|_|"Generation admission is unavailable. Nothing was started.".to_owned())?;
-            let scope=scope.as_ref().ok_or("Generation admission is unavailable. Nothing was started.")?;
-            Some(entry.resume_generation(scope,&request,&resume.link)?)
-        } else {None};
+        let generation = if resume.link.generation_bound() {
+            let entry = actions::native_owner::prepare_root_entry(
+                &app,
+                &window,
+                vault_path,
+                state.inner(),
+                &preparation,
+                mcp_state.inner(),
+            )
+            .map_err(|_| "Generation admission is unavailable. Nothing was started.".to_owned())?;
+            let scope = scope
+                .as_ref()
+                .ok_or("Generation admission is unavailable. Nothing was started.")?;
+            Some(entry.resume_generation(scope, &request, &resume.link)?)
+        } else {
+            None
+        };
         request.mcp_url = Some(mcp_state.ensure(&app)?.url);
         spawn_requested_run(
             &app,
@@ -4018,7 +4094,10 @@ fn answer_interaction(
             Vec::new(),
             None,
             None,
-            agent::LaunchLink {generation,answer:Some(resume.link.clone())},
+            agent::LaunchLink {
+                generation,
+                answer: Some(resume.link.clone()),
+            },
         )
     })();
     match started {
@@ -4143,7 +4222,6 @@ fn finish_legacy_open(
     )
 }
 
-
 /// The actual OPEN_LOCK/entry/cleanup seam shared by start_watcher and race tests.
 /// Request and agent invalidation happen before this lock. Cleanup runs before
 /// entered denial can be released, including unwinding after partial preparation.
@@ -4155,7 +4233,9 @@ fn run_open_attempt<T>(
     operation: impl FnOnce() -> Result<T, String>,
     cleanup: impl FnOnce() -> Result<(), String>,
 ) -> Result<T, String> {
-    let _opening = OPEN_LOCK.lock().map_err(|_| "Workspace opening is unavailable.".to_owned())?;
+    let _opening = OPEN_LOCK
+        .lock()
+        .map_err(|_| "Workspace opening is unavailable.".to_owned())?;
     if let Err(error) = context.enter_open(attempt) {
         let _ = context.abandon_open(attempt);
         return Err(error.message);
@@ -4176,12 +4256,17 @@ fn run_open_attempt<T>(
             }
         }
     }
-    let mut guard = Cleanup { context, attempt, cleanup: Some(cleanup) };
+    let mut guard = Cleanup {
+        context,
+        attempt,
+        cleanup: Some(cleanup),
+    };
     let result = operation();
-    if result.is_ok() { guard.cleanup = None; }
+    if result.is_ok() {
+        guard.cleanup = None;
+    }
     result
 }
-
 
 /// The actual opening completion callback; native observation must run after
 /// run_open_attempt has released OPEN_LOCK, against its original attempt.
@@ -4204,14 +4289,16 @@ fn finish_legacy_attempt(
 ) -> Result<(), workspace_service::types::selected::AuthorityError> {
     context.publish_attempt_with(attempt, || {
         bind();
-        agents.complete_open(attempt.generation(), attempt.root()).map_err(|message| {
-            workspace_service::types::selected::AuthorityError {
-                code: workspace_service::types::StoreErrorCode::CapabilityUnavailable,
-                kind: workspace_service::types::selected::AuthorityErrorKind::SourceChanged,
-                message,
-                retryable: false,
-            }
-        })
+        agents
+            .complete_open(attempt.generation(), attempt.root())
+            .map_err(
+                |message| workspace_service::types::selected::AuthorityError {
+                    code: workspace_service::types::StoreErrorCode::CapabilityUnavailable,
+                    kind: workspace_service::types::selected::AuthorityErrorKind::SourceChanged,
+                    message,
+                    retryable: false,
+                },
+            )
     })
 }
 
@@ -4252,183 +4339,213 @@ fn start_watcher(
     // An unavailable native owner remains degraded without refusing the vault.
     let native_binding = actions::native_owner::observe_opening_binding(&app, &window);
     let context = workspace_service::authority::context().map_err(|e| e.message)?;
-    let attempt = context.request_open(Path::new(&vault)).map_err(|e| e.message)?;
+    let attempt = context
+        .request_open(Path::new(&vault))
+        .map_err(|e| e.message)?;
     if let Err(error) = agents.begin_open(attempt.generation()) {
         let _ = context.abandon_open(&attempt);
         return Err(error);
     }
     let vault_path = attempt.root().to_path_buf();
-    run_open_attempt_then(&context, &attempt, || {
-    vault::watcher::stop(state.inner())?;
-    if attempt.selected() {
-        suspend_legacy_for_selected(state.inner(), ambient.inner(), agents.inner())?;
-        let journal = app.state::<recovery_commands::RecoveryState>().get(&app);
-        prepare_selected_open_with_retention(&vault_path, journal.as_deref().ok())
-            .map_err(|e| e.message)?;
-        vault::watcher::start_selected(app.clone(), state.inner(), vault_path.clone())?;
-        if let Err(error) = context.publish_attempt_with(&attempt, || Ok(())) {
+    run_open_attempt_then(
+        &context,
+        &attempt,
+        || {
             vault::watcher::stop(state.inner())?;
-            return Err(error.message);
-        }
-        return Ok((None, None, false));
-    }
-    let mut report = OpenReport::default();
-    let mut listener_scope = None;
-    let mut native_storage_ready = false;
-    // M53.10: a run or client session never outlives its vault.
-    // Opening one stops every run in
-    // any other, Cerebro's own included; reopening this one (a webview
-    // reload) stops nothing, and a run started here while it opened is kept.
-    let retarget_ambient = ambient.watching().as_deref() != Some(vault_path.as_path());
-    if retarget_ambient { ambient.request_stop()?; }
-    agents.stop_other_vaults(&vault_path);
-    if retarget_ambient { ambient.stop()?; }
-    agents.wait_opening_readers(Some(&vault_path), std::time::Duration::from_secs(2))?;
-    client_access::vault_opening(&vault_path);
-    client_access::listener::wait_for_opening(Some(&vault_path), std::time::Duration::from_secs(2))?;
-    // M53.11: a connectors.json an older build wrote world-readable holds the
-    // vault's connector credentials. Opening the vault narrows it to its
-    // owner, best effort, and never stops the open.
-    connectors::tighten(&vault_path);
-    // M21.8 startup: run the M21.4 verification, record the verdict, start
-    // shadow recording for this vault. Never blocks watching — a refused
-    // ledger holds no writer, so knowledge writes refuse and ledger_status
-    // says why. Idempotent across webview reloads (M49.1).
-    if let Ok(dir) = config_dir(&app) {
-        let _ = ledger::shadow::activate(&dir, &vault_path);
-        // M24.2: the runtime DB is armed beside the ledger index, in
-        // app-data — never inside a possibly cloud-synced vault (D2).
-        // Failing to open the OPERATIONAL LOG must not stop the app from
-        // opening the vault: it would trade a working workspace for a
-        // diagnostic, and every refusal is still returned to its caller.
-        match runtime::sink::arm(&dir) {
-            Ok(()) => {
-                native_storage_ready = actions::native_owner::prepare_storage(&app).is_ok();
-                if !native_storage_ready {
-                    log::warn!("managed action runtime ownership is unavailable");
+            if attempt.selected() {
+                suspend_legacy_for_selected(state.inner(), ambient.inner(), agents.inner())?;
+                let journal = app.state::<recovery_commands::RecoveryState>().get(&app);
+                prepare_selected_open_with_retention(&vault_path, journal.as_deref().ok())
+                    .map_err(|e| e.message)?;
+                vault::watcher::start_selected(app.clone(), state.inner(), vault_path.clone())?;
+                if let Err(error) = context.publish_attempt_with(&attempt, || Ok(())) {
+                    vault::watcher::stop(state.inner())?;
+                    return Err(error.message);
                 }
+                return Ok((None, None, false));
             }
-            Err(e) => {
-                log::warn!("runtime db unavailable, operational refusals go unrecorded: {e}");
+            let mut report = OpenReport::default();
+            let mut listener_scope = None;
+            let mut native_storage_ready = false;
+            // M53.10: a run or client session never outlives its vault.
+            // Opening one stops every run in
+            // any other, Cerebro's own included; reopening this one (a webview
+            // reload) stops nothing, and a run started here while it opened is kept.
+            let retarget_ambient = ambient.watching().as_deref() != Some(vault_path.as_path());
+            if retarget_ambient {
+                ambient.request_stop()?;
             }
-        }
-        // M49.9: after the arm, which migrated the database. An attended row
-        // a previous process left `running` has no finisher left; the cutoff
-        // is this process's start, so a run it opened is never touched.
-        #[cfg(feature = "native-read-smoke")]
-        native_read_smoke::child_claim_profile::restart_profile::note(
-            "storage",
-            Some(native_storage_ready),
-            None,
-        );
-        if native_storage_ready {
-            let recovered = Some(
-                actions::native_owner::recover_unstarted_children(&app, process_started())
-                    .map_err(|_| ()),
-            );
-            #[cfg(feature = "native-read-smoke")]
-            native_read_smoke::child_claim_profile::restart_profile::note(
-                "child",
-                recovered.as_ref().map(Result::is_ok),
-                recovered.as_ref().and_then(|r| r.as_ref().ok().copied()),
-            );
-            if recovered.as_ref().is_some_and(Result::is_err) {
-                log::warn!("supervised child recovery unavailable; protected rows retained");
+            agents.stop_other_vaults(&vault_path);
+            if retarget_ambient {
+                ambient.stop()?;
             }
-        } else {
-            #[cfg(feature = "native-read-smoke")]
-            native_read_smoke::child_claim_profile::restart_profile::note(
-                "child",
-                Some(false),
-                None,
-            );
-            log::warn!("supervised child recovery unavailable; retained storage missing");
-        }
-        agent::meter::recover_orphaned(&dir, process_started());
-        // M63.1: wakes past their week expire, and a started wake whose run
-        // ended without finishing it is closed. Never fails the open.
-        runtime::wakes::sweep_at_open(&dir, &vault_path, chrono::Utc::now());
-        // M70.4: a comment thread's pending answer whose run this process
-        // does not hold reads failed, "didn't finish"; a live one is kept.
-        agent::thread_turn::settle_orphans(&vault_path);
-        // M25.1: one database serves every vault, so an opening vault
-        // registers itself before anything writes a row that has to say
-        // which folder it belongs to. Failing here is degraded, not fatal,
-        // for the same reason the line above is.
-        // M49.9 (K25): and the session records which PROCESS has it open.
-        if let Some(scope) = runtime::open_vault(&vault_path) {
-            runtime::sessions::track(&scope);
-            #[cfg(feature = "native-read-smoke")]
+            agents.wait_opening_readers(Some(&vault_path), std::time::Duration::from_secs(2))?;
+            client_access::vault_opening(&vault_path);
+            client_access::listener::wait_for_opening(
+                Some(&vault_path),
+                std::time::Duration::from_secs(2),
+            )?;
+            // M53.11: a connectors.json an older build wrote world-readable holds the
+            // vault's connector credentials. Opening the vault narrows it to its
+            // owner, best effort, and never stops the open.
+            connectors::tighten(&vault_path);
+            // M21.8 startup: run the M21.4 verification, record the verdict, start
+            // shadow recording for this vault. Never blocks watching — a refused
+            // ledger holds no writer, so knowledge writes refuse and ledger_status
+            // says why. Idempotent across webview reloads (M49.1).
+            if let Ok(dir) = config_dir(&app) {
+                let _ = ledger::shadow::activate(&dir, &vault_path);
+                // M24.2: the runtime DB is armed beside the ledger index, in
+                // app-data — never inside a possibly cloud-synced vault (D2).
+                // Failing to open the OPERATIONAL LOG must not stop the app from
+                // opening the vault: it would trade a working workspace for a
+                // diagnostic, and every refusal is still returned to its caller.
+                match runtime::sink::arm(&dir) {
+                    Ok(()) => {
+                        native_storage_ready = actions::native_owner::prepare_storage(&app).is_ok();
+                        if !native_storage_ready {
+                            log::warn!("managed action runtime ownership is unavailable");
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "runtime db unavailable, operational refusals go unrecorded: {e}"
+                        );
+                    }
+                }
+                // M49.9: after the arm, which migrated the database. An attended row
+                // a previous process left `running` has no finisher left; the cutoff
+                // is this process's start, so a run it opened is never touched.
+                #[cfg(feature = "native-read-smoke")]
+                native_read_smoke::child_claim_profile::restart_profile::note(
+                    "storage",
+                    Some(native_storage_ready),
+                    None,
+                );
+                if native_storage_ready {
+                    let recovered = Some(
+                        actions::native_owner::recover_unstarted_children(&app, process_started())
+                            .map_err(|_| ()),
+                    );
+                    #[cfg(feature = "native-read-smoke")]
+                    native_read_smoke::child_claim_profile::restart_profile::note(
+                        "child",
+                        recovered.as_ref().map(Result::is_ok),
+                        recovered.as_ref().and_then(|r| r.as_ref().ok().copied()),
+                    );
+                    if recovered.as_ref().is_some_and(Result::is_err) {
+                        log::warn!(
+                            "supervised child recovery unavailable; protected rows retained"
+                        );
+                    }
+                } else {
+                    #[cfg(feature = "native-read-smoke")]
+                    native_read_smoke::child_claim_profile::restart_profile::note(
+                        "child",
+                        Some(false),
+                        None,
+                    );
+                    log::warn!("supervised child recovery unavailable; retained storage missing");
+                }
+                agent::meter::recover_orphaned(&dir, process_started());
+                // M63.1: wakes past their week expire, and a started wake whose run
+                // ended without finishing it is closed. Never fails the open.
+                runtime::wakes::sweep_at_open(&dir, &vault_path, chrono::Utc::now());
+                // M70.4: a comment thread's pending answer whose run this process
+                // does not hold reads failed, "didn't finish"; a live one is kept.
+                agent::thread_turn::settle_orphans(&vault_path);
+                // M25.1: one database serves every vault, so an opening vault
+                // registers itself before anything writes a row that has to say
+                // which folder it belongs to. Failing here is degraded, not fatal,
+                // for the same reason the line above is.
+                // M49.9 (K25): and the session records which PROCESS has it open.
+                if let Some(scope) = runtime::open_vault(&vault_path) {
+                    runtime::sessions::track(&scope);
+                    #[cfg(feature = "native-read-smoke")]
             native_read_smoke::child_claim_profile::restart_profile::audit::session_observed(
                 &dir, &scope,
             );
-            listener_scope = Some(scope);
-        }
-        // M60.6: a batch an earlier process left unfinished is put back
-        // before the purge and the watcher, and the webview says so. The
-        // cutoff is this process's start, so a reload never touches a batch
-        // this process is running.
-        let recovered = WriteReceipt::system(vault::receipt::SystemWriter::BatchRecovery);
-        let rolled = vault::batch::recover(&vault_path, process_started(), &recovered);
-        report = OpenReport {
-            unfinished: rolled.unfinished,
-            restored: rolled.restored,
-            kept: rolled.kept,
-        };
-
-    }
-    vault::watcher::start(app.clone(), state.inner(), vault_path.clone())?;
-    // M99 P2: purge has no join handle. Keep it synchronous while this
-    // attempt is entered; publication must never release a still-writing purge.
-    let by = WriteReceipt::system(vault::receipt::SystemWriter::TrashPurge);
-    let purged = vault::trash::purge_expired_to_os_trash(&vault_path, &by);
-    if purged.moved + purged.kept > 0 {
-        log::info!("trash: {} old items moved to the OS Trash, {} kept", purged.moved, purged.kept);
-    }
-    // Install the owned supervisor before publication. Its existing agent
-    // admission gate prevents an early tick from mutating an unpublished root;
-    // a publication failure now stops/joins this exact owner before release.
-    if let Ok(dir) = config_dir(&app) {
-        // M26.4i: the ambient ingest supervisor. It reads its own switch,
-        // which defaults OFF — starting the loop is not the same as
-        // enabling the work, and nothing here turns it on.
-        ingest::ambient::start(&app, ambient.inner(), &vault_path, &dir)?;
-    }
-    if let Err(error) =
-        finish_legacy_attempt(&context, &attempt, agents.inner(), || {
-            if let Some(scope) = listener_scope.as_ref() {
-                client_access::vault_opened(&app, &vault_path, scope);
+                    listener_scope = Some(scope);
+                }
+                // M60.6: a batch an earlier process left unfinished is put back
+                // before the purge and the watcher, and the webview says so. The
+                // cutoff is this process's start, so a reload never touches a batch
+                // this process is running.
+                let recovered = WriteReceipt::system(vault::receipt::SystemWriter::BatchRecovery);
+                let rolled = vault::batch::recover(&vault_path, process_started(), &recovered);
+                report = OpenReport {
+                    unfinished: rolled.unfinished,
+                    restored: rolled.restored,
+                    kept: rolled.kept,
+                };
             }
-        })
-    {
-        vault::watcher::stop(state.inner())?;
-        client_access::listener::suspend_for_selected();
-        return Err(error.message);
-    }
-    Ok((Some(report), listener_scope, native_storage_ready))
-    }, || suspend_legacy_for_selected(state.inner(), ambient.inner(), agents.inner()),
-    |(report, listener_scope, native_storage_ready)| {
-    if native_storage_ready {
-        if let Some(scope) = listener_scope.as_ref() {
-            let bound =
-                native_binding.and_then(|observation| actions::native_owner::bind_opening(observation, &context, &vault_path, scope, &attempt));
-            #[cfg(feature = "native-read-smoke")]
-            native_read_smoke::child_claim_profile::restart_profile::note(
-                "bind",
-                Some(bound.is_ok()),
-                None,
-            );
-            if bound.is_err() {
-                log::warn!("managed action opening ownership is unavailable");
-            } else if actions::native_owner::workflow_schedule_opened(&app, &window, &attempt).is_err() {
-                // The vault is already open. Schedule readiness is reported by
-                // its own view and may be resumed explicitly without reopening.
-                log::warn!("workflow schedule monitoring is unavailable");
+            vault::watcher::start(app.clone(), state.inner(), vault_path.clone())?;
+            // M99 P2: purge has no join handle. Keep it synchronous while this
+            // attempt is entered; publication must never release a still-writing purge.
+            let by = WriteReceipt::system(vault::receipt::SystemWriter::TrashPurge);
+            let purged = vault::trash::purge_expired_to_os_trash(&vault_path, &by);
+            if purged.moved + purged.kept > 0 {
+                log::info!(
+                    "trash: {} old items moved to the OS Trash, {} kept",
+                    purged.moved,
+                    purged.kept
+                );
             }
-        }
-    }
-    Ok(report)
-    })
+            // Install the owned supervisor before publication. Its existing agent
+            // admission gate prevents an early tick from mutating an unpublished root;
+            // a publication failure now stops/joins this exact owner before release.
+            if let Ok(dir) = config_dir(&app) {
+                // M26.4i: the ambient ingest supervisor. It reads its own switch,
+                // which defaults OFF — starting the loop is not the same as
+                // enabling the work, and nothing here turns it on.
+                ingest::ambient::start(&app, ambient.inner(), &vault_path, &dir)?;
+            }
+            if let Err(error) = finish_legacy_attempt(&context, &attempt, agents.inner(), || {
+                if let Some(scope) = listener_scope.as_ref() {
+                    client_access::vault_opened(&app, &vault_path, scope);
+                }
+            }) {
+                vault::watcher::stop(state.inner())?;
+                client_access::listener::suspend_for_selected();
+                return Err(error.message);
+            }
+            Ok((Some(report), listener_scope, native_storage_ready))
+        },
+        || suspend_legacy_for_selected(state.inner(), ambient.inner(), agents.inner()),
+        |(report, listener_scope, native_storage_ready)| {
+            if native_storage_ready {
+                if let Some(scope) = listener_scope.as_ref() {
+                    let bound = native_binding.and_then(|observation| {
+                        actions::native_owner::bind_opening(
+                            observation,
+                            &context,
+                            &vault_path,
+                            scope,
+                            &attempt,
+                        )
+                    });
+                    #[cfg(feature = "native-read-smoke")]
+                    native_read_smoke::child_claim_profile::restart_profile::note(
+                        "bind",
+                        Some(bound.is_ok()),
+                        None,
+                    );
+                    if bound.is_err() {
+                        log::warn!("managed action opening ownership is unavailable");
+                    } else if actions::native_owner::workflow_schedule_opened(
+                        &app, &window, &attempt,
+                    )
+                    .is_err()
+                    {
+                        // The vault is already open. Schedule readiness is reported by
+                        // its own view and may be resumed explicitly without reopening.
+                        log::warn!("workflow schedule monitoring is unavailable");
+                    }
+                }
+            }
+            Ok(report)
+        },
+    )
 }
 
 /// What opening a vault put back (M60.6): the pages of batches an earlier
@@ -4519,23 +4636,23 @@ pub fn run() {
                 workflow_commands::workflow_unpublish,
                 workflow_commands::workflow_validate,
                 workflow_commands::workflow_actions,
-            workflow_commands::workflow_start,
-            workflow_commands::workflow_continue,
-            workflow_commands::workflow_reauthorize,
-            workflow_commands::workflow_cancel,
-            workflow_commands::workflow_runs,
-            workflow_commands::workflow_run,
-            workflow_commands::workflow_access,
-            workflow_commands::workflow_value,
-            workflow_commands::workflow_action_details,
-            workflow_commands::workflow_answer_action,
-            workflow_commands::workflow_answer_wait,
-            workflow_commands::workflow_schedule,
-            workflow_commands::workflow_schedule_enable,
-            workflow_commands::workflow_schedule_pause,
-            workflow_commands::workflow_schedule_remove,
-            workflow_commands::workflow_schedule_preview,
-            workflow_commands::workflow_schedule_wake,
+                workflow_commands::workflow_start,
+                workflow_commands::workflow_continue,
+                workflow_commands::workflow_reauthorize,
+                workflow_commands::workflow_cancel,
+                workflow_commands::workflow_runs,
+                workflow_commands::workflow_run,
+                workflow_commands::workflow_access,
+                workflow_commands::workflow_value,
+                workflow_commands::workflow_action_details,
+                workflow_commands::workflow_answer_action,
+                workflow_commands::workflow_answer_wait,
+                workflow_commands::workflow_schedule,
+                workflow_commands::workflow_schedule_enable,
+                workflow_commands::workflow_schedule_pause,
+                workflow_commands::workflow_schedule_remove,
+                workflow_commands::workflow_schedule_preview,
+                workflow_commands::workflow_schedule_wake,
                 credential_commands::begin_gh_import,
                 credential_commands::credential_acquisition,
                 credential_commands::cancel_credential_acquisition,

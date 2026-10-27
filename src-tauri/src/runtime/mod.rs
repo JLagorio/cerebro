@@ -37,7 +37,6 @@
 
 pub(crate) mod action_authority;
 pub(crate) mod action_invocations;
-mod physical_lease;
 pub mod activity;
 pub mod activity_tool;
 pub mod batch_journal;
@@ -45,14 +44,12 @@ pub mod budget;
 pub mod catchup;
 pub mod cause;
 pub(crate) mod chat_generations;
-pub(crate) mod conversations;
-pub(crate) mod workflows;
-pub(crate) mod workflow_action_inputs;
 pub(crate) mod child_claim_history;
 #[cfg(any(test, feature = "native-read-smoke"))]
 pub(crate) mod child_jobs;
 pub mod client_tokens;
 pub mod connector_status;
+pub(crate) mod conversations;
 pub mod dispatch;
 pub mod done_marks;
 pub mod fleet;
@@ -67,6 +64,7 @@ pub mod normalize;
 pub mod operational;
 pub mod parked;
 pub mod pending_writes;
+mod physical_lease;
 pub mod projection;
 pub mod read_only;
 pub mod recovery;
@@ -86,6 +84,8 @@ pub mod taint;
 pub mod triggers;
 pub mod vault_writes;
 pub mod wakes;
+pub(crate) mod workflow_action_inputs;
+pub(crate) mod workflows;
 pub mod write_log;
 
 pub use read_only::ReadOnly;
@@ -441,57 +441,156 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V42,
         validate: validate_v42,
     },
-    Migration { to: 43, sql: schema::SCHEMA_V43, validate: validate_v43 },
-    Migration { to: 44, sql: schema::SCHEMA_V44, validate: validate_v44 },
-    Migration { to: 45, sql: schema::SCHEMA_V45, validate: validate_v45 },
-    Migration { to: 46, sql: schema::SCHEMA_V46, validate: validate_v46 },
-    Migration { to: 47, sql: schema::SCHEMA_V47, validate: validate_v47 },
-    Migration { to: 48, sql: schema::SCHEMA_V48, validate: validate_v48 },
-    Migration { to: 49, sql: schema::SCHEMA_V49, validate: validate_v49 },
-    Migration { to: 50, sql: schema::SCHEMA_V50, validate: validate_v50 },
+    Migration {
+        to: 43,
+        sql: schema::SCHEMA_V43,
+        validate: validate_v43,
+    },
+    Migration {
+        to: 44,
+        sql: schema::SCHEMA_V44,
+        validate: validate_v44,
+    },
+    Migration {
+        to: 45,
+        sql: schema::SCHEMA_V45,
+        validate: validate_v45,
+    },
+    Migration {
+        to: 46,
+        sql: schema::SCHEMA_V46,
+        validate: validate_v46,
+    },
+    Migration {
+        to: 47,
+        sql: schema::SCHEMA_V47,
+        validate: validate_v47,
+    },
+    Migration {
+        to: 48,
+        sql: schema::SCHEMA_V48,
+        validate: validate_v48,
+    },
+    Migration {
+        to: 49,
+        sql: schema::SCHEMA_V49,
+        validate: validate_v49,
+    },
+    Migration {
+        to: 50,
+        sql: schema::SCHEMA_V50,
+        validate: validate_v50,
+    },
 ];
 
-fn validate_v46(conn:&Connection)->Result<(),String>{
-    for fragment in schema::SCHEMA_V46.split("CREATE ").skip(1){
-        let expected=format!("CREATE {}",fragment.trim().trim_end_matches(';'));
-        let name=expected.split_whitespace().nth(2).ok_or("physical action namespace schema unavailable")?;
-        let actual:String=conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",[name],|row|row.get(0)).map_err(|_|"physical action namespace table unavailable".to_owned())?;
-        if actual.trim()!=expected.trim(){return Err("physical action namespace constraints changed".into());}
-        let bad:i64=conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),[],|row|row.get(0)).map_err(|_|"physical action namespace foreign keys unavailable".to_owned())?;
-        if bad!=0{return Err("physical action namespace foreign keys invalid".into());}
-    }Ok(())
+fn validate_v46(conn: &Connection) -> Result<(), String> {
+    for fragment in schema::SCHEMA_V46.split("CREATE ").skip(1) {
+        let expected = format!("CREATE {}", fragment.trim().trim_end_matches(';'));
+        let name = expected
+            .split_whitespace()
+            .nth(2)
+            .ok_or("physical action namespace schema unavailable")?;
+        let actual: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                [name],
+                |row| row.get(0),
+            )
+            .map_err(|_| "physical action namespace table unavailable".to_owned())?;
+        if actual.trim() != expected.trim() {
+            return Err("physical action namespace constraints changed".into());
+        }
+        let bad: i64 = conn
+            .query_row(
+                &format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| "physical action namespace foreign keys unavailable".to_owned())?;
+        if bad != 0 {
+            return Err("physical action namespace foreign keys invalid".into());
+        }
+    }
+    Ok(())
 }
 
 fn validate_v45(conn: &Connection) -> Result<(), String> {
     let expected = schema::SCHEMA_V45.trim().trim_end_matches(';');
-    let actual: String = conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name='workflow_action_inputs'", [], |row| row.get(0))
+    let actual: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='workflow_action_inputs'",
+            [],
+            |row| row.get(0),
+        )
         .map_err(|_| "workflow action input table unavailable".to_owned())?;
-    if actual.trim() != expected { return Err("workflow action input constraints changed".into()); }
-    let bad: i64 = conn.query_row("SELECT count(*) FROM pragma_foreign_key_check('workflow_action_inputs')", [], |row| row.get(0))
+    if actual.trim() != expected {
+        return Err("workflow action input constraints changed".into());
+    }
+    let bad: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM pragma_foreign_key_check('workflow_action_inputs')",
+            [],
+            |row| row.get(0),
+        )
         .map_err(|_| "workflow action input foreign keys unavailable".to_owned())?;
-    if bad != 0 { return Err("workflow action input foreign keys invalid".into()); }
+    if bad != 0 {
+        return Err("workflow action input foreign keys invalid".into());
+    }
     Ok(())
 }
 
 fn validate_v44(conn: &Connection) -> Result<(), String> {
     let expected = schema::SCHEMA_V44.trim().trim_end_matches(';');
-    let actual: String = conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name='action_output_handoffs'", [], |row| row.get(0))
+    let actual: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='action_output_handoffs'",
+            [],
+            |row| row.get(0),
+        )
         .map_err(|_| "action output handoff table unavailable".to_owned())?;
-    if actual.trim() != expected { return Err("action output handoff constraints changed".into()); }
-    let bad: i64 = conn.query_row("SELECT count(*) FROM pragma_foreign_key_check('action_output_handoffs')", [], |row| row.get(0))
+    if actual.trim() != expected {
+        return Err("action output handoff constraints changed".into());
+    }
+    let bad: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM pragma_foreign_key_check('action_output_handoffs')",
+            [],
+            |row| row.get(0),
+        )
         .map_err(|_| "action output handoff foreign keys unavailable".to_owned())?;
-    if bad != 0 { return Err("action output handoff foreign keys invalid".into()); }
+    if bad != 0 {
+        return Err("action output handoff foreign keys invalid".into());
+    }
     Ok(())
 }
 
 fn validate_v43(conn: &Connection) -> Result<(), String> {
     for fragment in schema::SCHEMA_V43.split("CREATE ").skip(1) {
         let expected = format!("CREATE {}", fragment.trim().trim_end_matches(';'));
-        let name = expected.split_whitespace().nth(2).ok_or("workflow schema unavailable")?;
-        let actual: String = conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1", [name], |row| row.get(0)).map_err(|_| "workflow table unavailable".to_owned())?;
-        if actual.trim() != expected.trim() { return Err("workflow constraints changed".into()); }
-        let bad: i64 = conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"), [], |row| row.get(0)).map_err(|_| "workflow foreign keys unavailable".to_owned())?;
-        if bad != 0 { return Err("workflow foreign keys invalid".into()); }
+        let name = expected
+            .split_whitespace()
+            .nth(2)
+            .ok_or("workflow schema unavailable")?;
+        let actual: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                [name],
+                |row| row.get(0),
+            )
+            .map_err(|_| "workflow table unavailable".to_owned())?;
+        if actual.trim() != expected.trim() {
+            return Err("workflow constraints changed".into());
+        }
+        let bad: i64 = conn
+            .query_row(
+                &format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| "workflow foreign keys unavailable".to_owned())?;
+        if bad != 0 {
+            return Err("workflow foreign keys invalid".into());
+        }
     }
     Ok(())
 }
@@ -499,13 +598,30 @@ fn validate_v43(conn: &Connection) -> Result<(), String> {
 fn validate_v42(conn: &Connection) -> Result<(), String> {
     for fragment in schema::SCHEMA_V42.split("CREATE ").skip(1) {
         let expected = format!("CREATE {}", fragment.trim().trim_end_matches(';'));
-        let name = expected.split_whitespace().nth(2).ok_or("generation schema unavailable")?;
-        let actual: String = conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1", [name], |row| row.get(0)).map_err(|_| "generation table unavailable".to_owned())?;
+        let name = expected
+            .split_whitespace()
+            .nth(2)
+            .ok_or("generation schema unavailable")?;
+        let actual: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                [name],
+                |row| row.get(0),
+            )
+            .map_err(|_| "generation table unavailable".to_owned())?;
         if actual.trim() != expected.trim() {
             return Err("generation constraints changed".into());
         }
-        let bad: i64 = conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"), [], |row| row.get(0)).map_err(|_| "generation foreign keys unavailable".to_owned())?;
-        if bad != 0 { return Err("generation foreign keys invalid".into()); }
+        let bad: i64 = conn
+            .query_row(
+                &format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| "generation foreign keys unavailable".to_owned())?;
+        if bad != 0 {
+            return Err("generation foreign keys invalid".into());
+        }
     }
     Ok(())
 }
@@ -3724,87 +3840,239 @@ mod chat_parent_attempt_migration_tests;
 #[cfg(test)]
 mod chat_delegation_migration_tests;
 
-fn validate_v47(conn:&Connection)->Result<(),String>{
-    for fragment in schema::SCHEMA_V47.split("CREATE ").skip(1){
-        let expected=format!("CREATE {}",fragment.trim().trim_end_matches(';'));
-        let name=expected.split_whitespace().nth(2).ok_or("workflow origin schema unavailable")?;
-        let actual:String=conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",[name],|r|r.get(0)).map_err(|_|"workflow origin table unavailable".to_owned())?;
-        if actual.trim()!=expected.trim(){return Err("workflow origin constraints changed".into());}
-        let bad:i64=conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),[],|r|r.get(0)).map_err(|_|"workflow origin foreign keys unavailable".to_owned())?;
-        if bad!=0{return Err("workflow origin foreign keys invalid".into());}
-    }Ok(())
+fn validate_v47(conn: &Connection) -> Result<(), String> {
+    for fragment in schema::SCHEMA_V47.split("CREATE ").skip(1) {
+        let expected = format!("CREATE {}", fragment.trim().trim_end_matches(';'));
+        let name = expected
+            .split_whitespace()
+            .nth(2)
+            .ok_or("workflow origin schema unavailable")?;
+        let actual: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                [name],
+                |r| r.get(0),
+            )
+            .map_err(|_| "workflow origin table unavailable".to_owned())?;
+        if actual.trim() != expected.trim() {
+            return Err("workflow origin constraints changed".into());
+        }
+        let bad: i64 = conn
+            .query_row(
+                &format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|_| "workflow origin foreign keys unavailable".to_owned())?;
+        if bad != 0 {
+            return Err("workflow origin foreign keys invalid".into());
+        }
+    }
+    Ok(())
 }
 
-
-#[cfg_attr(not(test),expect(dead_code,reason="native workflow producer follows causal ownership tests"))]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "native workflow producer follows causal ownership tests"
+    )
+)]
 pub(crate) mod workflow_submission;
 
-fn validate_v48(conn:&Connection)->Result<(),String>{
- for fragment in schema::SCHEMA_V48.split("CREATE ").skip(1){
-  let expected=format!("CREATE {}",fragment.trim().trim_end_matches(';'));
-  let name=expected.split_whitespace().nth(2).ok_or("workflow activation schema unavailable")?;
-  let actual:String=conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",[name],|r|r.get(0)).map_err(|_|"workflow activation table unavailable".to_owned())?;
-  if actual.trim()!=expected.trim(){return Err("workflow activation constraints changed".into());}
-  let bad:i64=conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),[],|r|r.get(0)).map_err(|_|"workflow activation foreign keys unavailable".to_owned())?;
-  if bad!=0{return Err("workflow activation foreign keys invalid".into());}
- }Ok(())
+fn validate_v48(conn: &Connection) -> Result<(), String> {
+    for fragment in schema::SCHEMA_V48.split("CREATE ").skip(1) {
+        let expected = format!("CREATE {}", fragment.trim().trim_end_matches(';'));
+        let name = expected
+            .split_whitespace()
+            .nth(2)
+            .ok_or("workflow activation schema unavailable")?;
+        let actual: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                [name],
+                |r| r.get(0),
+            )
+            .map_err(|_| "workflow activation table unavailable".to_owned())?;
+        if actual.trim() != expected.trim() {
+            return Err("workflow activation constraints changed".into());
+        }
+        let bad: i64 = conn
+            .query_row(
+                &format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|_| "workflow activation foreign keys unavailable".to_owned())?;
+        if bad != 0 {
+            return Err("workflow activation foreign keys invalid".into());
+        }
+    }
+    Ok(())
 }
 pub(crate) mod workflow_activations;
 
 #[cfg(test)]
 mod workflow_activation_upgrade_tests {
- use super::*;
- #[test]
- fn v47_active_flow_input_survives_v48_and_reopens_at_actual_head(){
-  let dir=crate::vault::testutil::temp_vault("workflow-v47-to-v48");
-  let conn=connect(&runtime_db_path(&dir)).unwrap();
-  let mut ddl=String::from("BEGIN IMMEDIATE;");
-  for migration in MIGRATIONS.iter().filter(|migration|migration.to<=47){ddl.push_str(migration.sql);}
-  ddl.push_str("PRAGMA user_version=47;COMMIT;");conn.execute_batch(&ddl).unwrap();
-  let vault="c".repeat(32);let run="1".repeat(32);let reference="2".repeat(32);let key="3".repeat(32);let hash="a".repeat(64);
-  let input=r#"{"keep":9007199254740993.0000000000000001}"#;let input_digest=crate::ledger::sha256_hex(input.as_bytes());
-  conn.execute("INSERT INTO vault_registry(vault_id,vault_path,first_seen_at) VALUES(?1,'/synthetic/v47-flow','2026-10-26T00:00:00.000Z')",[&vault]).unwrap();
-  conn.execute("INSERT INTO workflow_runs(run_id,owner_person,vault_id,store_uuid,actor_id,workflow_id,definition_hash,input_schema_digest,start_key,start_digest,input_ref,input_digest,configuration_digest,grant_digest,state,cursor,revision,created_at,updated_at) VALUES(?1,'human:me',?2,'original-store','original-actor','old-workflow',?3,?3,?4,?3,?5,?6,?3,?3,'queued','done',1,60000,60000)",rusqlite::params![run,vault,hash,key,reference,input_digest]).unwrap();
-  conn.execute("INSERT INTO workflow_steps(run_id,step_id,definition_ordinal,kind,state,revision,updated_at) VALUES(?1,'done',0,'result','pending',1,60000)",[&run]).unwrap();
-  conn.execute("INSERT INTO workflow_values(run_id,value_ref,digest,role,step_id,ordinal,canonical_json,byte_count) VALUES(?1,?2,?3,'run_input','',0,?4,?5)",rusqlite::params![run,reference,input_digest,input,i64::try_from(input.len()).unwrap()]).unwrap();
-  assert_eq!(user_version(&conn).unwrap(),47);drop(conn);
-  let conn=open(&dir).unwrap();assert_eq!(user_version(&conn).unwrap(),USER_VERSION);validate_v48(&conn).unwrap();
-  let kept:(String,String,String,String,i64)=conn.query_row("SELECT r.state,r.store_uuid,r.actor_id,v.canonical_json,r.revision FROM workflow_runs r JOIN workflow_values v ON v.run_id=r.run_id AND v.value_ref=r.input_ref WHERE r.run_id=?1",[&run],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).unwrap();
-  assert_eq!(kept,("queued".into(),"original-store".into(),"original-actor".into(),input.into(),1));
-  assert_eq!(conn.query_row("SELECT count(*) FROM workflow_steps WHERE run_id=?1",[&run],|r|r.get::<_,i64>(0)).unwrap(),1);
-  assert_eq!(conn.query_row("SELECT count(*) FROM workflow_activations",[],|r|r.get::<_,i64>(0)).unwrap(),0,"migration never enables existing workflows");drop(conn);
-  let reopened=open_existing(&dir).unwrap();assert_eq!(user_version(&reopened).unwrap(),USER_VERSION);let body:String=reopened.query_row("SELECT canonical_json FROM workflow_values WHERE run_id=?1",[&run],|r|r.get(0)).unwrap();assert_eq!(body,input);drop(reopened);let _=std::fs::remove_dir_all(dir);
- }
-}
-
-fn validate_v49(conn:&Connection)->Result<(),String>{
-    // Compare every emitted table/index/trigger to a fresh DDL-only model.
-    let expected=Connection::open_in_memory().map_err(|_|"archive schema model unavailable")?;
-    expected.execute_batch("CREATE TABLE chat_generations(generation_id TEXT,owner_person TEXT,vault_id TEXT,store_uuid TEXT);").map_err(|_|"archive schema model unavailable")?;
-    expected.execute_batch(schema::SCHEMA_V49).map_err(|_|"archive schema model unavailable")?;
-    let mut statement=expected.prepare("SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name LIKE 'conversation_%'").map_err(|_|"archive schema unavailable")?;
-    let rows=statement.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?))).map_err(|_|"archive schema unavailable")?;
-    for row in rows {
-        let (kind,name,sql)=row.map_err(|_|"archive schema unavailable")?;
-        let actual:String=conn.query_row("SELECT sql FROM sqlite_master WHERE type=?1 AND name=?2",rusqlite::params![kind,name],|row|row.get(0)).map_err(|_|"archive schema object missing")?;
-        if actual!=sql{return Err("archive schema constraints changed".into());}
-        if kind=="table" {
-            let bad:i64=conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),[],|row|row.get(0)).map_err(|_|"archive foreign keys unavailable")?;
-            if bad!=0{return Err("archive foreign keys invalid".into());}
+    use super::*;
+    #[test]
+    fn v47_active_flow_input_survives_v48_and_reopens_at_actual_head() {
+        let dir = crate::vault::testutil::temp_vault("workflow-v47-to-v48");
+        let conn = connect(&runtime_db_path(&dir)).unwrap();
+        let mut ddl = String::from("BEGIN IMMEDIATE;");
+        for migration in MIGRATIONS.iter().filter(|migration| migration.to <= 47) {
+            ddl.push_str(migration.sql);
         }
-    } Ok(())
+        ddl.push_str("PRAGMA user_version=47;COMMIT;");
+        conn.execute_batch(&ddl).unwrap();
+        let vault = "c".repeat(32);
+        let run = "1".repeat(32);
+        let reference = "2".repeat(32);
+        let key = "3".repeat(32);
+        let hash = "a".repeat(64);
+        let input = r#"{"keep":9007199254740993.0000000000000001}"#;
+        let input_digest = crate::ledger::sha256_hex(input.as_bytes());
+        conn.execute("INSERT INTO vault_registry(vault_id,vault_path,first_seen_at) VALUES(?1,'/synthetic/v47-flow','2026-10-26T00:00:00.000Z')",[&vault]).unwrap();
+        conn.execute("INSERT INTO workflow_runs(run_id,owner_person,vault_id,store_uuid,actor_id,workflow_id,definition_hash,input_schema_digest,start_key,start_digest,input_ref,input_digest,configuration_digest,grant_digest,state,cursor,revision,created_at,updated_at) VALUES(?1,'human:me',?2,'original-store','original-actor','old-workflow',?3,?3,?4,?3,?5,?6,?3,?3,'queued','done',1,60000,60000)",rusqlite::params![run,vault,hash,key,reference,input_digest]).unwrap();
+        conn.execute("INSERT INTO workflow_steps(run_id,step_id,definition_ordinal,kind,state,revision,updated_at) VALUES(?1,'done',0,'result','pending',1,60000)",[&run]).unwrap();
+        conn.execute("INSERT INTO workflow_values(run_id,value_ref,digest,role,step_id,ordinal,canonical_json,byte_count) VALUES(?1,?2,?3,'run_input','',0,?4,?5)",rusqlite::params![run,reference,input_digest,input,i64::try_from(input.len()).unwrap()]).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), 47);
+        drop(conn);
+        let conn = open(&dir).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        validate_v48(&conn).unwrap();
+        let kept:(String,String,String,String,i64)=conn.query_row("SELECT r.state,r.store_uuid,r.actor_id,v.canonical_json,r.revision FROM workflow_runs r JOIN workflow_values v ON v.run_id=r.run_id AND v.value_ref=r.input_ref WHERE r.run_id=?1",[&run],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).unwrap();
+        assert_eq!(
+            kept,
+            (
+                "queued".into(),
+                "original-store".into(),
+                "original-actor".into(),
+                input.into(),
+                1
+            )
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM workflow_steps WHERE run_id=?1",
+                [&run],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM workflow_activations", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "migration never enables existing workflows"
+        );
+        drop(conn);
+        let reopened = open_existing(&dir).unwrap();
+        assert_eq!(user_version(&reopened).unwrap(), USER_VERSION);
+        let body: String = reopened
+            .query_row(
+                "SELECT canonical_json FROM workflow_values WHERE run_id=?1",
+                [&run],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(body, input);
+        drop(reopened);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
-fn validate_v50(conn:&Connection)->Result<(),String>{
-    let expected=Connection::open_in_memory().map_err(|_|"legacy archive schema model unavailable")?;
+fn validate_v49(conn: &Connection) -> Result<(), String> {
+    // Compare every emitted table/index/trigger to a fresh DDL-only model.
+    let expected = Connection::open_in_memory().map_err(|_| "archive schema model unavailable")?;
+    expected.execute_batch("CREATE TABLE chat_generations(generation_id TEXT,owner_person TEXT,vault_id TEXT,store_uuid TEXT);").map_err(|_|"archive schema model unavailable")?;
+    expected
+        .execute_batch(schema::SCHEMA_V49)
+        .map_err(|_| "archive schema model unavailable")?;
+    let mut statement=expected.prepare("SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name LIKE 'conversation_%'").map_err(|_|"archive schema unavailable")?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|_| "archive schema unavailable")?;
+    for row in rows {
+        let (kind, name, sql) = row.map_err(|_| "archive schema unavailable")?;
+        let actual: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type=?1 AND name=?2",
+                rusqlite::params![kind, name],
+                |row| row.get(0),
+            )
+            .map_err(|_| "archive schema object missing")?;
+        if actual != sql {
+            return Err("archive schema constraints changed".into());
+        }
+        if kind == "table" {
+            let bad: i64 = conn
+                .query_row(
+                    &format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| "archive foreign keys unavailable")?;
+            if bad != 0 {
+                return Err("archive foreign keys invalid".into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_v50(conn: &Connection) -> Result<(), String> {
+    let expected =
+        Connection::open_in_memory().map_err(|_| "legacy archive schema model unavailable")?;
     expected.execute_batch("CREATE TABLE chat_generations(generation_id TEXT,owner_person TEXT,vault_id TEXT,store_uuid TEXT);").map_err(|_|"legacy archive schema model unavailable")?;
-    expected.execute_batch(schema::SCHEMA_V49).map_err(|_|"legacy archive schema model unavailable")?;
-    expected.execute_batch(schema::SCHEMA_V50).map_err(|_|"legacy archive schema model unavailable")?;
+    expected
+        .execute_batch(schema::SCHEMA_V49)
+        .map_err(|_| "legacy archive schema model unavailable")?;
+    expected
+        .execute_batch(schema::SCHEMA_V50)
+        .map_err(|_| "legacy archive schema model unavailable")?;
     let mut statement=expected.prepare("SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL AND (name LIKE 'conversation_legacy_%' OR name LIKE 'conversation_archive_%')").map_err(|_|"legacy archive schema unavailable")?;
-    for row in statement.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?))).map_err(|_|"legacy archive schema unavailable")? {
-        let (kind,name,sql)=row.map_err(|_|"legacy archive schema unavailable")?;
-        let actual:String=conn.query_row("SELECT sql FROM sqlite_master WHERE type=?1 AND name=?2",rusqlite::params![kind,name],|row|row.get(0)).map_err(|_|"legacy archive schema object missing")?;
-        if actual!=sql{return Err("legacy archive schema constraints changed".into());}
-        if kind=="table" {let bad:i64=conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),[],|row|row.get(0)).map_err(|_|"legacy archive foreign keys unavailable")?;if bad!=0{return Err("legacy archive foreign keys invalid".into());}}
-    }Ok(())
+    for row in statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|_| "legacy archive schema unavailable")?
+    {
+        let (kind, name, sql) = row.map_err(|_| "legacy archive schema unavailable")?;
+        let actual: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type=?1 AND name=?2",
+                rusqlite::params![kind, name],
+                |row| row.get(0),
+            )
+            .map_err(|_| "legacy archive schema object missing")?;
+        if actual != sql {
+            return Err("legacy archive schema constraints changed".into());
+        }
+        if kind == "table" {
+            let bad: i64 = conn
+                .query_row(
+                    &format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| "legacy archive foreign keys unavailable")?;
+            if bad != 0 {
+                return Err("legacy archive foreign keys invalid".into());
+            }
+        }
+    }
+    Ok(())
 }

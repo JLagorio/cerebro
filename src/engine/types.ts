@@ -1,7 +1,12 @@
 import type { AggregateCalc } from './aggregate';
 import type { DateDisplayFormat, RemindOffset, TimeDisplayFormat } from './dates';
 import type { RelationIndex } from './relations';
-import type { SelectedBodyObservation, SelectedEntryProperties, SelectedPropertyValue, SelectedRecordVersion } from '@/lib/generated/workspace';
+import type {
+  SelectedBodyObservation,
+  SelectedEntryProperties,
+  SelectedPropertyValue,
+  SelectedRecordVersion,
+} from '@/lib/generated/workspace';
 
 export type Scalar = string | number | boolean | null;
 

@@ -26,7 +26,14 @@ import type { AgentChat } from '@/agent/useAgentChat';
 import type { ChatMessage, Conversation } from '@/agent/types';
 import type { RunChoice } from '@/engine/runOptions';
 import { useReviewNotesStore } from '@/stores/reviewNotesStore';
-import { archiveConversation, archiveService, healRetainedArchive, projectArchiveThread, projectArchiveMessage, sameArchiveContext } from './conversationArchive';
+import {
+  archiveConversation,
+  archiveService,
+  healRetainedArchive,
+  projectArchiveThread,
+  projectArchiveMessage,
+  sameArchiveContext,
+} from './conversationArchive';
 import { getVaultOpening, useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -171,7 +178,8 @@ export function useConversations(
   const [activeId, setActiveId] = useState<string>(() => {
     const requested = useUiStore.getState().panelConversation;
     if (requested !== null && conversations.some((c) => c.id === requested)) {
-      useUiStore.getState().takePanelConversation();return requested;
+      useUiStore.getState().takePanelConversation();
+      return requested;
     }
     const remembered = loadActiveId();
     return remembered !== null && conversations.some((c) => c.id === remembered)
@@ -179,7 +187,10 @@ export function useConversations(
       : conversations[0].id;
   });
 
-  const activeThreadRef=useRef({id:activeId,vault:conversations.find((thread)=>thread.id===activeId)?.vault});
+  const activeThreadRef = useRef({
+    id: activeId,
+    vault: conversations.find((thread) => thread.id === activeId)?.vault,
+  });
 
   // One writer for every path that changes the active conversation — start,
   // select, remove and the initial seed all end up here.
@@ -199,10 +210,16 @@ export function useConversations(
   const [readBlock, setReadBlock] = useState<'cleared' | 'expired' | null>(null);
   const restoreThread = useCallback(
     (c: Conversation) => {
-      activeThreadRef.current={id:c.id,vault:c.vault};
+      activeThreadRef.current = { id: c.id, vault: c.vault };
       restoreEpoch.current += 1;
       const epoch = restoreEpoch.current;
-      restore(expireArchivedMessages(c.messages,Date.now()), c.sessionId, undefined, c.live ?? null, c.fork ?? null);
+      restore(
+        expireArchivedMessages(c.messages, Date.now()),
+        c.sessionId,
+        undefined,
+        c.live ?? null,
+        c.fork ?? null,
+      );
       setReadBlock(null);
       const session = c.sessionId;
       // A thread with a turn still running re-attaches to it (M57.6), and
@@ -214,54 +231,104 @@ export function useConversations(
         retentionDays: null,
       };
       if (vault === null || c.live != null || (session === null && c.archiveBacked !== true)) {
-        setTranscript(c.cacheTrimmed === true ? partial : { state: 'idle' });return;
+        setTranscript(c.cacheTrimmed === true ? partial : { state: 'idle' });
+        return;
       }
       const originalOpening = getVaultOpening();
-      const current = () => restoreEpoch.current === epoch && !streamingRef.current && originalOpening === getVaultOpening();
+      const current = () =>
+        restoreEpoch.current === epoch &&
+        !streamingRef.current &&
+        originalOpening === getVaultOpening();
       setTranscript({ state: 'reading' });
       void (async () => {
-        let cached = c.messages;let incomplete = c.cacheTrimmed === true;
+        let cached = c.messages;
+        let incomplete = c.cacheTrimmed === true;
         if (c.archiveBacked === true) {
-          if (c.vault !== vault) {setTranscript({state:'unavailable',reason:'archive_elsewhere',retentionDays:null});return;}
+          if (c.vault !== vault) {
+            setTranscript({
+              state: 'unavailable',
+              reason: 'archive_elsewhere',
+              retentionDays: null,
+            });
+            return;
+          }
           try {
-            const context = await archiveService.context();const page = await archiveService.messages(context,c.id);
+            const context = await archiveService.context();
+            const page = await archiveService.messages(context, c.id);
             if (!current()) return;
-            if (!sameArchiveContext(context,page.context) || page.threadId !== c.id) throw new Error('archive scope');
+            if (!sameArchiveContext(context, page.context) || page.threadId !== c.id)
+              throw new Error('archive scope');
             cached = [...page.items].reverse().flatMap(projectArchiveMessage);
-            incomplete = page.nextCursor !== null || page.items.some((item) => item.content === null || item.content.answer.availability !== 'complete');
-            restore(cached,session);setTranscript(incomplete ? {state:'unavailable',reason:'archive_partial',retentionDays:null} : {state:'healed'});
+            incomplete =
+              page.nextCursor !== null ||
+              page.items.some(
+                (item) => item.content === null || item.content.answer.availability !== 'complete',
+              );
+            restore(cached, session);
+            setTranscript(
+              incomplete
+                ? { state: 'unavailable', reason: 'archive_partial', retentionDays: null }
+                : { state: 'healed' },
+            );
           } catch {
-            if (current()) setTranscript({state:'unavailable',reason:'archive_unavailable',retentionDays:null});return;
+            if (current())
+              setTranscript({
+                state: 'unavailable',
+                reason: 'archive_unavailable',
+                retentionDays: null,
+              });
+            return;
           }
         }
         if (session === null) return;
-        const read = await readCliTranscript(c.vault ?? vault,session,c.updatedAt ?? c.createdAt);
+        const read = await readCliTranscript(c.vault ?? vault, session, c.updatedAt ?? c.createdAt);
         if (!current()) return;
         if (read.state === 'unavailable') {
-          if (c.archiveBacked !== true) setTranscript({state:'unavailable',reason:incomplete?'cache_trimmed':read.reason,retentionDays:read.retention_days,...(read.detail===undefined?{}:{detail:read.detail})});
-          if (read.reason === 'cleared' || read.reason === 'expired') setReadBlock(read.reason==='cleared'?'cleared':'expired');
+          if (c.archiveBacked !== true)
+            setTranscript({
+              state: 'unavailable',
+              reason: incomplete ? 'cache_trimmed' : read.reason,
+              retentionDays: read.retention_days,
+              ...(read.detail === undefined ? {} : { detail: read.detail }),
+            });
+          if (read.reason === 'cleared' || read.reason === 'expired')
+            setReadBlock(read.reason === 'cleared' ? 'cleared' : 'expired');
           return;
         }
-        const replayed = replayTranscript(read.events,session);
-        const facts = {model:replayed.model,prLinks:replayed.prLinks};
+        const replayed = replayTranscript(read.events, session);
+        const facts = { model: replayed.model, prLinks: replayed.prLinks };
         // Archive expiry and absence stay authoritative for the archive view.
         // The independent CLI file may heal only the retained messages shown.
         if (c.archiveBacked === true) {
-          const healed=healRetainedArchive(cached,replayed.messages);
-          restore(healed,session,facts);
-          if(incomplete || healed.some((message)=>message.archiveRecord?.persistence!=='retained'))setTranscript({state:'unavailable',reason:'archive_partial',retentionDays:null});
+          const healed = healRetainedArchive(cached, replayed.messages);
+          restore(healed, session, facts);
+          if (
+            incomplete ||
+            healed.some((message) => message.archiveRecord?.persistence !== 'retained')
+          )
+            setTranscript({ state: 'unavailable', reason: 'archive_partial', retentionDays: null });
           return;
         }
         if (cached.length === 0) {
-          restore(replayed.messages,session,facts);
-          if (c.cacheTrimmed === true) setConversations((prev)=>prev.map((thread)=>{
-            if(thread.id!==c.id)return thread;const {cacheTrimmed:_rebuilt,...rest}=thread;return rest;
-          }));
-          setTranscript({state:'rebuilt'});return;
+          restore(replayed.messages, session, facts);
+          if (c.cacheTrimmed === true)
+            setConversations((prev) =>
+              prev.map((thread) => {
+                if (thread.id !== c.id) return thread;
+                const { cacheTrimmed: _rebuilt, ...rest } = thread;
+                return rest;
+              }),
+            );
+          setTranscript({ state: 'rebuilt' });
+          return;
         }
-        const healed = healFromTranscript(cached,replayed.messages);restore(healed,session,facts);
-        setTranscript(incomplete?partial:{state:healed===cached?'idle':'healed'});
-      })().catch(()=>{if(current())setTranscript({state:'unavailable',reason:'unreadable',retentionDays:null});});
+        const healed = healFromTranscript(cached, replayed.messages);
+        restore(healed, session, facts);
+        setTranscript(incomplete ? partial : { state: healed === cached ? 'idle' : 'healed' });
+      })().catch(() => {
+        if (current())
+          setTranscript({ state: 'unavailable', reason: 'unreadable', retentionDays: null });
+      });
     },
     [restore, vault],
   );
@@ -394,7 +461,7 @@ export function useConversations(
 
   const start = useCallback(() => {
     const created = newConversation();
-    activeThreadRef.current={id:created.id,vault:created.vault};
+    activeThreadRef.current = { id: created.id, vault: created.vault };
     // The thread being left keeps its turn running (M57.6): saved with it.
     setConversations((prev) => [created, ...prev]);
     saveActive(activeId);
@@ -411,19 +478,44 @@ export function useConversations(
       const target = conversations.find((c) => c.id === id);
       if (target === undefined) {
         if (vault === null) return;
-        const token=++restoreEpoch.current;const originalOpening=getVaultOpening();
-        void (async()=>{
-          const context=await archiveService.context();let after:string|null=null;const seen=new Set<string>();
-          for(let pageNumber=0;pageNumber<256;pageNumber+=1){
-            const page=await archiveService.threads(context,'',after);
-            if(restoreEpoch.current!==token || streamingRef.current || getVaultOpening()!==originalOpening)return;
-            if(!sameArchiveContext(context,page.context))throw new Error('archive scope');
-            const found=page.items.find((thread)=>thread.id===id);
-            if(found!==undefined){const loaded=archiveConversation(found,vault);saveActive(activeId);setConversations((previous)=>previous.some((item)=>item.id===id)?previous:[loaded,...previous]);setActiveId(id);restoreThread(loaded);return;}
-            if(page.nextCursor===null)break;if(seen.has(page.nextCursor))throw new Error('archive cursor');seen.add(page.nextCursor);after=page.nextCursor;
+        const token = ++restoreEpoch.current;
+        const originalOpening = getVaultOpening();
+        void (async () => {
+          const context = await archiveService.context();
+          let after: string | null = null;
+          const seen = new Set<string>();
+          for (let pageNumber = 0; pageNumber < 256; pageNumber += 1) {
+            const page = await archiveService.threads(context, '', after);
+            if (
+              restoreEpoch.current !== token ||
+              streamingRef.current ||
+              getVaultOpening() !== originalOpening
+            )
+              return;
+            if (!sameArchiveContext(context, page.context)) throw new Error('archive scope');
+            const found = page.items.find((thread) => thread.id === id);
+            if (found !== undefined) {
+              const loaded = archiveConversation(found, vault);
+              saveActive(activeId);
+              setConversations((previous) =>
+                previous.some((item) => item.id === id) ? previous : [loaded, ...previous],
+              );
+              setActiveId(id);
+              restoreThread(loaded);
+              return;
+            }
+            if (page.nextCursor === null) break;
+            if (seen.has(page.nextCursor)) throw new Error('archive cursor');
+            seen.add(page.nextCursor);
+            after = page.nextCursor;
           }
           throw new Error('Conversation could not be found in this archive.');
-        })().catch(()=>{if(restoreEpoch.current===token && getVaultOpening()===originalOpening)useUiStore.getState().toast('Conversation archive is unavailable. Refresh its history and try again.');});
+        })().catch(() => {
+          if (restoreEpoch.current === token && getVaultOpening() === originalOpening)
+            useUiStore
+              .getState()
+              .toast('Conversation archive is unavailable. Refresh its history and try again.');
+        });
         return;
       }
       // The thread being left keeps its turn running (M57.6): saved with it.
@@ -449,7 +541,12 @@ export function useConversations(
       // usesDefaultTitle flips false so auto-titling never overwrites a name
       // the user chose.
       const next = prev.map((c) =>
-        c.id === id ? (()=>{const {archiveTitle:_sourceTitle,...rest}=c;return {...rest,title:trimmed,usesDefaultTitle:false};})() : c,
+        c.id === id
+          ? (() => {
+              const { archiveTitle: _sourceTitle, ...rest } = c;
+              return { ...rest, title: trimmed, usesDefaultTitle: false };
+            })()
+          : c,
       );
       saveConversations(next);
       return next;
@@ -489,7 +586,12 @@ export function useConversations(
         ...newConversation(),
         title: source.title,
         usesDefaultTitle: source.usesDefaultTitle,
-        ...(source.archiveTitle===true?{archiveTitle:true as const,archiveTitleExpiresAt:source.archiveTitleExpiresAt??null}:{}),
+        ...(source.archiveTitle === true
+          ? {
+              archiveTitle: true as const,
+              archiveTitleExpiresAt: source.archiveTitleExpiresAt ?? null,
+            }
+          : {}),
         messages: held.slice(0, at + 1).map(copied),
         place: source.place ?? null,
         ...(source.placeLabel === undefined ? {} : { placeLabel: source.placeLabel }),
@@ -497,7 +599,9 @@ export function useConversations(
         model: source.model ?? null,
         effort: source.effort ?? null,
         fork: { from: anchor.sessionId, at: anchor.uuid },
-        ...(source.archiveBacked === true ? {archiveAncestry:{parentThreadId:threadId,branchMessageId:messageId}} : {}),
+        ...(source.archiveBacked === true
+          ? { archiveAncestry: { parentThreadId: threadId, branchMessageId: messageId } }
+          : {}),
       };
       // The thread being left keeps its turn running and its card waiting
       // (M57.6): saved with it.
@@ -516,16 +620,48 @@ export function useConversations(
       // stopped and the card it waits on cancelled, since nothing could
       // answer either once the thread is gone.
       const doomed = conversations.find((c) => c.id === id);
-      if (doomed !== undefined && (doomed.archiveBacked === true || doomed.messages.some((message)=>message.generationRequestKey!==undefined) || (id===activeId && chatRef.current.messages.some((message)=>message.generationRequestKey!==undefined || message.nativeRecoveryRoot!==undefined)))) {
-        if(id===activeId && (chatRef.current.streaming || chatRef.current.live!==null)){useUiStore.getState().toast('This conversation still has work. Stop or resolve it explicitly before retrying Delete.');return;}
-        if(vault===null || doomed.vault!==vault){useUiStore.getState().toast('Open the conversation’s original vault before deleting it.');return;}
-        const originalOpening=getVaultOpening();
-        void (async()=>{
-          const context=await archiveService.context();const result=await archiveService.remove(context,id);
-          if(getVaultOpening()!==originalOpening)return;
-          if(result.state==='blocked_active'){useUiStore.getState().toast('This conversation has running work or an approval. Stop or resolve it explicitly, then retry Delete.');return;}
-          forgetArchivedConversation(vault,id);
-        })().catch(()=>useUiStore.getState().toast('Conversation deletion is unavailable. Its work and cached copy were kept.'));
+      if (
+        doomed !== undefined &&
+        (doomed.archiveBacked === true ||
+          doomed.messages.some((message) => message.generationRequestKey !== undefined) ||
+          (id === activeId &&
+            chatRef.current.messages.some(
+              (message) =>
+                message.generationRequestKey !== undefined ||
+                message.nativeRecoveryRoot !== undefined,
+            )))
+      ) {
+        if (id === activeId && (chatRef.current.streaming || chatRef.current.live !== null)) {
+          useUiStore
+            .getState()
+            .toast(
+              'This conversation still has work. Stop or resolve it explicitly before retrying Delete.',
+            );
+          return;
+        }
+        if (vault === null || doomed.vault !== vault) {
+          useUiStore.getState().toast('Open the conversation’s original vault before deleting it.');
+          return;
+        }
+        const originalOpening = getVaultOpening();
+        void (async () => {
+          const context = await archiveService.context();
+          const result = await archiveService.remove(context, id);
+          if (getVaultOpening() !== originalOpening) return;
+          if (result.state === 'blocked_active') {
+            useUiStore
+              .getState()
+              .toast(
+                'This conversation has running work or an approval. Stop or resolve it explicitly, then retry Delete.',
+              );
+            return;
+          }
+          forgetArchivedConversation(vault, id);
+        })().catch(() =>
+          useUiStore
+            .getState()
+            .toast('Conversation deletion is unavailable. Its work and cached copy were kept.'),
+        );
         return;
       }
       const turn = id === activeId ? chat.live : (doomed?.live ?? null);
@@ -557,63 +693,180 @@ export function useConversations(
     [activeId, chat.live, chat.sessionId, conversations, restoreThread, vault],
   );
 
-  useEffect(()=>onImportedCacheReadback((sourceVault,thread,marks)=>{
-    const records=new Map(marks.map((mark)=>[mark.messageId,mark.record]));
-    setConversations((previous)=>previous.map((item)=>item.id!==thread||item.vault!==sourceVault?item:{...item,archiveBacked:true as const,messages:item.messages.map((message)=>{const record=records.get(message.id);return record===undefined?message:{...message,archiveRecord:record};})}));
-    if(activeThreadRef.current.id===thread&&activeThreadRef.current.vault===sourceVault&&sourceVault===vault)chatRef.current.applyArchiveReadback?.(marks);
-  }),[vault]);
+  useEffect(
+    () =>
+      onImportedCacheReadback((sourceVault, thread, marks) => {
+        const records = new Map(marks.map((mark) => [mark.messageId, mark.record]));
+        setConversations((previous) =>
+          previous.map((item) =>
+            item.id !== thread || item.vault !== sourceVault
+              ? item
+              : {
+                  ...item,
+                  archiveBacked: true as const,
+                  messages: item.messages.map((message) => {
+                    const record = records.get(message.id);
+                    return record === undefined ? message : { ...message, archiveRecord: record };
+                  }),
+                },
+          ),
+        );
+        if (
+          activeThreadRef.current.id === thread &&
+          activeThreadRef.current.vault === sourceVault &&
+          sourceVault === vault
+        )
+          chatRef.current.applyArchiveReadback?.(marks);
+      }),
+    [vault],
+  );
 
-  useEffect(() => onArchivedConversationDeleted((deletedVault,id)=>{
-    archiveReadEpoch.current+=1;
-    useReviewNotesStore.getState().prune(id);
-    setConversations((previous)=>{
-      const next=previous.filter((thread)=>thread.id!==id || thread.vault!==deletedVault);
-      if(next.length===previous.length)return previous;
-      const kept=next.length===0?[newConversation()]:next;
-      if(id===activeId){setActiveId(kept[0].id);restoreThread(kept[0]);}
-      return kept;
+  useEffect(
+    () =>
+      onArchivedConversationDeleted((deletedVault, id) => {
+        archiveReadEpoch.current += 1;
+        useReviewNotesStore.getState().prune(id);
+        setConversations((previous) => {
+          const next = previous.filter(
+            (thread) => thread.id !== id || thread.vault !== deletedVault,
+          );
+          if (next.length === previous.length) return previous;
+          const kept = next.length === 0 ? [newConversation()] : next;
+          if (id === activeId) {
+            setActiveId(kept[0].id);
+            restoreThread(kept[0]);
+          }
+          return kept;
+        });
+      }),
+    [activeId, restoreThread],
+  );
+
+  useEffect(() => {
+    const now = Date.now();
+    const expiries = conversations.flatMap((thread) => {
+      const next = nextArchiveExpiry(thread.messages, now);
+      const title =
+        thread.archiveTitle === true &&
+        thread.title !== 'Conversation' &&
+        typeof thread.archiveTitleExpiresAt === 'string'
+          ? Date.parse(thread.archiveTitleExpiresAt)
+          : NaN;
+      return [
+        ...(next === null ? [] : [next]),
+        ...(Number.isFinite(title) ? [Math.max(now, title)] : []),
+      ];
     });
-  }),[activeId,restoreThread]);
-
-  useEffect(()=>{
-    const now=Date.now();const expiries=conversations.flatMap((thread)=>{const next=nextArchiveExpiry(thread.messages,now);const title=thread.archiveTitle===true && thread.title!=='Conversation' && typeof thread.archiveTitleExpiresAt==='string'?Date.parse(thread.archiveTitleExpiresAt):NaN;return [...(next===null?[]:[next]),...(Number.isFinite(title)?[Math.max(now,title)]:[])];});
-    if(expiries.length===0)return;
-    const timer=window.setTimeout(()=>setConversations((previous)=>{
-      const next=previous.map((thread)=>{const kept=expireArchivedMessages(thread.messages,Date.now());const titleExpired=thread.archiveTitle===true && typeof thread.archiveTitleExpiresAt==='string' && Date.parse(thread.archiveTitleExpiresAt)<=Date.now();return kept===thread.messages && !titleExpired?thread:{...thread,...(titleExpired?{title:'Conversation'}:{}),messages:kept};});saveConversations(next);return next;
-    }),Math.min(2_147_483_647,Math.max(1,Math.min(...expiries)-now)));
-    return()=>window.clearTimeout(timer);
-  },[conversations]);
+    if (expiries.length === 0) return;
+    const timer = window.setTimeout(
+      () =>
+        setConversations((previous) => {
+          const next = previous.map((thread) => {
+            const kept = expireArchivedMessages(thread.messages, Date.now());
+            const titleExpired =
+              thread.archiveTitle === true &&
+              typeof thread.archiveTitleExpiresAt === 'string' &&
+              Date.parse(thread.archiveTitleExpiresAt) <= Date.now();
+            return kept === thread.messages && !titleExpired
+              ? thread
+              : { ...thread, ...(titleExpired ? { title: 'Conversation' } : {}), messages: kept };
+          });
+          saveConversations(next);
+          return next;
+        }),
+      Math.min(2_147_483_647, Math.max(1, Math.min(...expiries) - now)),
+    );
+    return () => window.clearTimeout(timer);
+  }, [conversations]);
 
   // Metadata discovery and actual content readback, never a legacy import.
   // A successful native body read is required before removing a browser body.
-  useEffect(()=>{
-    if(vault===null)return;let retired=false;const originalOpening=getVaultOpening();const discovery=archiveReadEpoch.current;
-    void (async()=>{
-      const context=await archiveService.context();const page=await archiveService.threads(context,'');
-      if(retired || archiveReadEpoch.current!==discovery || getVaultOpening()!==originalOpening)return;
-      if(!sameArchiveContext(context,page.context))throw new Error('archive scope');
-      setConversations((previous)=>{
-        if(retired || archiveReadEpoch.current!==discovery)return previous;
-        const known=new Set(previous.map((thread)=>thread.id));
-        return [...previous.map((thread)=>{
-          const stored=page.items.find((item)=>item.id===thread.id);
-          return stored===undefined || thread.vault!==vault?thread:{...thread,archiveBacked:true as const,...(thread.usesDefaultTitle || thread.archiveTitle===true ? {archiveTitle:true as const,archiveTitleExpiresAt:'titleExpiresAt' in stored && typeof stored.titleExpiresAt==='string'?stored.titleExpiresAt:null,title:projectArchiveThread(stored).title??'Conversation'} : {})};
-        }),...page.items.filter((thread)=>!known.has(thread.id)).map((thread)=>archiveConversation(thread,vault))];
+  useEffect(() => {
+    if (vault === null) return;
+    let retired = false;
+    const originalOpening = getVaultOpening();
+    const discovery = archiveReadEpoch.current;
+    void (async () => {
+      const context = await archiveService.context();
+      const page = await archiveService.threads(context, '');
+      if (
+        retired ||
+        archiveReadEpoch.current !== discovery ||
+        getVaultOpening() !== originalOpening
+      )
+        return;
+      if (!sameArchiveContext(context, page.context)) throw new Error('archive scope');
+      setConversations((previous) => {
+        if (retired || archiveReadEpoch.current !== discovery) return previous;
+        const known = new Set(previous.map((thread) => thread.id));
+        return [
+          ...previous.map((thread) => {
+            const stored = page.items.find((item) => item.id === thread.id);
+            return stored === undefined || thread.vault !== vault
+              ? thread
+              : {
+                  ...thread,
+                  archiveBacked: true as const,
+                  ...(thread.usesDefaultTitle || thread.archiveTitle === true
+                    ? {
+                        archiveTitle: true as const,
+                        archiveTitleExpiresAt:
+                          'titleExpiresAt' in stored && typeof stored.titleExpiresAt === 'string'
+                            ? stored.titleExpiresAt
+                            : null,
+                        title: projectArchiveThread(stored).title ?? 'Conversation',
+                      }
+                    : {}),
+                };
+          }),
+          ...page.items
+            .filter((thread) => !known.has(thread.id))
+            .map((thread) => archiveConversation(thread, vault)),
+        ];
       });
-      const active=page.items.find((thread)=>thread.id===activeId);
-      if(active===undefined || streamingRef.current || chatRef.current.live!==null)return;
-      const epoch=restoreEpoch.current;const read=await archiveService.messages(context,activeId);
-      if(retired || archiveReadEpoch.current!==discovery || originalOpening!==getVaultOpening() || streamingRef.current || restoreEpoch.current!==epoch)return;
-      if(!sameArchiveContext(context,read.context)||read.threadId!==activeId)throw new Error('archive scope');
-      const markers=new Map(read.items.filter((item)=>item.content!==null && item.persistence==='retained').flatMap((item)=>{
-        const marker={attemptId:item.attemptId,expiresAt:item.expiresAt,persistence:item.persistence};return [[item.userMessageId,marker],[item.assistantMessageId,marker]] as const;
-      }));
-      const held=chatRef.current.messages;
-      const marked=held.map((message)=>{const marker=markers.get(message.id);return marker===undefined?message:{...message,archiveRecord:marker};});
-      if(marked.some((message,index)=>message!==held[index]))restore(marked,chatRef.current.sessionId);
-    })().catch(()=>{/* Background discovery failure never presents an empty successful archive. Explicit reads show their own failure. */});
-    return()=>{retired=true;};
-  },[vault,opening,turnEndedAt,activeId,restore]);
+      const active = page.items.find((thread) => thread.id === activeId);
+      if (active === undefined || streamingRef.current || chatRef.current.live !== null) return;
+      const epoch = restoreEpoch.current;
+      const read = await archiveService.messages(context, activeId);
+      if (
+        retired ||
+        archiveReadEpoch.current !== discovery ||
+        originalOpening !== getVaultOpening() ||
+        streamingRef.current ||
+        restoreEpoch.current !== epoch
+      )
+        return;
+      if (!sameArchiveContext(context, read.context) || read.threadId !== activeId)
+        throw new Error('archive scope');
+      const markers = new Map(
+        read.items
+          .filter((item) => item.content !== null && item.persistence === 'retained')
+          .flatMap((item) => {
+            const marker = {
+              attemptId: item.attemptId,
+              expiresAt: item.expiresAt,
+              persistence: item.persistence,
+            };
+            return [
+              [item.userMessageId, marker],
+              [item.assistantMessageId, marker],
+            ] as const;
+          }),
+      );
+      const held = chatRef.current.messages;
+      const marked = held.map((message) => {
+        const marker = markers.get(message.id);
+        return marker === undefined ? message : { ...message, archiveRecord: marker };
+      });
+      if (marked.some((message, index) => message !== held[index]))
+        restore(marked, chatRef.current.sessionId);
+    })().catch(() => {
+      /* Background discovery failure never presents an empty successful archive. Explicit reads show their own failure. */
+    });
+    return () => {
+      retired = true;
+    };
+  }, [vault, opening, turnEndedAt, activeId, restore]);
 
   const active = conversations.find((c) => c.id === activeId) ?? null;
   return {

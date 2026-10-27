@@ -228,7 +228,24 @@ const selectFieldEditorVault = (state: VaultState): FieldEditorVault => ({
 export function FieldEditor(props: FieldEditorProps) {
   // A draft belongs to a file and property, even if a view reuses its cell.
   const vaultState = useVaultStore(useShallow(selectFieldEditorVault));
-  if(props.onPatch===undefined&&props.entry.authority?.kind==='sqlite_metadata')return <SelectedMetadataFieldCell key={vaultState.vaultPath+':'+props.entry.path+':'+props.entry.authority.workspaceId+':'+props.entry.authority.recordId+':'+props.def.name} {...props} vaultState={vaultState}/>;
+  if (props.onPatch === undefined && props.entry.authority?.kind === 'sqlite_metadata')
+    return (
+      <SelectedMetadataFieldCell
+        key={
+          vaultState.vaultPath +
+          ':' +
+          props.entry.path +
+          ':' +
+          props.entry.authority.workspaceId +
+          ':' +
+          props.entry.authority.recordId +
+          ':' +
+          props.def.name
+        }
+        {...props}
+        vaultState={vaultState}
+      />
+    );
   return (
     <FieldEditorValue
       key={`${vaultState.vaultPath}:${props.entry.path}:${props.def.name}`}
@@ -240,18 +257,94 @@ export function FieldEditor(props: FieldEditorProps) {
 
 /** The bounded first selected property consumer. Other canonical kinds have
  * no ordinary inline writer yet; caller-owned draft forms stay onPatch. */
-const SELECTED_FIELD_INPUTS:Partial<Record<FieldDef['kind'],{kind:'text'|'checkbox'|'number'|'date';inputMode:'text'|'email'|'tel'|'url'|'decimal'}>>={
- date:{kind:'date',inputMode:'text'},number:{kind:'number',inputMode:'decimal'},text:{kind:'text',inputMode:'text'},checkbox:{kind:'checkbox',inputMode:'text'},email:{kind:'text',inputMode:'email'},phone:{kind:'text',inputMode:'tel'},url:{kind:'text',inputMode:'url'},
+const SELECTED_FIELD_INPUTS: Partial<
+  Record<
+    FieldDef['kind'],
+    {
+      kind: 'text' | 'checkbox' | 'number' | 'date';
+      inputMode: 'text' | 'email' | 'tel' | 'url' | 'decimal';
+    }
+  >
+> = {
+  date: { kind: 'date', inputMode: 'text' },
+  number: { kind: 'number', inputMode: 'decimal' },
+  text: { kind: 'text', inputMode: 'text' },
+  checkbox: { kind: 'checkbox', inputMode: 'text' },
+  email: { kind: 'text', inputMode: 'email' },
+  phone: { kind: 'text', inputMode: 'tel' },
+  url: { kind: 'text', inputMode: 'url' },
 };
-function SelectedMetadataFieldCell({entry,def,schema,vaultState,onEditingChange,chrome='cell',placeholder='ghost'}:FieldEditorProps&{vaultState:FieldEditorVault}){
- const [editing,setEditing]=useState(false);const callback=useRef(onEditingChange);callback.current=onEditingChange;
- useEffect(()=>{callback.current?.(editing);},[editing]);useEffect(()=>()=>callback.current?.(false),[]);
- const label=humanize(def.name);const resolved=schema.resolveField(entry,def.name);
- const display=resolved.display||'';
- const renderer=SELECTED_FIELD_INPUTS[def.kind];
- if(vaultState.vaultPath===null||renderer===undefined||!METADATA_PATCH.supportedDeclaredKinds.includes(def.kind)||def.from!==undefined)return <span className="text-ui text-n-600">{display||'Empty'}<span role="status" className="block text-xs">This property needs a different editor.</span></span>;
- if(editing)return <SelectedMetadataFieldInput entry={entry} vault={vaultState.vaultPath} field={def.name} label={label} kind={renderer.kind} inputMode={renderer.inputMode} onEnd={()=>setEditing(false)}/>;
- return <span className="inline-flex min-w-0 max-w-full flex-col"><button type="button" data-cell-primary className={'min-w-0 text-left text-ui text-n-800 '+CHROME[chrome]} aria-label={def.kind==='checkbox'||def.kind==='number'||def.kind==='date'?'Edit '+label:display||label} onClick={event=>{event.stopPropagation();setEditing(true);}}>{display||(placeholder==='blank'?null:<span className="text-n-400">Empty</span>)}</button>{resolved.unavailableReason&&<span role="status" className="text-xs text-n-600">{resolved.unavailableReason}</span>}</span>;
+function SelectedMetadataFieldCell({
+  entry,
+  def,
+  schema,
+  vaultState,
+  onEditingChange,
+  chrome = 'cell',
+  placeholder = 'ghost',
+}: FieldEditorProps & { vaultState: FieldEditorVault }) {
+  const [editing, setEditing] = useState(false);
+  const callback = useRef(onEditingChange);
+  callback.current = onEditingChange;
+  useEffect(() => {
+    callback.current?.(editing);
+  }, [editing]);
+  useEffect(() => () => callback.current?.(false), []);
+  const label = humanize(def.name);
+  const resolved = schema.resolveField(entry, def.name);
+  const display = resolved.display || '';
+  const renderer = SELECTED_FIELD_INPUTS[def.kind];
+  if (
+    vaultState.vaultPath === null ||
+    renderer === undefined ||
+    !METADATA_PATCH.supportedDeclaredKinds.includes(def.kind) ||
+    def.from !== undefined
+  )
+    return (
+      <span className="text-ui text-n-600">
+        {display || 'Empty'}
+        <span role="status" className="block text-xs">
+          This property needs a different editor.
+        </span>
+      </span>
+    );
+  if (editing)
+    return (
+      <SelectedMetadataFieldInput
+        entry={entry}
+        vault={vaultState.vaultPath}
+        field={def.name}
+        label={label}
+        kind={renderer.kind}
+        inputMode={renderer.inputMode}
+        onEnd={() => setEditing(false)}
+      />
+    );
+  return (
+    <span className="inline-flex min-w-0 max-w-full flex-col">
+      <button
+        type="button"
+        data-cell-primary
+        className={'min-w-0 text-left text-ui text-n-800 ' + CHROME[chrome]}
+        aria-label={
+          def.kind === 'checkbox' || def.kind === 'number' || def.kind === 'date'
+            ? 'Edit ' + label
+            : display || label
+        }
+        onClick={(event) => {
+          event.stopPropagation();
+          setEditing(true);
+        }}
+      >
+        {display || (placeholder === 'blank' ? null : <span className="text-n-400">Empty</span>)}
+      </button>
+      {resolved.unavailableReason && (
+        <span role="status" className="text-xs text-n-600">
+          {resolved.unavailableReason}
+        </span>
+      )}
+    </span>
+  );
 }
 
 function FieldEditorValue({

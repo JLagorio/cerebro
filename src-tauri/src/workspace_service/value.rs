@@ -267,75 +267,191 @@ pub(crate) fn decode_tagged(source: &str) -> Result<PropertyValue, ValueError> {
 // Exact comparison is a view of a bounded lexeme, never a rewrite of metadata.
 // Magnitude exponents are bounded digit strings, not machine exponents or an
 // instruction to allocate zeros. This also handles 256-byte exponent lexemes.
-struct DecimalPower { negative: bool, digits: Vec<u8> }
+struct DecimalPower {
+    negative: bool,
+    digits: Vec<u8>,
+}
 impl DecimalPower {
     fn new(negative: bool, digits: &[u8]) -> Self {
-        let first = digits.iter().position(|digit| *digit != b'0').unwrap_or(digits.len());
-        let digits = if first == digits.len() { vec![b'0'] } else { digits[first..].to_vec() };
-        Self { negative: negative && digits != [b'0'], digits }
-    }
-    fn magnitude(a: &[u8], b: &[u8]) -> std::cmp::Ordering { a.len().cmp(&b.len()).then_with(|| a.cmp(b)) }
-    fn sum(a: &[u8], b: &[u8]) -> Vec<u8> {
-        let mut out = Vec::new(); let mut carry = 0u8;
-        for index in 0..a.len().max(b.len()) {
-            let x = a.len().checked_sub(index + 1).map(|i| a[i] - b'0').unwrap_or(0);
-            let y = b.len().checked_sub(index + 1).map(|i| b[i] - b'0').unwrap_or(0);
-            let sum = x + y + carry; out.push(b'0' + sum % 10); carry = sum / 10;
+        let first = digits
+            .iter()
+            .position(|digit| *digit != b'0')
+            .unwrap_or(digits.len());
+        let digits = if first == digits.len() {
+            vec![b'0']
+        } else {
+            digits[first..].to_vec()
+        };
+        Self {
+            negative: negative && digits != [b'0'],
+            digits,
         }
-        if carry != 0 { out.push(b'0' + carry); } out.reverse(); out
+    }
+    fn magnitude(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+        a.len().cmp(&b.len()).then_with(|| a.cmp(b))
+    }
+    fn sum(a: &[u8], b: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut carry = 0u8;
+        for index in 0..a.len().max(b.len()) {
+            let x = a
+                .len()
+                .checked_sub(index + 1)
+                .map(|i| a[i] - b'0')
+                .unwrap_or(0);
+            let y = b
+                .len()
+                .checked_sub(index + 1)
+                .map(|i| b[i] - b'0')
+                .unwrap_or(0);
+            let sum = x + y + carry;
+            out.push(b'0' + sum % 10);
+            carry = sum / 10;
+        }
+        if carry != 0 {
+            out.push(b'0' + carry);
+        }
+        out.reverse();
+        out
     }
     // a >= b; both are normalized nonnegative integer digit strings.
     fn difference(a: &[u8], b: &[u8]) -> Vec<u8> {
-        let mut out = Vec::new(); let mut borrow = 0i16;
+        let mut out = Vec::new();
+        let mut borrow = 0i16;
         for index in 0..a.len() {
             let x = i16::from(a[a.len() - index - 1] - b'0');
-            let y = b.len().checked_sub(index + 1).map(|i| i16::from(b[i] - b'0')).unwrap_or(0);
-            let value = x - y - borrow; borrow = i16::from(value < 0);
-            out.push(b'0' + u8::try_from(if value < 0 { value + 10 } else { value }).expect("decimal subtraction digit"));
+            let y = b
+                .len()
+                .checked_sub(index + 1)
+                .map(|i| i16::from(b[i] - b'0'))
+                .unwrap_or(0);
+            let value = x - y - borrow;
+            borrow = i16::from(value < 0);
+            out.push(
+                b'0' + u8::try_from(if value < 0 { value + 10 } else { value })
+                    .expect("decimal subtraction digit"),
+            );
         }
-        out.reverse(); Self::new(false, &out).digits
+        out.reverse();
+        Self::new(false, &out).digits
     }
     fn offset(self, offset: i32) -> Self {
-        if offset == 0 { return self; }
+        if offset == 0 {
+            return self;
+        }
         let other = Self::new(offset < 0, offset.unsigned_abs().to_string().as_bytes());
-        if self.negative == other.negative { return Self::new(self.negative, &Self::sum(&self.digits, &other.digits)); }
+        if self.negative == other.negative {
+            return Self::new(self.negative, &Self::sum(&self.digits, &other.digits));
+        }
         match Self::magnitude(&self.digits, &other.digits) {
-            std::cmp::Ordering::Less => Self::new(other.negative, &Self::difference(&other.digits, &self.digits)),
-            _ => Self::new(self.negative, &Self::difference(&self.digits, &other.digits)),
+            std::cmp::Ordering::Less => Self::new(
+                other.negative,
+                &Self::difference(&other.digits, &self.digits),
+            ),
+            _ => Self::new(
+                self.negative,
+                &Self::difference(&self.digits, &other.digits),
+            ),
         }
     }
     fn compare(&self, other: &Self) -> std::cmp::Ordering {
-        if self.negative != other.negative { return if self.negative { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater }; }
-        let order = Self::magnitude(&self.digits, &other.digits); if self.negative { order.reverse() } else { order }
+        if self.negative != other.negative {
+            return if self.negative {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            };
+        }
+        let order = Self::magnitude(&self.digits, &other.digits);
+        if self.negative {
+            order.reverse()
+        } else {
+            order
+        }
     }
 }
-struct ComparableDecimal { negative: bool, digits: Vec<u8>, power: DecimalPower }
+struct ComparableDecimal {
+    negative: bool,
+    digits: Vec<u8>,
+    power: DecimalPower,
+}
 fn comparable_decimal(source: &str) -> Option<ComparableDecimal> {
-    let negative = source.starts_with('-'); let source = source.strip_prefix('-').unwrap_or(source);
-    let (mantissa, exponent) = source.split_once(|c| c == 'e' || c == 'E').unwrap_or((source, "0"));
-    let fraction = mantissa.split_once('.').map(|(_, fraction)| fraction.len()).unwrap_or(0);
-    let raw = mantissa.bytes().filter(|digit| *digit != b'.').collect::<Vec<_>>();
+    let negative = source.starts_with('-');
+    let source = source.strip_prefix('-').unwrap_or(source);
+    let (mantissa, exponent) = source
+        .split_once(|c| c == 'e' || c == 'E')
+        .unwrap_or((source, "0"));
+    let fraction = mantissa
+        .split_once('.')
+        .map(|(_, fraction)| fraction.len())
+        .unwrap_or(0);
+    let raw = mantissa
+        .bytes()
+        .filter(|digit| *digit != b'.')
+        .collect::<Vec<_>>();
     let first = raw.iter().position(|digit| *digit != b'0')?;
     let significant = raw.len() - first;
-    let mut digits = raw[first..].to_vec(); while digits.last() == Some(&b'0') { digits.pop(); }
-    let power = DecimalPower::new(exponent.starts_with('-'), exponent.trim_start_matches(['-', '+']).as_bytes());
-    let offset = i32::try_from(significant).expect("bounded decimal digits") - i32::try_from(fraction).expect("bounded decimal fraction");
-    Some(ComparableDecimal { negative, digits, power: power.offset(offset) })
+    let mut digits = raw[first..].to_vec();
+    while digits.last() == Some(&b'0') {
+        digits.pop();
+    }
+    let power = DecimalPower::new(
+        exponent.starts_with('-'),
+        exponent.trim_start_matches(['-', '+']).as_bytes(),
+    );
+    let offset = i32::try_from(significant).expect("bounded decimal digits")
+        - i32::try_from(fraction).expect("bounded decimal fraction");
+    Some(ComparableDecimal {
+        negative,
+        digits,
+        power: power.offset(offset),
+    })
 }
 pub(crate) fn compare_decimals(left: &str, right: &str) -> Result<std::cmp::Ordering, ValueError> {
     use std::cmp::Ordering;
-    if !decimal_valid(left) || !decimal_valid(right) { return Err(invalid("Invalid finite decimal comparison lexeme.")); }
+    if !decimal_valid(left) || !decimal_valid(right) {
+        return Err(invalid("Invalid finite decimal comparison lexeme."));
+    }
     let (a, b) = (comparable_decimal(left), comparable_decimal(right));
     let (a, b) = match (a, b) {
         (None, None) => return Ok(Ordering::Equal),
-        (None, Some(b)) => return Ok(if b.negative { Ordering::Greater } else { Ordering::Less }),
-        (Some(a), None) => return Ok(if a.negative { Ordering::Less } else { Ordering::Greater }),
+        (None, Some(b)) => {
+            return Ok(if b.negative {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            })
+        }
+        (Some(a), None) => {
+            return Ok(if a.negative {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            })
+        }
         (Some(a), Some(b)) => (a, b),
     };
-    if a.negative != b.negative { return Ok(if a.negative { Ordering::Less } else { Ordering::Greater }); }
+    if a.negative != b.negative {
+        return Ok(if a.negative {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        });
+    }
     let order = a.power.compare(&b.power).then_with(|| {
         let count = a.digits.len().max(b.digits.len());
-        a.digits.iter().copied().chain(std::iter::repeat(b'0')).take(count).cmp(b.digits.iter().copied().chain(std::iter::repeat(b'0')).take(count))
+        a.digits
+            .iter()
+            .copied()
+            .chain(std::iter::repeat(b'0'))
+            .take(count)
+            .cmp(
+                b.digits
+                    .iter()
+                    .copied()
+                    .chain(std::iter::repeat(b'0'))
+                    .take(count),
+            )
     });
     Ok(if a.negative { order.reverse() } else { order })
 }

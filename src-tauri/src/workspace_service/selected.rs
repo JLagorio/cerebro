@@ -52,18 +52,26 @@ mod metadata;
 #[cfg(not(unix))]
 #[path = "selected_metadata_unsupported.rs"]
 mod metadata;
-pub(crate) use metadata::{patch_metadata,read_property};
-#[cfg(all(test,unix))]
-pub(crate) use metadata::{with_metadata_request_bounds_for_test,with_operation_stamp_for_test};
+pub(crate) use metadata::{patch_metadata, read_property};
+#[cfg(all(test, unix))]
+pub(crate) use metadata::{with_metadata_request_bounds_for_test, with_operation_stamp_for_test};
 #[path = "selected_view_types.rs"]
 mod view_types;
 pub(crate) use view_types::*;
 #[path = "selected_view.rs"]
 mod saved_view;
-#[cfg_attr(not(test),expect(unused_imports,reason="Native saved-view command integration follows causal service RED."))]
+#[cfg_attr(
+    not(test),
+    expect(
+        unused_imports,
+        reason = "Native saved-view command integration follows causal service RED."
+    )
+)]
 pub(crate) use saved_view::read_saved_view;
 #[cfg(test)]
-pub(crate) use saved_view::{with_saved_view_before_publish_for_test,with_saved_view_response_limit_for_test};
+pub(crate) use saved_view::{
+    with_saved_view_before_publish_for_test, with_saved_view_response_limit_for_test,
+};
 #[path = "selected_editor.rs"]
 mod editor;
 pub(crate) use editor::{read_editor_snapshot, save_editor_body};
@@ -222,10 +230,14 @@ fn verify_schema_with_journal(
                     ("sqlite_autoindex_workspace_1", "workspace")
                         | ("sqlite_autoindex_records_1", "records")
                         | ("sqlite_autoindex_records_2", "records")
-                ) && !(version == metadata::schema_version() && matches!((name.as_str(),table.as_str()),
-                    ("sqlite_autoindex_metadata_requests_1","metadata_requests") |
-                    ("sqlite_autoindex_metadata_requests_2","metadata_requests") |
-                    ("sqlite_autoindex_metadata_requests_3","metadata_requests"))) || !automatic.insert(name)
+                ) && !(version == metadata::schema_version()
+                    && matches!(
+                        (name.as_str(), table.as_str()),
+                        ("sqlite_autoindex_metadata_requests_1", "metadata_requests")
+                            | ("sqlite_autoindex_metadata_requests_2", "metadata_requests")
+                            | ("sqlite_autoindex_metadata_requests_3", "metadata_requests")
+                    ))
+                    || !automatic.insert(name)
                 {
                     return Err(invalid("Canonical indexes are unsupported."));
                 }
@@ -237,7 +249,14 @@ fn verify_schema_with_journal(
             }
         }
     }
-    if seen.len() != expected.len() || automatic.len() != if version == metadata::schema_version() { 6 } else { 3 } {
+    if seen.len() != expected.len()
+        || automatic.len()
+            != if version == metadata::schema_version() {
+                6
+            } else {
+                3
+            }
+    {
         return Err(invalid("Canonical schema is incomplete."));
     }
     let integrity: String = conn
@@ -248,9 +267,15 @@ fn verify_schema_with_journal(
     }
     Ok(())
 }
-fn record_path_valid(path:&str)->bool {
-    crate::files::bytes::rel_refusal("selected-authority",path).is_none() && path.ends_with(".md") &&
-        !path.split('/').any(crate::vault::scan::is_hidden) && !path.split('/').rev().skip(1).any(crate::vault::scan::is_skipped_dir)
+fn record_path_valid(path: &str) -> bool {
+    crate::files::bytes::rel_refusal("selected-authority", path).is_none()
+        && path.ends_with(".md")
+        && !path.split('/').any(crate::vault::scan::is_hidden)
+        && !path
+            .split('/')
+            .rev()
+            .skip(1)
+            .any(crate::vault::scan::is_skipped_dir)
 }
 fn read_snapshot(conn: &Connection, binding: &SelectedBinding) -> Result<Snapshot, AuthorityError> {
     read_snapshot_for_workspace(conn, &binding.workspace_id)
@@ -396,8 +421,12 @@ fn read_snapshot_with_journal(
     for record in &records {
         relations(&record.metadata, &ids)?;
     }
-    let snapshot = Snapshot { schema_revision, epoch, records };
-    metadata::validate_requests(conn,workspace_id,&snapshot)?;
+    let snapshot = Snapshot {
+        schema_revision,
+        epoch,
+        records,
+    };
+    metadata::validate_requests(conn, workspace_id, &snapshot)?;
     Ok(snapshot)
 }
 fn record_version(binding: &SelectedBinding, record: &Record) -> SelectedRecordVersion {
@@ -511,7 +540,9 @@ fn entry_metadata(record: &Record) -> Result<EntryMetadata, AuthorityError> {
     // The exact complete Object is retained below; this is compatibility only.
     for (key, stored) in fields {
         match value::legacy_value(stored) {
-            Ok(projected) => { properties.insert(key.clone(), projected); }
+            Ok(projected) => {
+                properties.insert(key.clone(), projected);
+            }
             Err(_) => unavailable_legacy_keys.push(key.clone()),
         }
     }
@@ -529,10 +560,16 @@ fn entry(binding: &SelectedBinding, record: &Record, body: &str) -> Result<Entry
     entry_with_metadata(binding, record, body, entry_metadata(record)?)
 }
 fn entry_with_metadata(
-    binding: &SelectedBinding, record: &Record, body: &str,
+    binding: &SelectedBinding,
+    record: &Record,
+    body: &str,
     metadata: EntryMetadata,
 ) -> Result<Entry, AuthorityError> {
-    let EntryMetadata { properties, entry_type, canonical_properties } = metadata;
+    let EntryMetadata {
+        properties,
+        entry_type,
+        canonical_properties,
+    } = metadata;
     let filename = record
         .path
         .rsplit('/')
@@ -1078,4 +1115,4 @@ pub(crate) use search::{search_snapshot, source_body};
 // Actual scoped semantic read services; metadata stays in tagged canonical form.
 #[path = "selected_semantics.rs"]
 mod semantics;
-pub(crate) use semantics::{query_records, describe_database, suggest_view, agenda_text};
+pub(crate) use semantics::{agenda_text, describe_database, query_records, suggest_view};

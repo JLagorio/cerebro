@@ -1771,7 +1771,10 @@ mod tests {
         let mut message = wire_phase_batch();
         message["events"][7][6]["value"] = serde_json::json!(true);
         let batch = phase_batch_input(message);
-        assert!(super::decode_phase_batch(&batch).is_ok(), "the actual leave step confirms completion with true");
+        assert!(
+            super::decode_phase_batch(&batch).is_ok(),
+            "the actual leave step confirms completion with true"
+        );
     }
 
     #[test]
@@ -1779,7 +1782,10 @@ mod tests {
         let mut message = wire_phase_batch();
         message["events"][7][6]["value"] = serde_json::Value::Null;
         let batch = phase_batch_input(message);
-        assert!(super::decode_phase_batch(&batch).is_err(), "void is not confirmation that the shell finished leaving");
+        assert!(
+            super::decode_phase_batch(&batch).is_err(),
+            "void is not confirmation that the shell finished leaving"
+        );
     }
 
     #[test]

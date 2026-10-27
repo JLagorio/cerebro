@@ -513,7 +513,11 @@ trait GhExecutor {
 }
 
 fn check_cancelled(cancelled: &dyn Fn() -> bool) -> Result<(), ConnectionError> {
-    if cancelled() { Err(ConnectionError::Cancelled) } else { Ok(()) }
+    if cancelled() {
+        Err(ConnectionError::Cancelled)
+    } else {
+        Ok(())
+    }
 }
 
 fn capture_selected(
@@ -534,14 +538,20 @@ fn capture_selected(
     let _ = token_command(context, &provisional, recipe)?;
     executor.revalidate(context)?;
     check_cancelled(cancelled)?;
-    let help = executor.capture(&mut compatibility_command(context, empty_config)?, cancelled)?;
+    let help = executor.capture(
+        &mut compatibility_command(context, empty_config)?,
+        cancelled,
+    )?;
     check_cancelled(cancelled)?;
     let compatibility = accept_compatibility(context, help)?;
     // A binary/config/home replacement invalidates the selected attempt. Never
     // rediscover or fall back to a different executable/account on this path.
     executor.revalidate(context)?;
     check_cancelled(cancelled)?;
-    let output = executor.capture(&mut token_command(context, &compatibility, recipe)?, cancelled)?;
+    let output = executor.capture(
+        &mut token_command(context, &compatibility, recipe)?,
+        cancelled,
+    )?;
     check_cancelled(cancelled)?;
     executor.revalidate(context)?;
     check_cancelled(cancelled)?;

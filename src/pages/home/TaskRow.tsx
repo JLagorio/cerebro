@@ -5,7 +5,15 @@ import { resolveTarget } from '@/engine/wikilink';
 import { todayIso } from '@/lib/templates';
 import { useVaultStore } from '@/stores/vaultStore';
 
-export function TaskRow({ task, onToggle, disabledReason }: { task: DocTask; onToggle: (done: boolean) => void; disabledReason?: string }) {
+export function TaskRow({
+  task,
+  onToggle,
+  disabledReason,
+}: {
+  task: DocTask;
+  onToggle: (done: boolean) => void;
+  disabledReason?: string;
+}) {
   const entries = useVaultStore((s) => s.entries);
   const open = useOpenPath();
   const source = entries.find((e) => e.path === task.sourcePath) ?? null;

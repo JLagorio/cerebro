@@ -5,13 +5,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowScheduleView",
       "type": "object",
-      "required": [
-        "configuration",
-        "context",
-        "monitoring",
-        "readiness",
-        "workflowId"
-      ],
+      "required": ["configuration", "context", "monitoring", "readiness", "workflowId"],
       "properties": {
         "configuration": {
           "anyOf": [
@@ -74,10 +68,7 @@
               "type": "string"
             },
             "inputDigest": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "inputScope": {
               "$ref": "#/definitions/WorkflowInputScope"
@@ -87,10 +78,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -103,26 +91,15 @@
         },
         "WorkflowInputScope": {
           "type": "string",
-          "enum": [
-            "all_valid_inputs",
-            "exact_canonical_input"
-          ]
+          "enum": ["all_valid_inputs", "exact_canonical_input"]
         },
         "WorkflowMonitorState": {
           "type": "string",
-          "enum": [
-            "watching",
-            "stopped",
-            "unavailable"
-          ]
+          "enum": ["watching", "stopped", "unavailable"]
         },
         "WorkflowPermissions": {
           "type": "object",
-          "required": [
-            "accounts",
-            "queryRecords",
-            "readPrefixes"
-          ],
+          "required": ["accounts", "queryRecords", "readPrefixes"],
           "properties": {
             "accounts": {
               "type": "array",
@@ -202,10 +179,7 @@
               "type": "string"
             },
             "inputJson": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "lastSkippedMs": {
               "anyOf": [
@@ -275,18 +249,11 @@
         },
         "WorkflowScheduleState": {
           "type": "string",
-          "enum": [
-            "enabled",
-            "paused",
-            "removed"
-          ]
+          "enum": ["enabled", "paused", "removed"]
         },
         "WorkflowVersionRef": {
           "type": "object",
-          "required": [
-            "definitionHash",
-            "workflowId"
-          ],
+          "required": ["definitionHash", "workflowId"],
           "properties": {
             "definitionHash": {
               "type": "string"
@@ -369,10 +336,7 @@
               "type": "string"
             },
             "inputDigest": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "inputScope": {
               "$ref": "#/definitions/WorkflowInputScope"
@@ -382,10 +346,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -398,18 +359,11 @@
         },
         "WorkflowInputScope": {
           "type": "string",
-          "enum": [
-            "all_valid_inputs",
-            "exact_canonical_input"
-          ]
+          "enum": ["all_valid_inputs", "exact_canonical_input"]
         },
         "WorkflowPermissions": {
           "type": "object",
-          "required": [
-            "accounts",
-            "queryRecords",
-            "readPrefixes"
-          ],
+          "required": ["accounts", "queryRecords", "readPrefixes"],
           "properties": {
             "accounts": {
               "type": "array",
@@ -431,10 +385,7 @@
         },
         "WorkflowVersionRef": {
           "type": "object",
-          "required": [
-            "definitionHash",
-            "workflowId"
-          ],
+          "required": ["definitionHash", "workflowId"],
           "properties": {
             "definitionHash": {
               "type": "string"
@@ -451,12 +402,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowScheduleChangeRequest",
       "type": "object",
-      "required": [
-        "context",
-        "expectedRevision",
-        "requestKey",
-        "workflowId"
-      ],
+      "required": ["context", "expectedRevision", "requestKey", "workflowId"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -480,10 +426,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -500,14 +443,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowScheduleAck",
       "type": "object",
-      "required": [
-        "context",
-        "current",
-        "monitoring",
-        "receipt",
-        "replayed",
-        "workflowId"
-      ],
+      "required": ["context", "current", "monitoring", "receipt", "replayed", "workflowId"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -573,10 +509,7 @@
               "type": "string"
             },
             "inputDigest": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "inputScope": {
               "$ref": "#/definitions/WorkflowInputScope"
@@ -586,10 +519,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -602,27 +532,15 @@
         },
         "WorkflowInputScope": {
           "type": "string",
-          "enum": [
-            "all_valid_inputs",
-            "exact_canonical_input"
-          ]
+          "enum": ["all_valid_inputs", "exact_canonical_input"]
         },
         "WorkflowMonitoring": {
           "type": "string",
-          "enum": [
-            "queued",
-            "observed",
-            "busy",
-            "unavailable"
-          ]
+          "enum": ["queued", "observed", "busy", "unavailable"]
         },
         "WorkflowPermissions": {
           "type": "object",
-          "required": [
-            "accounts",
-            "queryRecords",
-            "readPrefixes"
-          ],
+          "required": ["accounts", "queryRecords", "readPrefixes"],
           "properties": {
             "accounts": {
               "type": "array",
@@ -702,10 +620,7 @@
               "type": "string"
             },
             "inputJson": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "lastSkippedMs": {
               "anyOf": [
@@ -763,21 +678,11 @@
         },
         "WorkflowScheduleOperation": {
           "type": "string",
-          "enum": [
-            "enable",
-            "pause",
-            "remove"
-          ]
+          "enum": ["enable", "pause", "remove"]
         },
         "WorkflowScheduleReceipt": {
           "type": "object",
-          "required": [
-            "epoch",
-            "operation",
-            "revision",
-            "state",
-            "version"
-          ],
+          "required": ["epoch", "operation", "revision", "state", "version"],
           "properties": {
             "epoch": {
               "type": "string"
@@ -799,18 +704,11 @@
         },
         "WorkflowScheduleState": {
           "type": "string",
-          "enum": [
-            "enabled",
-            "paused",
-            "removed"
-          ]
+          "enum": ["enabled", "paused", "removed"]
         },
         "WorkflowVersionRef": {
           "type": "object",
-          "required": [
-            "definitionHash",
-            "workflowId"
-          ],
+          "required": ["definitionHash", "workflowId"],
           "properties": {
             "definitionHash": {
               "type": "string"
@@ -827,10 +725,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowScheduleMonitorAck",
       "type": "object",
-      "required": [
-        "context",
-        "monitoring"
-      ],
+      "required": ["context", "monitoring"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -843,10 +738,7 @@
       "definitions": {
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -859,12 +751,7 @@
         },
         "WorkflowMonitoring": {
           "type": "string",
-          "enum": [
-            "queued",
-            "observed",
-            "busy",
-            "unavailable"
-          ]
+          "enum": ["queued", "observed", "busy", "unavailable"]
         }
       }
     },
@@ -932,10 +819,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -948,14 +832,7 @@
         },
         "WorkflowScheduleDisposition": {
           "type": "string",
-          "enum": [
-            "idle",
-            "due",
-            "paused",
-            "not_ready",
-            "recovery_held",
-            "clock_backwards"
-          ]
+          "enum": ["idle", "due", "paused", "not_ready", "recovery_held", "clock_backwards"]
         }
       }
     },
@@ -963,10 +840,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowContext",
       "type": "object",
-      "required": [
-        "storeUuid",
-        "vaultId"
-      ],
+      "required": ["storeUuid", "vaultId"],
       "properties": {
         "storeUuid": {
           "type": "string"
@@ -981,13 +855,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowDraft",
       "type": "object",
-      "required": [
-        "entryStepId",
-        "inputSchemaJson",
-        "steps",
-        "triggerJson",
-        "workflowId"
-      ],
+      "required": ["entryStepId", "inputSchemaJson", "steps", "triggerJson", "workflowId"],
       "properties": {
         "entryStepId": {
           "type": "string"
@@ -1014,18 +882,11 @@
           "oneOf": [
             {
               "type": "object",
-              "required": [
-                "kind",
-                "nextStepId",
-                "outputSchemaJson",
-                "queryJson"
-              ],
+              "required": ["kind", "nextStepId", "outputSchemaJson", "queryJson"],
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "read"
-                  ]
+                  "enum": ["read"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -1041,18 +902,11 @@
             },
             {
               "type": "object",
-              "required": [
-                "kind",
-                "mappingJson",
-                "nextStepId",
-                "outputSchemaJson"
-              ],
+              "required": ["kind", "mappingJson", "nextStepId", "outputSchemaJson"],
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "transform"
-                  ]
+                  "enum": ["transform"]
                 },
                 "mappingJson": {
                   "type": "string"
@@ -1068,12 +922,7 @@
             },
             {
               "type": "object",
-              "required": [
-                "ifFalse",
-                "ifTrue",
-                "kind",
-                "predicateJson"
-              ],
+              "required": ["ifFalse", "ifTrue", "kind", "predicateJson"],
               "properties": {
                 "ifFalse": {
                   "type": "string"
@@ -1083,9 +932,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "condition"
-                  ]
+                  "enum": ["condition"]
                 },
                 "predicateJson": {
                   "type": "string"
@@ -1122,9 +969,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "action"
-                  ]
+                  "enum": ["action"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -1134,20 +979,14 @@
             },
             {
               "type": "object",
-              "required": [
-                "at",
-                "kind",
-                "nextStepId"
-              ],
+              "required": ["at", "kind", "nextStepId"],
               "properties": {
                 "at": {
                   "type": "string"
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "timer"
-                  ]
+                  "enum": ["timer"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -1157,21 +996,14 @@
             },
             {
               "type": "object",
-              "required": [
-                "expiresAt",
-                "kind",
-                "nextStepId",
-                "schemaJson"
-              ],
+              "required": ["expiresAt", "kind", "nextStepId", "schemaJson"],
               "properties": {
                 "expiresAt": {
                   "type": "string"
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "external_input"
-                  ]
+                  "enum": ["external_input"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -1184,16 +1016,11 @@
             },
             {
               "type": "object",
-              "required": [
-                "kind",
-                "outputJson"
-              ],
+              "required": ["kind", "outputJson"],
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "result"
-                  ]
+                  "enum": ["result"]
                 },
                 "outputJson": {
                   "type": "string"
@@ -1205,11 +1032,7 @@
         },
         "WorkflowStepDraft": {
           "type": "object",
-          "required": [
-            "label",
-            "operation",
-            "stepId"
-          ],
+          "required": ["label", "operation", "stepId"],
           "properties": {
             "label": {
               "type": "string"
@@ -1293,54 +1116,39 @@
           "oneOf": [
             {
               "type": "object",
-              "required": [
-                "state"
-              ],
+              "required": ["state"],
               "properties": {
                 "state": {
                   "type": "string",
-                  "enum": [
-                    "unavailable"
-                  ]
+                  "enum": ["unavailable"]
                 }
               },
               "additionalProperties": false
             },
             {
               "type": "object",
-              "required": [
-                "revision",
-                "state"
-              ],
+              "required": ["revision", "state"],
               "properties": {
                 "revision": {
                   "$ref": "#/definitions/SafeCounter"
                 },
                 "state": {
                   "type": "string",
-                  "enum": [
-                    "disabled"
-                  ]
+                  "enum": ["disabled"]
                 }
               },
               "additionalProperties": false
             },
             {
               "type": "object",
-              "required": [
-                "revision",
-                "state",
-                "version"
-              ],
+              "required": ["revision", "state", "version"],
               "properties": {
                 "revision": {
                   "$ref": "#/definitions/SafeCounter"
                 },
                 "state": {
                   "type": "string",
-                  "enum": [
-                    "enabled"
-                  ]
+                  "enum": ["enabled"]
                 },
                 "version": {
                   "$ref": "#/definitions/WorkflowVersionRef"
@@ -1352,10 +1160,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -1368,13 +1173,7 @@
         },
         "WorkflowDraft": {
           "type": "object",
-          "required": [
-            "entryStepId",
-            "inputSchemaJson",
-            "steps",
-            "triggerJson",
-            "workflowId"
-          ],
+          "required": ["entryStepId", "inputSchemaJson", "steps", "triggerJson", "workflowId"],
           "properties": {
             "entryStepId": {
               "type": "string"
@@ -1399,10 +1198,7 @@
         },
         "WorkflowDraftSnapshot": {
           "type": "object",
-          "required": [
-            "draft",
-            "etag"
-          ],
+          "required": ["draft", "etag"],
           "properties": {
             "draft": {
               "$ref": "#/definitions/WorkflowDraft"
@@ -1417,18 +1213,11 @@
           "oneOf": [
             {
               "type": "object",
-              "required": [
-                "kind",
-                "nextStepId",
-                "outputSchemaJson",
-                "queryJson"
-              ],
+              "required": ["kind", "nextStepId", "outputSchemaJson", "queryJson"],
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "read"
-                  ]
+                  "enum": ["read"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -1444,18 +1233,11 @@
             },
             {
               "type": "object",
-              "required": [
-                "kind",
-                "mappingJson",
-                "nextStepId",
-                "outputSchemaJson"
-              ],
+              "required": ["kind", "mappingJson", "nextStepId", "outputSchemaJson"],
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "transform"
-                  ]
+                  "enum": ["transform"]
                 },
                 "mappingJson": {
                   "type": "string"
@@ -1471,12 +1253,7 @@
             },
             {
               "type": "object",
-              "required": [
-                "ifFalse",
-                "ifTrue",
-                "kind",
-                "predicateJson"
-              ],
+              "required": ["ifFalse", "ifTrue", "kind", "predicateJson"],
               "properties": {
                 "ifFalse": {
                   "type": "string"
@@ -1486,9 +1263,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "condition"
-                  ]
+                  "enum": ["condition"]
                 },
                 "predicateJson": {
                   "type": "string"
@@ -1525,9 +1300,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "action"
-                  ]
+                  "enum": ["action"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -1537,20 +1310,14 @@
             },
             {
               "type": "object",
-              "required": [
-                "at",
-                "kind",
-                "nextStepId"
-              ],
+              "required": ["at", "kind", "nextStepId"],
               "properties": {
                 "at": {
                   "type": "string"
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "timer"
-                  ]
+                  "enum": ["timer"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -1560,21 +1327,14 @@
             },
             {
               "type": "object",
-              "required": [
-                "expiresAt",
-                "kind",
-                "nextStepId",
-                "schemaJson"
-              ],
+              "required": ["expiresAt", "kind", "nextStepId", "schemaJson"],
               "properties": {
                 "expiresAt": {
                   "type": "string"
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "external_input"
-                  ]
+                  "enum": ["external_input"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -1587,16 +1347,11 @@
             },
             {
               "type": "object",
-              "required": [
-                "kind",
-                "outputJson"
-              ],
+              "required": ["kind", "outputJson"],
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "result"
-                  ]
+                  "enum": ["result"]
                 },
                 "outputJson": {
                   "type": "string"
@@ -1608,10 +1363,7 @@
         },
         "WorkflowPublication": {
           "type": "object",
-          "required": [
-            "revision",
-            "version"
-          ],
+          "required": ["revision", "version"],
           "properties": {
             "revision": {
               "$ref": "#/definitions/SafeCounter"
@@ -1624,11 +1376,7 @@
         },
         "WorkflowStepDraft": {
           "type": "object",
-          "required": [
-            "label",
-            "operation",
-            "stepId"
-          ],
+          "required": ["label", "operation", "stepId"],
           "properties": {
             "label": {
               "type": "string"
@@ -1644,10 +1392,7 @@
         },
         "WorkflowVersionRef": {
           "type": "object",
-          "required": [
-            "definitionHash",
-            "workflowId"
-          ],
+          "required": ["definitionHash", "workflowId"],
           "properties": {
             "definitionHash": {
               "type": "string"
@@ -1664,12 +1409,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowCatalog",
       "type": "object",
-      "required": [
-        "context",
-        "items",
-        "nextCursor",
-        "truncated"
-      ],
+      "required": ["context", "items", "nextCursor", "truncated"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -1681,10 +1421,7 @@
           }
         },
         "nextCursor": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "truncated": {
           "type": "boolean"
@@ -1699,10 +1436,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -1715,11 +1449,7 @@
         },
         "WorkflowListItem": {
           "type": "object",
-          "required": [
-            "publication",
-            "readable",
-            "workflowId"
-          ],
+          "required": ["publication", "readable", "workflowId"],
           "properties": {
             "publication": {
               "anyOf": [
@@ -1742,10 +1472,7 @@
         },
         "WorkflowPublication": {
           "type": "object",
-          "required": [
-            "revision",
-            "version"
-          ],
+          "required": ["revision", "version"],
           "properties": {
             "revision": {
               "$ref": "#/definitions/SafeCounter"
@@ -1758,10 +1485,7 @@
         },
         "WorkflowVersionRef": {
           "type": "object",
-          "required": [
-            "definitionHash",
-            "workflowId"
-          ],
+          "required": ["definitionHash", "workflowId"],
           "properties": {
             "definitionHash": {
               "type": "string"
@@ -1778,10 +1502,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowValidation",
       "type": "object",
-      "required": [
-        "diagnostics",
-        "valid"
-      ],
+      "required": ["diagnostics", "valid"],
       "properties": {
         "diagnostics": {
           "type": "array",
@@ -1797,26 +1518,16 @@
       "definitions": {
         "WorkflowDiagnostic": {
           "type": "object",
-          "required": [
-            "code",
-            "field",
-            "stepId"
-          ],
+          "required": ["code", "field", "stepId"],
           "properties": {
             "code": {
               "$ref": "#/definitions/WorkflowErrorCode"
             },
             "field": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "stepId": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             }
           },
           "additionalProperties": false
@@ -1840,13 +1551,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowStartRequest",
       "type": "object",
-      "required": [
-        "context",
-        "inputJson",
-        "permissions",
-        "startKey",
-        "version"
-      ],
+      "required": ["context", "inputJson", "permissions", "startKey", "version"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -1897,10 +1602,7 @@
               "type": "string"
             },
             "inputDigest": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "inputScope": {
               "$ref": "#/definitions/WorkflowInputScope"
@@ -1910,10 +1612,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -1926,18 +1625,11 @@
         },
         "WorkflowInputScope": {
           "type": "string",
-          "enum": [
-            "all_valid_inputs",
-            "exact_canonical_input"
-          ]
+          "enum": ["all_valid_inputs", "exact_canonical_input"]
         },
         "WorkflowPermissions": {
           "type": "object",
-          "required": [
-            "accounts",
-            "queryRecords",
-            "readPrefixes"
-          ],
+          "required": ["accounts", "queryRecords", "readPrefixes"],
           "properties": {
             "accounts": {
               "type": "array",
@@ -1959,10 +1651,7 @@
         },
         "WorkflowVersionRef": {
           "type": "object",
-          "required": [
-            "definitionHash",
-            "workflowId"
-          ],
+          "required": ["definitionHash", "workflowId"],
           "properties": {
             "definitionHash": {
               "type": "string"
@@ -2020,18 +1709,11 @@
         },
         "WorkflowAdmission": {
           "type": "string",
-          "enum": [
-            "ready",
-            "busy",
-            "unavailable"
-          ]
+          "enum": ["ready", "busy", "unavailable"]
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -2044,10 +1726,7 @@
         },
         "WorkflowVersionRef": {
           "type": "object",
-          "required": [
-            "definitionHash",
-            "workflowId"
-          ],
+          "required": ["definitionHash", "workflowId"],
           "properties": {
             "definitionHash": {
               "type": "string"
@@ -2064,11 +1743,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowSaveRequest",
       "type": "object",
-      "required": [
-        "context",
-        "draft",
-        "expectedEtag"
-      ],
+      "required": ["context", "draft", "expectedEtag"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -2077,20 +1752,14 @@
           "$ref": "#/definitions/WorkflowDraft"
         },
         "expectedEtag": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
       "additionalProperties": false,
       "definitions": {
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -2103,13 +1772,7 @@
         },
         "WorkflowDraft": {
           "type": "object",
-          "required": [
-            "entryStepId",
-            "inputSchemaJson",
-            "steps",
-            "triggerJson",
-            "workflowId"
-          ],
+          "required": ["entryStepId", "inputSchemaJson", "steps", "triggerJson", "workflowId"],
           "properties": {
             "entryStepId": {
               "type": "string"
@@ -2136,18 +1799,11 @@
           "oneOf": [
             {
               "type": "object",
-              "required": [
-                "kind",
-                "nextStepId",
-                "outputSchemaJson",
-                "queryJson"
-              ],
+              "required": ["kind", "nextStepId", "outputSchemaJson", "queryJson"],
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "read"
-                  ]
+                  "enum": ["read"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -2163,18 +1819,11 @@
             },
             {
               "type": "object",
-              "required": [
-                "kind",
-                "mappingJson",
-                "nextStepId",
-                "outputSchemaJson"
-              ],
+              "required": ["kind", "mappingJson", "nextStepId", "outputSchemaJson"],
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "transform"
-                  ]
+                  "enum": ["transform"]
                 },
                 "mappingJson": {
                   "type": "string"
@@ -2190,12 +1839,7 @@
             },
             {
               "type": "object",
-              "required": [
-                "ifFalse",
-                "ifTrue",
-                "kind",
-                "predicateJson"
-              ],
+              "required": ["ifFalse", "ifTrue", "kind", "predicateJson"],
               "properties": {
                 "ifFalse": {
                   "type": "string"
@@ -2205,9 +1849,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "condition"
-                  ]
+                  "enum": ["condition"]
                 },
                 "predicateJson": {
                   "type": "string"
@@ -2244,9 +1886,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "action"
-                  ]
+                  "enum": ["action"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -2256,20 +1896,14 @@
             },
             {
               "type": "object",
-              "required": [
-                "at",
-                "kind",
-                "nextStepId"
-              ],
+              "required": ["at", "kind", "nextStepId"],
               "properties": {
                 "at": {
                   "type": "string"
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "timer"
-                  ]
+                  "enum": ["timer"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -2279,21 +1913,14 @@
             },
             {
               "type": "object",
-              "required": [
-                "expiresAt",
-                "kind",
-                "nextStepId",
-                "schemaJson"
-              ],
+              "required": ["expiresAt", "kind", "nextStepId", "schemaJson"],
               "properties": {
                 "expiresAt": {
                   "type": "string"
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "external_input"
-                  ]
+                  "enum": ["external_input"]
                 },
                 "nextStepId": {
                   "type": "string"
@@ -2306,16 +1933,11 @@
             },
             {
               "type": "object",
-              "required": [
-                "kind",
-                "outputJson"
-              ],
+              "required": ["kind", "outputJson"],
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "result"
-                  ]
+                  "enum": ["result"]
                 },
                 "outputJson": {
                   "type": "string"
@@ -2327,11 +1949,7 @@
         },
         "WorkflowStepDraft": {
           "type": "object",
-          "required": [
-            "label",
-            "operation",
-            "stepId"
-          ],
+          "required": ["label", "operation", "stepId"],
           "properties": {
             "label": {
               "type": "string"
@@ -2351,12 +1969,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowPublishRequest",
       "type": "object",
-      "required": [
-        "context",
-        "expectedDraftEtag",
-        "expectedPublicationRevision",
-        "workflowId"
-      ],
+      "required": ["context", "expectedDraftEtag", "expectedPublicationRevision", "workflowId"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -2387,10 +2000,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -2407,11 +2017,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowUnpublishRequest",
       "type": "object",
-      "required": [
-        "context",
-        "publication",
-        "requestKey"
-      ],
+      "required": ["context", "publication", "requestKey"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -2432,10 +2038,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -2448,10 +2051,7 @@
         },
         "WorkflowPublication": {
           "type": "object",
-          "required": [
-            "revision",
-            "version"
-          ],
+          "required": ["revision", "version"],
           "properties": {
             "revision": {
               "$ref": "#/definitions/SafeCounter"
@@ -2464,10 +2064,7 @@
         },
         "WorkflowVersionRef": {
           "type": "object",
-          "required": [
-            "definitionHash",
-            "workflowId"
-          ],
+          "required": ["definitionHash", "workflowId"],
           "properties": {
             "definitionHash": {
               "type": "string"
@@ -2484,13 +2081,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowUnpublishAck",
       "type": "object",
-      "required": [
-        "context",
-        "original",
-        "publicationRevision",
-        "replayed",
-        "requestKey"
-      ],
+      "required": ["context", "original", "publicationRevision", "replayed", "requestKey"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -2517,10 +2108,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -2533,10 +2121,7 @@
         },
         "WorkflowPublication": {
           "type": "object",
-          "required": [
-            "revision",
-            "version"
-          ],
+          "required": ["revision", "version"],
           "properties": {
             "revision": {
               "$ref": "#/definitions/SafeCounter"
@@ -2549,10 +2134,7 @@
         },
         "WorkflowVersionRef": {
           "type": "object",
-          "required": [
-            "definitionHash",
-            "workflowId"
-          ],
+          "required": ["definitionHash", "workflowId"],
           "properties": {
             "definitionHash": {
               "type": "string"
@@ -2569,12 +2151,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowRunRequest",
       "type": "object",
-      "required": [
-        "context",
-        "expectedEpoch",
-        "expectedRevision",
-        "runId"
-      ],
+      "required": ["context", "expectedEpoch", "expectedRevision", "runId"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -2598,10 +2175,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -2618,12 +2192,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowReauthorizeRequest",
       "type": "object",
-      "required": [
-        "context",
-        "expectedEpoch",
-        "permissions",
-        "runId"
-      ],
+      "required": ["context", "expectedEpoch", "permissions", "runId"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -2676,10 +2245,7 @@
               "type": "string"
             },
             "inputDigest": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "inputScope": {
               "$ref": "#/definitions/WorkflowInputScope"
@@ -2689,10 +2255,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -2705,18 +2268,11 @@
         },
         "WorkflowInputScope": {
           "type": "string",
-          "enum": [
-            "all_valid_inputs",
-            "exact_canonical_input"
-          ]
+          "enum": ["all_valid_inputs", "exact_canonical_input"]
         },
         "WorkflowPermissions": {
           "type": "object",
-          "required": [
-            "accounts",
-            "queryRecords",
-            "readPrefixes"
-          ],
+          "required": ["accounts", "queryRecords", "readPrefixes"],
           "properties": {
             "accounts": {
               "type": "array",
@@ -2779,10 +2335,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -2820,10 +2373,7 @@
           "$ref": "#/definitions/WorkflowContext"
         },
         "editedInputJson": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "expectedApprovalRevision": {
           "$ref": "#/definitions/SafeCounter"
@@ -2847,10 +2397,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -2901,10 +2448,7 @@
           "type": "string"
         },
         "reason": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "revision": {
           "$ref": "#/definitions/SafeCounter"
@@ -2934,10 +2478,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -2950,27 +2491,11 @@
         },
         "WorkflowRunState": {
           "type": "string",
-          "enum": [
-            "queued",
-            "running",
-            "waiting",
-            "blocked",
-            "succeeded",
-            "failed",
-            "cancelled"
-          ]
+          "enum": ["queued", "running", "waiting", "blocked", "succeeded", "failed", "cancelled"]
         },
         "WorkflowStepKind": {
           "type": "string",
-          "enum": [
-            "read",
-            "transform",
-            "condition",
-            "action",
-            "timer",
-            "external_input",
-            "result"
-          ]
+          "enum": ["read", "transform", "condition", "action", "timer", "external_input", "result"]
         },
         "WorkflowStepState": {
           "type": "string",
@@ -3004,10 +2529,7 @@
               "$ref": "#/definitions/WorkflowValueView"
             },
             "invocationId": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "kind": {
               "$ref": "#/definitions/WorkflowStepKind"
@@ -3022,10 +2544,7 @@
               "$ref": "#/definitions/WorkflowValueView"
             },
             "reason": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "state": {
               "$ref": "#/definitions/WorkflowStepState"
@@ -3050,11 +2569,7 @@
           "oneOf": [
             {
               "type": "object",
-              "required": [
-                "bytes",
-                "digest",
-                "state"
-              ],
+              "required": ["bytes", "digest", "state"],
               "properties": {
                 "bytes": {
                   "$ref": "#/definitions/SafeCounter"
@@ -3064,58 +2579,43 @@
                 },
                 "state": {
                   "type": "string",
-                  "enum": [
-                    "available"
-                  ]
+                  "enum": ["available"]
                 }
               },
               "additionalProperties": false
             },
             {
               "type": "object",
-              "required": [
-                "state"
-              ],
+              "required": ["state"],
               "properties": {
                 "state": {
                   "type": "string",
-                  "enum": [
-                    "not_recorded"
-                  ]
+                  "enum": ["not_recorded"]
                 }
               },
               "additionalProperties": false
             },
             {
               "type": "object",
-              "required": [
-                "digest",
-                "state"
-              ],
+              "required": ["digest", "state"],
               "properties": {
                 "digest": {
                   "type": "string"
                 },
                 "state": {
                   "type": "string",
-                  "enum": [
-                    "not_retained"
-                  ]
+                  "enum": ["not_retained"]
                 }
               },
               "additionalProperties": false
             },
             {
               "type": "object",
-              "required": [
-                "state"
-              ],
+              "required": ["state"],
               "properties": {
                 "state": {
                   "type": "string",
-                  "enum": [
-                    "unavailable"
-                  ]
+                  "enum": ["unavailable"]
                 }
               },
               "additionalProperties": false
@@ -3124,10 +2624,7 @@
         },
         "WorkflowVersionRef": {
           "type": "object",
-          "required": [
-            "definitionHash",
-            "workflowId"
-          ],
+          "required": ["definitionHash", "workflowId"],
           "properties": {
             "definitionHash": {
               "type": "string"
@@ -3140,20 +2637,11 @@
         },
         "WorkflowWaitKind": {
           "type": "string",
-          "enum": [
-            "timer",
-            "external_input",
-            "person_approval"
-          ]
+          "enum": ["timer", "external_input", "person_approval"]
         },
         "WorkflowWaitState": {
           "type": "string",
-          "enum": [
-            "pending",
-            "consumed",
-            "cancelled",
-            "expired"
-          ]
+          "enum": ["pending", "consumed", "cancelled", "expired"]
         },
         "WorkflowWaitView": {
           "type": "object",
@@ -3171,16 +2659,10 @@
               "type": "string"
             },
             "dueAt": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "expiresAt": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "kind": {
               "$ref": "#/definitions/WorkflowWaitKind"
@@ -3189,10 +2671,7 @@
               "$ref": "#/definitions/SafeCounter"
             },
             "schemaJson": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "state": {
               "$ref": "#/definitions/WorkflowWaitState"
@@ -3207,13 +2686,7 @@
       "title": "WorkflowAccessView",
       "description": "Original permission ceiling and current selection, read-only comparison data.",
       "type": "object",
-      "required": [
-        "admissionEpoch",
-        "context",
-        "current",
-        "original",
-        "runId"
-      ],
+      "required": ["admissionEpoch", "context", "current", "original", "runId"],
       "properties": {
         "admissionEpoch": {
           "$ref": "#/definitions/SafeCounter"
@@ -3269,10 +2742,7 @@
               "type": "string"
             },
             "inputDigest": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "inputScope": {
               "$ref": "#/definitions/WorkflowInputScope"
@@ -3282,10 +2752,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -3298,18 +2765,11 @@
         },
         "WorkflowInputScope": {
           "type": "string",
-          "enum": [
-            "all_valid_inputs",
-            "exact_canonical_input"
-          ]
+          "enum": ["all_valid_inputs", "exact_canonical_input"]
         },
         "WorkflowPermissions": {
           "type": "object",
-          "required": [
-            "accounts",
-            "queryRecords",
-            "readPrefixes"
-          ],
+          "required": ["accounts", "queryRecords", "readPrefixes"],
           "properties": {
             "accounts": {
               "type": "array",
@@ -3335,12 +2795,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowRunCatalog",
       "type": "object",
-      "required": [
-        "context",
-        "items",
-        "nextCursor",
-        "truncated"
-      ],
+      "required": ["context", "items", "nextCursor", "truncated"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -3352,10 +2807,7 @@
           }
         },
         "nextCursor": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "truncated": {
           "type": "boolean"
@@ -3370,10 +2822,7 @@
         },
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -3402,10 +2851,7 @@
               "$ref": "#/definitions/SafeCounter"
             },
             "reason": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "revision": {
               "$ref": "#/definitions/SafeCounter"
@@ -3430,22 +2876,11 @@
         },
         "WorkflowRunState": {
           "type": "string",
-          "enum": [
-            "queued",
-            "running",
-            "waiting",
-            "blocked",
-            "succeeded",
-            "failed",
-            "cancelled"
-          ]
+          "enum": ["queued", "running", "waiting", "blocked", "succeeded", "failed", "cancelled"]
         },
         "WorkflowVersionRef": {
           "type": "object",
-          "required": [
-            "definitionHash",
-            "workflowId"
-          ],
+          "required": ["definitionHash", "workflowId"],
           "properties": {
             "definitionHash": {
               "type": "string"
@@ -3462,13 +2897,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowValueRequest",
       "type": "object",
-      "required": [
-        "context",
-        "digest",
-        "role",
-        "runId",
-        "stepId"
-      ],
+      "required": ["context", "digest", "role", "runId", "stepId"],
       "properties": {
         "context": {
           "$ref": "#/definitions/WorkflowContext"
@@ -3490,10 +2919,7 @@
       "definitions": {
         "WorkflowContext": {
           "type": "object",
-          "required": [
-            "storeUuid",
-            "vaultId"
-          ],
+          "required": ["storeUuid", "vaultId"],
           "properties": {
             "storeUuid": {
               "type": "string"
@@ -3506,11 +2932,7 @@
         },
         "WorkflowValueRole": {
           "type": "string",
-          "enum": [
-            "run_input",
-            "step_input",
-            "step_output"
-          ]
+          "enum": ["run_input", "step_input", "step_output"]
         }
       }
     },
@@ -3518,10 +2940,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowValueDetail",
       "type": "object",
-      "required": [
-        "digest",
-        "json"
-      ],
+      "required": ["digest", "json"],
       "properties": {
         "digest": {
           "type": "string"
@@ -3536,10 +2955,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "WorkflowError",
       "type": "object",
-      "required": [
-        "code",
-        "diagnostics"
-      ],
+      "required": ["code", "diagnostics"],
       "properties": {
         "code": {
           "$ref": "#/definitions/WorkflowErrorCode"
@@ -3555,26 +2971,16 @@
       "definitions": {
         "WorkflowDiagnostic": {
           "type": "object",
-          "required": [
-            "code",
-            "field",
-            "stepId"
-          ],
+          "required": ["code", "field", "stepId"],
           "properties": {
             "code": {
               "$ref": "#/definitions/WorkflowErrorCode"
             },
             "field": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "stepId": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             }
           },
           "additionalProperties": false

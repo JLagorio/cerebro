@@ -8,15 +8,20 @@ use std::sync::{atomic::Ordering, Arc};
 // These metadata transitions start no credential or provider adapter.
 impl NativeOwnerState {
     pub(super) fn credential_cancellation(
-        self: &Arc<Self>, ticket: &CredentialAcquisition,
+        self: &Arc<Self>,
+        ticket: &CredentialAcquisition,
     ) -> Result<super::credential_cancel::CancellationRegistration, ConnectionError> {
         let registration = self.credential_cancellations.register(ticket)?;
         // Registration precedes the exact retained read, closing cancellation
         // between Pending commit and worker registration without any re-open.
         let current = self.account_acquisition(&ticket.attempt_id)?;
-        if &current != ticket || current.state != crate::connections::AcquisitionState::Pending
-            || registration.flag.stopped() || !self.registration.live.load(Ordering::SeqCst)
-        { return Err(ConnectionError::Cancelled); }
+        if &current != ticket
+            || current.state != crate::connections::AcquisitionState::Pending
+            || registration.flag.stopped()
+            || !self.registration.live.load(Ordering::SeqCst)
+        {
+            return Err(ConnectionError::Cancelled);
+        }
         Ok(registration)
     }
     pub(super) fn acquisition_failed(
@@ -37,12 +42,17 @@ impl NativeOwnerState {
     ) -> Result<CredentialAcquisition, ConnectionError> {
         // The shared kernel validates selection before its first write. Only
         // an acknowledged commit returns a ticket eligible for worker handoff.
-        self.account_transaction_after(|tx, owner_key| {
-            account_metadata::begin_import(tx, owner_key, selection, expected_revision)
-        }, |_| {
-            self.action_cancellations.cancel_connection(&selection.connection_id);
-            self.credential_cancellations.cancel_connection(&selection.connection_id);
-        })
+        self.account_transaction_after(
+            |tx, owner_key| {
+                account_metadata::begin_import(tx, owner_key, selection, expected_revision)
+            },
+            |_| {
+                self.action_cancellations
+                    .cancel_connection(&selection.connection_id);
+                self.credential_cancellations
+                    .cancel_connection(&selection.connection_id);
+            },
+        )
         .into_result()
     }
 
@@ -80,7 +90,8 @@ impl NativeOwnerState {
             });
             if owner.retired {
                 storage.failed = true;
-                self.action_cancellations.cancel_all(); self.credential_cancellations.cancel_all();
+                self.action_cancellations.cancel_all();
+                self.credential_cancellations.cancel_all();
             }
             result.map_err(|_| ConnectionError::Unavailable)?
         };
@@ -96,9 +107,10 @@ impl NativeOwnerState {
         attempt: &crate::actions::ids::AttemptId,
     ) -> Result<CredentialAcquisition, ConnectionError> {
         validate_acquisition_selector(attempt)?;
-        self.account_transaction_after(|tx, owner_key| {
-            account_metadata::cancel_import(tx, owner_key, attempt)
-        }, |_| self.credential_cancellations.cancel_attempt(attempt))
+        self.account_transaction_after(
+            |tx, owner_key| account_metadata::cancel_import(tx, owner_key, attempt),
+            |_| self.credential_cancellations.cancel_attempt(attempt),
+        )
         .into_result()
     }
 }

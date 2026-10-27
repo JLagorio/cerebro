@@ -1324,20 +1324,45 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
     'managed_action_profile',
     'workflow_profile',
   ]);
-  expect(entryCode).toMatch(/#\[cfg\(feature\s*=\s*"native-action-smoke"\)\]\s*#\[path\s*=\s*"native_managed_action_smoke.rs"\]\s*mod managed_action_profile;/);
+  expect(entryCode).toMatch(
+    /#\[cfg\(feature\s*=\s*"native-action-smoke"\)\]\s*#\[path\s*=\s*"native_managed_action_smoke.rs"\]\s*mod managed_action_profile;/,
+  );
   expect([...managedCode.matchAll(/#\[path\b|\bmod\s+\w+\s*;/g)]).toEqual([]);
   expect([...quitCode.matchAll(/#\[path\b|\bmod\s+\w+\s*;/g)]).toEqual([]);
   // One closed native workflow journey, no new handler or authority factory.
   expect(entryCode).toMatch(/#\[path = "native_workflow_smoke.rs"\]\s*mod workflow_profile;/);
   expect([...workflowCode.matchAll(/#\[path\b|\bmod\s+\w+\s*;|#\[tauri::command/g)]).toEqual([]);
   expect(workflowCode).toContain('use crate::workflow_commands as commands;');
-  expect(nativeItem(workflowCode, 'pub(super) fn selected(')).toContain('value=="--quit-workflow-pinned"');
-  expect(nativeItem(workflowCode, 'fn entered<T>(')).toContain('checked(name,payload,||tauri::async_runtime::block_on(future))');
-  expect(nativeItem(workflowCode, 'pub(super) fn capture(')).toContain('if!paths.workflow_pinned{returnErr("workflow-profile-absent");}open(app,window,&paths.vault_a)?;');
-  expect(nativeItem(entryCode, 'async fn capture_native_reads(')).toContain('ifpaths.workflow_pinned{returnworkflow_profile::capture(&app,&window,&mutcases);}');
-  expect(workflowCode).not.toMatch(/\brun_agent\b|\bRuntimeOwner\b|\bSecretStore\b|\bworkflow_rows\b|\.execute(?:_batch)?\s*\(|\bCommand::new\b/);
-  const workflowCommands = [...new Set([...workflowCode.matchAll(/\bcommands::(workflow_\w+)\s*\(/g)].map((m) => m[1]))].sort();
-  expect(workflowCommands).toEqual(['workflow_answer_wait', 'workflow_context', 'workflow_continue', 'workflow_document', 'workflow_publish', 'workflow_run', 'workflow_save', 'workflow_start', 'workflow_unpublish', 'workflow_version']);
+  expect(nativeItem(workflowCode, 'pub(super) fn selected(')).toContain(
+    'value=="--quit-workflow-pinned"',
+  );
+  expect(nativeItem(workflowCode, 'fn entered<T>(')).toContain(
+    'checked(name,payload,||tauri::async_runtime::block_on(future))',
+  );
+  expect(nativeItem(workflowCode, 'pub(super) fn capture(')).toContain(
+    'if!paths.workflow_pinned{returnErr("workflow-profile-absent");}open(app,window,&paths.vault_a)?;',
+  );
+  expect(nativeItem(entryCode, 'async fn capture_native_reads(')).toContain(
+    'ifpaths.workflow_pinned{returnworkflow_profile::capture(&app,&window,&mutcases);}',
+  );
+  expect(workflowCode).not.toMatch(
+    /\brun_agent\b|\bRuntimeOwner\b|\bSecretStore\b|\bworkflow_rows\b|\.execute(?:_batch)?\s*\(|\bCommand::new\b/,
+  );
+  const workflowCommands = [
+    ...new Set([...workflowCode.matchAll(/\bcommands::(workflow_\w+)\s*\(/g)].map((m) => m[1])),
+  ].sort();
+  expect(workflowCommands).toEqual([
+    'workflow_answer_wait',
+    'workflow_context',
+    'workflow_continue',
+    'workflow_document',
+    'workflow_publish',
+    'workflow_run',
+    'workflow_save',
+    'workflow_start',
+    'workflow_unpublish',
+    'workflow_version',
+  ]);
   for (const name of workflowCommands) {
     expect(real().rust.commands.get(name)?.file).toBe('workflow_commands.rs');
   }
@@ -1372,19 +1397,39 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
   // The production scanner deliberately does not guess crate-root imports.
   // These exact five imports are independently resolved below from unchanged
   // production source and registrations; no other diagnostic is tolerated.
-  const imported = ['read_managed_action_access', 'set_managed_action_access', 'list_interactions', 'answer_interaction', 'stop_agent'];
-  expect(side.problems).toEqual(imported.map((name) =>
-    `${RS}lib.rs: generate_handler! registers crate::${name}, but ${RS}crate.rs or ${RS}crate/mod.rs holds no #[tauri::command] fn ${name}`,
-  ));
+  const imported = [
+    'read_managed_action_access',
+    'set_managed_action_access',
+    'list_interactions',
+    'answer_interaction',
+    'stop_agent',
+  ];
+  expect(side.problems).toEqual(
+    imported.map(
+      (name) =>
+        `${RS}lib.rs: generate_handler! registers crate::${name}, but ${RS}crate.rs or ${RS}crate/mod.rs holds no #[tauri::command] fn ${name}`,
+    ),
+  );
   const sharedProblems: string[] = [];
   const shared = commandsIn('lib.rs', productionCode.split('\n'), sharedProblems);
   const sharedHandlers = handlerEntries(productionCode, sharedProblems);
   expect(sharedProblems).toEqual([]);
   const injected: Record<string, readonly (readonly [string, string])[]> = {
-    read_managed_action_access: [['app', 'tauri::AppHandle'], ['window', 'tauri::WebviewWindow']],
-    set_managed_action_access: [['app', 'tauri::AppHandle'], ['window', 'tauri::WebviewWindow']],
+    read_managed_action_access: [
+      ['app', 'tauri::AppHandle'],
+      ['window', 'tauri::WebviewWindow'],
+    ],
+    set_managed_action_access: [
+      ['app', 'tauri::AppHandle'],
+      ['window', 'tauri::WebviewWindow'],
+    ],
     list_interactions: [['state', "tauri::State<'_,agent::AgentState>"]],
-    answer_interaction: [['app', 'tauri::AppHandle'], ['window', 'tauri::WebviewWindow'], ['state', "tauri::State<'_,agent::AgentState>"], ['mcp_state', "tauri::State<'_,mcp::McpState>"]],
+    answer_interaction: [
+      ['app', 'tauri::AppHandle'],
+      ['window', 'tauri::WebviewWindow'],
+      ['state', "tauri::State<'_,agent::AgentState>"],
+      ['mcp_state', "tauri::State<'_,mcp::McpState>"],
+    ],
     stop_agent: [['state', "tauri::State<'_,agent::AgentState>"]],
   };
   for (const [name, keys] of [
@@ -1400,14 +1445,28 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
     const expected = real().rust.commands.get(name);
     expect(expected?.file).toBe('lib.rs');
     expect(expected?.params.map((param) => param.key)).toEqual(keys);
-    expect(declarations[0].params.filter((param) => ['app', 'window', 'state', 'mcp_state'].includes(param.name)).map((param) => [param.name, param.type.replace(/\s/g, '')])).toEqual(injected[name]);
-    const wire = declarations[0].params.filter((param) => !['app', 'window', 'state', 'mcp_state'].includes(param.name));
+    expect(
+      declarations[0].params
+        .filter((param) => ['app', 'window', 'state', 'mcp_state'].includes(param.name))
+        .map((param) => [param.name, param.type.replace(/\s/g, '')]),
+    ).toEqual(injected[name]);
+    const wire = declarations[0].params.filter(
+      (param) => !['app', 'window', 'state', 'mcp_state'].includes(param.name),
+    );
     expect(wire.map((param) => camel(param.name))).toEqual(keys);
-    expect(wire.map((param) => param.type.replace(/\s/g, ''))).toEqual(expected?.params.map((param) => param.type.replace(/\s/g, '')));
+    expect(wire.map((param) => param.type.replace(/\s/g, ''))).toEqual(
+      expected?.params.map((param) => param.type.replace(/\s/g, '')),
+    );
   }
-  expect(nativeItem(productionCode, 'async fn read_managed_action_access(')).toContain('actions::native_owner::read_managed_action_access(&app,&window,run)');
-  expect(nativeItem(productionCode, 'async fn set_managed_action_access(')).toContain('actions::native_owner::set_managed_action_access(&app,&window,run,request)');
-  expect(nativeItem(productionCode, 'fn answer_interaction(')).toContain('actions::native_owner::answer_held_managed_interaction(&app,&window,Path::new(&vault),&id,&answer,updated_input.as_ref(),)');
+  expect(nativeItem(productionCode, 'async fn read_managed_action_access(')).toContain(
+    'actions::native_owner::read_managed_action_access(&app,&window,run)',
+  );
+  expect(nativeItem(productionCode, 'async fn set_managed_action_access(')).toContain(
+    'actions::native_owner::set_managed_action_access(&app,&window,run,request)',
+  );
+  expect(nativeItem(productionCode, 'fn answer_interaction(')).toContain(
+    'actions::native_owner::answer_held_managed_interaction(&app,&window,Path::new(&vault),&id,&answer,updated_input.as_ref(),)',
+  );
   expect(nativeItem(productionCode, 'fn stop_agent(')).toContain('state.stop(run)');
   expect([...side.commands.keys()]).toEqual([
     'capture_native_reads',
@@ -1561,7 +1620,9 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
   expect(ingress).toContain('late.wait=WaitState::Consumed;');
   const selectedCancel = nativeItem(quitCode, 'async fn selected_cancel(');
   expect(selectedCancel).toContain('tauri::async_runtime::spawn_blocking(move||{');
-  expect(selectedCancel).toContain('handle.state::<Trace>().injection_entry(&handle.state(),&ticket,case,entered)?;');
+  expect(selectedCancel).toContain(
+    'handle.state::<Trace>().injection_entry(&handle.state(),&ticket,case,entered)?;',
+  );
   expect(selectedCancel).toContain('std::thread::sleep(Duration::from_millis(case.delay()));');
   expect(selectedCancel).toContain('.await.map_err(|_|"quit-delay-worker")??;');
   expect(selectedCancel).toContain(
@@ -1592,27 +1653,56 @@ function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
   // The Value carrier is immediately decoded into this one closed probe type.
   // It is measurement-only and remains profile/started-session gated.
   const managedEntry = nativeItem(entryCode, 'async fn native_managed_action_probe(');
-  expect(managedEntry).toContain('#[cfg(feature="native-action-smoke")]{returnmanaged_action_profile::probe(app,window,probe).await;}');
-  expect(managedEntry).toContain('#[cfg(not(feature="native-action-smoke"))]{let_=(app,window,probe);Err("managed-action-profile-not-enabled")}');
-  expect(nativeItem(managedCode, 'enum Probe')).toBe('enumProbe{Progress{stage:Progress},Access{card_id:String},BeforeAnswer{card_id:String},Answered{card_id:String,answered_id:String},Stopped{card_id:String,refused:bool},DestroyWindow{card_id:String},Finish,Fail{stage:String}}');
-  expect(managedCode.replace(/\s/g, '')).toContain('#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]enumProbe');
-  expect(nativeItem(managedCode, 'enum Progress')).toBe('enumProgress{AccessMountRequested,MountWait,MountReady,ClickDispatched,AccessCallback,AccessReadReturned,AccessWriteReturned}');
+  expect(managedEntry).toContain(
+    '#[cfg(feature="native-action-smoke")]{returnmanaged_action_profile::probe(app,window,probe).await;}',
+  );
+  expect(managedEntry).toContain(
+    '#[cfg(not(feature="native-action-smoke"))]{let_=(app,window,probe);Err("managed-action-profile-not-enabled")}',
+  );
+  expect(nativeItem(managedCode, 'enum Probe')).toBe(
+    'enumProbe{Progress{stage:Progress},Access{card_id:String},BeforeAnswer{card_id:String},Answered{card_id:String,answered_id:String},Stopped{card_id:String,refused:bool},DestroyWindow{card_id:String},Finish,Fail{stage:String}}',
+  );
+  expect(managedCode.replace(/\s/g, '')).toContain(
+    '#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]enumProbe',
+  );
+  expect(nativeItem(managedCode, 'enum Progress')).toBe(
+    'enumProgress{AccessMountRequested,MountWait,MountReady,ClickDispatched,AccessCallback,AccessReadReturned,AccessWriteReturned}',
+  );
   const managedProbe = nativeItem(managedCode, 'pub(super) async fn probe(');
-  expect(managedProbe).toContain('letparsed:Probe=serde_json::from_value(value).map_err(|_|"managed-probe-shape")?;');
+  expect(managedProbe).toContain(
+    'letparsed:Probe=serde_json::from_value(value).map_err(|_|"managed-probe-shape")?;',
+  );
   expect(managedProbe).toContain('if!enabled(&app){returnErr("managed-profile-absent");}');
   expect(managedProbe).toContain('seat.as_mut().ok_or("managed-profile-not-started")?;');
-  expect(managedProbe).toContain('ifsession.progress.len()>=16{returnErr("managed-progress-bound");}');
-  expect(nativeItem(managedCode, 'fn card(')).toContain('found.run.as_ref().map(|run|run.get())!=Some(session.handle.run)');
-  expect(nativeItem(managedCode, 'fn card(')).toContain('found.session_id!=session.handle.session_id');
+  expect(managedProbe).toContain(
+    'ifsession.progress.len()>=16{returnErr("managed-progress-bound");}',
+  );
+  expect(nativeItem(managedCode, 'fn card(')).toContain(
+    'found.run.as_ref().map(|run|run.get())!=Some(session.handle.run)',
+  );
+  expect(nativeItem(managedCode, 'fn card(')).toContain(
+    'found.session_id!=session.handle.session_id',
+  );
   const entryCompact = entryCode.replace(/\s/g, '');
-  expect(entryCompact).toContain('#[cfg(feature="native-action-smoke")]if!matches!(invoke.message.command(),"capture_native_reads"|"native_managed_action_probe"|"native_smoke_cancel_quit"|"native_smoke_finish_quit")');
-  expect(entryCompact).toContain('crate::workspace_service::native_admission::request(invoke.message.command(),invoke.message.payload()).and_then(|request|crate::workspace_service::authority::context().and_then(|context|crate::workspace_service::native_admission::dispatch_checked(&context,request,||generated(invoke))))');
+  expect(entryCompact).toContain(
+    '#[cfg(feature="native-action-smoke")]if!matches!(invoke.message.command(),"capture_native_reads"|"native_managed_action_probe"|"native_smoke_cancel_quit"|"native_smoke_finish_quit")',
+  );
+  expect(entryCompact).toContain(
+    'crate::workspace_service::native_admission::request(invoke.message.command(),invoke.message.payload()).and_then(|request|crate::workspace_service::authority::context().and_then(|context|crate::workspace_service::native_admission::dispatch_checked(&context,request,||generated(invoke))))',
+  );
   return side;
 }
 
 function nativeSmokeFiles(): Map<string, string> {
   return new Map(
-    ['native_read_smoke.rs', 'native_quit_smoke.rs', 'credential_commands.rs', 'native_managed_action_smoke.rs', 'native_workflow_smoke.rs', 'production-lib.rs'].map((file) => [
+    [
+      'native_read_smoke.rs',
+      'native_quit_smoke.rs',
+      'credential_commands.rs',
+      'native_managed_action_smoke.rs',
+      'native_workflow_smoke.rs',
+      'production-lib.rs',
+    ].map((file) => [
       file,
       readFileSync(join(REPO, RS, file === 'production-lib.rs' ? 'lib.rs' : file), 'utf8'),
     ]),
@@ -1640,26 +1730,126 @@ function real(): { rust: RustSide; side: TsSide } {
 
 describe('the closed native quit fixture audit', () => {
   it.each([
-    ['workflow profile widened', 'native_workflow_smoke.rs', 'value == "--quit-workflow-pinned"', 'value != "--unknown"'],
-    ['workflow outer admission bypass', 'native_workflow_smoke.rs', 'checked(name, payload, || tauri::async_runtime::block_on(future))', 'Ok(tauri::async_runtime::block_on(future))'],
-    ['workflow original opening bypass', 'native_workflow_smoke.rs', 'open(app,window,&paths.vault_a)?;', 'open(app,window,&paths.vault_b)?;'],
-    ['workflow production facade substitution', 'native_workflow_smoke.rs', 'use crate::workflow_commands as commands;', 'use crate::fixture_commands as commands;'],
-    ['workflow CLI execution', 'native_workflow_smoke.rs', 'const WORKFLOW:', 'fn forbidden() { run_agent(); }\nconst WORKFLOW:'],
-    ['workflow raw writer', 'native_workflow_smoke.rs', 'const WORKFLOW:', 'fn forbidden() { db.execute_batch("DELETE"); }\nconst WORKFLOW:'],
-    ['managed profile ungated', 'native_read_smoke.rs', '#[cfg(feature="native-action-smoke")]\n#[path="native_managed_action_smoke.rs"]', '#[path="native_managed_action_smoke.rs"]'],
-    ['managed probe optional', 'native_read_smoke.rs', 'probe:serde_json::Value', 'probe:Option<serde_json::Value>'],
-    ['managed probe ungated fallback', 'native_read_smoke.rs', 'Err("managed-action-profile-not-enabled")', 'Ok(serde_json::Value::Null)'],
-    ['managed probe extra variant', 'native_managed_action_smoke.rs', 'enum Probe{', 'enum Probe{Extra,'],
-    ['managed probe unknown fields', 'native_managed_action_smoke.rs', 'tag="kind",rename_all="snake_case",deny_unknown_fields', 'tag="kind",rename_all="snake_case"'],
-    ['managed progress unbounded', 'native_managed_action_smoke.rs', 'session.progress.len()>=16', 'session.progress.len()>=160'],
-    ['managed probe no original session', 'native_managed_action_smoke.rs', 'if !enabled(&app)', 'if false'],
-    ['managed card foreign run', 'native_managed_action_smoke.rs', 'found.run.as_ref().map(|run|run.get())!=Some(session.handle.run)', 'false'],
-    ['managed outer admission bypass', 'native_read_smoke.rs', 'native_admission::dispatch_checked(&context,request,||generated(invoke))', 'Ok(generated(invoke))'],
-    ['extra root command', 'native_read_smoke.rs', 'crate::stop_agent,', 'crate::stop_agent,\ncrate::start_watcher,'],
-    ['changed root command', 'native_read_smoke.rs', 'crate::stop_agent,', 'crate::stop_all_agents,'],
-    ['root command payload change', 'production-lib.rs', '    run: u64,\n) -> Result<actions::native_owner::RunActionAccessView', '    run: String,\n) -> Result<actions::native_owner::RunActionAccessView'],
-    ['root command injected window removed', 'production-lib.rs', 'async fn read_managed_action_access(\n    app: tauri::AppHandle,\n    window: tauri::WebviewWindow,', 'async fn read_managed_action_access(\n    app: tauri::AppHandle,'],
-    ['selected injected delay admission bypass', 'native_quit_smoke.rs', '.injection_entry(&handle.state(), &ticket, case, entered)?;', '.injection_entry(&handle.state(), &ticket, case, entered).ok();'],
+    [
+      'workflow profile widened',
+      'native_workflow_smoke.rs',
+      'value == "--quit-workflow-pinned"',
+      'value != "--unknown"',
+    ],
+    [
+      'workflow outer admission bypass',
+      'native_workflow_smoke.rs',
+      'checked(name, payload, || tauri::async_runtime::block_on(future))',
+      'Ok(tauri::async_runtime::block_on(future))',
+    ],
+    [
+      'workflow original opening bypass',
+      'native_workflow_smoke.rs',
+      'open(app,window,&paths.vault_a)?;',
+      'open(app,window,&paths.vault_b)?;',
+    ],
+    [
+      'workflow production facade substitution',
+      'native_workflow_smoke.rs',
+      'use crate::workflow_commands as commands;',
+      'use crate::fixture_commands as commands;',
+    ],
+    [
+      'workflow CLI execution',
+      'native_workflow_smoke.rs',
+      'const WORKFLOW:',
+      'fn forbidden() { run_agent(); }\nconst WORKFLOW:',
+    ],
+    [
+      'workflow raw writer',
+      'native_workflow_smoke.rs',
+      'const WORKFLOW:',
+      'fn forbidden() { db.execute_batch("DELETE"); }\nconst WORKFLOW:',
+    ],
+    [
+      'managed profile ungated',
+      'native_read_smoke.rs',
+      '#[cfg(feature="native-action-smoke")]\n#[path="native_managed_action_smoke.rs"]',
+      '#[path="native_managed_action_smoke.rs"]',
+    ],
+    [
+      'managed probe optional',
+      'native_read_smoke.rs',
+      'probe:serde_json::Value',
+      'probe:Option<serde_json::Value>',
+    ],
+    [
+      'managed probe ungated fallback',
+      'native_read_smoke.rs',
+      'Err("managed-action-profile-not-enabled")',
+      'Ok(serde_json::Value::Null)',
+    ],
+    [
+      'managed probe extra variant',
+      'native_managed_action_smoke.rs',
+      'enum Probe{',
+      'enum Probe{Extra,',
+    ],
+    [
+      'managed probe unknown fields',
+      'native_managed_action_smoke.rs',
+      'tag="kind",rename_all="snake_case",deny_unknown_fields',
+      'tag="kind",rename_all="snake_case"',
+    ],
+    [
+      'managed progress unbounded',
+      'native_managed_action_smoke.rs',
+      'session.progress.len()>=16',
+      'session.progress.len()>=160',
+    ],
+    [
+      'managed probe no original session',
+      'native_managed_action_smoke.rs',
+      'if !enabled(&app)',
+      'if false',
+    ],
+    [
+      'managed card foreign run',
+      'native_managed_action_smoke.rs',
+      'found.run.as_ref().map(|run|run.get())!=Some(session.handle.run)',
+      'false',
+    ],
+    [
+      'managed outer admission bypass',
+      'native_read_smoke.rs',
+      'native_admission::dispatch_checked(&context,request,||generated(invoke))',
+      'Ok(generated(invoke))',
+    ],
+    [
+      'extra root command',
+      'native_read_smoke.rs',
+      'crate::stop_agent,',
+      'crate::stop_agent,\ncrate::start_watcher,',
+    ],
+    [
+      'changed root command',
+      'native_read_smoke.rs',
+      'crate::stop_agent,',
+      'crate::stop_all_agents,',
+    ],
+    [
+      'root command payload change',
+      'production-lib.rs',
+      '    run: u64,\n) -> Result<actions::native_owner::RunActionAccessView',
+      '    run: String,\n) -> Result<actions::native_owner::RunActionAccessView',
+    ],
+    [
+      'root command injected window removed',
+      'production-lib.rs',
+      'async fn read_managed_action_access(\n    app: tauri::AppHandle,\n    window: tauri::WebviewWindow,',
+      'async fn read_managed_action_access(\n    app: tauri::AppHandle,',
+    ],
+    [
+      'selected injected delay admission bypass',
+      'native_quit_smoke.rs',
+      '.injection_entry(&handle.state(), &ticket, case, entered)?;',
+      '.injection_entry(&handle.state(), &ticket, case, entered).ok();',
+    ],
     ['wire alias', 'native_quit_smoke.rs', 'rename = "cancel_quit"', 'rename = "anything_else"'],
     [
       'missing alias',

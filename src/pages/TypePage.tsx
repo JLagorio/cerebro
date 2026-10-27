@@ -230,9 +230,21 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
     })();
   };
 
-  const selectedUnavailable = collection.unavailable ?? selectedViewIssue(collection.entries, schema, presentation, activeView?.filters, listing.name, search);
+  const selectedUnavailable =
+    collection.unavailable ??
+    selectedViewIssue(
+      collection.entries,
+      schema,
+      presentation,
+      activeView?.filters,
+      listing.name,
+      search,
+    );
   const sortedEntries = useMemo(
-    () => selectedUnavailable ? [] : searchEntries(sortEntries(collection.entries, presentation.sort, schema), search),
+    () =>
+      selectedUnavailable
+        ? []
+        : searchEntries(sortEntries(collection.entries, presentation.sort, schema), search),
     [collection.entries, presentation.sort, schema, search, selectedUnavailable],
   );
   // After the sort: "the first 25" has to mean the first 25 of the order on
@@ -280,7 +292,11 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               {listing.name}
             </button>
           }
-          metadata={<span data-testid="view-count">{selectedUnavailable ? 'Unavailable' : sortedEntries.length}</span>}
+          metadata={
+            <span data-testid="view-count">
+              {selectedUnavailable ? 'Unavailable' : sortedEntries.length}
+            </span>
+          }
           actions={
             <>
               <DatabaseActions
@@ -482,11 +498,13 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
             })
           }
         />
-        {!selectedUnavailable && <ViewLimitNotice
-          shown={shownEntries.length}
-          total={sortedEntries.length}
-          onShowAll={() => changePresentation({ ...presentation, limit: undefined })}
-        />}
+        {!selectedUnavailable && (
+          <ViewLimitNotice
+            shown={shownEntries.length}
+            total={sortedEntries.length}
+            onShowAll={() => changePresentation({ ...presentation, limit: undefined })}
+          />
+        )}
       </div>
       {dialog === 'calendar' && (
         <IcsImportDialog initialType={listing.name} onClose={() => setDialog(null)} />

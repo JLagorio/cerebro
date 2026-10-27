@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::parse;
-pub use crate::workspace_service::types::selected::{SelectedAuthorityKind, SelectedRecordVersion};
 pub(crate) use crate::workspace_service::types::selected::SelectedEntryProperties;
+pub use crate::workspace_service::types::selected::{SelectedAuthorityKind, SelectedRecordVersion};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -30,7 +30,7 @@ pub(crate) struct SmokePaths {
     child_claim_deadline: bool,
     restart: restart_profile::Role,
     quit: Option<quit_profile::Case>,
-    #[cfg(feature="native-action-smoke")]
+    #[cfg(feature = "native-action-smoke")]
     managed_action: Option<managed_action_profile::Scenario>,
     #[cfg(feature = "native-credential-smoke")]
     credential_metadata: bool,
@@ -104,13 +104,17 @@ fn paths() -> Result<SmokePaths, Box<dyn std::error::Error>> {
         }
         _ => restart_profile::Role::None,
     };
-    #[cfg(feature="native-action-smoke")]
-    let managed_action=match args.as_slice(){[_,_,profile]=>managed_action_profile::Scenario::parse(profile),_=>None};
+    #[cfg(feature = "native-action-smoke")]
+    let managed_action = match args.as_slice() {
+        [_, _, profile] => managed_action_profile::Scenario::parse(profile),
+        _ => None,
+    };
     let quit = match args.as_slice() {
         [_, _, profile] => quit_profile::Case::parse(profile),
         _ => None,
     };
-    let workflow_pinned = matches!(args.as_slice(), [_, _, profile] if workflow_profile::selected(profile));
+    let workflow_pinned =
+        matches!(args.as_slice(), [_, _, profile] if workflow_profile::selected(profile));
     let settings_metadata = match args.as_slice() {
         [_, _] => false,
         [_, _, _] if quit.is_some() => false,
@@ -222,8 +226,10 @@ fn paths() -> Result<SmokePaths, Box<dyn std::error::Error>> {
     ) {
         create(&root.join("restart.marker"), b"cerebro-r0-v1\n")?;
     }
-    #[cfg(feature="native-action-smoke")]
-    if managed_action.is_some(){create(&root.join("managed-action.marker"),b"managed-action-v1\n")?;}
+    #[cfg(feature = "native-action-smoke")]
+    if managed_action.is_some() {
+        create(&root.join("managed-action.marker"), b"managed-action-v1\n")?;
+    }
     Ok(SmokePaths {
         config: root.join("config"),
         cache: root.join("cache"),
@@ -238,7 +244,7 @@ fn paths() -> Result<SmokePaths, Box<dyn std::error::Error>> {
         child_claim_deadline,
         restart,
         quit,
-        #[cfg(feature="native-action-smoke")]
+        #[cfg(feature = "native-action-smoke")]
         managed_action,
         #[cfg(feature = "native-credential-smoke")]
         credential_metadata,
@@ -282,8 +288,10 @@ fn fixture_child() -> bool {
                 }
             }
         }
-        #[cfg(feature="native-action-smoke")]
-        if managed_action_profile::child(&args){return true;}
+        #[cfg(feature = "native-action-smoke")]
+        if managed_action_profile::child(&args) {
+            return true;
+        }
         // Actual AgentState owns/kills/reaps this child. The deadline also bounds
         // an orphan if the smoke parent is externally killed before cleanup.
         std::thread::sleep(Duration::from_secs(45));
@@ -1147,11 +1155,11 @@ mod credential_profile;
 #[path = "native_delegation_smoke.rs"]
 mod delegation_profile;
 
+#[cfg(feature = "native-action-smoke")]
+#[path = "native_managed_action_smoke.rs"]
+mod managed_action_profile;
 #[path = "native_quit_smoke.rs"]
 mod quit_profile;
-#[cfg(feature="native-action-smoke")]
-#[path="native_managed_action_smoke.rs"]
-mod managed_action_profile;
 #[path = "native_workflow_smoke.rs"]
 mod workflow_profile;
 #[cfg(feature = "native-action-smoke")]
@@ -1166,18 +1174,29 @@ pub(crate) fn record_managed_child_launch(
     let _ = managed_action_profile::record_child_launch(config_dir, run, child);
 }
 
-
 #[tauri::command]
-async fn native_managed_action_probe(app:AppHandle,window:WebviewWindow,probe:serde_json::Value)->Result<serde_json::Value,&'static str>{
- #[cfg(feature="native-action-smoke")]
- {return managed_action_profile::probe(app,window,probe).await;}
- #[cfg(not(feature="native-action-smoke"))]
- {let _=(app,window,probe);Err("managed-action-profile-not-enabled")}
+async fn native_managed_action_probe(
+    app: AppHandle,
+    window: WebviewWindow,
+    probe: serde_json::Value,
+) -> Result<serde_json::Value, &'static str> {
+    #[cfg(feature = "native-action-smoke")]
+    {
+        return managed_action_profile::probe(app, window, probe).await;
+    }
+    #[cfg(not(feature = "native-action-smoke"))]
+    {
+        let _ = (app, window, probe);
+        Err("managed-action-profile-not-enabled")
+    }
 }
 
 fn finish(app: &AppHandle, cases: Vec<Case>, failed_stage: Option<&'static str>) {
-    #[cfg(feature="native-action-smoke")]
-    if managed_action_profile::enabled(app){managed_action_profile::finish(app,failed_stage);return;}
+    #[cfg(feature = "native-action-smoke")]
+    if managed_action_profile::enabled(app) {
+        managed_action_profile::finish(app, failed_stage);
+        return;
+    }
     let paths = app.state::<SmokePaths>();
     #[cfg(feature = "native-keychain-smoke")]
     if paths.keychain {
@@ -1257,8 +1276,13 @@ async fn capture_native_reads(
     window: WebviewWindow,
     probe: Option<quit_profile::Probe>,
 ) -> Result<serde_json::Value, &'static str> {
-    #[cfg(feature="native-action-smoke")]
-    if managed_action_profile::enabled(&app){if probe.is_some(){return Err("managed-profile-no-quit-probe");}return managed_action_profile::bootstrap(app,window).await;}
+    #[cfg(feature = "native-action-smoke")]
+    if managed_action_profile::enabled(&app) {
+        if probe.is_some() {
+            return Err("managed-profile-no-quit-probe");
+        }
+        return managed_action_profile::bootstrap(app, window).await;
+    }
     if quit_profile::enabled(&app) {
         return match probe {
             None => quit_profile::bootstrap(&app, &window),
@@ -1387,36 +1411,70 @@ pub fn main() {
         .manage(crate::ingest::ambient::AmbientState::default())
         .manage(crate::shell::quit::QuitState::default())
         .setup(|app| {
-            #[cfg(feature="native-action-smoke")]
-            {if !app.manage(managed_action_profile::State::default())||!app.manage(crate::actions::native_owner::NativeActionSmokeFixture::default()){return Err("Native managed smoke state was already installed.".into());}}
+            #[cfg(feature = "native-action-smoke")]
+            {
+                if !app.manage(managed_action_profile::State::default())
+                    || !app
+                        .manage(crate::actions::native_owner::NativeActionSmokeFixture::default())
+                {
+                    return Err("Native managed smoke state was already installed.".into());
+                }
+            }
             crate::workspace_service::authority::install(isolated_app_dir(app.handle())?)
                 .map_err(|e| e.message)?;
             crate::shell::build_main_window(app)
         })
-        .invoke_handler({let generated: fn(tauri::ipc::Invoke) -> bool = tauri::generate_handler![
-            capture_native_reads,
-            native_managed_action_probe,
-            crate::read_managed_action_access,
-            crate::set_managed_action_access,
-            crate::list_interactions,
-            crate::answer_interaction,
-            crate::stop_agent,
-            credential_commands::begin_gh_import,
-            credential_commands::credential_acquisition,
-            credential_commands::cancel_credential_acquisition,
-            quit_profile::native_smoke_cancel_quit,
-            quit_profile::native_smoke_finish_quit
-        ];move |invoke:tauri::ipc::Invoke|{
-          #[cfg(feature="native-action-smoke")]
-          if !matches!(invoke.message.command(),"capture_native_reads"|"native_managed_action_probe"|"native_smoke_cancel_quit"|"native_smoke_finish_quit"){
-            // Exact production outer admission for real command handlers. Only
-            // this executable's closed measurement commands bypass it.
-            let resolver=invoke.resolver.clone();
-            let result=crate::workspace_service::native_admission::request(invoke.message.command(),invoke.message.payload()).and_then(|request|crate::workspace_service::authority::context().and_then(|context|crate::workspace_service::native_admission::dispatch_checked(&context,request,||generated(invoke))));
-            return match result{Ok(handled)=>handled,Err(error)=>{resolver.reject(error);true}};
-          }
-          generated(invoke)
-        }})
+        .invoke_handler({
+            let generated: fn(tauri::ipc::Invoke) -> bool = tauri::generate_handler![
+                capture_native_reads,
+                native_managed_action_probe,
+                crate::read_managed_action_access,
+                crate::set_managed_action_access,
+                crate::list_interactions,
+                crate::answer_interaction,
+                crate::stop_agent,
+                credential_commands::begin_gh_import,
+                credential_commands::credential_acquisition,
+                credential_commands::cancel_credential_acquisition,
+                quit_profile::native_smoke_cancel_quit,
+                quit_profile::native_smoke_finish_quit
+            ];
+            move |invoke: tauri::ipc::Invoke| {
+                #[cfg(feature = "native-action-smoke")]
+                if !matches!(
+                    invoke.message.command(),
+                    "capture_native_reads"
+                        | "native_managed_action_probe"
+                        | "native_smoke_cancel_quit"
+                        | "native_smoke_finish_quit"
+                ) {
+                    // Exact production outer admission for real command handlers. Only
+                    // this executable's closed measurement commands bypass it.
+                    let resolver = invoke.resolver.clone();
+                    let result = crate::workspace_service::native_admission::request(
+                        invoke.message.command(),
+                        invoke.message.payload(),
+                    )
+                    .and_then(|request| {
+                        crate::workspace_service::authority::context().and_then(|context| {
+                            crate::workspace_service::native_admission::dispatch_checked(
+                                &context,
+                                request,
+                                || generated(invoke),
+                            )
+                        })
+                    });
+                    return match result {
+                        Ok(handled) => handled,
+                        Err(error) => {
+                            resolver.reject(error);
+                            true
+                        }
+                    };
+                }
+                generated(invoke)
+            }
+        })
         .build(context);
     let application = match application {
         Ok(app) => app,

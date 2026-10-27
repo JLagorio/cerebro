@@ -194,26 +194,45 @@ impl NewDirectoryChoice {
     pub(crate) fn new(parent: &Path, leaf: &str) -> Result<Self, BackupError> {
         portable::checked_path(leaf)?;
         if Path::new(leaf).components().count() != 1 {
-            return Err(portable::error(BackupErrorKind::InvalidPath, "One new directory name is required."));
+            return Err(portable::error(
+                BackupErrorKind::InvalidPath,
+                "One new directory name is required.",
+            ));
         }
         let parent = portable::io::Root::open(parent)?;
         let path = parent.path.join(leaf);
-        let choice = Self { parent, leaf: leaf.to_owned(), path };
+        let choice = Self {
+            parent,
+            leaf: leaf.to_owned(),
+            path,
+        };
         choice.validate()?;
         Ok(choice)
     }
-    pub(crate) fn path(&self) -> &Path { &self.path }
-    pub(crate) fn parent(&self) -> &Path { &self.parent.path }
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+    pub(crate) fn parent(&self) -> &Path {
+        &self.parent.path
+    }
     pub(crate) fn validate(&self) -> Result<(), BackupError> {
         self.parent.validate()?;
         match std::fs::symlink_metadata(&self.path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            _ => Err(portable::error(BackupErrorKind::DestinationUnavailable, "The new output directory is no longer absent.")),
+            _ => Err(portable::error(
+                BackupErrorKind::DestinationUnavailable,
+                "The new output directory is no longer absent.",
+            )),
         }
     }
-    pub(crate) fn create_observed(self, facts: &OutputFacts) -> Result<OutputDirectory, BackupError> {
+    pub(crate) fn create_observed(
+        self,
+        facts: &OutputFacts,
+    ) -> Result<OutputDirectory, BackupError> {
         self.validate()?;
-        self.parent.create_child_observed(&self.leaf, facts).map(|root| OutputDirectory { root })
+        self.parent
+            .create_child_observed(&self.leaf, facts)
+            .map(|root| OutputDirectory { root })
     }
 }
 /// Kept by the native worker, inside its outer OutputReservation lifetime.
@@ -223,12 +242,28 @@ pub(crate) struct OutputDirectory {
 }
 #[cfg(unix)]
 impl OutputDirectory {
-    pub(super) fn into_root(self) -> portable::io::Root { self.root }
-    pub(crate) fn path(&self) -> &Path { &self.root.path }
-    pub(crate) fn held_identity(&self) -> Result<(u64, u64), BackupError> { self.root.held_identity() }
-    pub(crate) fn passive_directory(&self) -> Result<std::fs::File, BackupError> { self.root.passive_directory() }
-    #[cfg_attr(not(test), expect(dead_code, reason = "Used by native output ownership acceptance tests."))]
-    pub(crate) fn validate(&self) -> Result<(), BackupError> { self.root.validate() }
+    pub(super) fn into_root(self) -> portable::io::Root {
+        self.root
+    }
+    pub(crate) fn path(&self) -> &Path {
+        &self.root.path
+    }
+    pub(crate) fn held_identity(&self) -> Result<(u64, u64), BackupError> {
+        self.root.held_identity()
+    }
+    pub(crate) fn passive_directory(&self) -> Result<std::fs::File, BackupError> {
+        self.root.passive_directory()
+    }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Used by native output ownership acceptance tests."
+        )
+    )]
+    pub(crate) fn validate(&self) -> Result<(), BackupError> {
+        self.root.validate()
+    }
 }
 
 /// Native coordinator handoff only; no command or activation exposes it yet.
@@ -261,39 +296,66 @@ pub(crate) fn restore_admitted(
     mut output: crate::workspace_service::authority::OutputReservation,
 ) -> Result<NativeCopyReport, BackupError> {
     let summary = input.summary().clone();
-    portable::restore_reserved(input, &mut output).map(|report| NativeCopyReport { workspace_id: report.workspace_id, summary: Some(summary) })
+    portable::restore_reserved(input, &mut output).map(|report| NativeCopyReport {
+        workspace_id: report.workspace_id,
+        summary: Some(summary),
+    })
 }
 
 /// Real owned output facts. No path lookup or caller boolean can advance them.
 #[cfg(unix)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub(crate) enum OutputPhase { NotStarted, CreationAttempted, Created, PublicationAttempted, Published }
+pub(crate) enum OutputPhase {
+    NotStarted,
+    CreationAttempted,
+    Created,
+    PublicationAttempted,
+    Published,
+}
 #[cfg(unix)]
 pub(crate) struct OutputFacts(std::sync::atomic::AtomicU8);
 #[cfg(unix)]
 impl OutputFacts {
-    pub(crate) fn new() -> Self { Self(std::sync::atomic::AtomicU8::new(0)) }
+    pub(crate) fn new() -> Self {
+        Self(std::sync::atomic::AtomicU8::new(0))
+    }
     pub(crate) fn phase(&self) -> OutputPhase {
         match self.0.load(std::sync::atomic::Ordering::SeqCst) {
-            0 => OutputPhase::NotStarted, 1 => OutputPhase::CreationAttempted, 2 => OutputPhase::Created,
-            3 => OutputPhase::PublicationAttempted, 4 => OutputPhase::Published,
+            0 => OutputPhase::NotStarted,
+            1 => OutputPhase::CreationAttempted,
+            2 => OutputPhase::Created,
+            3 => OutputPhase::PublicationAttempted,
+            4 => OutputPhase::Published,
             _ => unreachable!("private output phase"),
         }
     }
     fn advance(&self, phase: OutputPhase) {
         // One original recorder, monotonic even when error/unwind follows a
         // successful syscall/publication. Never derive phase from path existence.
-        self.0.fetch_max(phase as u8, std::sync::atomic::Ordering::SeqCst);
+        self.0
+            .fetch_max(phase as u8, std::sync::atomic::Ordering::SeqCst);
     }
-    pub(crate) fn creation_attempted(&self) { self.advance(OutputPhase::CreationAttempted); }
-    pub(crate) fn created(&self) { self.advance(OutputPhase::Created); }
-    pub(crate) fn publication_attempted(&self) { self.advance(OutputPhase::PublicationAttempted); }
-    pub(crate) fn published(&self) { self.advance(OutputPhase::Published); }
+    pub(crate) fn creation_attempted(&self) {
+        self.advance(OutputPhase::CreationAttempted);
+    }
+    pub(crate) fn created(&self) {
+        self.advance(OutputPhase::Created);
+    }
+    pub(crate) fn publication_attempted(&self) {
+        self.advance(OutputPhase::PublicationAttempted);
+    }
+    pub(crate) fn published(&self) {
+        self.advance(OutputPhase::Published);
+    }
 }
 
 #[cfg(all(test, target_os = "macos"))]
-pub(crate) fn native_copy_step(name: &'static str, first: &Path, second: &Path) { portable::step(name, first, second); }
+pub(crate) fn native_copy_step(name: &'static str, first: &Path, second: &Path) {
+    portable::step(name, first, second);
+}
 
 #[cfg(unix)]
-pub(crate) fn omissions() -> Vec<String> { portable::rules().omitted_scopes.clone() }
+pub(crate) fn omissions() -> Vec<String> {
+    portable::rules().omitted_scopes.clone()
+}

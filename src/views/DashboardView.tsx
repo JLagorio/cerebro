@@ -1196,8 +1196,20 @@ function ViewBlock({
     schema,
     lists,
   );
-  const unavailable = surface.unavailable ?? selectedViewIssue(surface.entries, schema, surface.presentation, spec.global) ?? selectedViewIssue(surface.entries, schema, surface.presentation, widget.filter);
-  if (unavailable) return <BrokenBlock widget={widget} title={title} defaultTitle={defaultTitle} icon="circle-slash" message={unavailable.message} />;
+  const unavailable =
+    surface.unavailable ??
+    selectedViewIssue(surface.entries, schema, surface.presentation, spec.global) ??
+    selectedViewIssue(surface.entries, schema, surface.presentation, widget.filter);
+  if (unavailable)
+    return (
+      <BrokenBlock
+        widget={widget}
+        title={title}
+        defaultTitle={defaultTitle}
+        icon="circle-slash"
+        message={unavailable.message}
+      />
+    );
   const fields = columnUniverse(
     list.definition.source,
     surface.entries,

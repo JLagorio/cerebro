@@ -29,7 +29,13 @@ pub(crate) mod backup_policy;
 
 // One original-owner workflow; macOS commands register the actual main window.
 #[cfg(unix)]
-#[cfg_attr(all(not(test), not(target_os = "macos")), expect(dead_code, reason = "Native backup workflow is unsupported outside macOS."))]
+#[cfg_attr(
+    all(not(test), not(target_os = "macos")),
+    expect(
+        dead_code,
+        reason = "Native backup workflow is unsupported outside macOS."
+    )
+)]
 pub(crate) mod backup_coordinator;
 
 // Generated backup wire views contain no authority-bearing values.

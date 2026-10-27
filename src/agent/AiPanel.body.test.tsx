@@ -808,14 +808,21 @@ describe('failed-turn inspection', () => {
   });
 });
 
-
 it('M95 reviews a genuinely started failed reply through its original native root without another send', async () => {
-  vi.mocked(agentIpc.readChatRecovery).mockRejectedValueOnce({ code: 'unavailable', message: 'Native history is unavailable.', retryDisposition: 'refresh' });
-  render(<AiPanel presentation="panel" />); send('Inspect this original turn');
+  vi.mocked(agentIpc.readChatRecovery).mockRejectedValueOnce({
+    code: 'unavailable',
+    message: 'Native history is unavailable.',
+    retryDisposition: 'refresh',
+  });
+  render(<AiPanel presentation="panel" />);
+  send('Inspect this original turn');
   await waitFor(() => expect(wire.deliver).not.toBeNull());
-  act(() => wire.deliver?.({ kind: 'Error', run: 8, seq: 1, message: 'Original native interruption' }));
+  act(() =>
+    wire.deliver?.({ kind: 'Error', run: 8, seq: 1, message: 'Original native interruption' }),
+  );
   stream({ kind: 'Done' });
-  const button = await screen.findByRole('button', { name: 'Review what happened' }); fireEvent.click(button);
+  const button = await screen.findByRole('button', { name: 'Review what happened' });
+  fireEvent.click(button);
   await waitFor(() => expect(agentIpc.readChatRecovery).toHaveBeenCalledExactlyOnceWith('body-8'));
   expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
   expect(screen.getByRole('region', { name: 'Review what happened' })).toBeTruthy();

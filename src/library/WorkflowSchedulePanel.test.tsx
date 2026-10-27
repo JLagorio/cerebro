@@ -3,27 +3,238 @@ import { usePinned } from './WorkflowRunPanel';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WorkflowSchedulePanel, type WorkflowScheduleService } from './WorkflowSchedulePanel';
-import type { WorkflowDraft, WorkflowScheduleAck, WorkflowScheduleConfiguration, WorkflowScheduleView } from '@/lib/generated/workflows';
+import type {
+  WorkflowDraft,
+  WorkflowScheduleAck,
+  WorkflowScheduleConfiguration,
+  WorkflowScheduleView,
+} from '@/lib/generated/workflows';
 afterEach(cleanup);
-const context = { vaultId: 'a'.repeat(32), storeUuid: 'original' }; const version = { workflowId: 'scheduled', definitionHash: 'b'.repeat(64) }; const digest = 'c'.repeat(64);
-const definition = (): WorkflowDraft => ({ workflowId: version.workflowId, entryStepId: 'done', inputSchemaJson: '{"type":"object"}', triggerJson: '{"kind":"schedule","intervalSeconds":60,"catchUp":"skip_missed"}', steps: [{ stepId: 'done', label: 'Result', operation: { kind: 'result', outputJson: '{"kind":"literal","value":null}' } }] });
-const configuration = (): WorkflowScheduleConfiguration => ({ activationId: 'd'.repeat(32), version, state: 'enabled', revision: 1, epoch: 'e'.repeat(32), configurationDigest: digest, inputDigest: digest, permissionDigest: digest, triggerDigest: digest, anchorMs: 1792980000000, cursorMs: 1792980000000, recoveryHeld: false, coverageKnown: false, skippedCount: 2, coalescedCount: 0, observedAtMs: null, firstSkippedMs: 1792980060000, lastSkippedMs: 1792980120000, inputJson: '{}', permissions: { queryRecords: false, readPrefixes: [], accounts: [] } });
-const view = (current: WorkflowScheduleConfiguration | null = null): WorkflowScheduleView => ({ context, workflowId: version.workflowId, configuration: current, readiness: current === null ? 'unconfigured' : 'ready', monitoring: 'stopped' });
-const ack = (): WorkflowScheduleAck => ({ context, workflowId: version.workflowId, current: configuration(), receipt: { operation: 'enable', revision: 1, epoch: 'e'.repeat(32), state: 'enabled', version }, replayed: false, monitoring: 'busy' });
-function service(): WorkflowScheduleService { return { read: vi.fn(async () => view()), enable: vi.fn(async () => ack()), pause: vi.fn(async (): ReturnType<WorkflowScheduleService['pause']> => ({ ...ack(), receipt: { ...ack().receipt, operation: 'pause', revision: 2, state: 'paused' }, current: { ...configuration(), revision: 2, state: 'paused' }, monitoring: null })), remove: vi.fn(async (): ReturnType<WorkflowScheduleService['remove']> => ({ ...ack(), receipt: { ...ack().receipt, operation: 'remove', revision: 2, state: 'removed' }, current: { ...configuration(), revision: 2, state: 'removed', inputJson: null, permissions: null }, monitoring: null })), wake: vi.fn(async (): ReturnType<WorkflowScheduleService['wake']> => ({ context, monitoring: 'queued' })), preview: vi.fn(async (): ReturnType<WorkflowScheduleService['preview']> => ({ context, workflowId: version.workflowId, revision: 1, epoch: 'e'.repeat(32), disposition: 'idle', coverageKnown: false, dueAtMs: null, cursorMs: 1792980120000, skippedCount: 2, coalescedCount: 0 })), definition: vi.fn(async () => definition()), actions: vi.fn(async () => []) }; }
-const props = (api: WorkflowScheduleService, id: string) => ({ vaultKey: '/vault/' + id, context, workflowId: version.workflowId, version, service: api });
-it('enables only by explicit click using the published version and exact JSON with permissions off', async () => { const api = service(); render(<WorkflowSchedulePanel {...props(api, 'enable')} />); const field = await screen.findByLabelText('Automatic run input JSON'); const exact = '{"n":9007199254740993.0000000000000001}'; fireEvent.change(field, { target: { value: exact } }); expect(api.enable).not.toHaveBeenCalled(); expect(api.wake).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: 'Enable automatic runs' })); await waitFor(() => expect(api.enable).toHaveBeenCalledTimes(1)); const request = vi.mocked(api.enable).mock.calls[0]![0]; expect(request).toMatchObject({ context, version, expectedRevision: 0, inputJson: exact, permissions: { queryRecords: false, readPrefixes: [], accounts: [] } }); expect(request.requestKey).toMatch(/^[a-f0-9]{32}$/); });
-it('shows known enabled configuration separately from Busy monitoring and resumes only monitoring', async () => { const api = service(); render(<WorkflowSchedulePanel {...props(api, 'busy')} />); fireEvent.click(await screen.findByRole('button', { name: 'Enable automatic runs' })); await screen.findByText('Configuration saved. Monitoring is stopped.'); fireEvent.click(screen.getByRole('button', { name: 'Resume monitoring' })); await waitFor(() => expect(api.wake).toHaveBeenCalledExactlyOnceWith(context)); expect(api.enable).toHaveBeenCalledTimes(1); await screen.findByText('Monitoring is active while this vault and Cerebro are ready.'); });
-it('recovers the same unknown Enable after remount without a fresh configuration request', async () => { const api = service(); vi.mocked(api.enable).mockRejectedValueOnce(new Error('lost')); const selected = props(api, 'unknown'); const first = render(<WorkflowSchedulePanel {...selected} />); fireEvent.click(await screen.findByRole('button', { name: 'Enable automatic runs' })); await screen.findByRole('button', { name: 'Check original configuration request' }); first.unmount(); render(<WorkflowSchedulePanel {...selected} />); fireEvent.click(await screen.findByRole('button', { name: 'Check original configuration request' })); await waitFor(() => expect(api.enable).toHaveBeenCalledTimes(2)); expect(vi.mocked(api.enable).mock.calls[1]![0]).toEqual(vi.mocked(api.enable).mock.calls[0]![0]); });
-it('pauses the displayed original selection instead of adopting a newly published version', async () => { const api = service(); vi.mocked(api.read).mockResolvedValue(view(configuration())); const selected = props(api, 'pause'); render(<WorkflowSchedulePanel {...selected} version={{ ...version, definitionHash: 'f'.repeat(64) }} />); fireEvent.click(await screen.findByRole('button', { name: 'Pause automatic runs' })); await waitFor(() => expect(api.pause).toHaveBeenCalledTimes(1)); expect(vi.mocked(api.pause).mock.calls[0]![0]).toMatchObject({ context, workflowId: version.workflowId, expectedRevision: 1 }); expect(api.enable).not.toHaveBeenCalled(); await screen.findByText('Paused. Existing runs and approvals are unchanged.'); });
-it('reads native preview only on request and preserves unavailable instead of claiming no schedule', async () => { const api = service(); vi.mocked(api.read).mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue(view(configuration())); render(<WorkflowSchedulePanel {...props(api, 'preview')} />); await screen.findByText('Automatic run configuration could not be read.'); expect(api.enable).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: 'Refresh automatic runs' })); fireEvent.click(await screen.findByRole('button', { name: 'Preview next observation' })); await waitFor(() => expect(api.preview).toHaveBeenCalledExactlyOnceWith(context, version.workflowId)); await screen.findByText('If monitoring resumes now: 2 skipped, 0 coalesced.'); expect(api.wake).not.toHaveBeenCalled(); });
+const context = { vaultId: 'a'.repeat(32), storeUuid: 'original' };
+const version = { workflowId: 'scheduled', definitionHash: 'b'.repeat(64) };
+const digest = 'c'.repeat(64);
+const definition = (): WorkflowDraft => ({
+  workflowId: version.workflowId,
+  entryStepId: 'done',
+  inputSchemaJson: '{"type":"object"}',
+  triggerJson: '{"kind":"schedule","intervalSeconds":60,"catchUp":"skip_missed"}',
+  steps: [
+    {
+      stepId: 'done',
+      label: 'Result',
+      operation: { kind: 'result', outputJson: '{"kind":"literal","value":null}' },
+    },
+  ],
+});
+const configuration = (): WorkflowScheduleConfiguration => ({
+  activationId: 'd'.repeat(32),
+  version,
+  state: 'enabled',
+  revision: 1,
+  epoch: 'e'.repeat(32),
+  configurationDigest: digest,
+  inputDigest: digest,
+  permissionDigest: digest,
+  triggerDigest: digest,
+  anchorMs: 1792980000000,
+  cursorMs: 1792980000000,
+  recoveryHeld: false,
+  coverageKnown: false,
+  skippedCount: 2,
+  coalescedCount: 0,
+  observedAtMs: null,
+  firstSkippedMs: 1792980060000,
+  lastSkippedMs: 1792980120000,
+  inputJson: '{}',
+  permissions: { queryRecords: false, readPrefixes: [], accounts: [] },
+});
+const view = (current: WorkflowScheduleConfiguration | null = null): WorkflowScheduleView => ({
+  context,
+  workflowId: version.workflowId,
+  configuration: current,
+  readiness: current === null ? 'unconfigured' : 'ready',
+  monitoring: 'stopped',
+});
+const ack = (): WorkflowScheduleAck => ({
+  context,
+  workflowId: version.workflowId,
+  current: configuration(),
+  receipt: { operation: 'enable', revision: 1, epoch: 'e'.repeat(32), state: 'enabled', version },
+  replayed: false,
+  monitoring: 'busy',
+});
+function service(): WorkflowScheduleService {
+  return {
+    read: vi.fn(async () => view()),
+    enable: vi.fn(async () => ack()),
+    pause: vi.fn(async (): ReturnType<WorkflowScheduleService['pause']> => ({
+      ...ack(),
+      receipt: { ...ack().receipt, operation: 'pause', revision: 2, state: 'paused' },
+      current: { ...configuration(), revision: 2, state: 'paused' },
+      monitoring: null,
+    })),
+    remove: vi.fn(async (): ReturnType<WorkflowScheduleService['remove']> => ({
+      ...ack(),
+      receipt: { ...ack().receipt, operation: 'remove', revision: 2, state: 'removed' },
+      current: {
+        ...configuration(),
+        revision: 2,
+        state: 'removed',
+        inputJson: null,
+        permissions: null,
+      },
+      monitoring: null,
+    })),
+    wake: vi.fn(async (): ReturnType<WorkflowScheduleService['wake']> => ({
+      context,
+      monitoring: 'queued',
+    })),
+    preview: vi.fn(async (): ReturnType<WorkflowScheduleService['preview']> => ({
+      context,
+      workflowId: version.workflowId,
+      revision: 1,
+      epoch: 'e'.repeat(32),
+      disposition: 'idle',
+      coverageKnown: false,
+      dueAtMs: null,
+      cursorMs: 1792980120000,
+      skippedCount: 2,
+      coalescedCount: 0,
+    })),
+    definition: vi.fn(async () => definition()),
+    actions: vi.fn(async () => []),
+  };
+}
+const props = (api: WorkflowScheduleService, id: string) => ({
+  vaultKey: '/vault/' + id,
+  context,
+  workflowId: version.workflowId,
+  version,
+  service: api,
+});
+it('enables only by explicit click using the published version and exact JSON with permissions off', async () => {
+  const api = service();
+  render(<WorkflowSchedulePanel {...props(api, 'enable')} />);
+  const field = await screen.findByLabelText('Automatic run input JSON');
+  const exact = '{"n":9007199254740993.0000000000000001}';
+  fireEvent.change(field, { target: { value: exact } });
+  expect(api.enable).not.toHaveBeenCalled();
+  expect(api.wake).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Enable automatic runs' }));
+  await waitFor(() => expect(api.enable).toHaveBeenCalledTimes(1));
+  const request = vi.mocked(api.enable).mock.calls[0]![0];
+  expect(request).toMatchObject({
+    context,
+    version,
+    expectedRevision: 0,
+    inputJson: exact,
+    permissions: { queryRecords: false, readPrefixes: [], accounts: [] },
+  });
+  expect(request.requestKey).toMatch(/^[a-f0-9]{32}$/);
+});
+it('shows known enabled configuration separately from Busy monitoring and resumes only monitoring', async () => {
+  const api = service();
+  render(<WorkflowSchedulePanel {...props(api, 'busy')} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Enable automatic runs' }));
+  await screen.findByText('Configuration saved. Monitoring is stopped.');
+  fireEvent.click(screen.getByRole('button', { name: 'Resume monitoring' }));
+  await waitFor(() => expect(api.wake).toHaveBeenCalledExactlyOnceWith(context));
+  expect(api.enable).toHaveBeenCalledTimes(1);
+  await screen.findByText('Monitoring is active while this vault and Cerebro are ready.');
+});
+it('recovers the same unknown Enable after remount without a fresh configuration request', async () => {
+  const api = service();
+  vi.mocked(api.enable).mockRejectedValueOnce(new Error('lost'));
+  const selected = props(api, 'unknown');
+  const first = render(<WorkflowSchedulePanel {...selected} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Enable automatic runs' }));
+  await screen.findByRole('button', { name: 'Check original configuration request' });
+  first.unmount();
+  render(<WorkflowSchedulePanel {...selected} />);
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Check original configuration request' }),
+  );
+  await waitFor(() => expect(api.enable).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(api.enable).mock.calls[1]![0]).toEqual(vi.mocked(api.enable).mock.calls[0]![0]);
+});
+it('pauses the displayed original selection instead of adopting a newly published version', async () => {
+  const api = service();
+  vi.mocked(api.read).mockResolvedValue(view(configuration()));
+  const selected = props(api, 'pause');
+  render(
+    <WorkflowSchedulePanel
+      {...selected}
+      version={{ ...version, definitionHash: 'f'.repeat(64) }}
+    />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Pause automatic runs' }));
+  await waitFor(() => expect(api.pause).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(api.pause).mock.calls[0]![0]).toMatchObject({
+    context,
+    workflowId: version.workflowId,
+    expectedRevision: 1,
+  });
+  expect(api.enable).not.toHaveBeenCalled();
+  await screen.findByText('Paused. Existing runs and approvals are unchanged.');
+});
+it('reads native preview only on request and preserves unavailable instead of claiming no schedule', async () => {
+  const api = service();
+  vi.mocked(api.read)
+    .mockRejectedValueOnce(new Error('unavailable'))
+    .mockResolvedValue(view(configuration()));
+  render(<WorkflowSchedulePanel {...props(api, 'preview')} />);
+  await screen.findByText('Automatic run configuration could not be read.');
+  expect(api.enable).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh automatic runs' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Preview next observation' }));
+  await waitFor(() =>
+    expect(api.preview).toHaveBeenCalledExactlyOnceWith(context, version.workflowId),
+  );
+  await screen.findByText('If monitoring resumes now: 2 skipped, 0 coalesced.');
+  expect(api.wake).not.toHaveBeenCalled();
+});
 
 it('keeps local automatic input and permission choices with their original owner on same-version vault switch', async () => {
- const api = service(); vi.mocked(api.read).mockImplementation(async (selected, workflowId) => ({ ...view(), context: selected, workflowId })); const original = props(api, 'scope-input'); const mounted = render(<WorkflowSchedulePanel {...original} />); fireEvent.change(await screen.findByLabelText('Automatic run input JSON'), { target: { value: '{"original":"private"}' } }); fireEvent.click(screen.getByLabelText('Allow scoped record queries'));
- const replacement = { ...context, storeUuid: 'replacement' }; mounted.rerender(<WorkflowSchedulePanel {...original} vaultKey="/vault/replacement" context={replacement} />); await waitFor(() => expect(api.read).toHaveBeenCalledWith(replacement, version.workflowId)); expect((await screen.findByLabelText('Automatic run input JSON') as HTMLTextAreaElement).value).toBe('{}'); expect((screen.getByLabelText('Allow scoped record queries') as HTMLInputElement).checked).toBe(false); expect(api.enable).not.toHaveBeenCalled();
+  const api = service();
+  vi.mocked(api.read).mockImplementation(async (selected, workflowId) => ({
+    ...view(),
+    context: selected,
+    workflowId,
+  }));
+  const original = props(api, 'scope-input');
+  const mounted = render(<WorkflowSchedulePanel {...original} />);
+  fireEvent.change(await screen.findByLabelText('Automatic run input JSON'), {
+    target: { value: '{"original":"private"}' },
+  });
+  fireEvent.click(screen.getByLabelText('Allow scoped record queries'));
+  const replacement = { ...context, storeUuid: 'replacement' };
+  mounted.rerender(
+    <WorkflowSchedulePanel {...original} vaultKey="/vault/replacement" context={replacement} />,
+  );
+  await waitFor(() => expect(api.read).toHaveBeenCalledWith(replacement, version.workflowId));
+  expect(
+    ((await screen.findByLabelText('Automatic run input JSON')) as HTMLTextAreaElement).value,
+  ).toBe('{}');
+  expect((screen.getByLabelText('Allow scoped record queries') as HTMLInputElement).checked).toBe(
+    false,
+  );
+  expect(api.enable).not.toHaveBeenCalled();
 });
 it('never commits the prior scoped pinned view during a service and context replacement', async () => {
- const first = service(); const second = service(); vi.mocked(second.definition).mockImplementation(() => new Promise<WorkflowDraft>(() => {})); const observations: { store: string; loaded: boolean }[] = [];
- function Probe({ api, selected }: { api: WorkflowScheduleService; selected: typeof context }) { const pinned = usePinned(api, selected, version); useLayoutEffect(() => { observations.push({ store: selected.storeUuid, loaded: pinned.loaded !== null }); }); return <span>{pinned.loaded === null ? 'pending' : 'pinned'}</span>; }
- const mounted = render(<Probe api={first} selected={context} />); await screen.findByText('pinned'); const replacement = { ...context, storeUuid: 'new-scope' }; mounted.rerender(<Probe api={second} selected={replacement} />); expect(observations.find((item) => item.store === 'new-scope')?.loaded).toBe(false);
+  const first = service();
+  const second = service();
+  vi.mocked(second.definition).mockImplementation(() => new Promise<WorkflowDraft>(() => {}));
+  const observations: { store: string; loaded: boolean }[] = [];
+  function Probe({ api, selected }: { api: WorkflowScheduleService; selected: typeof context }) {
+    const pinned = usePinned(api, selected, version);
+    useLayoutEffect(() => {
+      observations.push({ store: selected.storeUuid, loaded: pinned.loaded !== null });
+    });
+    return <span>{pinned.loaded === null ? 'pending' : 'pinned'}</span>;
+  }
+  const mounted = render(<Probe api={first} selected={context} />);
+  await screen.findByText('pinned');
+  const replacement = { ...context, storeUuid: 'new-scope' };
+  mounted.rerender(<Probe api={second} selected={replacement} />);
+  expect(observations.find((item) => item.store === 'new-scope')?.loaded).toBe(false);
 });

@@ -2,28 +2,175 @@ import { expect, it, vi } from 'vitest';
 import policy from '../../shared/workflows/editor.v1.json';
 import type { WorkflowRuntimeApi } from './workflowRunOwner';
 import type { WorkflowStartAck } from '@/lib/generated/workflows';
-const context = { vaultId: 'a'.repeat(32), storeUuid: 'original' }; const version = { workflowId: 'example', definitionHash: 'b'.repeat(64) };
-const ack = (): WorkflowStartAck => ({ context, version, runId: 'c'.repeat(32), admissionEpoch: 1, revision: 1, created: false, admission: 'busy' });
-function api(): WorkflowRuntimeApi { const unavailable = async (): Promise<never> => { throw new Error('unavailable'); }; return { start: vi.fn(unavailable), run: vi.fn(unavailable), continue: vi.fn(unavailable), cancel: vi.fn(unavailable), reauthorize: vi.fn(unavailable), action: vi.fn(unavailable), answerAction: vi.fn(unavailable), answerWait: vi.fn(unavailable), value: vi.fn(unavailable) }; }
-const input = () => ({ context, version, inputJson: '{}', permissions: { queryRecords: false, readPrefixes: [], accounts: [] } });
+const context = { vaultId: 'a'.repeat(32), storeUuid: 'original' };
+const version = { workflowId: 'example', definitionHash: 'b'.repeat(64) };
+const ack = (): WorkflowStartAck => ({
+  context,
+  version,
+  runId: 'c'.repeat(32),
+  admissionEpoch: 1,
+  revision: 1,
+  created: false,
+  admission: 'busy',
+});
+function api(): WorkflowRuntimeApi {
+  const unavailable = async (): Promise<never> => {
+    throw new Error('unavailable');
+  };
+  return {
+    start: vi.fn(unavailable),
+    run: vi.fn(unavailable),
+    continue: vi.fn(unavailable),
+    cancel: vi.fn(unavailable),
+    reauthorize: vi.fn(unavailable),
+    action: vi.fn(unavailable),
+    answerAction: vi.fn(unavailable),
+    answerWait: vi.fn(unavailable),
+    value: vi.fn(unavailable),
+  };
+}
+const input = () => ({
+  context,
+  version,
+  inputJson: '{}',
+  permissions: { queryRecords: false, readPrefixes: [], accounts: [] },
+});
 it('keeps an unknown Start through remount and reuses its exact original request key', async () => {
- vi.resetModules(); const { retainWorkflowRun } = await import('./workflowRunOwner'); const service = api(); const keys = vi.fn(() => '1'.repeat(32)); const owner = retainWorkflowRun('/vault', context, 'example', service, keys); expect(owner).not.toBeNull(); const detach = owner!.mount(); await owner!.start.begin(input()); detach(); await Promise.resolve(); const again = retainWorkflowRun('/vault', context, 'example', service, keys); expect(again).toBe(owner); const remount = again!.mount(); vi.mocked(service.start).mockResolvedValueOnce(ack()); await again!.start.retry(context); expect(keys).toHaveBeenCalledTimes(1); expect(vi.mocked(service.start).mock.calls[1]![0]).toEqual(vi.mocked(service.start).mock.calls[0]![0]); remount(); await Promise.resolve();
+  vi.resetModules();
+  const { retainWorkflowRun } = await import('./workflowRunOwner');
+  const service = api();
+  const keys = vi.fn(() => '1'.repeat(32));
+  const owner = retainWorkflowRun('/vault', context, 'example', service, keys);
+  expect(owner).not.toBeNull();
+  const detach = owner!.mount();
+  await owner!.start.begin(input());
+  detach();
+  await Promise.resolve();
+  const again = retainWorkflowRun('/vault', context, 'example', service, keys);
+  expect(again).toBe(owner);
+  const remount = again!.mount();
+  vi.mocked(service.start).mockResolvedValueOnce(ack());
+  await again!.start.retry(context);
+  expect(keys).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(service.start).mock.calls[1]![0]).toEqual(
+    vi.mocked(service.start).mock.calls[0]![0],
+  );
+  remount();
+  await Promise.resolve();
 });
 it('never adopts a different original vault store or service for an existing owner', async () => {
- vi.resetModules(); const { retainWorkflowRun } = await import('./workflowRunOwner'); const service = api(); const key = () => '1'.repeat(32); const original = retainWorkflowRun('/vault', context, 'example', service, key); expect(original).not.toBeNull(); expect(retainWorkflowRun('/vault', context, 'example', api(), key)).toBeNull(); const foreign = retainWorkflowRun('/other', context, 'example', service, key); expect(foreign).not.toBe(original); const replaced = retainWorkflowRun('/vault', { ...context, storeUuid: 'replacement' }, 'example', service, key); expect(replaced).not.toBe(original); original!.mount()(); foreign?.mount()(); replaced?.mount()(); await Promise.resolve();
+  vi.resetModules();
+  const { retainWorkflowRun } = await import('./workflowRunOwner');
+  const service = api();
+  const key = () => '1'.repeat(32);
+  const original = retainWorkflowRun('/vault', context, 'example', service, key);
+  expect(original).not.toBeNull();
+  expect(retainWorkflowRun('/vault', context, 'example', api(), key)).toBeNull();
+  const foreign = retainWorkflowRun('/other', context, 'example', service, key);
+  expect(foreign).not.toBe(original);
+  const replaced = retainWorkflowRun(
+    '/vault',
+    { ...context, storeUuid: 'replacement' },
+    'example',
+    service,
+    key,
+  );
+  expect(replaced).not.toBe(original);
+  original!.mount()();
+  foreign?.mount()();
+  replaced?.mount()();
+  await Promise.resolve();
 });
 it('refuses capacity without evicting unknown native request identities', async () => {
- vi.resetModules(); const { retainWorkflowRun } = await import('./workflowRunOwner'); const service = api(); const owners = [];
- for (let n = 0; n < policy.maxRetainedRunSessions; n++) { const owner = retainWorkflowRun('/vault', context, 'workflow_' + n, service, () => '1'.repeat(32)); expect(owner).not.toBeNull(); const detach = owner!.mount(); await owner!.start.begin({ ...input(), version: { ...version, workflowId: 'workflow_' + n } }); detach(); owners.push(owner); }
- await Promise.resolve(); expect(retainWorkflowRun('/vault', context, 'overflow', service, () => '2'.repeat(32))).toBeNull(); expect(retainWorkflowRun('/vault', context, 'workflow_0', service, () => '2'.repeat(32))).toBe(owners[0]);
+  vi.resetModules();
+  const { retainWorkflowRun } = await import('./workflowRunOwner');
+  const service = api();
+  const owners = [];
+  for (let n = 0; n < policy.maxRetainedRunSessions; n++) {
+    const owner = retainWorkflowRun('/vault', context, 'workflow_' + n, service, () =>
+      '1'.repeat(32),
+    );
+    expect(owner).not.toBeNull();
+    const detach = owner!.mount();
+    await owner!.start.begin({ ...input(), version: { ...version, workflowId: 'workflow_' + n } });
+    detach();
+    owners.push(owner);
+  }
+  await Promise.resolve();
+  expect(
+    retainWorkflowRun('/vault', context, 'overflow', service, () => '2'.repeat(32)),
+  ).toBeNull();
+  expect(retainWorkflowRun('/vault', context, 'workflow_0', service, () => '2'.repeat(32))).toBe(
+    owners[0],
+  );
 });
 it('releases settled unmounted views while an immediate remount cancels release', async () => {
- vi.resetModules(); const { retainWorkflowRun } = await import('./workflowRunOwner'); const service = api(); const key = () => '1'.repeat(32); const original = retainWorkflowRun('/vault', context, 'example', service, key); expect(original).not.toBeNull(); const detach = original!.mount(); detach(); const remount = original!.mount(); await Promise.resolve(); expect(retainWorkflowRun('/vault', context, 'example', service, key)).toBe(original); remount(); await Promise.resolve(); const successor = retainWorkflowRun('/vault', context, 'example', service, key); expect(successor).not.toBe(original); expect(successor).not.toBeNull(); successor!.mount()(); await Promise.resolve();
+  vi.resetModules();
+  const { retainWorkflowRun } = await import('./workflowRunOwner');
+  const service = api();
+  const key = () => '1'.repeat(32);
+  const original = retainWorkflowRun('/vault', context, 'example', service, key);
+  expect(original).not.toBeNull();
+  const detach = original!.mount();
+  detach();
+  const remount = original!.mount();
+  await Promise.resolve();
+  expect(retainWorkflowRun('/vault', context, 'example', service, key)).toBe(original);
+  remount();
+  await Promise.resolve();
+  const successor = retainWorkflowRun('/vault', context, 'example', service, key);
+  expect(successor).not.toBe(original);
+  expect(successor).not.toBeNull();
+  successor!.mount()();
+  await Promise.resolve();
 });
 
 it('keeps an unknown mutation owner after a failed original refresh and remount', async () => {
- vi.resetModules(); const { retainWorkflowRun } = await import('./workflowRunOwner'); const service = api(); const id = 'c'.repeat(32);
- const observed: import('@/lib/generated/workflows').WorkflowRunView = { context, version, runId: id, nativeRunId: 'd'.repeat(32), admissionEpoch: 1, revision: 1, state: 'waiting', cancelRequested: false, configurationDigest: 'e'.repeat(64), inputDigest: 'f'.repeat(64), reason: 'timer_waiting', steps: [] };
- vi.mocked(service.run).mockResolvedValueOnce(observed); const owner = retainWorkflowRun('/vault', context, 'example', service, () => '1'.repeat(32)); expect(owner).not.toBeNull(); const detach = owner!.mount(); await owner!.run.open(id); await owner!.run.cancel(); expect(owner!.run.getSnapshot().phase).toBe('unknown'); await owner!.run.refresh(); expect(service.run).toHaveBeenCalledTimes(2); detach(); await Promise.resolve(); const again = retainWorkflowRun('/vault', context, 'example', service, () => '2'.repeat(32)); expect(again).toBe(owner);
- const remount = again!.mount(); await again!.run.open('9'.repeat(32)); expect(service.run).toHaveBeenCalledTimes(2); vi.mocked(service.run).mockResolvedValueOnce({ ...observed, revision: 2, state: 'cancelled', cancelRequested: true }); await again!.run.refresh(); remount(); await Promise.resolve(); const successor = retainWorkflowRun('/vault', context, 'example', service, () => '3'.repeat(32)); expect(successor).not.toBe(owner); successor!.mount()(); await Promise.resolve();
+  vi.resetModules();
+  const { retainWorkflowRun } = await import('./workflowRunOwner');
+  const service = api();
+  const id = 'c'.repeat(32);
+  const observed: import('@/lib/generated/workflows').WorkflowRunView = {
+    context,
+    version,
+    runId: id,
+    nativeRunId: 'd'.repeat(32),
+    admissionEpoch: 1,
+    revision: 1,
+    state: 'waiting',
+    cancelRequested: false,
+    configurationDigest: 'e'.repeat(64),
+    inputDigest: 'f'.repeat(64),
+    reason: 'timer_waiting',
+    steps: [],
+  };
+  vi.mocked(service.run).mockResolvedValueOnce(observed);
+  const owner = retainWorkflowRun('/vault', context, 'example', service, () => '1'.repeat(32));
+  expect(owner).not.toBeNull();
+  const detach = owner!.mount();
+  await owner!.run.open(id);
+  await owner!.run.cancel();
+  expect(owner!.run.getSnapshot().phase).toBe('unknown');
+  await owner!.run.refresh();
+  expect(service.run).toHaveBeenCalledTimes(2);
+  detach();
+  await Promise.resolve();
+  const again = retainWorkflowRun('/vault', context, 'example', service, () => '2'.repeat(32));
+  expect(again).toBe(owner);
+  const remount = again!.mount();
+  await again!.run.open('9'.repeat(32));
+  expect(service.run).toHaveBeenCalledTimes(2);
+  vi.mocked(service.run).mockResolvedValueOnce({
+    ...observed,
+    revision: 2,
+    state: 'cancelled',
+    cancelRequested: true,
+  });
+  await again!.run.refresh();
+  remount();
+  await Promise.resolve();
+  const successor = retainWorkflowRun('/vault', context, 'example', service, () => '3'.repeat(32));
+  expect(successor).not.toBe(owner);
+  successor!.mount()();
+  await Promise.resolve();
 });

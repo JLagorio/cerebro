@@ -1,355 +1,2944 @@
 //! Real migration-backed rows only. No window, CLI or native authority fixture.
 use super::*;
-use rusqlite::{params,Transaction,TransactionBehavior};
-const HASH:&str="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const KEY:&str="11111111111111111111111111111111";
-const VAULT:&str="cccccccccccccccccccccccccccccccc";
-const PATH:&str="/synthetic/workflow-origin-vault";
-fn time()->chrono::DateTime<chrono::Utc>{"2026-10-26T00:00:00.000Z".parse().unwrap()}
-fn facts()->OpeningFacts<'static>{OpeningFacts{owner:"human:me",vault:VAULT,store:"store",canonical_vault:PATH,session:"session-one",process:"process-one"}}
-fn permissions()->Permissions{Permissions{read_prefixes:vec!["visible".into()],query_records:true,accounts:vec![]}}
-struct Db {conn:Option<Connection>,dir:std::path::PathBuf}
-impl std::ops::Deref for Db {type Target=Connection;fn deref(&self)->&Connection{self.conn.as_ref().unwrap()}}
-impl Drop for Db{fn drop(&mut self){drop(self.conn.take());let _=std::fs::remove_dir_all(&self.dir);}}
-fn db()->Db{let dir=crate::vault::testutil::temp_vault("workflow-origin-rows").canonicalize().unwrap();let conn=crate::runtime::open(&dir).unwrap();conn.execute("INSERT INTO vault_registry(vault_id,vault_path,first_seen_at) VALUES(?1,?2,?3)",params![VAULT,PATH,time().to_rfc3339_opts(chrono::SecondsFormat::Millis,true)]).unwrap();session(&conn,"session-one");Db{conn:Some(conn),dir}}
-fn session(conn:&Connection,id:&str){crate::runtime::catchup::open_session(conn,id,VAULT,"store",time()).unwrap();}
-fn tx<T>(conn:&Connection,f:impl FnOnce(&Connection)->Result<T,flow::Error>)->Result<T,flow::Error>{let tx=Transaction::new_unchecked(conn,TransactionBehavior::Immediate).unwrap();let value=f(&tx)?;tx.commit().unwrap();Ok(value)}
-fn start(conn:&Connection,p:&Permissions)->Result<Started,flow::Error>{let steps=[flow::Step{id:"done",kind:flow::Kind::Result,next:None,otherwise:None}];start_rows(conn,facts(),Start{key:KEY,workflow:"workflow",version:HASH,schema:HASH,input:"{}",configuration:HASH,permissions:p,selectors:&[],entry:"done",steps:&steps,now:time()})}
-fn original(conn:&Connection)->Origin{let Started::New(row)=tx(conn,|c|start(c,&permissions())).unwrap()else{panic!("new")};row}
-fn count(conn:&Connection,table:&str)->i64{let sql=match table{"runs"=>"SELECT count(*) FROM runs","origins"=>"SELECT count(*) FROM workflow_run_origins","flow"=>"SELECT count(*) FROM workflow_runs","grants"=>"SELECT count(*) FROM action_account_grants",_=>panic!("fixed table")};conn.query_row(sql,[],|r|r.get(0)).unwrap()}
+use rusqlite::{params, Transaction, TransactionBehavior};
+const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const KEY: &str = "11111111111111111111111111111111";
+const VAULT: &str = "cccccccccccccccccccccccccccccccc";
+const PATH: &str = "/synthetic/workflow-origin-vault";
+fn time() -> chrono::DateTime<chrono::Utc> {
+    "2026-10-26T00:00:00.000Z".parse().unwrap()
+}
+fn facts() -> OpeningFacts<'static> {
+    OpeningFacts {
+        owner: "human:me",
+        vault: VAULT,
+        store: "store",
+        canonical_vault: PATH,
+        session: "session-one",
+        process: "process-one",
+    }
+}
+fn permissions() -> Permissions {
+    Permissions {
+        read_prefixes: vec!["visible".into()],
+        query_records: true,
+        accounts: vec![],
+    }
+}
+struct Db {
+    conn: Option<Connection>,
+    dir: std::path::PathBuf,
+}
+impl std::ops::Deref for Db {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        self.conn.as_ref().unwrap()
+    }
+}
+impl Drop for Db {
+    fn drop(&mut self) {
+        drop(self.conn.take());
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+fn db() -> Db {
+    let dir = crate::vault::testutil::temp_vault("workflow-origin-rows")
+        .canonicalize()
+        .unwrap();
+    let conn = crate::runtime::open(&dir).unwrap();
+    conn.execute(
+        "INSERT INTO vault_registry(vault_id,vault_path,first_seen_at) VALUES(?1,?2,?3)",
+        params![
+            VAULT,
+            PATH,
+            time().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        ],
+    )
+    .unwrap();
+    session(&conn, "session-one");
+    Db {
+        conn: Some(conn),
+        dir,
+    }
+}
+fn session(conn: &Connection, id: &str) {
+    crate::runtime::catchup::open_session(conn, id, VAULT, "store", time()).unwrap();
+}
+fn tx<T>(
+    conn: &Connection,
+    f: impl FnOnce(&Connection) -> Result<T, flow::Error>,
+) -> Result<T, flow::Error> {
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate).unwrap();
+    let value = f(&tx)?;
+    tx.commit().unwrap();
+    Ok(value)
+}
+fn start(conn: &Connection, p: &Permissions) -> Result<Started, flow::Error> {
+    let steps = [flow::Step {
+        id: "done",
+        kind: flow::Kind::Result,
+        next: None,
+        otherwise: None,
+    }];
+    start_rows(
+        conn,
+        facts(),
+        Start {
+            key: KEY,
+            workflow: "workflow",
+            version: HASH,
+            schema: HASH,
+            input: "{}",
+            configuration: HASH,
+            permissions: p,
+            selectors: &[],
+            entry: "done",
+            steps: &steps,
+            now: time(),
+        },
+    )
+}
+fn original(conn: &Connection) -> Origin {
+    let Started::New(row) = tx(conn, |c| start(c, &permissions())).unwrap() else {
+        panic!("new")
+    };
+    row
+}
+fn count(conn: &Connection, table: &str) -> i64 {
+    let sql = match table {
+        "runs" => "SELECT count(*) FROM runs",
+        "origins" => "SELECT count(*) FROM workflow_run_origins",
+        "flow" => "SELECT count(*) FROM workflow_runs",
+        "grants" => "SELECT count(*) FROM action_account_grants",
+        _ => panic!("fixed table"),
+    };
+    conn.query_row(sql, [], |r| r.get(0)).unwrap()
+}
 #[test]
-fn workflow_origin_rows_require_transaction(){let conn=db();assert_eq!(start(&conn,&permissions()),Err(flow::Error::Unavailable));assert_eq!(count(&conn,"runs"),0);}
+fn workflow_origin_rows_require_transaction() {
+    let conn = db();
+    assert_eq!(start(&conn, &permissions()), Err(flow::Error::Unavailable));
+    assert_eq!(count(&conn, "runs"), 0);
+}
 #[test]
-fn workflow_origin_start_mints_exact_native_operation_and_scope(){let conn=db();let origin=original(&conn);assert_ne!(origin.flow_run,origin.native_run);assert_eq!(origin.actor,format!("workflow:{}",origin.native_run));assert_eq!(origin.epoch,1);let (native,scope,actor,kind,cli):(String,String,String,String,Option<String>)=conn.query_row("SELECT r.act_run_id,r.act_scope_digest,n.actor_id,n.source_kind,n.cli_session_id FROM workflow_runs r JOIN action_native_runs n ON n.run_id=r.act_run_id WHERE r.run_id=?1",[&origin.flow_run],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).unwrap();assert_eq!(native,origin.native_run);assert_eq!(actor,origin.actor);assert_eq!(kind,"attended_operation");assert!(cli.is_none());assert_eq!(scope.len(),64);assert_eq!(count(&conn,"grants"),0,"definition/read permission never creates account grants");}
+fn workflow_origin_start_mints_exact_native_operation_and_scope() {
+    let conn = db();
+    let origin = original(&conn);
+    assert_ne!(origin.flow_run, origin.native_run);
+    assert_eq!(origin.actor, format!("workflow:{}", origin.native_run));
+    assert_eq!(origin.epoch, 1);
+    let (native,scope,actor,kind,cli):(String,String,String,String,Option<String>)=conn.query_row("SELECT r.act_run_id,r.act_scope_digest,n.actor_id,n.source_kind,n.cli_session_id FROM workflow_runs r JOIN action_native_runs n ON n.run_id=r.act_run_id WHERE r.run_id=?1",[&origin.flow_run],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).unwrap();
+    assert_eq!(native, origin.native_run);
+    assert_eq!(actor, origin.actor);
+    assert_eq!(kind, "attended_operation");
+    assert!(cli.is_none());
+    assert_eq!(scope.len(), 64);
+    assert_eq!(
+        count(&conn, "grants"),
+        0,
+        "definition/read permission never creates account grants"
+    );
+}
 #[test]
-fn workflow_origin_duplicate_start_observes_same_identity(){let conn=db();let origin=original(&conn);assert_eq!(tx(&conn,|c|start(c,&permissions())).unwrap(),Started::Observed(origin));assert_eq!(count(&conn,"runs"),1);assert_eq!(count(&conn,"origins"),1);assert_eq!(count(&conn,"flow"),1);}
+fn workflow_origin_duplicate_start_observes_same_identity() {
+    let conn = db();
+    let origin = original(&conn);
+    assert_eq!(
+        tx(&conn, |c| start(c, &permissions())).unwrap(),
+        Started::Observed(origin)
+    );
+    assert_eq!(count(&conn, "runs"), 1);
+    assert_eq!(count(&conn, "origins"), 1);
+    assert_eq!(count(&conn, "flow"), 1);
+}
 #[test]
-fn workflow_origin_changed_start_permissions_conflict_without_reissue(){let conn=db();original(&conn);let mut changed=permissions();changed.read_prefixes.push("private".into());assert_eq!(tx(&conn,|c|start(c,&changed)),Err(flow::Error::Conflict));assert_eq!(count(&conn,"runs"),1);}
+fn workflow_origin_changed_start_permissions_conflict_without_reissue() {
+    let conn = db();
+    original(&conn);
+    let mut changed = permissions();
+    changed.read_prefixes.push("private".into());
+    assert_eq!(
+        tx(&conn, |c| start(c, &changed)),
+        Err(flow::Error::Conflict)
+    );
+    assert_eq!(count(&conn, "runs"), 1);
+}
 #[test]
-fn workflow_origin_claim_and_identity_rollback_together(){let conn=db();let transaction=Transaction::new_unchecked(&conn,TransactionBehavior::Immediate).unwrap();start(&transaction,&permissions()).unwrap();transaction.rollback().unwrap();assert_eq!((count(&conn,"runs"),count(&conn,"origins"),count(&conn,"flow")),(0,0,0));}
+fn workflow_origin_claim_and_identity_rollback_together() {
+    let conn = db();
+    let transaction = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate).unwrap();
+    start(&transaction, &permissions()).unwrap();
+    transaction.rollback().unwrap();
+    assert_eq!(
+        (
+            count(&conn, "runs"),
+            count(&conn, "origins"),
+            count(&conn, "flow")
+        ),
+        (0, 0, 0)
+    );
+}
 #[test]
-fn workflow_origin_closed_creation_session_reauthorizes_same_act_scope(){let conn=db();let original=original(&conn);let before:String=conn.query_row("SELECT act_scope_digest FROM workflow_runs WHERE run_id=?1",[&original.flow_run],|r|r.get(0)).unwrap();crate::runtime::catchup::close_session(&conn,"session-one",VAULT,"store",time()).unwrap();session(&conn,"session-two");let renewed=tx(&conn,|c|reauthorize_rows(c,OpeningFacts{session:"session-two",process:"process-two",..facts()},&original.flow_run,original.epoch,&permissions(),time())).unwrap();assert_eq!(renewed.native_run,original.native_run);assert_eq!(renewed.actor,original.actor);assert_eq!(renewed.authority,original.authority);assert_eq!(renewed.epoch,2);let (scope,creation):(String,String)=conn.query_row("SELECT r.act_scope_digest,n.app_session_id FROM workflow_runs r JOIN action_native_runs n ON n.run_id=r.act_run_id WHERE r.run_id=?1",[&original.flow_run],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();assert_eq!(scope,before);assert_eq!(creation,"session-one");}
+fn workflow_origin_closed_creation_session_reauthorizes_same_act_scope() {
+    let conn = db();
+    let original = original(&conn);
+    let before: String = conn
+        .query_row(
+            "SELECT act_scope_digest FROM workflow_runs WHERE run_id=?1",
+            [&original.flow_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    crate::runtime::catchup::close_session(&conn, "session-one", VAULT, "store", time()).unwrap();
+    session(&conn, "session-two");
+    let renewed = tx(&conn, |c| {
+        reauthorize_rows(
+            c,
+            OpeningFacts {
+                session: "session-two",
+                process: "process-two",
+                ..facts()
+            },
+            &original.flow_run,
+            original.epoch,
+            &permissions(),
+            time(),
+        )
+    })
+    .unwrap();
+    assert_eq!(renewed.native_run, original.native_run);
+    assert_eq!(renewed.actor, original.actor);
+    assert_eq!(renewed.authority, original.authority);
+    assert_eq!(renewed.epoch, 2);
+    let (scope,creation):(String,String)=conn.query_row("SELECT r.act_scope_digest,n.app_session_id FROM workflow_runs r JOIN action_native_runs n ON n.run_id=r.act_run_id WHERE r.run_id=?1",[&original.flow_run],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(scope, before);
+    assert_eq!(creation, "session-one");
+}
 #[test]
-fn workflow_origin_reauthorization_only_narrows_original_permissions(){let conn=db();let original=original(&conn);let narrow=Permissions{read_prefixes:vec!["visible/sub".into()],..permissions()};let narrowed=tx(&conn,|c|reauthorize_rows(c,facts(),&original.flow_run,original.epoch,&narrow,time())).unwrap();assert_eq!(narrowed.original,permissions());assert_eq!(narrowed.current,narrow);let wide=Permissions{read_prefixes:vec!["private".into()],..permissions()};assert_eq!(tx(&conn,|c|reauthorize_rows(c,facts(),&original.flow_run,narrowed.epoch,&wide,time())),Err(flow::Error::Denied));}
+fn workflow_origin_reauthorization_only_narrows_original_permissions() {
+    let conn = db();
+    let original = original(&conn);
+    let narrow = Permissions {
+        read_prefixes: vec!["visible/sub".into()],
+        ..permissions()
+    };
+    let narrowed = tx(&conn, |c| {
+        reauthorize_rows(
+            c,
+            facts(),
+            &original.flow_run,
+            original.epoch,
+            &narrow,
+            time(),
+        )
+    })
+    .unwrap();
+    assert_eq!(narrowed.original, permissions());
+    assert_eq!(narrowed.current, narrow);
+    let wide = Permissions {
+        read_prefixes: vec!["private".into()],
+        ..permissions()
+    };
+    assert_eq!(
+        tx(&conn, |c| reauthorize_rows(
+            c,
+            facts(),
+            &original.flow_run,
+            narrowed.epoch,
+            &wide,
+            time()
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 #[test]
-fn workflow_origin_stale_epoch_refuses_without_identity_change(){let conn=db();let original=original(&conn);let current=tx(&conn,|c|reauthorize_rows(c,facts(),&original.flow_run,original.epoch,&permissions(),time())).unwrap();assert_eq!(tx(&conn,|c|reauthorize_rows(c,facts(),&original.flow_run,original.epoch,&permissions(),time())),Err(flow::Error::Stale));assert_eq!(tx(&conn,|c|inspect_rows(c,facts(),&original.flow_run)).unwrap(),current);}
+fn workflow_origin_stale_epoch_refuses_without_identity_change() {
+    let conn = db();
+    let original = original(&conn);
+    let current = tx(&conn, |c| {
+        reauthorize_rows(
+            c,
+            facts(),
+            &original.flow_run,
+            original.epoch,
+            &permissions(),
+            time(),
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        tx(&conn, |c| reauthorize_rows(
+            c,
+            facts(),
+            &original.flow_run,
+            original.epoch,
+            &permissions(),
+            time()
+        )),
+        Err(flow::Error::Stale)
+    );
+    assert_eq!(
+        tx(&conn, |c| inspect_rows(c, facts(), &original.flow_run)).unwrap(),
+        current
+    );
+}
 #[test]
-fn workflow_origin_wrong_owner_vault_store_or_path_denied(){let conn=db();let original=original(&conn);for facts in [OpeningFacts{owner:"human:other",..facts()},OpeningFacts{vault:"dddddddddddddddddddddddddddddddd",..facts()},OpeningFacts{store:"replacement",..facts()},OpeningFacts{canonical_vault:"/another",..facts()}]{assert_eq!(tx(&conn,|c|inspect_rows(c,facts,&original.flow_run)),Err(flow::Error::Denied));}}
+fn workflow_origin_wrong_owner_vault_store_or_path_denied() {
+    let conn = db();
+    let original = original(&conn);
+    for facts in [
+        OpeningFacts {
+            owner: "human:other",
+            ..facts()
+        },
+        OpeningFacts {
+            vault: "dddddddddddddddddddddddddddddddd",
+            ..facts()
+        },
+        OpeningFacts {
+            store: "replacement",
+            ..facts()
+        },
+        OpeningFacts {
+            canonical_vault: "/another",
+            ..facts()
+        },
+    ] {
+        assert_eq!(
+            tx(&conn, |c| inspect_rows(c, facts, &original.flow_run)),
+            Err(flow::Error::Denied)
+        );
+    }
+}
 #[test]
-fn workflow_origin_revocation_cannot_be_restored_by_new_session(){let conn=db();let original=original(&conn);let revoked=tx(&conn,|c|revoke_rows(c,facts(),&original.flow_run,original.epoch,time())).unwrap();session(&conn,"session-two");assert_eq!(tx(&conn,|c|reauthorize_rows(c,OpeningFacts{session:"session-two",process:"process-two",..facts()},&original.flow_run,revoked.epoch,&permissions(),time())),Err(flow::Error::Denied));}
+fn workflow_origin_revocation_cannot_be_restored_by_new_session() {
+    let conn = db();
+    let original = original(&conn);
+    let revoked = tx(&conn, |c| {
+        revoke_rows(c, facts(), &original.flow_run, original.epoch, time())
+    })
+    .unwrap();
+    session(&conn, "session-two");
+    assert_eq!(
+        tx(&conn, |c| reauthorize_rows(
+            c,
+            OpeningFacts {
+                session: "session-two",
+                process: "process-two",
+                ..facts()
+            },
+            &original.flow_run,
+            revoked.epoch,
+            &permissions(),
+            time()
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 #[test]
-fn workflow_origin_never_backfills_missing_original_metadata(){let conn=db();let original=original(&conn);conn.execute("DELETE FROM workflow_run_origins WHERE workflow_run_id=?1",[&original.flow_run]).unwrap();assert!(tx(&conn,|c|start(c,&permissions())).is_err());assert_eq!(count(&conn,"origins"),0);assert_eq!(count(&conn,"runs"),1);}
+fn workflow_origin_never_backfills_missing_original_metadata() {
+    let conn = db();
+    let original = original(&conn);
+    conn.execute(
+        "DELETE FROM workflow_run_origins WHERE workflow_run_id=?1",
+        [&original.flow_run],
+    )
+    .unwrap();
+    assert!(tx(&conn, |c| start(c, &permissions())).is_err());
+    assert_eq!(count(&conn, "origins"), 0);
+    assert_eq!(count(&conn, "runs"), 1);
+}
 #[test]
-fn workflow_origin_selectors_survive_reopen_without_recapturing_catalog(){let mut conn=db();let p=permissions();let compiled=crate::actions::workflow_requests::fixture_selectors();let selector=SelectorRequest{step:"action".into(),action:compiled.action_id,definition:compiled.definition_digest,connection:compiled.connection_id,account:compiled.account_id};let steps=[flow::Step{id:"action",kind:flow::Kind::Action,next:Some("done"),otherwise:None},flow::Step{id:"done",kind:flow::Kind::Result,next:None,otherwise:None}];let Started::New(origin)=tx(&conn,|c|start_rows(c,facts(),Start{key:KEY,workflow:"workflow",version:HASH,schema:HASH,input:"{}",configuration:HASH,permissions:&p,selectors:std::slice::from_ref(&selector),entry:"action",steps:&steps,now:time()})).unwrap()else{panic!("new")};let captured=tx(&conn,|c|selector_rows(c,facts(),&origin.flow_run,"action")).unwrap();assert_eq!(captured.action,selector.action);assert_eq!(captured.definition,selector.definition);assert_eq!(captured.snapshot.len(),64);drop(conn.conn.take());conn.conn=Some(crate::runtime::open_existing(&conn.dir).unwrap());assert_eq!(tx(&conn,|c|selector_rows(c,facts(),&origin.flow_run,"action")).unwrap(),captured);assert_eq!(count(&conn,"grants"),0,"a frozen action selector never grants account access");}
+fn workflow_origin_selectors_survive_reopen_without_recapturing_catalog() {
+    let mut conn = db();
+    let p = permissions();
+    let compiled = crate::actions::workflow_requests::fixture_selectors();
+    let selector = SelectorRequest {
+        step: "action".into(),
+        action: compiled.action_id,
+        definition: compiled.definition_digest,
+        connection: compiled.connection_id,
+        account: compiled.account_id,
+    };
+    let steps = [
+        flow::Step {
+            id: "action",
+            kind: flow::Kind::Action,
+            next: Some("done"),
+            otherwise: None,
+        },
+        flow::Step {
+            id: "done",
+            kind: flow::Kind::Result,
+            next: None,
+            otherwise: None,
+        },
+    ];
+    let Started::New(origin) = tx(&conn, |c| {
+        start_rows(
+            c,
+            facts(),
+            Start {
+                key: KEY,
+                workflow: "workflow",
+                version: HASH,
+                schema: HASH,
+                input: "{}",
+                configuration: HASH,
+                permissions: &p,
+                selectors: std::slice::from_ref(&selector),
+                entry: "action",
+                steps: &steps,
+                now: time(),
+            },
+        )
+    })
+    .unwrap() else {
+        panic!("new")
+    };
+    let captured = tx(&conn, |c| {
+        selector_rows(c, facts(), &origin.flow_run, "action")
+    })
+    .unwrap();
+    assert_eq!(captured.action, selector.action);
+    assert_eq!(captured.definition, selector.definition);
+    assert_eq!(captured.snapshot.len(), 64);
+    drop(conn.conn.take());
+    conn.conn = Some(crate::runtime::open_existing(&conn.dir).unwrap());
+    assert_eq!(
+        tx(&conn, |c| selector_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            "action"
+        ))
+        .unwrap(),
+        captured
+    );
+    assert_eq!(
+        count(&conn, "grants"),
+        0,
+        "a frozen action selector never grants account access"
+    );
+}
 #[test]
-fn workflow_origin_unknown_account_selection_is_not_permission(){let conn=db();let mut p=permissions();p.accounts.push(AccountSelection{connection:"missing".into(),account:"missing".into(),action:"fixture:action".into(),definition:HASH.into(),capabilities:vec!["fixture:action".into()],input_scope:"all_valid_inputs".into(),input_digest:None});assert_eq!(tx(&conn,|c|start(c,&p)),Err(flow::Error::Denied));assert_eq!(count(&conn,"runs"),0);}
+fn workflow_origin_unknown_account_selection_is_not_permission() {
+    let conn = db();
+    let mut p = permissions();
+    p.accounts.push(AccountSelection {
+        connection: "missing".into(),
+        account: "missing".into(),
+        action: "fixture:action".into(),
+        definition: HASH.into(),
+        capabilities: vec!["fixture:action".into()],
+        input_scope: "all_valid_inputs".into(),
+        input_digest: None,
+    });
+    assert_eq!(tx(&conn, |c| start(c, &p)), Err(flow::Error::Denied));
+    assert_eq!(count(&conn, "runs"), 0);
+}
 #[test]
-fn workflow_origin_empty_read_scope_stays_closed(){let conn=db();let closed=Permissions{read_prefixes:vec![],query_records:false,accounts:vec![]};let Started::New(row)=tx(&conn,|c|start(c,&closed)).unwrap()else{panic!("new")};assert_eq!(row.original,closed);assert_eq!(tx(&conn,|c|reauthorize_rows(c,facts(),&row.flow_run,row.epoch,&permissions(),time())),Err(flow::Error::Denied));}
+fn workflow_origin_empty_read_scope_stays_closed() {
+    let conn = db();
+    let closed = Permissions {
+        read_prefixes: vec![],
+        query_records: false,
+        accounts: vec![],
+    };
+    let Started::New(row) = tx(&conn, |c| start(c, &closed)).unwrap() else {
+        panic!("new")
+    };
+    assert_eq!(row.original, closed);
+    assert_eq!(
+        tx(&conn, |c| reauthorize_rows(
+            c,
+            facts(),
+            &row.flow_run,
+            row.epoch,
+            &permissions(),
+            time()
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 #[test]
-fn workflow_origin_cli_recovery_skips_only_exact_workflow_rows(){let conn=db();let original=original(&conn);crate::runtime::dispatch::begin_attended(&conn,"ordinary",Some(VAULT),Some("store"),Some("human:me"),None,None,time()).unwrap();let count=crate::runtime::dispatch::recover_orphaned_attended(&conn,time()+chrono::Duration::seconds(1),time()+chrono::Duration::seconds(2)).unwrap();assert_eq!(count,1);let outcome:String=conn.query_row("SELECT outcome FROM runs WHERE run_id=?1",[original.native_run],|r|r.get(0)).unwrap();assert_eq!(outcome,"running");}
+fn workflow_origin_cli_recovery_skips_only_exact_workflow_rows() {
+    let conn = db();
+    let original = original(&conn);
+    crate::runtime::dispatch::begin_attended(
+        &conn,
+        "ordinary",
+        Some(VAULT),
+        Some("store"),
+        Some("human:me"),
+        None,
+        None,
+        time(),
+    )
+    .unwrap();
+    let count = crate::runtime::dispatch::recover_orphaned_attended(
+        &conn,
+        time() + chrono::Duration::seconds(1),
+        time() + chrono::Duration::seconds(2),
+    )
+    .unwrap();
+    assert_eq!(count, 1);
+    let outcome: String = conn
+        .query_row(
+            "SELECT outcome FROM runs WHERE run_id=?1",
+            [original.native_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(outcome, "running");
+}
 #[test]
-fn workflow_origin_permission_paths_do_not_use_string_prefix_authority(){let conn=db();for path in ["../private","visible/../private","/private","visible//sub","visible\\sub"]{let p=Permissions{read_prefixes:vec![path.into()],..permissions()};assert_eq!(tx(&conn,|c|start(c,&p)),Err(flow::Error::Invalid));}assert_eq!(count(&conn,"runs"),0);}
+fn workflow_origin_permission_paths_do_not_use_string_prefix_authority() {
+    let conn = db();
+    for path in [
+        "../private",
+        "visible/../private",
+        "/private",
+        "visible//sub",
+        "visible\\sub",
+    ] {
+        let p = Permissions {
+            read_prefixes: vec![path.into()],
+            ..permissions()
+        };
+        assert_eq!(tx(&conn, |c| start(c, &p)), Err(flow::Error::Invalid));
+    }
+    assert_eq!(count(&conn, "runs"), 0);
+}
 
 #[test]
-fn workflow_origin_v47_installs_distinct_namespace_and_identity_tables(){let conn=db();let version:i64=conn.query_row("PRAGMA user_version",[],|r|r.get(0)).unwrap();assert!(version>=47);let tables:i64=conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('workflow_run_origins','workflow_run_action_selectors','workflow_origin_account_grants','workflow_submission_namespace','workflow_submission_files')",[],|r|r.get(0)).unwrap();assert_eq!(tables,5);}
+fn workflow_origin_v47_installs_distinct_namespace_and_identity_tables() {
+    let conn = db();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert!(version >= 47);
+    let tables:i64=conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('workflow_run_origins','workflow_run_action_selectors','workflow_origin_account_grants','workflow_submission_namespace','workflow_submission_files')",[],|r|r.get(0)).unwrap();
+    assert_eq!(tables, 5);
+}
 #[test]
-fn workflow_origin_policy_keeps_bounds_and_retention_distinct(){let execution=flow::execution_policy();assert_eq!(execution.reconciliation_batch,32);assert_eq!(execution.max_workers,1);assert_eq!(execution.minimum_wake_interval_ms,1000);let original=flow::origin_policy();assert_eq!(original.permission_bytes,8192);assert_eq!(original.read_prefixes,128);assert_eq!(original.account_grants,32);let policy:serde_json::Value=serde_json::from_str(include_str!("../../../shared/workflows/runtime.v1.json")).unwrap();assert_eq!(policy["activeVaultBytes"],268435456);assert_eq!(policy["completedDetailRetention"],"off");}
+fn workflow_origin_policy_keeps_bounds_and_retention_distinct() {
+    let execution = flow::execution_policy();
+    assert_eq!(execution.reconciliation_batch, 32);
+    assert_eq!(execution.max_workers, 1);
+    assert_eq!(execution.minimum_wake_interval_ms, 1000);
+    let original = flow::origin_policy();
+    assert_eq!(original.permission_bytes, 8192);
+    assert_eq!(original.read_prefixes, 128);
+    assert_eq!(original.account_grants, 32);
+    let policy: serde_json::Value =
+        serde_json::from_str(include_str!("../../../shared/workflows/runtime.v1.json")).unwrap();
+    assert_eq!(policy["activeVaultBytes"], 268435456);
+    assert_eq!(policy["completedDetailRetention"], "off");
+}
 
 // Metadata-only account fixture: no secret store, provider or native gesture.
-fn selected_account(conn:&Connection)->(Permissions,SelectorRequest){
- use crate::{actions::ids::{AccountId,ConnectionId},connections::metadata::{AccountBinding,ConnectionStatus,ConnectionHealth,RemoteRevocation,SecretRef}};
- let compiled=crate::actions::workflow_requests::fixture_selectors();
- let definition=crate::actions::compiled_catalog::compiled_catalog().unwrap().resolve(&crate::actions::read_types::ActionId(compiled.action_id.clone()),&crate::actions::read_types::DefinitionDigest(compiled.definition_digest.clone())).unwrap();
- let account=AccountBinding{account_id:AccountId(compiled.account_id.clone()),subject:"42".into(),issuer:"https://github.com".into(),account_revision:1,scope_digest:HASH.into()};
- let status=ConnectionStatus{connection_id:ConnectionId(compiled.connection_id.clone()),revision:1,login:"fixture".into(),health:ConnectionHealth::Ready,account:Some(account.clone()),secret_revision:1,revocation_generation:0,observed_at:time().to_rfc3339_opts(chrono::SecondsFormat::Millis,true),cleanup_pending:false,remote_revocation:RemoteRevocation::NotAttempted};
- let reference=SecretRef{id:"f".repeat(32),account_id:account.account_id,issuer:account.issuer,subject:account.subject,secret_revision:1};
- conn.execute("INSERT INTO managed_connections(connection_id,person,status,secret_ref) VALUES(?1,'human:me',?2,?3)",params![compiled.connection_id,serde_json::to_string(&status).unwrap(),serde_json::to_string(&reference).unwrap()]).unwrap();
- let selection=AccountSelection{connection:compiled.connection_id.clone(),account:compiled.account_id.clone(),action:compiled.action_id.clone(),definition:compiled.definition_digest.clone(),capabilities:definition.required_capabilities,input_scope:"all_valid_inputs".into(),input_digest:None};
- (Permissions{accounts:vec![selection],..permissions()},SelectorRequest{step:"action".into(),action:compiled.action_id,definition:compiled.definition_digest,connection:compiled.connection_id,account:compiled.account_id})
+fn selected_account(conn: &Connection) -> (Permissions, SelectorRequest) {
+    use crate::{
+        actions::ids::{AccountId, ConnectionId},
+        connections::metadata::{
+            AccountBinding, ConnectionHealth, ConnectionStatus, RemoteRevocation, SecretRef,
+        },
+    };
+    let compiled = crate::actions::workflow_requests::fixture_selectors();
+    let definition = crate::actions::compiled_catalog::compiled_catalog()
+        .unwrap()
+        .resolve(
+            &crate::actions::read_types::ActionId(compiled.action_id.clone()),
+            &crate::actions::read_types::DefinitionDigest(compiled.definition_digest.clone()),
+        )
+        .unwrap();
+    let account = AccountBinding {
+        account_id: AccountId(compiled.account_id.clone()),
+        subject: "42".into(),
+        issuer: "https://github.com".into(),
+        account_revision: 1,
+        scope_digest: HASH.into(),
+    };
+    let status = ConnectionStatus {
+        connection_id: ConnectionId(compiled.connection_id.clone()),
+        revision: 1,
+        login: "fixture".into(),
+        health: ConnectionHealth::Ready,
+        account: Some(account.clone()),
+        secret_revision: 1,
+        revocation_generation: 0,
+        observed_at: time().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        cleanup_pending: false,
+        remote_revocation: RemoteRevocation::NotAttempted,
+    };
+    let reference = SecretRef {
+        id: "f".repeat(32),
+        account_id: account.account_id,
+        issuer: account.issuer,
+        subject: account.subject,
+        secret_revision: 1,
+    };
+    conn.execute("INSERT INTO managed_connections(connection_id,person,status,secret_ref) VALUES(?1,'human:me',?2,?3)",params![compiled.connection_id,serde_json::to_string(&status).unwrap(),serde_json::to_string(&reference).unwrap()]).unwrap();
+    let selection = AccountSelection {
+        connection: compiled.connection_id.clone(),
+        account: compiled.account_id.clone(),
+        action: compiled.action_id.clone(),
+        definition: compiled.definition_digest.clone(),
+        capabilities: definition.required_capabilities,
+        input_scope: "all_valid_inputs".into(),
+        input_digest: None,
+    };
+    (
+        Permissions {
+            accounts: vec![selection],
+            ..permissions()
+        },
+        SelectorRequest {
+            step: "action".into(),
+            action: compiled.action_id,
+            definition: compiled.definition_digest,
+            connection: compiled.connection_id,
+            account: compiled.account_id,
+        },
+    )
 }
-fn selected_start(conn:&Connection,p:&Permissions,selector:&SelectorRequest)->Origin{let steps=[flow::Step{id:"action",kind:flow::Kind::Action,next:Some("done"),otherwise:None},flow::Step{id:"done",kind:flow::Kind::Result,next:None,otherwise:None}];let Started::New(origin)=tx(conn,|c|start_rows(c,facts(),Start{key:KEY,workflow:"workflow",version:HASH,schema:HASH,input:"{}",configuration:HASH,permissions:p,selectors:std::slice::from_ref(selector),entry:"action",steps:&steps,now:time()})).unwrap()else{panic!("new")};origin}
+fn selected_start(conn: &Connection, p: &Permissions, selector: &SelectorRequest) -> Origin {
+    let steps = [
+        flow::Step {
+            id: "action",
+            kind: flow::Kind::Action,
+            next: Some("done"),
+            otherwise: None,
+        },
+        flow::Step {
+            id: "done",
+            kind: flow::Kind::Result,
+            next: None,
+            otherwise: None,
+        },
+    ];
+    let Started::New(origin) = tx(conn, |c| {
+        start_rows(
+            c,
+            facts(),
+            Start {
+                key: KEY,
+                workflow: "workflow",
+                version: HASH,
+                schema: HASH,
+                input: "{}",
+                configuration: HASH,
+                permissions: p,
+                selectors: std::slice::from_ref(selector),
+                entry: "action",
+                steps: &steps,
+                now: time(),
+            },
+        )
+    })
+    .unwrap() else {
+        panic!("new")
+    };
+    origin
+}
 #[test]
-fn workflow_origin_explicit_account_selection_issues_original_grant_before_snapshot(){let conn=db();let(p,selector)=selected_account(&conn);let origin=selected_start(&conn,&p,&selector);assert_eq!(origin.original,p);let (run,action,granted_by):(String,String,String)=conn.query_row("SELECT g.run_id,g.action_id,g.granted_by FROM workflow_origin_account_grants w JOIN action_account_grants g ON g.grant_id=w.grant_id WHERE w.workflow_run_id=?1",[&origin.flow_run],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();assert_eq!(run,origin.native_run);assert_eq!(action,selector.action);assert_eq!(granted_by,"human:me");assert_eq!(count(&conn,"grants"),1);let scope=crate::actions::read_types::ActionSubjectView{vault_id:VAULT.into(),run_id:origin.native_run,actor_id:origin.actor,client_id:None,child_job_id:None};let catalog=crate::actions::native_authority::ScopedCatalog{catalog:crate::actions::compiled_catalog::compiled_catalog().unwrap(),scope:&scope,owner:"human:me",execution:crate::actions::native_authority::CatalogExecution::NoExecutor}.catalog(crate::actions::native_db::AuthorityDb::Writer(&conn),None).unwrap();let frozen=tx(&conn,|c|selector_rows(c,facts(),&origin.flow_run,"action")).unwrap();assert_eq!(frozen.snapshot,catalog.snapshot_digest.0);assert!(!catalog.descriptors.is_empty());}
+fn workflow_origin_explicit_account_selection_issues_original_grant_before_snapshot() {
+    let conn = db();
+    let (p, selector) = selected_account(&conn);
+    let origin = selected_start(&conn, &p, &selector);
+    assert_eq!(origin.original, p);
+    let (run,action,granted_by):(String,String,String)=conn.query_row("SELECT g.run_id,g.action_id,g.granted_by FROM workflow_origin_account_grants w JOIN action_account_grants g ON g.grant_id=w.grant_id WHERE w.workflow_run_id=?1",[&origin.flow_run],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    assert_eq!(run, origin.native_run);
+    assert_eq!(action, selector.action);
+    assert_eq!(granted_by, "human:me");
+    assert_eq!(count(&conn, "grants"), 1);
+    let scope = crate::actions::read_types::ActionSubjectView {
+        vault_id: VAULT.into(),
+        run_id: origin.native_run,
+        actor_id: origin.actor,
+        client_id: None,
+        child_job_id: None,
+    };
+    let catalog = crate::actions::native_authority::ScopedCatalog {
+        catalog: crate::actions::compiled_catalog::compiled_catalog().unwrap(),
+        scope: &scope,
+        owner: "human:me",
+        execution: crate::actions::native_authority::CatalogExecution::NoExecutor,
+    }
+    .catalog(crate::actions::native_db::AuthorityDb::Writer(&conn), None)
+    .unwrap();
+    let frozen = tx(&conn, |c| {
+        selector_rows(c, facts(), &origin.flow_run, "action")
+    })
+    .unwrap();
+    assert_eq!(frozen.snapshot, catalog.snapshot_digest.0);
+    assert!(!catalog.descriptors.is_empty());
+}
 #[test]
-fn workflow_origin_current_account_revocation_blocks_resume_without_reissuing_grants(){let conn=db();let(p,selector)=selected_account(&conn);let origin=selected_start(&conn,&p,&selector);let tx1=Transaction::new_unchecked(&conn,TransactionBehavior::Immediate).unwrap();crate::connections::account_metadata::disable(&tx1,"human:me",&crate::actions::ids::ConnectionId(selector.connection),1).unwrap();tx1.commit().unwrap();assert_eq!(tx(&conn,|c|reauthorize_rows(c,facts(),&origin.flow_run,origin.epoch,&p,time())),Err(flow::Error::Denied));assert_eq!(count(&conn,"grants"),1);}
+fn workflow_origin_current_account_revocation_blocks_resume_without_reissuing_grants() {
+    let conn = db();
+    let (p, selector) = selected_account(&conn);
+    let origin = selected_start(&conn, &p, &selector);
+    let tx1 = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate).unwrap();
+    crate::connections::account_metadata::disable(
+        &tx1,
+        "human:me",
+        &crate::actions::ids::ConnectionId(selector.connection),
+        1,
+    )
+    .unwrap();
+    tx1.commit().unwrap();
+    assert_eq!(
+        tx(&conn, |c| reauthorize_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            &p,
+            time()
+        )),
+        Err(flow::Error::Denied)
+    );
+    assert_eq!(count(&conn, "grants"), 1);
+}
 
 #[test]
-fn workflow_origin_generic_cli_finalizer_cannot_end_durable_workflow(){let conn=db();let origin=original(&conn);let result=crate::runtime::dispatch::finalize(&conn,&origin.native_run,crate::runtime::dispatch::RunOutcome::Cancelled,None,None,crate::runtime::dispatch::ItemOutcome::Requeue,time()+chrono::Duration::seconds(1));assert!(result.is_err(),"generic CLI finalizer must refuse workflow-owned operation");let state:String=conn.query_row("SELECT outcome FROM runs WHERE run_id=?1",[origin.native_run],|r|r.get(0)).unwrap();assert_eq!(state,"running");}
+fn workflow_origin_generic_cli_finalizer_cannot_end_durable_workflow() {
+    let conn = db();
+    let origin = original(&conn);
+    let result = crate::runtime::dispatch::finalize(
+        &conn,
+        &origin.native_run,
+        crate::runtime::dispatch::RunOutcome::Cancelled,
+        None,
+        None,
+        crate::runtime::dispatch::ItemOutcome::Requeue,
+        time() + chrono::Duration::seconds(1),
+    );
+    assert!(
+        result.is_err(),
+        "generic CLI finalizer must refuse workflow-owned operation"
+    );
+    let state: String = conn
+        .query_row(
+            "SELECT outcome FROM runs WHERE run_id=?1",
+            [origin.native_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "running");
+}
 #[test]
-fn workflow_origin_generic_cli_meter_cannot_overwrite_durable_workflow(){let conn=db();let origin=original(&conn);let result=crate::runtime::dispatch::meter_attended(&conn,&origin.native_run,Some(VAULT),Some("store"),crate::runtime::dispatch::RunOutcome::Succeeded,None,None,Some(&origin.actor),None,None,time(),time()+chrono::Duration::seconds(1));assert!(result.is_err(),"CLI usage settlement is not workflow terminalization");let state:String=conn.query_row("SELECT outcome FROM runs WHERE run_id=?1",[origin.native_run],|r|r.get(0)).unwrap();assert_eq!(state,"running");}
+fn workflow_origin_generic_cli_meter_cannot_overwrite_durable_workflow() {
+    let conn = db();
+    let origin = original(&conn);
+    let result = crate::runtime::dispatch::meter_attended(
+        &conn,
+        &origin.native_run,
+        Some(VAULT),
+        Some("store"),
+        crate::runtime::dispatch::RunOutcome::Succeeded,
+        None,
+        None,
+        Some(&origin.actor),
+        None,
+        None,
+        time(),
+        time() + chrono::Duration::seconds(1),
+    );
+    assert!(
+        result.is_err(),
+        "CLI usage settlement is not workflow terminalization"
+    );
+    let state: String = conn
+        .query_row(
+            "SELECT outcome FROM runs WHERE run_id=?1",
+            [origin.native_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "running");
+}
 #[test]
-fn workflow_origin_cli_discard_ignores_workflow_without_attempting_fk_delete(){let conn=db();let origin=original(&conn);crate::runtime::dispatch::discard_unstarted_attended(&conn,&origin.native_run).expect("workflow rows are outside CLI discard, not a foreign-key failure");assert_eq!((count(&conn,"runs"),count(&conn,"origins"),count(&conn,"flow")),(1,1,1));}
+fn workflow_origin_cli_discard_ignores_workflow_without_attempting_fk_delete() {
+    let conn = db();
+    let origin = original(&conn);
+    crate::runtime::dispatch::discard_unstarted_attended(&conn, &origin.native_run)
+        .expect("workflow rows are outside CLI discard, not a foreign-key failure");
+    assert_eq!(
+        (
+            count(&conn, "runs"),
+            count(&conn, "origins"),
+            count(&conn, "flow")
+        ),
+        (1, 1, 1)
+    );
+}
 #[test]
-fn workflow_origin_cli_session_writer_does_not_relabel_native_operation(){let conn=db();let origin=original(&conn);crate::runtime::dispatch::record_cli_session(&conn,&origin.native_run,"12345678-1234-1234-1234-123456789abc").unwrap();let cli:Option<String>=conn.query_row("SELECT cli_session_id FROM runs WHERE run_id=?1",[origin.native_run],|r|r.get(0)).unwrap();assert!(cli.is_none(),"durable workflow operation must not inherit a CLI session");}
+fn workflow_origin_cli_session_writer_does_not_relabel_native_operation() {
+    let conn = db();
+    let origin = original(&conn);
+    crate::runtime::dispatch::record_cli_session(
+        &conn,
+        &origin.native_run,
+        "12345678-1234-1234-1234-123456789abc",
+    )
+    .unwrap();
+    let cli: Option<String> = conn
+        .query_row(
+            "SELECT cli_session_id FROM runs WHERE run_id=?1",
+            [origin.native_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        cli.is_none(),
+        "durable workflow operation must not inherit a CLI session"
+    );
+}
 
 #[test]
-fn workflow_origin_fixed_provider_refuses_non_policy_account_issuer_before_grant(){let conn=db();let(p,selector)=selected_account(&conn);conn.execute("UPDATE managed_connections SET status=json_set(status,'$.account.issuer','https://enterprise.invalid'),secret_ref=json_set(secret_ref,'$.issuer','https://enterprise.invalid') WHERE connection_id=?1",[&selector.connection]).unwrap();let steps=[flow::Step{id:"action",kind:flow::Kind::Action,next:Some("done"),otherwise:None},flow::Step{id:"done",kind:flow::Kind::Result,next:None,otherwise:None}];assert_eq!(tx(&conn,|c|start_rows(c,facts(),Start{key:KEY,workflow:"workflow",version:HASH,schema:HASH,input:"{}",configuration:HASH,permissions:&p,selectors:std::slice::from_ref(&selector),entry:"action",steps:&steps,now:time()})),Err(flow::Error::Denied));assert_eq!(count(&conn,"grants"),0);assert_eq!(count(&conn,"runs"),0);}
+fn workflow_origin_fixed_provider_refuses_non_policy_account_issuer_before_grant() {
+    let conn = db();
+    let (p, selector) = selected_account(&conn);
+    conn.execute("UPDATE managed_connections SET status=json_set(status,'$.account.issuer','https://enterprise.invalid'),secret_ref=json_set(secret_ref,'$.issuer','https://enterprise.invalid') WHERE connection_id=?1",[&selector.connection]).unwrap();
+    let steps = [
+        flow::Step {
+            id: "action",
+            kind: flow::Kind::Action,
+            next: Some("done"),
+            otherwise: None,
+        },
+        flow::Step {
+            id: "done",
+            kind: flow::Kind::Result,
+            next: None,
+            otherwise: None,
+        },
+    ];
+    assert_eq!(
+        tx(&conn, |c| start_rows(
+            c,
+            facts(),
+            Start {
+                key: KEY,
+                workflow: "workflow",
+                version: HASH,
+                schema: HASH,
+                input: "{}",
+                configuration: HASH,
+                permissions: &p,
+                selectors: std::slice::from_ref(&selector),
+                entry: "action",
+                steps: &steps,
+                now: time()
+            }
+        )),
+        Err(flow::Error::Denied)
+    );
+    assert_eq!(count(&conn, "grants"), 0);
+    assert_eq!(count(&conn, "runs"), 0);
+}
 
 #[test]
-fn workflow_current_admission_requires_existing_transaction(){let conn=db();let origin=original(&conn);assert_eq!(current_rows(&conn,facts(),&origin.flow_run,origin.epoch,CurrentUse::QueryRecords),Err(flow::Error::Unavailable));}
+fn workflow_current_admission_requires_existing_transaction() {
+    let conn = db();
+    let origin = original(&conn);
+    assert_eq!(
+        current_rows(
+            &conn,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            CurrentUse::QueryRecords
+        ),
+        Err(flow::Error::Unavailable)
+    );
+}
 #[test]
-fn workflow_current_query_uses_exact_current_origin(){let conn=db();let origin=original(&conn);assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,origin.epoch,CurrentUse::QueryRecords)).unwrap(),origin);}
+fn workflow_current_query_uses_exact_current_origin() {
+    let conn = db();
+    let origin = original(&conn);
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            CurrentUse::QueryRecords
+        ))
+        .unwrap(),
+        origin
+    );
+}
 #[test]
-fn workflow_current_other_process_cannot_adopt_live_admission(){let conn=db();let origin=original(&conn);assert_eq!(tx(&conn,|c|current_rows(c,OpeningFacts{process:"process-two",..facts()},&origin.flow_run,origin.epoch,CurrentUse::QueryRecords)),Err(flow::Error::Denied));}
+fn workflow_current_other_process_cannot_adopt_live_admission() {
+    let conn = db();
+    let origin = original(&conn);
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            OpeningFacts {
+                process: "process-two",
+                ..facts()
+            },
+            &origin.flow_run,
+            origin.epoch,
+            CurrentUse::QueryRecords
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 #[test]
-fn workflow_current_new_session_needs_explicit_reauthorization(){let conn=db();let origin=original(&conn);session(&conn,"session-two");assert_eq!(tx(&conn,|c|current_rows(c,OpeningFacts{session:"session-two",..facts()},&origin.flow_run,origin.epoch,CurrentUse::QueryRecords)),Err(flow::Error::Denied));}
+fn workflow_current_new_session_needs_explicit_reauthorization() {
+    let conn = db();
+    let origin = original(&conn);
+    session(&conn, "session-two");
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            OpeningFacts {
+                session: "session-two",
+                ..facts()
+            },
+            &origin.flow_run,
+            origin.epoch,
+            CurrentUse::QueryRecords
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 #[test]
-fn workflow_current_closed_admission_cannot_read(){let conn=db();let origin=original(&conn);crate::runtime::catchup::close_session(&conn,"session-one",VAULT,"store",time()).unwrap();assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,origin.epoch,CurrentUse::QueryRecords)),Err(flow::Error::Denied));}
+fn workflow_current_closed_admission_cannot_read() {
+    let conn = db();
+    let origin = original(&conn);
+    crate::runtime::catchup::close_session(&conn, "session-one", VAULT, "store", time()).unwrap();
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            CurrentUse::QueryRecords
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 #[test]
-fn workflow_current_old_epoch_cannot_use_narrowed_permissions(){let conn=db();let origin=original(&conn);tx(&conn,|c|reauthorize_rows(c,facts(),&origin.flow_run,origin.epoch,&permissions(),time())).unwrap();assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,origin.epoch,CurrentUse::QueryRecords)),Err(flow::Error::Stale));}
+fn workflow_current_old_epoch_cannot_use_narrowed_permissions() {
+    let conn = db();
+    let origin = original(&conn);
+    tx(&conn, |c| {
+        reauthorize_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            &permissions(),
+            time(),
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            CurrentUse::QueryRecords
+        )),
+        Err(flow::Error::Stale)
+    );
+}
 #[test]
-fn workflow_current_revoked_origin_remains_inspectable_but_cannot_read(){let conn=db();let origin=original(&conn);let revoked=tx(&conn,|c|revoke_rows(c,facts(),&origin.flow_run,origin.epoch,time())).unwrap();assert_eq!(tx(&conn,|c|inspect_rows(c,facts(),&origin.flow_run)).unwrap(),revoked);assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,revoked.epoch,CurrentUse::QueryRecords)),Err(flow::Error::Denied));}
+fn workflow_current_revoked_origin_remains_inspectable_but_cannot_read() {
+    let conn = db();
+    let origin = original(&conn);
+    let revoked = tx(&conn, |c| {
+        revoke_rows(c, facts(), &origin.flow_run, origin.epoch, time())
+    })
+    .unwrap();
+    assert_eq!(
+        tx(&conn, |c| inspect_rows(c, facts(), &origin.flow_run)).unwrap(),
+        revoked
+    );
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            revoked.epoch,
+            CurrentUse::QueryRecords
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 #[test]
-fn workflow_current_query_permission_narrowing_closes_read(){let conn=db();let origin=original(&conn);let closed=Permissions{query_records:false,..permissions()};let narrowed=tx(&conn,|c|reauthorize_rows(c,facts(),&origin.flow_run,origin.epoch,&closed,time())).unwrap();assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,narrowed.epoch,CurrentUse::QueryRecords)),Err(flow::Error::Denied));}
+fn workflow_current_query_permission_narrowing_closes_read() {
+    let conn = db();
+    let origin = original(&conn);
+    let closed = Permissions {
+        query_records: false,
+        ..permissions()
+    };
+    let narrowed = tx(&conn, |c| {
+        reauthorize_rows(c, facts(), &origin.flow_run, origin.epoch, &closed, time())
+    })
+    .unwrap();
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            narrowed.epoch,
+            CurrentUse::QueryRecords
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 #[test]
-fn workflow_current_empty_read_selection_does_not_become_whole_vault(){let conn=db();let closed=Permissions{read_prefixes:vec![],..permissions()};let Started::New(origin)=tx(&conn,|c|start(c,&closed)).unwrap()else{panic!("new")};assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,origin.epoch,CurrentUse::QueryRecords)),Err(flow::Error::Denied));}
+fn workflow_current_empty_read_selection_does_not_become_whole_vault() {
+    let conn = db();
+    let closed = Permissions {
+        read_prefixes: vec![],
+        ..permissions()
+    };
+    let Started::New(origin) = tx(&conn, |c| start(c, &closed)).unwrap() else {
+        panic!("new")
+    };
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            CurrentUse::QueryRecords
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 #[test]
-fn workflow_current_actual_reauthorization_uses_same_original_scope(){let conn=db();let origin=original(&conn);crate::runtime::catchup::close_session(&conn,"session-one",VAULT,"store",time()).unwrap();session(&conn,"session-two");let fresh=OpeningFacts{session:"session-two",process:"process-two",..facts()};let resumed=tx(&conn,|c|reauthorize_rows(c,fresh,&origin.flow_run,origin.epoch,&permissions(),time())).unwrap();let current=tx(&conn,|c|current_rows(c,fresh,&origin.flow_run,resumed.epoch,CurrentUse::QueryRecords)).unwrap();assert_eq!(current.native_run,origin.native_run);assert_eq!(current.actor,origin.actor);assert_eq!(current.authority,origin.authority);}
+fn workflow_current_actual_reauthorization_uses_same_original_scope() {
+    let conn = db();
+    let origin = original(&conn);
+    crate::runtime::catchup::close_session(&conn, "session-one", VAULT, "store", time()).unwrap();
+    session(&conn, "session-two");
+    let fresh = OpeningFacts {
+        session: "session-two",
+        process: "process-two",
+        ..facts()
+    };
+    let resumed = tx(&conn, |c| {
+        reauthorize_rows(
+            c,
+            fresh,
+            &origin.flow_run,
+            origin.epoch,
+            &permissions(),
+            time(),
+        )
+    })
+    .unwrap();
+    let current = tx(&conn, |c| {
+        current_rows(
+            c,
+            fresh,
+            &origin.flow_run,
+            resumed.epoch,
+            CurrentUse::QueryRecords,
+        )
+    })
+    .unwrap();
+    assert_eq!(current.native_run, origin.native_run);
+    assert_eq!(current.actor, origin.actor);
+    assert_eq!(current.authority, origin.authority);
+}
 #[test]
-fn workflow_current_action_accepts_actual_selected_original_account(){let conn=db();let(p,selector)=selected_account(&conn);let origin=selected_start(&conn,&p,&selector);assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,origin.epoch,CurrentUse::Action{step:"action",input_digest:HASH})).unwrap(),origin);}
+fn workflow_current_action_accepts_actual_selected_original_account() {
+    let conn = db();
+    let (p, selector) = selected_account(&conn);
+    let origin = selected_start(&conn, &p, &selector);
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            CurrentUse::Action {
+                step: "action",
+                input_digest: HASH
+            }
+        ))
+        .unwrap(),
+        origin
+    );
+}
 #[test]
-fn workflow_current_removed_account_cannot_reuse_retained_original_grant(){let conn=db();let(p,selector)=selected_account(&conn);let origin=selected_start(&conn,&p,&selector);let narrow=Permissions{accounts:vec![],..p};let renewed=tx(&conn,|c|reauthorize_rows(c,facts(),&origin.flow_run,origin.epoch,&narrow,time())).unwrap();assert_eq!(count(&conn,"grants"),1,"original grant remains an immutable historical fact");assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,renewed.epoch,CurrentUse::Action{step:"action",input_digest:HASH})),Err(flow::Error::Denied));}
+fn workflow_current_removed_account_cannot_reuse_retained_original_grant() {
+    let conn = db();
+    let (p, selector) = selected_account(&conn);
+    let origin = selected_start(&conn, &p, &selector);
+    let narrow = Permissions {
+        accounts: vec![],
+        ..p
+    };
+    let renewed = tx(&conn, |c| {
+        reauthorize_rows(c, facts(), &origin.flow_run, origin.epoch, &narrow, time())
+    })
+    .unwrap();
+    assert_eq!(
+        count(&conn, "grants"),
+        1,
+        "original grant remains an immutable historical fact"
+    );
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            renewed.epoch,
+            CurrentUse::Action {
+                step: "action",
+                input_digest: HASH
+            }
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 #[test]
-fn workflow_current_exact_input_narrowing_gates_original_all_input_grant(){let conn=db();let(mut p,selector)=selected_account(&conn);let origin=selected_start(&conn,&p,&selector);p.accounts[0].input_scope="exact_canonical_input".into();p.accounts[0].input_digest=Some(HASH.into());let renewed=tx(&conn,|c|reauthorize_rows(c,facts(),&origin.flow_run,origin.epoch,&p,time())).unwrap();let other="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,renewed.epoch,CurrentUse::Action{step:"action",input_digest:other})),Err(flow::Error::Denied));assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,renewed.epoch,CurrentUse::Action{step:"action",input_digest:HASH})).unwrap(),renewed);}
+fn workflow_current_exact_input_narrowing_gates_original_all_input_grant() {
+    let conn = db();
+    let (mut p, selector) = selected_account(&conn);
+    let origin = selected_start(&conn, &p, &selector);
+    p.accounts[0].input_scope = "exact_canonical_input".into();
+    p.accounts[0].input_digest = Some(HASH.into());
+    let renewed = tx(&conn, |c| {
+        reauthorize_rows(c, facts(), &origin.flow_run, origin.epoch, &p, time())
+    })
+    .unwrap();
+    let other = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            renewed.epoch,
+            CurrentUse::Action {
+                step: "action",
+                input_digest: other
+            }
+        )),
+        Err(flow::Error::Denied)
+    );
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            renewed.epoch,
+            CurrentUse::Action {
+                step: "action",
+                input_digest: HASH
+            }
+        ))
+        .unwrap(),
+        renewed
+    );
+}
 #[test]
-fn workflow_current_account_revocation_gates_each_action(){let conn=db();let(p,selector)=selected_account(&conn);let origin=selected_start(&conn,&p,&selector);let change=Transaction::new_unchecked(&conn,TransactionBehavior::Immediate).unwrap();crate::connections::account_metadata::disable(&change,"human:me",&crate::actions::ids::ConnectionId(selector.connection),1).unwrap();change.commit().unwrap();assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,origin.epoch,CurrentUse::Action{step:"action",input_digest:HASH})),Err(flow::Error::Denied));}
+fn workflow_current_account_revocation_gates_each_action() {
+    let conn = db();
+    let (p, selector) = selected_account(&conn);
+    let origin = selected_start(&conn, &p, &selector);
+    let change = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate).unwrap();
+    crate::connections::account_metadata::disable(
+        &change,
+        "human:me",
+        &crate::actions::ids::ConnectionId(selector.connection),
+        1,
+    )
+    .unwrap();
+    change.commit().unwrap();
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            CurrentUse::Action {
+                step: "action",
+                input_digest: HASH
+            }
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 #[test]
-fn workflow_current_terminal_cancellation_cannot_execute(){let conn=db();let origin=original(&conn);tx(&conn,|c|{let run=flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)?;flow::cancel_rows(c,scope(facts(),&origin),&origin.flow_run,run.revision,time().timestamp_millis())}).unwrap();assert_eq!(tx(&conn,|c|current_rows(c,facts(),&origin.flow_run,origin.epoch,CurrentUse::QueryRecords)),Err(flow::Error::Denied));}
+fn workflow_current_terminal_cancellation_cannot_execute() {
+    let conn = db();
+    let origin = original(&conn);
+    tx(&conn, |c| {
+        let run = flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)?;
+        flow::cancel_rows(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run,
+            run.revision,
+            time().timestamp_millis(),
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        tx(&conn, |c| current_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            CurrentUse::QueryRecords
+        )),
+        Err(flow::Error::Denied)
+    );
+}
 
 #[cfg(unix)]
-fn physical_ids(conn:&Db)->((u64,u64),(u64,u64)){use std::os::unix::fs::MetadataExt;let runtime=std::fs::metadata(crate::runtime::runtime_db_path(&conn.dir)).unwrap();let parent=std::fs::metadata(&conn.dir).unwrap();((runtime.dev(),runtime.ino()),(parent.dev(),parent.ino()))}
+fn physical_ids(conn: &Db) -> ((u64, u64), (u64, u64)) {
+    use std::os::unix::fs::MetadataExt;
+    let runtime = std::fs::metadata(crate::runtime::runtime_db_path(&conn.dir)).unwrap();
+    let parent = std::fs::metadata(&conn.dir).unwrap();
+    ((runtime.dev(), runtime.ino()), (parent.dev(), parent.ino()))
+}
 #[cfg(unix)]
-fn acquire_workflow(conn:&Db,run:&str)->Result<Option<crate::runtime::workflow_submission::ExecutionOwner>,String>{let(runtime,parent)=physical_ids(conn);let tx=Transaction::new_unchecked(conn,TransactionBehavior::Immediate).unwrap();let lease=crate::runtime::workflow_submission::try_execution_owner(&tx,&conn.dir,runtime,parent,run)?;tx.commit().unwrap();Ok(lease)}
-#[cfg(unix)]
-#[test]
-fn workflow_physical_owner_requires_transaction(){let conn=db();let origin=original(&conn);let(runtime,parent)=physical_ids(&conn);assert!(crate::runtime::workflow_submission::try_execution_owner(&conn,&conn.dir,runtime,parent,&origin.flow_run).is_err());assert!(!conn.dir.join(".workflow-execution-owners").exists());}
-#[cfg(unix)]
-#[test]
-fn workflow_physical_owner_pins_only_workflow_namespace(){let conn=db();let origin=original(&conn);let owner=acquire_workflow(&conn,&origin.flow_run).unwrap().expect("workflow lease");let(runtime,_)=physical_ids(&conn);assert!(owner.matches_retained(&origin.flow_run,runtime));assert!(!owner.matches_retained(&origin.native_run,runtime));assert!(conn.dir.join(".workflow-execution-owners").is_dir());assert!(!conn.dir.join(".action-submission-owners").exists());let(workflow,actions):(i64,i64)=conn.query_row("SELECT (SELECT count(*) FROM workflow_submission_namespace),(SELECT count(*) FROM action_submission_namespace)",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();assert_eq!((workflow,actions),(1,0));let pinned:String=conn.query_row("SELECT workflow_run_id FROM workflow_submission_files",[],|r|r.get(0)).unwrap();assert_eq!(pinned,origin.flow_run);}
-#[cfg(unix)]
-#[test]
-fn workflow_physical_owner_busy_until_actual_holder_drops(){let conn=db();let origin=original(&conn);let owner=acquire_workflow(&conn,&origin.flow_run).unwrap().unwrap();assert!(acquire_workflow(&conn,&origin.flow_run).unwrap().is_none());drop(owner);assert!(acquire_workflow(&conn,&origin.flow_run).unwrap().is_some());}
-#[cfg(unix)]
-#[test]
-fn workflow_physical_owner_never_accepts_native_run_as_workflow_selector(){let conn=db();let origin=original(&conn);assert!(acquire_workflow(&conn,&origin.native_run).is_err());assert!(!conn.dir.join(".workflow-execution-owners").exists());}
-#[cfg(unix)]
-#[test]
-fn workflow_physical_owner_rejects_recreated_namespace(){let conn=db();let origin=original(&conn);let owner=acquire_workflow(&conn,&origin.flow_run).unwrap().unwrap();std::fs::rename(conn.dir.join(".workflow-execution-owners"),conn.dir.join("retired-workflow-owners")).unwrap();assert!(acquire_workflow(&conn,&origin.flow_run).is_err());assert!(owner.matches_retained(&origin.flow_run,physical_ids(&conn).0),"original descriptors remain owned for settlement");drop(owner);assert!(acquire_workflow(&conn,&origin.flow_run).is_err(),"dropping original never rebinds namespace");}
-#[cfg(unix)]
-#[test]
-fn workflow_physical_owner_rejects_recreated_file(){let conn=db();let origin=original(&conn);let owner=acquire_workflow(&conn,&origin.flow_run).unwrap().unwrap();let namespace=conn.dir.join(".workflow-execution-owners");let file=std::fs::read_dir(&namespace).unwrap().next().unwrap().unwrap().path();std::fs::rename(&file,conn.dir.join("retired-workflow-file")).unwrap();assert!(acquire_workflow(&conn,&origin.flow_run).is_err());assert!(owner.matches_retained(&origin.flow_run,physical_ids(&conn).0));drop(owner);assert!(acquire_workflow(&conn,&origin.flow_run).is_err());}
+fn acquire_workflow(
+    conn: &Db,
+    run: &str,
+) -> Result<Option<crate::runtime::workflow_submission::ExecutionOwner>, String> {
+    let (runtime, parent) = physical_ids(conn);
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate).unwrap();
+    let lease = crate::runtime::workflow_submission::try_execution_owner(
+        &tx, &conn.dir, runtime, parent, run,
+    )?;
+    tx.commit().unwrap();
+    Ok(lease)
+}
 #[cfg(unix)]
 #[test]
-fn workflow_physical_owner_pin_rollback_does_not_claim_commit(){let conn=db();let origin=original(&conn);let(runtime,parent)=physical_ids(&conn);let tx=Transaction::new_unchecked(&conn,TransactionBehavior::Immediate).unwrap();let owner=crate::runtime::workflow_submission::try_execution_owner(&tx,&conn.dir,runtime,parent,&origin.flow_run).unwrap().unwrap();tx.rollback().unwrap();drop(owner);let count:i64=conn.query_row("SELECT count(*) FROM workflow_submission_namespace",[],|r|r.get(0)).unwrap();assert_eq!(count,0);assert!(acquire_workflow(&conn,&origin.flow_run).unwrap().is_some());}
+fn workflow_physical_owner_requires_transaction() {
+    let conn = db();
+    let origin = original(&conn);
+    let (runtime, parent) = physical_ids(&conn);
+    assert!(crate::runtime::workflow_submission::try_execution_owner(
+        &conn,
+        &conn.dir,
+        runtime,
+        parent,
+        &origin.flow_run
+    )
+    .is_err());
+    assert!(!conn.dir.join(".workflow-execution-owners").exists());
+}
+#[cfg(unix)]
+#[test]
+fn workflow_physical_owner_pins_only_workflow_namespace() {
+    let conn = db();
+    let origin = original(&conn);
+    let owner = acquire_workflow(&conn, &origin.flow_run)
+        .unwrap()
+        .expect("workflow lease");
+    let (runtime, _) = physical_ids(&conn);
+    assert!(owner.matches_retained(&origin.flow_run, runtime));
+    assert!(!owner.matches_retained(&origin.native_run, runtime));
+    assert!(conn.dir.join(".workflow-execution-owners").is_dir());
+    assert!(!conn.dir.join(".action-submission-owners").exists());
+    let(workflow,actions):(i64,i64)=conn.query_row("SELECT (SELECT count(*) FROM workflow_submission_namespace),(SELECT count(*) FROM action_submission_namespace)",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!((workflow, actions), (1, 0));
+    let pinned: String = conn
+        .query_row(
+            "SELECT workflow_run_id FROM workflow_submission_files",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(pinned, origin.flow_run);
+}
+#[cfg(unix)]
+#[test]
+fn workflow_physical_owner_busy_until_actual_holder_drops() {
+    let conn = db();
+    let origin = original(&conn);
+    let owner = acquire_workflow(&conn, &origin.flow_run).unwrap().unwrap();
+    assert!(acquire_workflow(&conn, &origin.flow_run).unwrap().is_none());
+    drop(owner);
+    assert!(acquire_workflow(&conn, &origin.flow_run).unwrap().is_some());
+}
+#[cfg(unix)]
+#[test]
+fn workflow_physical_owner_never_accepts_native_run_as_workflow_selector() {
+    let conn = db();
+    let origin = original(&conn);
+    assert!(acquire_workflow(&conn, &origin.native_run).is_err());
+    assert!(!conn.dir.join(".workflow-execution-owners").exists());
+}
+#[cfg(unix)]
+#[test]
+fn workflow_physical_owner_rejects_recreated_namespace() {
+    let conn = db();
+    let origin = original(&conn);
+    let owner = acquire_workflow(&conn, &origin.flow_run).unwrap().unwrap();
+    std::fs::rename(
+        conn.dir.join(".workflow-execution-owners"),
+        conn.dir.join("retired-workflow-owners"),
+    )
+    .unwrap();
+    assert!(acquire_workflow(&conn, &origin.flow_run).is_err());
+    assert!(
+        owner.matches_retained(&origin.flow_run, physical_ids(&conn).0),
+        "original descriptors remain owned for settlement"
+    );
+    drop(owner);
+    assert!(
+        acquire_workflow(&conn, &origin.flow_run).is_err(),
+        "dropping original never rebinds namespace"
+    );
+}
+#[cfg(unix)]
+#[test]
+fn workflow_physical_owner_rejects_recreated_file() {
+    let conn = db();
+    let origin = original(&conn);
+    let owner = acquire_workflow(&conn, &origin.flow_run).unwrap().unwrap();
+    let namespace = conn.dir.join(".workflow-execution-owners");
+    let file = std::fs::read_dir(&namespace)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    std::fs::rename(&file, conn.dir.join("retired-workflow-file")).unwrap();
+    assert!(acquire_workflow(&conn, &origin.flow_run).is_err());
+    assert!(owner.matches_retained(&origin.flow_run, physical_ids(&conn).0));
+    drop(owner);
+    assert!(acquire_workflow(&conn, &origin.flow_run).is_err());
+}
+#[cfg(unix)]
+#[test]
+fn workflow_physical_owner_pin_rollback_does_not_claim_commit() {
+    let conn = db();
+    let origin = original(&conn);
+    let (runtime, parent) = physical_ids(&conn);
+    let tx = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate).unwrap();
+    let owner = crate::runtime::workflow_submission::try_execution_owner(
+        &tx,
+        &conn.dir,
+        runtime,
+        parent,
+        &origin.flow_run,
+    )
+    .unwrap()
+    .unwrap();
+    tx.rollback().unwrap();
+    drop(owner);
+    let count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM workflow_submission_namespace",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+    assert!(acquire_workflow(&conn, &origin.flow_run).unwrap().is_some());
+}
 
-#[cfg(target_os="macos")]
-fn owned_start(owner:&mut super::super::RuntimeOwner,recheck:impl Fn()->Result<(),flow::Error>)->Result<Started,flow::Error>{let p=permissions();let steps=[flow::Step{id:"done",kind:flow::Kind::Result,next:None,otherwise:None}];super::super::native_workflows::start_owned_rows(owner,facts(),Start{key:KEY,workflow:"workflow",version:HASH,schema:HASH,input:"{}",configuration:HASH,permissions:&p,selectors:&[],entry:"done",steps:&steps,now:time()},recheck)}
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
+fn owned_start(
+    owner: &mut super::super::RuntimeOwner,
+    recheck: impl Fn() -> Result<(), flow::Error>,
+) -> Result<Started, flow::Error> {
+    let p = permissions();
+    let steps = [flow::Step {
+        id: "done",
+        kind: flow::Kind::Result,
+        next: None,
+        otherwise: None,
+    }];
+    super::super::native_workflows::start_owned_rows(
+        owner,
+        facts(),
+        Start {
+            key: KEY,
+            workflow: "workflow",
+            version: HASH,
+            schema: HASH,
+            input: "{}",
+            configuration: HASH,
+            permissions: &p,
+            selectors: &[],
+            entry: "done",
+            steps: &steps,
+            now: time(),
+        },
+        recheck,
+    )
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn workflow_producer_owned_commit_returns_original_metadata(){let conn=db();let mut owner=super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();let Started::New(origin)=owned_start(&mut owner,||Ok(())).unwrap()else{panic!("new")};assert_eq!(count(&conn,"runs"),1);assert_eq!(tx(&conn,|c|inspect_rows(c,facts(),&origin.flow_run)).unwrap(),origin);}
-#[cfg(target_os="macos")]
+fn workflow_producer_owned_commit_returns_original_metadata() {
+    let conn = db();
+    let mut owner = super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
+    let Started::New(origin) = owned_start(&mut owner, || Ok(())).unwrap() else {
+        panic!("new")
+    };
+    assert_eq!(count(&conn, "runs"), 1);
+    assert_eq!(
+        tx(&conn, |c| inspect_rows(c, facts(), &origin.flow_run)).unwrap(),
+        origin
+    );
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn workflow_producer_owned_duplicate_does_not_mint_again(){let conn=db();let mut owner=super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();let Started::New(origin)=owned_start(&mut owner,||Ok(())).unwrap()else{panic!("new")};assert_eq!(owned_start(&mut owner,||Ok(())).unwrap(),Started::Observed(origin));assert_eq!(count(&conn,"runs"),1);}
-#[cfg(target_os="macos")]
+fn workflow_producer_owned_duplicate_does_not_mint_again() {
+    let conn = db();
+    let mut owner = super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
+    let Started::New(origin) = owned_start(&mut owner, || Ok(())).unwrap() else {
+        panic!("new")
+    };
+    assert_eq!(
+        owned_start(&mut owner, || Ok(())).unwrap(),
+        Started::Observed(origin)
+    );
+    assert_eq!(count(&conn, "runs"), 1);
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn workflow_producer_opening_retired_before_commit_rolls_back_all_rows(){let conn=db();let mut owner=super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();let calls=std::cell::Cell::new(0);assert_eq!(owned_start(&mut owner,||{calls.set(calls.get()+1);if calls.get()==1{Ok(())}else{Err(flow::Error::Denied)}}),Err(flow::Error::Denied));assert_eq!(calls.get(),2,"real owner checks before rows and again before commit");assert_eq!((count(&conn,"runs"),count(&conn,"flow"),count(&conn,"origins")),(0,0,0));}
-#[cfg(target_os="macos")]
+fn workflow_producer_opening_retired_before_commit_rolls_back_all_rows() {
+    let conn = db();
+    let mut owner = super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
+    let calls = std::cell::Cell::new(0);
+    assert_eq!(
+        owned_start(&mut owner, || {
+            calls.set(calls.get() + 1);
+            if calls.get() == 1 {
+                Ok(())
+            } else {
+                Err(flow::Error::Denied)
+            }
+        }),
+        Err(flow::Error::Denied)
+    );
+    assert_eq!(
+        calls.get(),
+        2,
+        "real owner checks before rows and again before commit"
+    );
+    assert_eq!(
+        (
+            count(&conn, "runs"),
+            count(&conn, "flow"),
+            count(&conn, "origins")
+        ),
+        (0, 0, 0)
+    );
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn workflow_producer_lost_ack_returns_no_runnable_origin_after_real_commit(){let conn=db();let mut owner=super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();let result=super::super::tests::with_transaction_ack_probe(||{super::super::tests::lose_next_transaction_ack();owned_start(&mut owner,||Ok(()))});assert_eq!(result,Err(flow::Error::Unavailable));assert_eq!(count(&conn,"origins"),1,"actual commit occurred before the lost acknowledgement");assert!(owner.retired);assert_eq!(owned_start(&mut owner,||Ok(())),Err(flow::Error::Unavailable));assert_eq!(count(&conn,"runs"),1);}
+fn workflow_producer_lost_ack_returns_no_runnable_origin_after_real_commit() {
+    let conn = db();
+    let mut owner = super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
+    let result = super::super::tests::with_transaction_ack_probe(|| {
+        super::super::tests::lose_next_transaction_ack();
+        owned_start(&mut owner, || Ok(()))
+    });
+    assert_eq!(result, Err(flow::Error::Unavailable));
+    assert_eq!(
+        count(&conn, "origins"),
+        1,
+        "actual commit occurred before the lost acknowledgement"
+    );
+    assert!(owner.retired);
+    assert_eq!(
+        owned_start(&mut owner, || Ok(())),
+        Err(flow::Error::Unavailable)
+    );
+    assert_eq!(count(&conn, "runs"), 1);
+}
 
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
 #[test]
-fn workflow_producer_revoke_cancels_queued_flow_in_same_owned_transaction(){let conn=db();let origin=original(&conn);let mut owner=super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();let revoked=super::super::native_workflows::revoke_owned_rows(&mut owner,facts(),&origin.flow_run,origin.epoch,time(),||Ok(())).unwrap();assert_eq!(revoked.native_run,origin.native_run);let(state,requested,revoked_at):(String,bool,bool)=conn.query_row("SELECT r.state,r.cancel_requested,o.revoked_at IS NOT NULL FROM workflow_runs r JOIN workflow_run_origins o ON o.workflow_run_id=r.run_id WHERE r.run_id=?1",[&origin.flow_run],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();assert_eq!((state.as_str(),requested,revoked_at),("cancelled",true,true));let values:i64=conn.query_row("SELECT count(*) FROM workflow_values WHERE run_id=?1",[&origin.flow_run],|r|r.get(0)).unwrap();assert_eq!(values,0);}
-#[cfg(target_os="macos")]
+fn workflow_producer_revoke_cancels_queued_flow_in_same_owned_transaction() {
+    let conn = db();
+    let origin = original(&conn);
+    let mut owner = super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
+    let revoked = super::super::native_workflows::revoke_owned_rows(
+        &mut owner,
+        facts(),
+        &origin.flow_run,
+        origin.epoch,
+        time(),
+        || Ok(()),
+    )
+    .unwrap();
+    assert_eq!(revoked.native_run, origin.native_run);
+    let(state,requested,revoked_at):(String,bool,bool)=conn.query_row("SELECT r.state,r.cancel_requested,o.revoked_at IS NOT NULL FROM workflow_runs r JOIN workflow_run_origins o ON o.workflow_run_id=r.run_id WHERE r.run_id=?1",[&origin.flow_run],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    assert_eq!(
+        (state.as_str(), requested, revoked_at),
+        ("cancelled", true, true)
+    );
+    let values: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM workflow_values WHERE run_id=?1",
+            [&origin.flow_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(values, 0);
+}
+#[cfg(target_os = "macos")]
 #[test]
-fn workflow_producer_revoke_keeps_unknown_effect_truth_and_recovery_values(){let conn=db();let(p,selector)=selected_account(&conn);let origin=selected_start(&conn,&p,&selector);tx(&conn,|c|{let current=flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)?;let claim=flow::claim_rows(c,scope(facts(),&origin),&origin.flow_run,current.revision,"{}","original-process",time().timestamp_millis())?;flow::effect_rows(c,scope(facts(),&origin),&origin.flow_run,claim.run_revision,flow::Effect{step:"action",ordinal:claim.ordinal,request_key:&claim.request_key,invocation:"recorded-unknown-effect",approval:None,revision:1,state:flow::EffectState::Unknown,output:None},time().timestamp_millis())}).unwrap();let before:i64=conn.query_row("SELECT count(*) FROM workflow_values WHERE run_id=?1",[&origin.flow_run],|r|r.get(0)).unwrap();assert!(before>0);let mut owner=super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();super::super::native_workflows::revoke_owned_rows(&mut owner,facts(),&origin.flow_run,origin.epoch,time(),||Ok(())).unwrap();let run=tx(&conn,|c|flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)).unwrap();assert_eq!(run.state,"blocked");assert_eq!(run.reason.as_deref(),Some("effect_outcome_unknown"));assert!(run.cancel_requested);let after:i64=conn.query_row("SELECT count(*) FROM workflow_values WHERE run_id=?1",[&origin.flow_run],|r|r.get(0)).unwrap();assert_eq!(after,before);let revoked:bool=conn.query_row("SELECT revoked_at IS NOT NULL FROM workflow_run_origins WHERE workflow_run_id=?1",[&origin.flow_run],|r|r.get(0)).unwrap();assert!(revoked);}
+fn workflow_producer_revoke_keeps_unknown_effect_truth_and_recovery_values() {
+    let conn = db();
+    let (p, selector) = selected_account(&conn);
+    let origin = selected_start(&conn, &p, &selector);
+    tx(&conn, |c| {
+        let current = flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)?;
+        let claim = flow::claim_rows(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run,
+            current.revision,
+            "{}",
+            "original-process",
+            time().timestamp_millis(),
+        )?;
+        flow::effect_rows(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run,
+            claim.run_revision,
+            flow::Effect {
+                step: "action",
+                ordinal: claim.ordinal,
+                request_key: &claim.request_key,
+                invocation: "recorded-unknown-effect",
+                approval: None,
+                revision: 1,
+                state: flow::EffectState::Unknown,
+                output: None,
+            },
+            time().timestamp_millis(),
+        )
+    })
+    .unwrap();
+    let before: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM workflow_values WHERE run_id=?1",
+            [&origin.flow_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(before > 0);
+    let mut owner = super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
+    super::super::native_workflows::revoke_owned_rows(
+        &mut owner,
+        facts(),
+        &origin.flow_run,
+        origin.epoch,
+        time(),
+        || Ok(()),
+    )
+    .unwrap();
+    let run = tx(&conn, |c| {
+        flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)
+    })
+    .unwrap();
+    assert_eq!(run.state, "blocked");
+    assert_eq!(run.reason.as_deref(), Some("effect_outcome_unknown"));
+    assert!(run.cancel_requested);
+    let after: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM workflow_values WHERE run_id=?1",
+            [&origin.flow_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(after, before);
+    let revoked: bool = conn
+        .query_row(
+            "SELECT revoked_at IS NOT NULL FROM workflow_run_origins WHERE workflow_run_id=?1",
+            [&origin.flow_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(revoked);
+}
 
-fn terminal_native(conn:&Connection,native:&str)->(String,String,Option<String>,Option<String>,Option<String>){conn.query_row("SELECT r.outcome,r.usage_state,r.ended_at,n.close_kind,n.closed_at FROM runs r JOIN action_native_runs n USING(run_id) WHERE r.run_id=?1",[native],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).unwrap()}
+fn terminal_native(
+    conn: &Connection,
+    native: &str,
+) -> (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    conn.query_row("SELECT r.outcome,r.usage_state,r.ended_at,n.close_kind,n.closed_at FROM runs r JOIN action_native_runs n USING(run_id) WHERE r.run_id=?1",[native],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).unwrap()
+}
 #[test]
-fn workflow_terminal_success_closes_only_its_exact_native_operation(){let conn=db();let origin=original(&conn);crate::runtime::dispatch::begin_attended(&conn,"ordinary",Some(VAULT),Some("store"),Some("human:me"),None,None,time()).unwrap();tx(&conn,|c|{let run=flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)?;let claim=flow::claim_rows(c,scope(facts(),&origin),&origin.flow_run,run.revision,"{}","process-one",time().timestamp_millis())?;flow::finish_rows(c,scope(facts(),&origin),&claim,"null",None,time().timestamp_millis())}).unwrap();let(outcome,usage,end,close,closed)=terminal_native(&conn,&origin.native_run);assert_eq!(outcome,"succeeded");assert_eq!(usage,"unknown");assert_eq!(close.as_deref(),Some("completed"));assert!(end.is_some());assert_eq!(end,closed);let ordinary:String=conn.query_row("SELECT outcome FROM runs WHERE run_id='ordinary'",[],|r|r.get(0)).unwrap();assert_eq!(ordinary,"running");}
+fn workflow_terminal_success_closes_only_its_exact_native_operation() {
+    let conn = db();
+    let origin = original(&conn);
+    crate::runtime::dispatch::begin_attended(
+        &conn,
+        "ordinary",
+        Some(VAULT),
+        Some("store"),
+        Some("human:me"),
+        None,
+        None,
+        time(),
+    )
+    .unwrap();
+    tx(&conn, |c| {
+        let run = flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)?;
+        let claim = flow::claim_rows(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run,
+            run.revision,
+            "{}",
+            "process-one",
+            time().timestamp_millis(),
+        )?;
+        flow::finish_rows(
+            c,
+            scope(facts(), &origin),
+            &claim,
+            "null",
+            None,
+            time().timestamp_millis(),
+        )
+    })
+    .unwrap();
+    let (outcome, usage, end, close, closed) = terminal_native(&conn, &origin.native_run);
+    assert_eq!(outcome, "succeeded");
+    assert_eq!(usage, "unknown");
+    assert_eq!(close.as_deref(), Some("completed"));
+    assert!(end.is_some());
+    assert_eq!(end, closed);
+    let ordinary: String = conn
+        .query_row(
+            "SELECT outcome FROM runs WHERE run_id='ordinary'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(ordinary, "running");
+}
 #[test]
-fn workflow_terminal_failure_closes_native_without_invented_usage(){let conn=db();let origin=original(&conn);tx(&conn,|c|{let run=flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)?;let claim=flow::claim_rows(c,scope(facts(),&origin),&origin.flow_run,run.revision,"{}","process-one",time().timestamp_millis())?;flow::fail_rows(c,scope(facts(),&origin),&claim,"mapping_invalid",time().timestamp_millis())}).unwrap();let(outcome,usage,end,close,closed)=terminal_native(&conn,&origin.native_run);assert_eq!(outcome,"failed");assert_eq!(usage,"unknown");assert_eq!(close.as_deref(),Some("completed"));assert!(end.is_some());assert_eq!(end,closed);}
+fn workflow_terminal_failure_closes_native_without_invented_usage() {
+    let conn = db();
+    let origin = original(&conn);
+    tx(&conn, |c| {
+        let run = flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)?;
+        let claim = flow::claim_rows(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run,
+            run.revision,
+            "{}",
+            "process-one",
+            time().timestamp_millis(),
+        )?;
+        flow::fail_rows(
+            c,
+            scope(facts(), &origin),
+            &claim,
+            "mapping_invalid",
+            time().timestamp_millis(),
+        )
+    })
+    .unwrap();
+    let (outcome, usage, end, close, closed) = terminal_native(&conn, &origin.native_run);
+    assert_eq!(outcome, "failed");
+    assert_eq!(usage, "unknown");
+    assert_eq!(close.as_deref(), Some("completed"));
+    assert!(end.is_some());
+    assert_eq!(end, closed);
+}
 #[test]
-fn workflow_terminal_cancel_closes_native_once_and_preserves_original_identity(){let conn=db();let origin=original(&conn);let first=tx(&conn,|c|{let run=flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)?;flow::cancel_rows(c,scope(facts(),&origin),&origin.flow_run,run.revision,time().timestamp_millis())}).unwrap();let before=terminal_native(&conn,&origin.native_run);assert_eq!(before.0,"cancelled");assert_eq!(before.1,"unknown");assert_eq!(before.3.as_deref(),Some("stopped"));assert!(before.2.is_some());assert_eq!(before.2,before.4);tx(&conn,|c|flow::cancel_rows(c,scope(facts(),&origin),&origin.flow_run,first.revision,time().timestamp_millis()+1000)).unwrap();assert_eq!(terminal_native(&conn,&origin.native_run),before);assert_eq!(tx(&conn,|c|inspect_rows(c,facts(),&origin.flow_run)).unwrap().authority,origin.authority);}
+fn workflow_terminal_cancel_closes_native_once_and_preserves_original_identity() {
+    let conn = db();
+    let origin = original(&conn);
+    let first = tx(&conn, |c| {
+        let run = flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)?;
+        flow::cancel_rows(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run,
+            run.revision,
+            time().timestamp_millis(),
+        )
+    })
+    .unwrap();
+    let before = terminal_native(&conn, &origin.native_run);
+    assert_eq!(before.0, "cancelled");
+    assert_eq!(before.1, "unknown");
+    assert_eq!(before.3.as_deref(), Some("stopped"));
+    assert!(before.2.is_some());
+    assert_eq!(before.2, before.4);
+    tx(&conn, |c| {
+        flow::cancel_rows(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run,
+            first.revision,
+            time().timestamp_millis() + 1000,
+        )
+    })
+    .unwrap();
+    assert_eq!(terminal_native(&conn, &origin.native_run), before);
+    assert_eq!(
+        tx(&conn, |c| inspect_rows(c, facts(), &origin.flow_run))
+            .unwrap()
+            .authority,
+        origin.authority
+    );
+}
 
 #[test]
-fn workflow_known_start_keeps_created_identity_after_opening_retirement(){let conn=db();let origin=original(&conn);let expected=Started::New(origin.clone());let status=super::super::native_workflows::finish_known_start(Started::New(origin),false,|_|panic!("retired opening cannot acquire execution lease")).unwrap_or_else(|error|panic!("known created metadata was lost: {error:?}"));assert_eq!(status.row,expected);assert!(status.current.is_err());}
+fn workflow_known_start_keeps_created_identity_after_opening_retirement() {
+    let conn = db();
+    let origin = original(&conn);
+    let expected = Started::New(origin.clone());
+    let status =
+        super::super::native_workflows::finish_known_start(Started::New(origin), false, |_| {
+            panic!("retired opening cannot acquire execution lease")
+        })
+        .unwrap_or_else(|error| panic!("known created metadata was lost: {error:?}"));
+    assert_eq!(status.row, expected);
+    assert!(status.current.is_err());
+}
 #[test]
-fn workflow_known_start_keeps_created_identity_after_lease_admission_failure(){let conn=db();let origin=original(&conn);let expected=Started::New(origin.clone());let status=super::super::native_workflows::finish_known_start(Started::New(origin),true,|_|Err(crate::actions::effect_kernel::unavailable())).unwrap_or_else(|error|panic!("known created metadata was lost: {error:?}"));assert_eq!(status.row,expected);assert!(status.current.is_err());assert_eq!(count(&conn,"runs"),1);}
+fn workflow_known_start_keeps_created_identity_after_lease_admission_failure() {
+    let conn = db();
+    let origin = original(&conn);
+    let expected = Started::New(origin.clone());
+    let status =
+        super::super::native_workflows::finish_known_start(Started::New(origin), true, |_| {
+            Err(crate::actions::effect_kernel::unavailable())
+        })
+        .unwrap_or_else(|error| panic!("known created metadata was lost: {error:?}"));
+    assert_eq!(status.row, expected);
+    assert!(status.current.is_err());
+    assert_eq!(count(&conn, "runs"), 1);
+}
 #[test]
-fn workflow_known_duplicate_start_never_recaptures_runnable_origin(){let conn=db();let origin=original(&conn);let expected=Started::Observed(origin.clone());let status=super::super::native_workflows::finish_known_start(Started::Observed(origin),true,|_|panic!("duplicate Start is observational")).unwrap();assert_eq!(status.row,expected);assert!(matches!(status.current,Ok(None)));assert_eq!(count(&conn,"runs"),1);}
+fn workflow_known_duplicate_start_never_recaptures_runnable_origin() {
+    let conn = db();
+    let origin = original(&conn);
+    let expected = Started::Observed(origin.clone());
+    let status =
+        super::super::native_workflows::finish_known_start(Started::Observed(origin), true, |_| {
+            panic!("duplicate Start is observational")
+        })
+        .unwrap();
+    assert_eq!(status.row, expected);
+    assert!(matches!(status.current, Ok(None)));
+    assert_eq!(count(&conn, "runs"), 1);
+}
 
 // Actual compiled action/grant/approval/claim/receipt rows. This context is a
 // test-only row fixture, not a native window/origin/credential/provider factory.
-struct HistoryFixtureContext<'a>{conn:&'a Connection,subject:&'a ActionSubjectView}
-impl crate::actions::effect_kernel::MutationContext for HistoryFixtureContext<'_>{
- fn definition(&self,id:&crate::actions::read_types::ActionId,digest:&crate::actions::read_types::DefinitionDigest)->Result<crate::actions::read_types::ActionDefinition,crate::actions::read_types::ActionError>{super::super::native_actions::semantics::definition(id,digest)}
- fn check(&self,db:crate::actions::native_db::AuthorityDb<'_>,subject:&ActionSubjectView,request:&crate::actions::effect_record::PrepareAction,definition:&crate::actions::read_types::ActionDefinition)->Result<crate::actions::effect_record::Binding,crate::actions::read_types::ActionError>{if !matches!(db,crate::actions::native_db::AuthorityDb::Writer(conn) if std::ptr::eq(conn,self.conn))||subject!=self.subject{return Err(crate::actions::effect_kernel::denied());}super::super::native_actions::semantics::checked_binding(db,subject,"human:me",request,definition)}
- fn read_access(&self,db:crate::actions::native_db::AuthorityDb<'_>,subject:&ActionSubjectView,_account:&crate::actions::ids::AccountId)->Result<(),crate::actions::read_types::ActionError>{if !matches!(db,crate::actions::native_db::AuthorityDb::Writer(conn) if std::ptr::eq(conn,self.conn))||subject!=self.subject{return Err(crate::actions::effect_kernel::denied());}Ok(())}
- fn target(&self,definition:&crate::actions::read_types::ActionDefinition,input:&crate::actions::schema::ValidatedInput)->Result<crate::actions::effect_record::AdapterTarget,crate::actions::read_types::ActionError>{super::super::native_actions::semantics::target(definition,input)}
- fn preview(&self,definition:&crate::actions::read_types::ActionDefinition,input:&crate::actions::schema::ValidatedInput,_target:&crate::actions::effect_record::AdapterTarget)->Result<crate::actions::effect_types::SafeEffectPreview,crate::actions::read_types::ActionError>{super::super::native_actions::semantics::preview(definition,input)}
+struct HistoryFixtureContext<'a> {
+    conn: &'a Connection,
+    subject: &'a ActionSubjectView,
 }
-fn historical_claim(conn:&Connection)->(Origin,crate::actions::effect_types::InvocationId,crate::actions::ids::AttemptId,Permissions){
- use crate::actions::{effect_kernel as k,effect_record::PrepareAction,effect_types::*,workflow_requests};
- let(p,selector)=selected_account(conn);let origin=selected_start(conn,&p,&selector);let subject=subject(facts(),&origin);
- let (id,attempt)=tx(conn,|c|{
-  let current=flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)?;
-  let input=r#"{"repository":"owner/repo","title":"first","body":"body"}"#;
-  let claim=flow::claim_rows(c,scope(facts(),&origin),&origin.flow_run,current.revision,input,"process-one",time().timestamp_millis())?;
-  let selector=selector_rows(c,facts(),&origin.flow_run,"action")?;
-  let frozen=workflow_requests::freeze(workflow_requests::Selectors{action_id:selector.action.clone(),definition_digest:selector.definition.clone(),connection_id:selector.connection.clone(),account_id:selector.account.clone(),snapshot_digest:selector.snapshot.clone()},input,&claim.request_key).unwrap();
-  crate::runtime::workflow_action_inputs::freeze_rows(c,scope(facts(),&origin),&claim,&frozen,&origin.configuration)?;
-  let request=PrepareAction{action_id:ActionId(selector.action),definition_digest:DefinitionDigest(selector.definition),connection_id:ConnectionId(selector.connection),account_id:AccountId(selector.account),snapshot_digest:SnapshotDigest(selector.snapshot),input:frozen.input,request_key:claim.request_key.clone()};
-  let context=HistoryFixtureContext{conn:c,subject:&subject};
-  let prepared=crate::actions::workflow_bridge::prepare_claim_rows(c,scope(facts(),&origin),&claim,&context,&subject,request,time().timestamp_millis())?;
-  let id=prepared.prepared.effect.invocation_id;let before=k::load(c,&id).unwrap();let approval=before.approval.as_ref().unwrap();
-  k::answer_rows(c,&context,k::AnswerInput{person_id:"human:me".into(),scope:subject.clone(),approval_id:approval.view.approval_id.clone(),allow:true,edited_input:None,expected_invocation_revision:before.revision(),expected_approval_revision:approval.view.revision.get()}).unwrap();
-  let k::ClaimDisposition::Claimed{attempt_id,..}=k::claim_rows(c,&context,&id).unwrap()else{panic!("actual ACT claim")};
-  let current=flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)?;
-  crate::actions::workflow_linkage::observe_with_context(c,scope(facts(),&origin),&origin.flow_run,current.revision,&context,&subject,&id,time().timestamp_millis())?;
-  Ok((id,attempt_id))
- }).unwrap();(origin,id,attempt,p)
+impl crate::actions::effect_kernel::MutationContext for HistoryFixtureContext<'_> {
+    fn definition(
+        &self,
+        id: &crate::actions::read_types::ActionId,
+        digest: &crate::actions::read_types::DefinitionDigest,
+    ) -> Result<crate::actions::read_types::ActionDefinition, crate::actions::read_types::ActionError>
+    {
+        super::super::native_actions::semantics::definition(id, digest)
+    }
+    fn check(
+        &self,
+        db: crate::actions::native_db::AuthorityDb<'_>,
+        subject: &ActionSubjectView,
+        request: &crate::actions::effect_record::PrepareAction,
+        definition: &crate::actions::read_types::ActionDefinition,
+    ) -> Result<crate::actions::effect_record::Binding, crate::actions::read_types::ActionError>
+    {
+        if !matches!(db,crate::actions::native_db::AuthorityDb::Writer(conn) if std::ptr::eq(conn,self.conn))
+            || subject != self.subject
+        {
+            return Err(crate::actions::effect_kernel::denied());
+        }
+        super::super::native_actions::semantics::checked_binding(
+            db, subject, "human:me", request, definition,
+        )
+    }
+    fn read_access(
+        &self,
+        db: crate::actions::native_db::AuthorityDb<'_>,
+        subject: &ActionSubjectView,
+        _account: &crate::actions::ids::AccountId,
+    ) -> Result<(), crate::actions::read_types::ActionError> {
+        if !matches!(db,crate::actions::native_db::AuthorityDb::Writer(conn) if std::ptr::eq(conn,self.conn))
+            || subject != self.subject
+        {
+            return Err(crate::actions::effect_kernel::denied());
+        }
+        Ok(())
+    }
+    fn target(
+        &self,
+        definition: &crate::actions::read_types::ActionDefinition,
+        input: &crate::actions::schema::ValidatedInput,
+    ) -> Result<crate::actions::effect_record::AdapterTarget, crate::actions::read_types::ActionError>
+    {
+        super::super::native_actions::semantics::target(definition, input)
+    }
+    fn preview(
+        &self,
+        definition: &crate::actions::read_types::ActionDefinition,
+        input: &crate::actions::schema::ValidatedInput,
+        _target: &crate::actions::effect_record::AdapterTarget,
+    ) -> Result<
+        crate::actions::effect_types::SafeEffectPreview,
+        crate::actions::read_types::ActionError,
+    > {
+        super::super::native_actions::semantics::preview(definition, input)
+    }
 }
-fn historical_success(conn:&Connection,id:&crate::actions::effect_types::InvocationId,attempt:&crate::actions::ids::AttemptId){let change=Transaction::new_unchecked(conn,TransactionBehavior::Immediate).unwrap();crate::actions::effect_kernel::observe_rows(&change,id,attempt,None,crate::actions::effect_kernel::Observation::Succeeded{output:r#"{"issueId":"42","repository":"owner/repo","number":1,"url":"https://github.com/owner/repo/issues/1","title":"first","body":"FRESH-PAYLOAD"}"#.into(),remote_effect_reference:Some("https://github.com/owner/repo/issues/1".into())}).unwrap();change.commit().unwrap();}
-fn assert_historical_discard(conn:&Connection,origin:&Origin,id:&crate::actions::effect_types::InvocationId,epoch:u64){let result=tx(conn,|c|super::super::native_workflows::history::reconcile_rows(c,facts(),&origin.flow_run,epoch,id,time().timestamp_millis())).unwrap();assert_eq!(result.state,"cancelled");let(state,ack,body,reserved,values):(String,Option<String>,Option<String>,i64,i64)=conn.query_row("SELECT h.state,h.ack_kind,h.output_json,r.reserved_bytes,(SELECT count(*) FROM workflow_values v WHERE v.run_id=r.run_id) FROM action_output_handoffs h JOIN workflow_runs r ON r.run_id=h.workflow_run_id WHERE h.invocation_id=?1",[&id.0],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).unwrap();assert_eq!(state,"acknowledged");assert_eq!(ack.as_deref(),Some("discarded"));assert!(body.is_none());assert_eq!((reserved,values),(0,0));assert_eq!(crate::actions::effect_kernel::load(conn,id).unwrap().details.effect.state,crate::actions::effect_types::InvocationState::Succeeded);let again=tx(conn,|c|super::super::native_workflows::history::reconcile_rows(c,facts(),&origin.flow_run,epoch,id,time().timestamp_millis()+1)).unwrap();assert_eq!(again.revision,result.revision);}
+fn historical_claim(
+    conn: &Connection,
+) -> (
+    Origin,
+    crate::actions::effect_types::InvocationId,
+    crate::actions::ids::AttemptId,
+    Permissions,
+) {
+    use crate::actions::{
+        effect_kernel as k, effect_record::PrepareAction, effect_types::*, workflow_requests,
+    };
+    let (p, selector) = selected_account(conn);
+    let origin = selected_start(conn, &p, &selector);
+    let subject = subject(facts(), &origin);
+    let (id, attempt) = tx(conn, |c| {
+        let current = flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)?;
+        let input = r#"{"repository":"owner/repo","title":"first","body":"body"}"#;
+        let claim = flow::claim_rows(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run,
+            current.revision,
+            input,
+            "process-one",
+            time().timestamp_millis(),
+        )?;
+        let selector = selector_rows(c, facts(), &origin.flow_run, "action")?;
+        let frozen = workflow_requests::freeze(
+            workflow_requests::Selectors {
+                action_id: selector.action.clone(),
+                definition_digest: selector.definition.clone(),
+                connection_id: selector.connection.clone(),
+                account_id: selector.account.clone(),
+                snapshot_digest: selector.snapshot.clone(),
+            },
+            input,
+            &claim.request_key,
+        )
+        .unwrap();
+        crate::runtime::workflow_action_inputs::freeze_rows(
+            c,
+            scope(facts(), &origin),
+            &claim,
+            &frozen,
+            &origin.configuration,
+        )?;
+        let request = PrepareAction {
+            action_id: ActionId(selector.action),
+            definition_digest: DefinitionDigest(selector.definition),
+            connection_id: ConnectionId(selector.connection),
+            account_id: AccountId(selector.account),
+            snapshot_digest: SnapshotDigest(selector.snapshot),
+            input: frozen.input,
+            request_key: claim.request_key.clone(),
+        };
+        let context = HistoryFixtureContext {
+            conn: c,
+            subject: &subject,
+        };
+        let prepared = crate::actions::workflow_bridge::prepare_claim_rows(
+            c,
+            scope(facts(), &origin),
+            &claim,
+            &context,
+            &subject,
+            request,
+            time().timestamp_millis(),
+        )?;
+        let id = prepared.prepared.effect.invocation_id;
+        let before = k::load(c, &id).unwrap();
+        let approval = before.approval.as_ref().unwrap();
+        k::answer_rows(
+            c,
+            &context,
+            k::AnswerInput {
+                person_id: "human:me".into(),
+                scope: subject.clone(),
+                approval_id: approval.view.approval_id.clone(),
+                allow: true,
+                edited_input: None,
+                expected_invocation_revision: before.revision(),
+                expected_approval_revision: approval.view.revision.get(),
+            },
+        )
+        .unwrap();
+        let k::ClaimDisposition::Claimed { attempt_id, .. } =
+            k::claim_rows(c, &context, &id).unwrap()
+        else {
+            panic!("actual ACT claim")
+        };
+        let current = flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)?;
+        crate::actions::workflow_linkage::observe_with_context(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run,
+            current.revision,
+            &context,
+            &subject,
+            &id,
+            time().timestamp_millis(),
+        )?;
+        Ok((id, attempt_id))
+    })
+    .unwrap();
+    (origin, id, attempt, p)
+}
+fn historical_success(
+    conn: &Connection,
+    id: &crate::actions::effect_types::InvocationId,
+    attempt: &crate::actions::ids::AttemptId,
+) {
+    let change = Transaction::new_unchecked(conn, TransactionBehavior::Immediate).unwrap();
+    crate::actions::effect_kernel::observe_rows(&change,id,attempt,None,crate::actions::effect_kernel::Observation::Succeeded{output:r#"{"issueId":"42","repository":"owner/repo","number":1,"url":"https://github.com/owner/repo/issues/1","title":"first","body":"FRESH-PAYLOAD"}"#.into(),remote_effect_reference:Some("https://github.com/owner/repo/issues/1".into())}).unwrap();
+    change.commit().unwrap();
+}
+fn assert_historical_discard(
+    conn: &Connection,
+    origin: &Origin,
+    id: &crate::actions::effect_types::InvocationId,
+    epoch: u64,
+) {
+    let result = tx(conn, |c| {
+        super::super::native_workflows::history::reconcile_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            epoch,
+            id,
+            time().timestamp_millis(),
+        )
+    })
+    .unwrap();
+    assert_eq!(result.state, "cancelled");
+    let(state,ack,body,reserved,values):(String,Option<String>,Option<String>,i64,i64)=conn.query_row("SELECT h.state,h.ack_kind,h.output_json,r.reserved_bytes,(SELECT count(*) FROM workflow_values v WHERE v.run_id=r.run_id) FROM action_output_handoffs h JOIN workflow_runs r ON r.run_id=h.workflow_run_id WHERE h.invocation_id=?1",[&id.0],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).unwrap();
+    assert_eq!(state, "acknowledged");
+    assert_eq!(ack.as_deref(), Some("discarded"));
+    assert!(body.is_none());
+    assert_eq!((reserved, values), (0, 0));
+    assert_eq!(
+        crate::actions::effect_kernel::load(conn, id)
+            .unwrap()
+            .details
+            .effect
+            .state,
+        crate::actions::effect_types::InvocationState::Succeeded
+    );
+    let again = tx(conn, |c| {
+        super::super::native_workflows::history::reconcile_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            epoch,
+            id,
+            time().timestamp_millis() + 1,
+        )
+    })
+    .unwrap();
+    assert_eq!(again.revision, result.revision);
+}
 #[test]
-fn workflow_historical_admitted_success_transfers_actual_receipt(){let conn=db();let(origin,id,attempt,_)=historical_claim(&conn);historical_success(&conn,&id,&attempt);let run=tx(&conn,|c|super::super::native_workflows::history::reconcile_rows(c,facts(),&origin.flow_run,origin.epoch,&id,time().timestamp_millis())).unwrap();assert_eq!(run.state,"queued");assert_eq!(run.cursor.as_deref(),Some("done"));let(output,ack):(String,String)=conn.query_row("SELECT v.canonical_json,h.ack_kind FROM workflow_values v JOIN action_output_handoffs h ON h.workflow_run_id=v.run_id WHERE v.run_id=?1 AND v.step_id='action' AND v.role='step_output'",[&origin.flow_run],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();assert!(output.contains("FRESH-PAYLOAD"));assert_eq!(ack,"transferred");}
+fn workflow_historical_admitted_success_transfers_actual_receipt() {
+    let conn = db();
+    let (origin, id, attempt, _) = historical_claim(&conn);
+    historical_success(&conn, &id, &attempt);
+    let run = tx(&conn, |c| {
+        super::super::native_workflows::history::reconcile_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            &id,
+            time().timestamp_millis(),
+        )
+    })
+    .unwrap();
+    assert_eq!(run.state, "queued");
+    assert_eq!(run.cursor.as_deref(), Some("done"));
+    let(output,ack):(String,String)=conn.query_row("SELECT v.canonical_json,h.ack_kind FROM workflow_values v JOIN action_output_handoffs h ON h.workflow_run_id=v.run_id WHERE v.run_id=?1 AND v.step_id='action' AND v.role='step_output'",[&origin.flow_run],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert!(output.contains("FRESH-PAYLOAD"));
+    assert_eq!(ack, "transferred");
+}
 #[test]
-fn workflow_historical_revoked_origin_discards_original_completed_receipt(){let conn=db();let(origin,id,attempt,_)=historical_claim(&conn);let revoked=tx(&conn,|c|{let revoked=revoke_rows(c,facts(),&origin.flow_run,origin.epoch,time())?;let current=flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)?;flow::cancel_rows(c,scope(facts(),&origin),&origin.flow_run,current.revision,time().timestamp_millis())?;Ok(revoked)}).unwrap();historical_success(&conn,&id,&attempt);assert_historical_discard(&conn,&origin,&id,revoked.epoch);}
+fn workflow_historical_revoked_origin_discards_original_completed_receipt() {
+    let conn = db();
+    let (origin, id, attempt, _) = historical_claim(&conn);
+    let revoked = tx(&conn, |c| {
+        let revoked = revoke_rows(c, facts(), &origin.flow_run, origin.epoch, time())?;
+        let current = flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)?;
+        flow::cancel_rows(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run,
+            current.revision,
+            time().timestamp_millis(),
+        )?;
+        Ok(revoked)
+    })
+    .unwrap();
+    historical_success(&conn, &id, &attempt);
+    assert_historical_discard(&conn, &origin, &id, revoked.epoch);
+}
 #[test]
-fn workflow_historical_narrowed_account_discards_original_completed_receipt(){let conn=db();let(origin,id,attempt,p)=historical_claim(&conn);let narrow=Permissions{accounts:vec![],..p};let current=tx(&conn,|c|reauthorize_rows(c,facts(),&origin.flow_run,origin.epoch,&narrow,time())).unwrap();historical_success(&conn,&id,&attempt);assert_historical_discard(&conn,&origin,&id,current.epoch);}
+fn workflow_historical_narrowed_account_discards_original_completed_receipt() {
+    let conn = db();
+    let (origin, id, attempt, p) = historical_claim(&conn);
+    let narrow = Permissions {
+        accounts: vec![],
+        ..p
+    };
+    let current = tx(&conn, |c| {
+        reauthorize_rows(c, facts(), &origin.flow_run, origin.epoch, &narrow, time())
+    })
+    .unwrap();
+    historical_success(&conn, &id, &attempt);
+    assert_historical_discard(&conn, &origin, &id, current.epoch);
+}
 #[test]
-fn workflow_historical_disabled_account_discards_original_completed_receipt(){let conn=db();let(origin,id,attempt,p)=historical_claim(&conn);let change=Transaction::new_unchecked(&conn,TransactionBehavior::Immediate).unwrap();crate::connections::account_metadata::disable(&change,"human:me",&crate::actions::ids::ConnectionId(p.accounts[0].connection.clone()),1).unwrap();change.commit().unwrap();historical_success(&conn,&id,&attempt);assert_historical_discard(&conn,&origin,&id,origin.epoch);}
+fn workflow_historical_disabled_account_discards_original_completed_receipt() {
+    let conn = db();
+    let (origin, id, attempt, p) = historical_claim(&conn);
+    let change = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate).unwrap();
+    crate::connections::account_metadata::disable(
+        &change,
+        "human:me",
+        &crate::actions::ids::ConnectionId(p.accounts[0].connection.clone()),
+        1,
+    )
+    .unwrap();
+    change.commit().unwrap();
+    historical_success(&conn, &id, &attempt);
+    assert_historical_discard(&conn, &origin, &id, origin.epoch);
+}
 
 // Native sequential adapter tests: real published files/migrations/ACT rows.
 // The fixture context cannot construct a retained native workflow origin.
+use super::super::native_workflows::driver;
 use crate::workflows::native_definition as nd;
-use super::super::native_workflows::driver as driver;
-fn driver_tx<T>(conn:&Connection,operation:impl FnOnce(&Connection)->Result<T,nd::RunnerError>)->Result<T,nd::RunnerError>{let transaction=Transaction::new_unchecked(conn,TransactionBehavior::Immediate).unwrap();let result=operation(&transaction)?;transaction.commit().unwrap();Ok(result)}
-fn driver_step(id:&str,operation:serde_json::Value)->serde_json::Value{serde_json::json!({"stepId":id,"label":id,"operation":operation})}
-fn driver_result()->serde_json::Value{driver_step("done",serde_json::json!({"kind":"result","output":{"kind":"literal","value":true}}))}
-fn driver_fixture(conn:&Db,steps:Vec<serde_json::Value>,permissions:&Permissions,input:&str)->(nd::NativeDefinition,Origin){
- let schema=serde_json::json!({"type":"object"});let schema_digest=crate::actions::schema::workflow_schema_digest(&schema.to_string()).unwrap();
- let raw=serde_json::json!({"formatVersion":1,"workflowId":"driver","entryStepId":steps[0]["stepId"],"inputSchema":schema,"inputSchemaDigest":schema_digest,"declaredActionDigests":steps.iter().filter_map(|s|s["operation"]["definitionDigest"].as_str()).collect::<Vec<_>>(),"steps":steps,"trigger":{"kind":"manual"},"authoredBy":"human:me"});
- let pinned=nd::publish_fixture(&conn.dir,&raw.to_string(),input);let selectors=pinned.selectors().into_iter().map(|s|SelectorRequest{step:s.step,action:s.action,definition:s.definition,connection:s.connection,account:s.account}).collect::<Vec<_>>();let graph=pinned.steps();
- let Started::New(origin)=tx(conn,|c|start_rows(c,facts(),Start{key:KEY,workflow:pinned.workflow(),version:pinned.version(),schema:pinned.schema(),input:pinned.input(),configuration:HASH,permissions,selectors:&selectors,entry:pinned.entry(),steps:&graph,now:time()})).unwrap()else{panic!("new")};(pinned,origin)
+fn driver_tx<T>(
+    conn: &Connection,
+    operation: impl FnOnce(&Connection) -> Result<T, nd::RunnerError>,
+) -> Result<T, nd::RunnerError> {
+    let transaction = Transaction::new_unchecked(conn, TransactionBehavior::Immediate).unwrap();
+    let result = operation(&transaction)?;
+    transaction.commit().unwrap();
+    Ok(result)
 }
-fn driver_plan(conn:&Connection,pinned:&nd::NativeDefinition,origin:&Origin)->nd::Snapshot{let nd::Plan::Pending(plan)=driver_tx(conn,|c|pinned.plan_rows(c,scope(facts(),origin),&origin.flow_run)).unwrap()else{panic!("queued")};plan}
-fn driver_apply(conn:&Connection,pinned:&nd::NativeDefinition,origin:&Origin)->Result<driver::Step,nd::RunnerError>{let plan=driver_plan(conn,pinned,origin);let prepared=nd::prepare(&plan).unwrap();driver_tx(conn,|c|{let subject=subject(facts(),origin);let context=HistoryFixtureContext{conn:c,subject:&subject};driver::apply_rows(c,facts(),&origin.flow_run,origin.epoch,prepared,&context,&subject,time().timestamp_millis())})}
-fn driver_read()->serde_json::Value{driver_step("read",serde_json::json!({"kind":"read","query":{"kind":"literal","value":{"limit":10}},"outputSchema":{"type":"string"},"nextStepId":"done"}))}
-#[test]
-fn workflow_driver_plan_uses_actual_current_origin_and_pinned_file(){let conn=db();let(pinned,origin)=driver_fixture(&conn,vec![driver_result()],&permissions(),"{}");assert!(matches!(driver_tx(&conn,|c|driver::plan_rows(c,facts(),&origin.flow_run,origin.epoch,&pinned)).unwrap(),nd::Plan::Pending(_)));}
-#[test]
-fn workflow_driver_autocommit_never_plans_work(){let conn=db();let(pinned,origin)=driver_fixture(&conn,vec![driver_result()],&permissions(),"{}");assert!(driver::plan_rows(&conn,facts(),&origin.flow_run,origin.epoch,&pinned).is_err());assert_eq!(conn.query_row("SELECT count(*) FROM workflow_attempts",[],|r|r.get::<_,i64>(0)).unwrap(),0);}
-#[test]
-fn workflow_driver_local_result_finishes_same_native_run_and_releases_values(){let conn=db();let(pinned,origin)=driver_fixture(&conn,vec![driver_result()],&permissions(),"{}");let driver::Step::Advanced(run)=driver_apply(&conn,&pinned,&origin).unwrap()else{panic!("local result")};assert_eq!(run.state,"succeeded");let outcome:String=conn.query_row("SELECT outcome FROM runs WHERE run_id=?1",[&origin.native_run],|r|r.get(0)).unwrap();assert_eq!(outcome,"succeeded");assert_eq!(conn.query_row("SELECT count(*) FROM workflow_values",[],|r|r.get::<_,i64>(0)).unwrap(),0);}
-#[test]
-fn workflow_driver_stale_epoch_refuses_prepared_work_before_any_claim(){let conn=db();let(pinned,origin)=driver_fixture(&conn,vec![driver_result()],&permissions(),"{}");let prepared=nd::prepare(&driver_plan(&conn,&pinned,&origin)).unwrap();tx(&conn,|c|reauthorize_rows(c,facts(),&origin.flow_run,origin.epoch,&permissions(),time())).unwrap();let result=driver_tx(&conn,|c|{let subject=subject(facts(),&origin);let context=HistoryFixtureContext{conn:c,subject:&subject};driver::apply_rows(c,facts(),&origin.flow_run,origin.epoch,prepared,&context,&subject,time().timestamp_millis())});assert!(matches!(result,Err(nd::RunnerError::Runtime(flow::Error::Stale))));assert_eq!(conn.query_row("SELECT count(*) FROM workflow_attempts",[],|r|r.get::<_,i64>(0)).unwrap(),0);}
-#[test]
-fn workflow_driver_query_requires_current_explicit_permission_before_claim(){let conn=db();let denied=Permissions{query_records:false,..permissions()};let(pinned,origin)=driver_fixture(&conn,vec![driver_read(),driver_result()],&denied,"{}");assert!(matches!(driver_apply(&conn,&pinned,&origin),Err(nd::RunnerError::Runtime(flow::Error::Denied))));assert_eq!(conn.query_row("SELECT count(*) FROM workflow_attempts",[],|r|r.get::<_,i64>(0)).unwrap(),0);}
-#[test]
-fn workflow_driver_action_atomically_freezes_prepares_and_registers_actual_consumer(){let conn=db();let(p,selector)=selected_account(&conn);let input=serde_json::json!({"repository":"owner/repo","title":"driver","body":"body"});let action=driver_step("action",serde_json::json!({"kind":"action","actionId":selector.action,"definitionDigest":selector.definition,"connectionId":selector.connection,"accountId":selector.account,"input":{"kind":"input","path":[]},"nextStepId":"done"}));let(pinned,origin)=driver_fixture(&conn,vec![action,driver_result()],&p,&input.to_string());let driver::Step::Action{run,invocation,inserted}=driver_apply(&conn,&pinned,&origin).unwrap()else{panic!("actual ACT prepare")};assert!(inserted);assert_eq!(run.state,"waiting");let record=crate::actions::effect_kernel::load(&conn,&invocation).unwrap();assert_eq!(record.details.effect.state,crate::actions::effect_types::InvocationState::AwaitingApproval);assert!(record.details.attempts.is_empty());let(frozen,key,registered,reserved):(String,String,String,i64)=conn.query_row("SELECT i.snapshot_digest,i.request_key,h.request_key,r.reserved_bytes FROM workflow_action_inputs i JOIN action_output_handoffs h ON h.workflow_run_id=i.run_id AND h.step_id=i.step_id AND h.ordinal=i.ordinal JOIN workflow_runs r ON r.run_id=i.run_id WHERE r.run_id=?1",[&origin.flow_run],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();assert_eq!(key,record.request.request_key);assert_eq!(registered,key);assert_eq!(frozen,record.request.snapshot_digest.0);assert_eq!(usize::try_from(reserved).unwrap(),flow::action_output_allocation());}
-#[test]
-fn workflow_driver_mapping_failure_is_durable_without_fabricated_attempt(){let conn=db();let copy=driver_step("copy",serde_json::json!({"kind":"transform","mapping":{"kind":"input","path":["missing"]},"outputSchema":{"type":"string"},"nextStepId":"done"}));let(pinned,origin)=driver_fixture(&conn,vec![copy,driver_result()],&permissions(),"{}");let plan=driver_plan(&conn,&pinned,&origin);let error=nd::prepare(&plan).unwrap_err();assert_eq!(error,nd::RunnerError::MissingStepOutput);let run=driver_tx(&conn,|c|driver::reject_rows(c,facts(),&origin.flow_run,origin.epoch,&plan,error,time().timestamp_millis())).unwrap();assert_eq!(run.state,"failed");assert_eq!(run.reason.as_deref(),Some("missing_step_output"));assert_eq!(conn.query_row("SELECT count(*) FROM workflow_attempts",[],|r|r.get::<_,i64>(0)).unwrap(),0);}
-fn driver_claim_read(conn:&Connection,pinned:&nd::NativeDefinition,origin:&Origin)->nd::ReadWork{let plan=driver_plan(conn,pinned,origin);let prepared=nd::prepare(&plan).unwrap();let nd::Applied::Read(work)=driver_tx(conn,|c|nd::apply_rows(c,scope(facts(),origin),prepared,None,"process-one",time().timestamp_millis())).unwrap()else{panic!("real claim")};work}
-#[test]
-fn workflow_driver_failed_read_never_fabricates_output(){let conn=db();let(pinned,origin)=driver_fixture(&conn,vec![driver_read(),driver_result()],&permissions(),"{}");let work=driver_claim_read(&conn,&pinned,&origin);let run=driver_tx(&conn,|c|driver::settle_read_rows(c,facts(),&origin.flow_run,origin.epoch,&pinned,&work,Err(nd::ReadError::Unavailable),time().timestamp_millis())).unwrap();assert_eq!(run.state,"failed");assert_eq!(run.reason.as_deref(),Some("read_unavailable"));assert_eq!(conn.query_row("SELECT count(*) FROM workflow_values WHERE role='step_output'",[],|r|r.get::<_,i64>(0)).unwrap(),0);}
-#[test]
-fn workflow_driver_stale_read_settlement_cannot_rewrite_new_admission(){let conn=db();let(pinned,origin)=driver_fixture(&conn,vec![driver_read(),driver_result()],&permissions(),"{}");let work=driver_claim_read(&conn,&pinned,&origin);let narrowed=Permissions{query_records:false,..permissions()};tx(&conn,|c|reauthorize_rows(c,facts(),&origin.flow_run,origin.epoch,&narrowed,time())).unwrap();assert!(matches!(driver_tx(&conn,|c|driver::settle_read_rows(c,facts(),&origin.flow_run,origin.epoch,&pinned,&work,Err(nd::ReadError::Unavailable),time().timestamp_millis())),Err(nd::RunnerError::Runtime(flow::Error::Stale))));let state:String=conn.query_row("SELECT state FROM workflow_runs WHERE run_id=?1",[&origin.flow_run],|r|r.get(0)).unwrap();assert_eq!(state,"running");}
-
-fn driver_other_scoped_run(conn:&Connection,pinned:&nd::NativeDefinition,origin:&Origin)->flow::Run{
- let subject=subject(facts(),origin);let act_scope=crate::actions::effect_record::scope_key(&subject).unwrap();
- let grants:String=conn.query_row("SELECT grant_digest FROM workflow_runs WHERE run_id=?1",[&origin.flow_run],|r|r.get(0)).unwrap();
- let graph=pinned.steps();
- let flow::Started::New(other)=tx(conn,|c|flow::start_rows(c,scope(facts(),origin),flow::Start{key:"22222222222222222222222222222222",workflow:pinned.workflow(),version:pinned.version(),schema_digest:pinned.schema(),input:pinned.input(),configuration:HASH,grants:&grants,act_scope:Some(&act_scope),act_run:Some(&origin.native_run),entry:pinned.entry(),steps:&graph,now:time().timestamp_millis()})).unwrap()else{panic!("other durable scoped run")};other
+fn driver_step(id: &str, operation: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({"stepId":id,"label":id,"operation":operation})
+}
+fn driver_result() -> serde_json::Value {
+    driver_step(
+        "done",
+        serde_json::json!({"kind":"result","output":{"kind":"literal","value":true}}),
+    )
+}
+fn driver_fixture(
+    conn: &Db,
+    steps: Vec<serde_json::Value>,
+    permissions: &Permissions,
+    input: &str,
+) -> (nd::NativeDefinition, Origin) {
+    let schema = serde_json::json!({"type":"object"});
+    let schema_digest =
+        crate::actions::schema::workflow_schema_digest(&schema.to_string()).unwrap();
+    let raw = serde_json::json!({"formatVersion":1,"workflowId":"driver","entryStepId":steps[0]["stepId"],"inputSchema":schema,"inputSchemaDigest":schema_digest,"declaredActionDigests":steps.iter().filter_map(|s|s["operation"]["definitionDigest"].as_str()).collect::<Vec<_>>(),"steps":steps,"trigger":{"kind":"manual"},"authoredBy":"human:me"});
+    let pinned = nd::publish_fixture(&conn.dir, &raw.to_string(), input);
+    let selectors = pinned
+        .selectors()
+        .into_iter()
+        .map(|s| SelectorRequest {
+            step: s.step,
+            action: s.action,
+            definition: s.definition,
+            connection: s.connection,
+            account: s.account,
+        })
+        .collect::<Vec<_>>();
+    let graph = pinned.steps();
+    let Started::New(origin) = tx(conn, |c| {
+        start_rows(
+            c,
+            facts(),
+            Start {
+                key: KEY,
+                workflow: pinned.workflow(),
+                version: pinned.version(),
+                schema: pinned.schema(),
+                input: pinned.input(),
+                configuration: HASH,
+                permissions,
+                selectors: &selectors,
+                entry: pinned.entry(),
+                steps: &graph,
+                now: time(),
+            },
+        )
+    })
+    .unwrap() else {
+        panic!("new")
+    };
+    (pinned, origin)
+}
+fn driver_plan(conn: &Connection, pinned: &nd::NativeDefinition, origin: &Origin) -> nd::Snapshot {
+    let nd::Plan::Pending(plan) = driver_tx(conn, |c| {
+        pinned.plan_rows(c, scope(facts(), origin), &origin.flow_run)
+    })
+    .unwrap() else {
+        panic!("queued")
+    };
+    plan
+}
+fn driver_apply(
+    conn: &Connection,
+    pinned: &nd::NativeDefinition,
+    origin: &Origin,
+) -> Result<driver::Step, nd::RunnerError> {
+    let plan = driver_plan(conn, pinned, origin);
+    let prepared = nd::prepare(&plan).unwrap();
+    driver_tx(conn, |c| {
+        let subject = subject(facts(), origin);
+        let context = HistoryFixtureContext {
+            conn: c,
+            subject: &subject,
+        };
+        driver::apply_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            prepared,
+            &context,
+            &subject,
+            time().timestamp_millis(),
+        )
+    })
+}
+fn driver_read() -> serde_json::Value {
+    driver_step(
+        "read",
+        serde_json::json!({"kind":"read","query":{"kind":"literal","value":{"limit":10}},"outputSchema":{"type":"string"},"nextStepId":"done"}),
+    )
 }
 #[test]
-fn workflow_driver_cannot_apply_other_run_prepared_work_under_admitted_origin(){let conn=db();let(pinned,origin)=driver_fixture(&conn,vec![driver_result()],&permissions(),"{}");let other=driver_other_scoped_run(&conn,&pinned,&origin);let nd::Plan::Pending(plan)=driver_tx(&conn,|c|pinned.plan_rows(c,scope(facts(),&origin),&other.id)).unwrap()else{panic!("queued other")};assert_eq!(plan.run_id(),other.id);let prepared=nd::prepare(&plan).unwrap();assert_eq!(prepared.run_id(),other.id);let result=driver_tx(&conn,|c|{let subject=subject(facts(),&origin);let context=HistoryFixtureContext{conn:c,subject:&subject};driver::apply_rows(c,facts(),&origin.flow_run,origin.epoch,prepared,&context,&subject,time().timestamp_millis())});assert!(matches!(result,Err(nd::RunnerError::Runtime(flow::Error::Denied))));let states:Vec<String>=conn.prepare("SELECT state FROM workflow_runs ORDER BY run_id").unwrap().query_map([],|r|r.get(0)).unwrap().collect::<Result<_,_>>().unwrap();assert_eq!(states,vec!["queued","queued"]);assert_eq!(conn.query_row("SELECT count(*) FROM workflow_attempts",[],|r|r.get::<_,i64>(0)).unwrap(),0);}
+fn workflow_driver_plan_uses_actual_current_origin_and_pinned_file() {
+    let conn = db();
+    let (pinned, origin) = driver_fixture(&conn, vec![driver_result()], &permissions(), "{}");
+    assert!(matches!(
+        driver_tx(&conn, |c| driver::plan_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            &pinned
+        ))
+        .unwrap(),
+        nd::Plan::Pending(_)
+    ));
+}
 #[test]
-fn workflow_driver_cannot_reject_other_run_plan_under_admitted_origin(){let conn=db();let copy=driver_step("copy",serde_json::json!({"kind":"transform","mapping":{"kind":"input","path":["missing"]},"outputSchema":{"type":"string"},"nextStepId":"done"}));let(pinned,origin)=driver_fixture(&conn,vec![copy,driver_result()],&permissions(),"{}");let other=driver_other_scoped_run(&conn,&pinned,&origin);let nd::Plan::Pending(plan)=driver_tx(&conn,|c|pinned.plan_rows(c,scope(facts(),&origin),&other.id)).unwrap()else{panic!("queued other")};let error=nd::prepare(&plan).unwrap_err();assert_eq!(error,nd::RunnerError::MissingStepOutput);let result=driver_tx(&conn,|c|driver::reject_rows(c,facts(),&origin.flow_run,origin.epoch,&plan,error,time().timestamp_millis()));assert!(matches!(result,Err(nd::RunnerError::Runtime(flow::Error::Denied))));let states:Vec<String>=conn.prepare("SELECT state FROM workflow_runs ORDER BY run_id").unwrap().query_map([],|r|r.get(0)).unwrap().collect::<Result<_,_>>().unwrap();assert_eq!(states,vec!["queued","queued"]);}
+fn workflow_driver_autocommit_never_plans_work() {
+    let conn = db();
+    let (pinned, origin) = driver_fixture(&conn, vec![driver_result()], &permissions(), "{}");
+    assert!(driver::plan_rows(&conn, facts(), &origin.flow_run, origin.epoch, &pinned).is_err());
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM workflow_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+#[test]
+fn workflow_driver_local_result_finishes_same_native_run_and_releases_values() {
+    let conn = db();
+    let (pinned, origin) = driver_fixture(&conn, vec![driver_result()], &permissions(), "{}");
+    let driver::Step::Advanced(run) = driver_apply(&conn, &pinned, &origin).unwrap() else {
+        panic!("local result")
+    };
+    assert_eq!(run.state, "succeeded");
+    let outcome: String = conn
+        .query_row(
+            "SELECT outcome FROM runs WHERE run_id=?1",
+            [&origin.native_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(outcome, "succeeded");
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM workflow_values", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+#[test]
+fn workflow_driver_stale_epoch_refuses_prepared_work_before_any_claim() {
+    let conn = db();
+    let (pinned, origin) = driver_fixture(&conn, vec![driver_result()], &permissions(), "{}");
+    let prepared = nd::prepare(&driver_plan(&conn, &pinned, &origin)).unwrap();
+    tx(&conn, |c| {
+        reauthorize_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            &permissions(),
+            time(),
+        )
+    })
+    .unwrap();
+    let result = driver_tx(&conn, |c| {
+        let subject = subject(facts(), &origin);
+        let context = HistoryFixtureContext {
+            conn: c,
+            subject: &subject,
+        };
+        driver::apply_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            prepared,
+            &context,
+            &subject,
+            time().timestamp_millis(),
+        )
+    });
+    assert!(matches!(
+        result,
+        Err(nd::RunnerError::Runtime(flow::Error::Stale))
+    ));
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM workflow_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+#[test]
+fn workflow_driver_query_requires_current_explicit_permission_before_claim() {
+    let conn = db();
+    let denied = Permissions {
+        query_records: false,
+        ..permissions()
+    };
+    let (pinned, origin) =
+        driver_fixture(&conn, vec![driver_read(), driver_result()], &denied, "{}");
+    assert!(matches!(
+        driver_apply(&conn, &pinned, &origin),
+        Err(nd::RunnerError::Runtime(flow::Error::Denied))
+    ));
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM workflow_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+#[test]
+fn workflow_driver_action_atomically_freezes_prepares_and_registers_actual_consumer() {
+    let conn = db();
+    let (p, selector) = selected_account(&conn);
+    let input = serde_json::json!({"repository":"owner/repo","title":"driver","body":"body"});
+    let action = driver_step(
+        "action",
+        serde_json::json!({"kind":"action","actionId":selector.action,"definitionDigest":selector.definition,"connectionId":selector.connection,"accountId":selector.account,"input":{"kind":"input","path":[]},"nextStepId":"done"}),
+    );
+    let (pinned, origin) =
+        driver_fixture(&conn, vec![action, driver_result()], &p, &input.to_string());
+    let driver::Step::Action {
+        run,
+        invocation,
+        inserted,
+    } = driver_apply(&conn, &pinned, &origin).unwrap()
+    else {
+        panic!("actual ACT prepare")
+    };
+    assert!(inserted);
+    assert_eq!(run.state, "waiting");
+    let record = crate::actions::effect_kernel::load(&conn, &invocation).unwrap();
+    assert_eq!(
+        record.details.effect.state,
+        crate::actions::effect_types::InvocationState::AwaitingApproval
+    );
+    assert!(record.details.attempts.is_empty());
+    let(frozen,key,registered,reserved):(String,String,String,i64)=conn.query_row("SELECT i.snapshot_digest,i.request_key,h.request_key,r.reserved_bytes FROM workflow_action_inputs i JOIN action_output_handoffs h ON h.workflow_run_id=i.run_id AND h.step_id=i.step_id AND h.ordinal=i.ordinal JOIN workflow_runs r ON r.run_id=i.run_id WHERE r.run_id=?1",[&origin.flow_run],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+    assert_eq!(key, record.request.request_key);
+    assert_eq!(registered, key);
+    assert_eq!(frozen, record.request.snapshot_digest.0);
+    assert_eq!(
+        usize::try_from(reserved).unwrap(),
+        flow::action_output_allocation()
+    );
+}
+#[test]
+fn workflow_driver_mapping_failure_is_durable_without_fabricated_attempt() {
+    let conn = db();
+    let copy = driver_step(
+        "copy",
+        serde_json::json!({"kind":"transform","mapping":{"kind":"input","path":["missing"]},"outputSchema":{"type":"string"},"nextStepId":"done"}),
+    );
+    let (pinned, origin) = driver_fixture(&conn, vec![copy, driver_result()], &permissions(), "{}");
+    let plan = driver_plan(&conn, &pinned, &origin);
+    let error = nd::prepare(&plan).unwrap_err();
+    assert_eq!(error, nd::RunnerError::MissingStepOutput);
+    let run = driver_tx(&conn, |c| {
+        driver::reject_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            &plan,
+            error,
+            time().timestamp_millis(),
+        )
+    })
+    .unwrap();
+    assert_eq!(run.state, "failed");
+    assert_eq!(run.reason.as_deref(), Some("missing_step_output"));
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM workflow_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+fn driver_claim_read(
+    conn: &Connection,
+    pinned: &nd::NativeDefinition,
+    origin: &Origin,
+) -> nd::ReadWork {
+    let plan = driver_plan(conn, pinned, origin);
+    let prepared = nd::prepare(&plan).unwrap();
+    let nd::Applied::Read(work) = driver_tx(conn, |c| {
+        nd::apply_rows(
+            c,
+            scope(facts(), origin),
+            prepared,
+            None,
+            "process-one",
+            time().timestamp_millis(),
+        )
+    })
+    .unwrap() else {
+        panic!("real claim")
+    };
+    work
+}
+#[test]
+fn workflow_driver_failed_read_never_fabricates_output() {
+    let conn = db();
+    let (pinned, origin) = driver_fixture(
+        &conn,
+        vec![driver_read(), driver_result()],
+        &permissions(),
+        "{}",
+    );
+    let work = driver_claim_read(&conn, &pinned, &origin);
+    let run = driver_tx(&conn, |c| {
+        driver::settle_read_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            &pinned,
+            &work,
+            Err(nd::ReadError::Unavailable),
+            time().timestamp_millis(),
+        )
+    })
+    .unwrap();
+    assert_eq!(run.state, "failed");
+    assert_eq!(run.reason.as_deref(), Some("read_unavailable"));
+    assert_eq!(
+        conn.query_row(
+            "SELECT count(*) FROM workflow_values WHERE role='step_output'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+}
+#[test]
+fn workflow_driver_stale_read_settlement_cannot_rewrite_new_admission() {
+    let conn = db();
+    let (pinned, origin) = driver_fixture(
+        &conn,
+        vec![driver_read(), driver_result()],
+        &permissions(),
+        "{}",
+    );
+    let work = driver_claim_read(&conn, &pinned, &origin);
+    let narrowed = Permissions {
+        query_records: false,
+        ..permissions()
+    };
+    tx(&conn, |c| {
+        reauthorize_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            &narrowed,
+            time(),
+        )
+    })
+    .unwrap();
+    assert!(matches!(
+        driver_tx(&conn, |c| driver::settle_read_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            &pinned,
+            &work,
+            Err(nd::ReadError::Unavailable),
+            time().timestamp_millis()
+        )),
+        Err(nd::RunnerError::Runtime(flow::Error::Stale))
+    ));
+    let state: String = conn
+        .query_row(
+            "SELECT state FROM workflow_runs WHERE run_id=?1",
+            [&origin.flow_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "running");
+}
+
+fn driver_other_scoped_run(
+    conn: &Connection,
+    pinned: &nd::NativeDefinition,
+    origin: &Origin,
+) -> flow::Run {
+    let subject = subject(facts(), origin);
+    let act_scope = crate::actions::effect_record::scope_key(&subject).unwrap();
+    let grants: String = conn
+        .query_row(
+            "SELECT grant_digest FROM workflow_runs WHERE run_id=?1",
+            [&origin.flow_run],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let graph = pinned.steps();
+    let flow::Started::New(other) = tx(conn, |c| {
+        flow::start_rows(
+            c,
+            scope(facts(), origin),
+            flow::Start {
+                key: "22222222222222222222222222222222",
+                workflow: pinned.workflow(),
+                version: pinned.version(),
+                schema_digest: pinned.schema(),
+                input: pinned.input(),
+                configuration: HASH,
+                grants: &grants,
+                act_scope: Some(&act_scope),
+                act_run: Some(&origin.native_run),
+                entry: pinned.entry(),
+                steps: &graph,
+                now: time().timestamp_millis(),
+            },
+        )
+    })
+    .unwrap() else {
+        panic!("other durable scoped run")
+    };
+    other
+}
+#[test]
+fn workflow_driver_cannot_apply_other_run_prepared_work_under_admitted_origin() {
+    let conn = db();
+    let (pinned, origin) = driver_fixture(&conn, vec![driver_result()], &permissions(), "{}");
+    let other = driver_other_scoped_run(&conn, &pinned, &origin);
+    let nd::Plan::Pending(plan) = driver_tx(&conn, |c| {
+        pinned.plan_rows(c, scope(facts(), &origin), &other.id)
+    })
+    .unwrap() else {
+        panic!("queued other")
+    };
+    assert_eq!(plan.run_id(), other.id);
+    let prepared = nd::prepare(&plan).unwrap();
+    assert_eq!(prepared.run_id(), other.id);
+    let result = driver_tx(&conn, |c| {
+        let subject = subject(facts(), &origin);
+        let context = HistoryFixtureContext {
+            conn: c,
+            subject: &subject,
+        };
+        driver::apply_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            prepared,
+            &context,
+            &subject,
+            time().timestamp_millis(),
+        )
+    });
+    assert!(matches!(
+        result,
+        Err(nd::RunnerError::Runtime(flow::Error::Denied))
+    ));
+    let states: Vec<String> = conn
+        .prepare("SELECT state FROM workflow_runs ORDER BY run_id")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(states, vec!["queued", "queued"]);
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM workflow_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+#[test]
+fn workflow_driver_cannot_reject_other_run_plan_under_admitted_origin() {
+    let conn = db();
+    let copy = driver_step(
+        "copy",
+        serde_json::json!({"kind":"transform","mapping":{"kind":"input","path":["missing"]},"outputSchema":{"type":"string"},"nextStepId":"done"}),
+    );
+    let (pinned, origin) = driver_fixture(&conn, vec![copy, driver_result()], &permissions(), "{}");
+    let other = driver_other_scoped_run(&conn, &pinned, &origin);
+    let nd::Plan::Pending(plan) = driver_tx(&conn, |c| {
+        pinned.plan_rows(c, scope(facts(), &origin), &other.id)
+    })
+    .unwrap() else {
+        panic!("queued other")
+    };
+    let error = nd::prepare(&plan).unwrap_err();
+    assert_eq!(error, nd::RunnerError::MissingStepOutput);
+    let result = driver_tx(&conn, |c| {
+        driver::reject_rows(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            &plan,
+            error,
+            time().timestamp_millis(),
+        )
+    });
+    assert!(matches!(
+        result,
+        Err(nd::RunnerError::Runtime(flow::Error::Denied))
+    ));
+    let states: Vec<String> = conn
+        .prepare("SELECT state FROM workflow_runs ORDER BY run_id")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(states, vec!["queued", "queued"]);
+}
 
 #[test]
-fn workflow_historical_lost_native_opening_defers_fresh_success_transfer(){let conn=db();let(origin,id,attempt,_)=historical_claim(&conn);historical_success(&conn,&id,&attempt);let before=tx(&conn,|c|flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)).unwrap();let observed=tx(&conn,|c|super::super::native_workflows::history::reconcile_with_opening(c,facts(),&origin.flow_run,origin.epoch,&id,time().timestamp_millis(),super::super::native_workflows::history::OpeningUse::Deferred)).unwrap();assert_eq!(observed,before);let(state,body,reserved,outputs):(String,Option<String>,i64,i64)=conn.query_row("SELECT h.state,h.output_json,r.reserved_bytes,(SELECT count(*) FROM workflow_values v WHERE v.run_id=r.run_id AND v.role='step_output') FROM action_output_handoffs h JOIN workflow_runs r ON r.run_id=h.workflow_run_id WHERE h.invocation_id=?1",[&id.0],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();assert_eq!(state,"retained");assert!(body.unwrap().contains("FRESH-PAYLOAD"));assert_eq!(usize::try_from(reserved).unwrap(),flow::action_output_allocation());assert_eq!(outputs,0);}
+fn workflow_historical_lost_native_opening_defers_fresh_success_transfer() {
+    let conn = db();
+    let (origin, id, attempt, _) = historical_claim(&conn);
+    historical_success(&conn, &id, &attempt);
+    let before = tx(&conn, |c| {
+        flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)
+    })
+    .unwrap();
+    let observed = tx(&conn, |c| {
+        super::super::native_workflows::history::reconcile_with_opening(
+            c,
+            facts(),
+            &origin.flow_run,
+            origin.epoch,
+            &id,
+            time().timestamp_millis(),
+            super::super::native_workflows::history::OpeningUse::Deferred,
+        )
+    })
+    .unwrap();
+    assert_eq!(observed, before);
+    let(state,body,reserved,outputs):(String,Option<String>,i64,i64)=conn.query_row("SELECT h.state,h.output_json,r.reserved_bytes,(SELECT count(*) FROM workflow_values v WHERE v.run_id=r.run_id AND v.role='step_output') FROM action_output_handoffs h JOIN workflow_runs r ON r.run_id=h.workflow_run_id WHERE h.invocation_id=?1",[&id.0],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+    assert_eq!(state, "retained");
+    assert!(body.unwrap().contains("FRESH-PAYLOAD"));
+    assert_eq!(
+        usize::try_from(reserved).unwrap(),
+        flow::action_output_allocation()
+    );
+    assert_eq!(outputs, 0);
+}
 #[test]
-fn workflow_historical_lost_opening_still_discards_definite_revoked_success(){let conn=db();let(origin,id,attempt,_)=historical_claim(&conn);let revoked=tx(&conn,|c|revoke_rows(c,facts(),&origin.flow_run,origin.epoch,time())).unwrap();historical_success(&conn,&id,&attempt);let observed=tx(&conn,|c|super::super::native_workflows::history::reconcile_with_opening(c,facts(),&origin.flow_run,revoked.epoch,&id,time().timestamp_millis(),super::super::native_workflows::history::OpeningUse::Deferred)).unwrap();assert_eq!(observed.state,"cancelled");let(state,ack,body):(String,String,Option<String>)=conn.query_row("SELECT state,ack_kind,output_json FROM action_output_handoffs WHERE invocation_id=?1",[&id.0],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();assert_eq!((state.as_str(),ack.as_str()),("acknowledged","discarded"));assert!(body.is_none());}
+fn workflow_historical_lost_opening_still_discards_definite_revoked_success() {
+    let conn = db();
+    let (origin, id, attempt, _) = historical_claim(&conn);
+    let revoked = tx(&conn, |c| {
+        revoke_rows(c, facts(), &origin.flow_run, origin.epoch, time())
+    })
+    .unwrap();
+    historical_success(&conn, &id, &attempt);
+    let observed = tx(&conn, |c| {
+        super::super::native_workflows::history::reconcile_with_opening(
+            c,
+            facts(),
+            &origin.flow_run,
+            revoked.epoch,
+            &id,
+            time().timestamp_millis(),
+            super::super::native_workflows::history::OpeningUse::Deferred,
+        )
+    })
+    .unwrap();
+    assert_eq!(observed.state, "cancelled");
+    let (state, ack, body): (String, String, Option<String>) = conn
+        .query_row(
+            "SELECT state,ack_kind,output_json FROM action_output_handoffs WHERE invocation_id=?1",
+            [&id.0],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (state.as_str(), ack.as_str()),
+        ("acknowledged", "discarded")
+    );
+    assert!(body.is_none());
+}
 
-fn control_pending_action(conn:&Db)->(Origin,crate::actions::effect_types::InvocationId){
- let(p,selector)=selected_account(conn);let input=serde_json::json!({"repository":"owner/repo","title":"control","body":"body"});let action=driver_step("action",serde_json::json!({"kind":"action","actionId":selector.action,"definitionDigest":selector.definition,"connectionId":selector.connection,"accountId":selector.account,"input":{"kind":"input","path":[]},"nextStepId":"done"}));
- let(pinned,origin)=driver_fixture(conn,vec![action,driver_result()],&p,&input.to_string());let driver::Step::Action{invocation,..}=driver_apply(conn,&pinned,&origin).unwrap()else{panic!("actual ACT prepare")};(origin,invocation)
+fn control_pending_action(conn: &Db) -> (Origin, crate::actions::effect_types::InvocationId) {
+    let (p, selector) = selected_account(conn);
+    let input = serde_json::json!({"repository":"owner/repo","title":"control","body":"body"});
+    let action = driver_step(
+        "action",
+        serde_json::json!({"kind":"action","actionId":selector.action,"definitionDigest":selector.definition,"connectionId":selector.connection,"accountId":selector.account,"input":{"kind":"input","path":[]},"nextStepId":"done"}),
+    );
+    let (pinned, origin) =
+        driver_fixture(conn, vec![action, driver_result()], &p, &input.to_string());
+    let driver::Step::Action { invocation, .. } = driver_apply(conn, &pinned, &origin).unwrap()
+    else {
+        panic!("actual ACT prepare")
+    };
+    (origin, invocation)
 }
 #[cfg(unix)]
-fn control_action_owner(conn:&Db,id:&crate::actions::effect_types::InvocationId)->Option<crate::runtime::action_invocations::SubmissionOwner>{let(runtime,parent)=physical_ids(conn);let transaction=Transaction::new_unchecked(conn,TransactionBehavior::Immediate).unwrap();let held=crate::runtime::action_invocations::try_retained_submission_owner(&transaction,&conn.dir,runtime,parent,&id.0).unwrap();transaction.commit().unwrap();held}
-#[cfg(unix)]
-#[test]
-fn workflow_control_cancels_pending_approval_while_original_execution_lease_is_still_held(){
- let conn=db();let(origin,id)=control_pending_action(&conn);let physical=acquire_workflow(&conn,&origin.flow_run).unwrap().unwrap();assert!(acquire_workflow(&conn,&origin.flow_run).unwrap().is_none());
- let before=tx(&conn,|c|flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)).unwrap();let mut owner=super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
- let cancelled=super::super::native_workflows::control::cancel_owned_rows(&mut owner,facts(),&origin.flow_run,origin.epoch,before.revision,time().timestamp_millis(),||Ok(())).unwrap();
- assert_eq!(cancelled.state,"cancelled");assert!(cancelled.cancel_requested);assert_eq!(crate::actions::effect_kernel::load(&conn,&id).unwrap().details.effect.state,crate::actions::effect_types::InvocationState::Cancelled);assert_eq!(conn.query_row("SELECT count(*) FROM workflow_values WHERE run_id=?1",[&origin.flow_run],|r|r.get::<_,i64>(0)).unwrap(),0);
- assert!(acquire_workflow(&conn,&origin.flow_run).unwrap().is_none(),"Cancel does not steal or release the original active pass lease");drop(physical);assert!(acquire_workflow(&conn,&origin.flow_run).unwrap().is_some());
+fn control_action_owner(
+    conn: &Db,
+    id: &crate::actions::effect_types::InvocationId,
+) -> Option<crate::runtime::action_invocations::SubmissionOwner> {
+    let (runtime, parent) = physical_ids(conn);
+    let transaction = Transaction::new_unchecked(conn, TransactionBehavior::Immediate).unwrap();
+    let held = crate::runtime::action_invocations::try_retained_submission_owner(
+        &transaction,
+        &conn.dir,
+        runtime,
+        parent,
+        &id.0,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    held
 }
 #[cfg(unix)]
 #[test]
-fn workflow_control_active_submission_cancel_keeps_physical_owners_and_discards_later_actual_success(){
- let conn=db();let(origin,id,attempt,_)=historical_claim(&conn);let execution=acquire_workflow(&conn,&origin.flow_run).unwrap().unwrap();let submission=control_action_owner(&conn,&id).unwrap();let before=tx(&conn,|c|flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)).unwrap();let mut owner=super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
- let cancelled=super::super::native_workflows::control::cancel_owned_rows(&mut owner,facts(),&origin.flow_run,origin.epoch,before.revision,time().timestamp_millis(),||Ok(())).unwrap();assert!(cancelled.cancel_requested);assert_eq!(cancelled.state,"blocked");
- let actual=crate::actions::effect_kernel::load(&conn,&id).unwrap();assert!(actual.cancel_requested);assert_eq!(actual.details.effect.state,crate::actions::effect_types::InvocationState::Dispatched,"a busy submission has no invented terminal outcome");
- assert!(acquire_workflow(&conn,&origin.flow_run).unwrap().is_none());assert!(control_action_owner(&conn,&id).is_none());assert!(conn.query_row("SELECT reserved_bytes FROM workflow_runs WHERE run_id=?1",[&origin.flow_run],|r|r.get::<_,i64>(0)).unwrap()>0);
- historical_success(&conn,&id,&attempt);assert_historical_discard(&conn,&origin,&id,origin.epoch);assert!(control_action_owner(&conn,&id).is_none(),"completed observation is not physical cleanup");drop(submission);drop(execution);assert!(control_action_owner(&conn,&id).is_some());
+fn workflow_control_cancels_pending_approval_while_original_execution_lease_is_still_held() {
+    let conn = db();
+    let (origin, id) = control_pending_action(&conn);
+    let physical = acquire_workflow(&conn, &origin.flow_run).unwrap().unwrap();
+    assert!(acquire_workflow(&conn, &origin.flow_run).unwrap().is_none());
+    let before = tx(&conn, |c| {
+        flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)
+    })
+    .unwrap();
+    let mut owner = super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
+    let cancelled = super::super::native_workflows::control::cancel_owned_rows(
+        &mut owner,
+        facts(),
+        &origin.flow_run,
+        origin.epoch,
+        before.revision,
+        time().timestamp_millis(),
+        || Ok(()),
+    )
+    .unwrap();
+    assert_eq!(cancelled.state, "cancelled");
+    assert!(cancelled.cancel_requested);
+    assert_eq!(
+        crate::actions::effect_kernel::load(&conn, &id)
+            .unwrap()
+            .details
+            .effect
+            .state,
+        crate::actions::effect_types::InvocationState::Cancelled
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT count(*) FROM workflow_values WHERE run_id=?1",
+            [&origin.flow_run],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert!(
+        acquire_workflow(&conn, &origin.flow_run).unwrap().is_none(),
+        "Cancel does not steal or release the original active pass lease"
+    );
+    drop(physical);
+    assert!(acquire_workflow(&conn, &origin.flow_run).unwrap().is_some());
 }
 #[cfg(unix)]
 #[test]
-fn workflow_control_precommit_loss_rolls_back_act_and_flow_cancellation_together(){
- let conn=db();let(origin,id)=control_pending_action(&conn);let _physical=acquire_workflow(&conn,&origin.flow_run).unwrap().unwrap();let before=tx(&conn,|c|flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)).unwrap();let actual_before=crate::actions::effect_kernel::load(&conn,&id).unwrap();let mut owner=super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();let checks=std::cell::Cell::new(0);
- let result=super::super::native_workflows::control::cancel_owned_rows(&mut owner,facts(),&origin.flow_run,origin.epoch,before.revision,time().timestamp_millis(),||{checks.set(checks.get()+1);if checks.get()==1{Ok(())}else{Err(flow::Error::Denied)}});assert_eq!(result,Err(flow::Error::Denied));assert_eq!(checks.get(),2);
- assert_eq!(tx(&conn,|c|flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)).unwrap(),before);let actual=crate::actions::effect_kernel::load(&conn,&id).unwrap();assert_eq!(actual.revision(),actual_before.revision());assert_eq!(actual.details.effect.state,actual_before.details.effect.state);assert!(!actual.cancel_requested);
+fn workflow_control_active_submission_cancel_keeps_physical_owners_and_discards_later_actual_success(
+) {
+    let conn = db();
+    let (origin, id, attempt, _) = historical_claim(&conn);
+    let execution = acquire_workflow(&conn, &origin.flow_run).unwrap().unwrap();
+    let submission = control_action_owner(&conn, &id).unwrap();
+    let before = tx(&conn, |c| {
+        flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)
+    })
+    .unwrap();
+    let mut owner = super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
+    let cancelled = super::super::native_workflows::control::cancel_owned_rows(
+        &mut owner,
+        facts(),
+        &origin.flow_run,
+        origin.epoch,
+        before.revision,
+        time().timestamp_millis(),
+        || Ok(()),
+    )
+    .unwrap();
+    assert!(cancelled.cancel_requested);
+    assert_eq!(cancelled.state, "blocked");
+    let actual = crate::actions::effect_kernel::load(&conn, &id).unwrap();
+    assert!(actual.cancel_requested);
+    assert_eq!(
+        actual.details.effect.state,
+        crate::actions::effect_types::InvocationState::Dispatched,
+        "a busy submission has no invented terminal outcome"
+    );
+    assert!(acquire_workflow(&conn, &origin.flow_run).unwrap().is_none());
+    assert!(control_action_owner(&conn, &id).is_none());
+    assert!(
+        conn.query_row(
+            "SELECT reserved_bytes FROM workflow_runs WHERE run_id=?1",
+            [&origin.flow_run],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap()
+            > 0
+    );
+    historical_success(&conn, &id, &attempt);
+    assert_historical_discard(&conn, &origin, &id, origin.epoch);
+    assert!(
+        control_action_owner(&conn, &id).is_none(),
+        "completed observation is not physical cleanup"
+    );
+    drop(submission);
+    drop(execution);
+    assert!(control_action_owner(&conn, &id).is_some());
+}
+#[cfg(unix)]
+#[test]
+fn workflow_control_precommit_loss_rolls_back_act_and_flow_cancellation_together() {
+    let conn = db();
+    let (origin, id) = control_pending_action(&conn);
+    let _physical = acquire_workflow(&conn, &origin.flow_run).unwrap().unwrap();
+    let before = tx(&conn, |c| {
+        flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)
+    })
+    .unwrap();
+    let actual_before = crate::actions::effect_kernel::load(&conn, &id).unwrap();
+    let mut owner = super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
+    let checks = std::cell::Cell::new(0);
+    let result = super::super::native_workflows::control::cancel_owned_rows(
+        &mut owner,
+        facts(),
+        &origin.flow_run,
+        origin.epoch,
+        before.revision,
+        time().timestamp_millis(),
+        || {
+            checks.set(checks.get() + 1);
+            if checks.get() == 1 {
+                Ok(())
+            } else {
+                Err(flow::Error::Denied)
+            }
+        },
+    );
+    assert_eq!(result, Err(flow::Error::Denied));
+    assert_eq!(checks.get(), 2);
+    assert_eq!(
+        tx(&conn, |c| flow::inspect_rows(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run
+        ))
+        .unwrap(),
+        before
+    );
+    let actual = crate::actions::effect_kernel::load(&conn, &id).unwrap();
+    assert_eq!(actual.revision(), actual_before.revision());
+    assert_eq!(
+        actual.details.effect.state,
+        actual_before.details.effect.state
+    );
+    assert!(!actual.cancel_requested);
 }
 
 #[test]
-fn workflow_worker_timer_wake_uses_current_attempt_not_older_pending_continuation(){
- let conn=db();let timer=driver_step("timer",serde_json::json!({"kind":"wait","until":{"kind":"timer","at":"2026-10-26T01:00:00Z"},"nextStepId":"done"}));let(pinned,origin)=driver_fixture(&conn,vec![timer,driver_result()],&permissions(),"{}");let driver::Step::Waiting(wait)=driver_apply(&conn,&pinned,&origin).unwrap()else{panic!("actual timer wait")};
- // The schema permits one pending continuation per attempt, not per step.
- // Represent an earlier pending continuation beside a later current attempt.
- let current_due=time().timestamp_millis()+7_200_000;
- tx(&conn,|c|{
+fn workflow_worker_timer_wake_uses_current_attempt_not_older_pending_continuation() {
+    let conn = db();
+    let timer = driver_step(
+        "timer",
+        serde_json::json!({"kind":"wait","until":{"kind":"timer","at":"2026-10-26T01:00:00Z"},"nextStepId":"done"}),
+    );
+    let (pinned, origin) =
+        driver_fixture(&conn, vec![timer, driver_result()], &permissions(), "{}");
+    let driver::Step::Waiting(wait) = driver_apply(&conn, &pinned, &origin).unwrap() else {
+        panic!("actual timer wait")
+    };
+    // The schema permits one pending continuation per attempt, not per step.
+    // Represent an earlier pending continuation beside a later current attempt.
+    let current_due = time().timestamp_millis() + 7_200_000;
+    tx(&conn,|c|{
   c.execute("INSERT INTO workflow_values(run_id,value_ref,digest,role,step_id,ordinal,canonical_json,byte_count) SELECT run_id,?2,digest,role,step_id,2,canonical_json,byte_count FROM workflow_values WHERE run_id=?1 AND role='step_input' AND step_id='timer' AND ordinal=1",params![origin.flow_run,"2".repeat(32)]).unwrap();
   c.execute("INSERT INTO workflow_attempts(run_id,step_id,ordinal,request_key,input_ref,input_digest,created_at) SELECT run_id,step_id,2,?2,?3,input_digest,created_at FROM workflow_attempts WHERE run_id=?1 AND step_id='timer' AND ordinal=1",params![origin.flow_run,"2".repeat(64),"2".repeat(32)]).unwrap();
   c.execute("UPDATE workflow_steps SET attempt_ordinal=2,revision=revision+1 WHERE run_id=?1 AND step_id='timer'",[&origin.flow_run]).unwrap();
   c.execute("INSERT INTO workflow_waits(continuation_id,run_id,definition_hash,step_id,attempt_ordinal,kind,state,revision,due_at,created_at,updated_at) SELECT ?2,run_id,definition_hash,step_id,2,kind,state,revision,?3,created_at,updated_at FROM workflow_waits WHERE continuation_id=?1",params![wait.id,"3".repeat(32),current_due]).unwrap();
   c.execute("UPDATE workflow_runs SET revision=revision+1 WHERE run_id=?1",[&origin.flow_run]).unwrap();Ok(())
  }).unwrap();
- let current=tx(&conn,|c|flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)).unwrap();
- let observed=tx(&conn,|c|Ok(super::super::native_workflows::worker::timer_due_rows(c,&current).unwrap())).unwrap();assert_eq!(observed,Some(current_due),"old pending wait is not this attempt's wake");
+    let current = tx(&conn, |c| {
+        flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)
+    })
+    .unwrap();
+    let observed = tx(&conn, |c| {
+        Ok(super::super::native_workflows::worker::timer_due_rows(c, &current).unwrap())
+    })
+    .unwrap();
+    assert_eq!(
+        observed,
+        Some(current_due),
+        "old pending wait is not this attempt's wake"
+    );
 }
 
-#[path="native_workflow_view_tests.rs"]
+#[path = "native_workflow_view_tests.rs"]
 mod view_tests;
 
 #[test]
-fn workflow_continue_rejects_revision_advanced_before_physical_admission(){
- let conn=db();let origin=original(&conn);
- let before=tx(&conn,|c|flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)).unwrap();
- tx(&conn,|c|flow::claim_rows(c,scope(facts(),&origin),&origin.flow_run,before.revision,"{}","process-one",time().timestamp_millis())).unwrap();
- let after=tx(&conn,|c|flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)).unwrap();assert!(after.revision>before.revision);
- let mut owner=super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
- let result=super::super::native_workflows::retain_owned_rows(&mut owner,facts(),&origin,Some(before.revision),||Ok(()));
- assert!(matches!(result,Err(flow::Error::Stale)),"stale Continue must not retain a newer run state");
+fn workflow_continue_rejects_revision_advanced_before_physical_admission() {
+    let conn = db();
+    let origin = original(&conn);
+    let before = tx(&conn, |c| {
+        flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)
+    })
+    .unwrap();
+    tx(&conn, |c| {
+        flow::claim_rows(
+            c,
+            scope(facts(), &origin),
+            &origin.flow_run,
+            before.revision,
+            "{}",
+            "process-one",
+            time().timestamp_millis(),
+        )
+    })
+    .unwrap();
+    let after = tx(&conn, |c| {
+        flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)
+    })
+    .unwrap();
+    assert!(after.revision > before.revision);
+    let mut owner = super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
+    let result = super::super::native_workflows::retain_owned_rows(
+        &mut owner,
+        facts(),
+        &origin,
+        Some(before.revision),
+        || Ok(()),
+    );
+    assert!(
+        matches!(result, Err(flow::Error::Stale)),
+        "stale Continue must not retain a newer run state"
+    );
 }
 #[test]
-fn workflow_continue_exact_revision_retains_only_after_known_commit(){
- let conn=db();let origin=original(&conn);let run=tx(&conn,|c|flow::inspect_rows(c,scope(facts(),&origin),&origin.flow_run)).unwrap();
- let mut owner=super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();let checks=std::cell::Cell::new(0);
- let physical=super::super::native_workflows::retain_owned_rows(&mut owner,facts(),&origin,Some(run.revision),||{checks.set(checks.get()+1);Ok(())}).unwrap().expect("real retained lease");
- assert_eq!(checks.get(),2);assert!(physical.matches_retained(&origin.flow_run,owner.identity));
- assert!(acquire_workflow(&conn,&origin.flow_run).unwrap().is_none(),"real second physical claimant is busy");
- drop(physical);assert!(acquire_workflow(&conn,&origin.flow_run).unwrap().is_some());
+fn workflow_continue_exact_revision_retains_only_after_known_commit() {
+    let conn = db();
+    let origin = original(&conn);
+    let run = tx(&conn, |c| {
+        flow::inspect_rows(c, scope(facts(), &origin), &origin.flow_run)
+    })
+    .unwrap();
+    let mut owner = super::super::RuntimeOwner::open_existing(&conn.dir).unwrap();
+    let checks = std::cell::Cell::new(0);
+    let physical = super::super::native_workflows::retain_owned_rows(
+        &mut owner,
+        facts(),
+        &origin,
+        Some(run.revision),
+        || {
+            checks.set(checks.get() + 1);
+            Ok(())
+        },
+    )
+    .unwrap()
+    .expect("real retained lease");
+    assert_eq!(checks.get(), 2);
+    assert!(physical.matches_retained(&origin.flow_run, owner.identity));
+    assert!(
+        acquire_workflow(&conn, &origin.flow_run).unwrap().is_none(),
+        "real second physical claimant is busy"
+    );
+    drop(physical);
+    assert!(acquire_workflow(&conn, &origin.flow_run).unwrap().is_some());
 }
 
-#[path="native_workflow_occurrence_tests.rs"]
+#[path = "native_workflow_occurrence_tests.rs"]
 mod occurrence_tests;
 
-#[path="native_workflow_activation_tests.rs"]
+#[path = "native_workflow_activation_tests.rs"]
 mod activation_tests;
 
-#[path="native_workflow_publication_tests.rs"]
+#[path = "native_workflow_publication_tests.rs"]
 mod publication_tests;

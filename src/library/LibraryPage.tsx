@@ -63,7 +63,10 @@ export function LibraryPage() {
   const toast = useUiStore((s) => s.toast);
   const [query, setQuery] = useState('');
 
-  const nav = selection.kind === 'library' ? selection : { tab: undefined, path: undefined, workflowId: undefined };
+  const nav =
+    selection.kind === 'library'
+      ? selection
+      : { tab: undefined, path: undefined, workflowId: undefined };
   const openPath = nav.path;
   const entry = useMemo(
     () => (openPath === undefined ? undefined : entries.find((e) => e.path === openPath)),
@@ -72,11 +75,20 @@ export function LibraryPage() {
   // The tab follows the open item when there is one: a skill opened from a
   // wikilink should not land you on whichever shelf you last browsed.
   const tab: LibraryKind =
-    entry !== undefined ? (libraryKind(entry) ?? 'skill') : (nav.tab === 'workflow' ? 'skill' : (nav.tab ?? 'skill'));
+    entry !== undefined
+      ? (libraryKind(entry) ?? 'skill')
+      : nav.tab === 'workflow'
+        ? 'skill'
+        : (nav.tab ?? 'skill');
 
-  const go = (next: { tab?: LibraryTab; path?: string; workflowId?: string }) => navigate({ kind: 'library', ...next });
+  const go = (next: { tab?: LibraryTab; path?: string; workflowId?: string }) =>
+    navigate({ kind: 'library', ...next });
   const tabStrip = useRef<HTMLDivElement>(null);
-  const pendingTabFocus = useRef<{ tab: LibraryTab; source: Element | null; vault: string | null } | null>(null);
+  const pendingTabFocus = useRef<{
+    tab: LibraryTab;
+    source: Element | null;
+    vault: string | null;
+  } | null>(null);
   const changeTab = (next: LibraryTab) => {
     const source = document.activeElement;
     pendingTabFocus.current = tabStrip.current?.querySelector('[role="tablist"]')?.contains(source)
@@ -91,8 +103,15 @@ export function LibraryPage() {
     const active = document.activeElement;
     // The tab's previous owner may have unmounted. Transfer only its focus;
     // navigation from elsewhere must not steal a newer control's focus.
-    if (active !== document.body && active !== pending.source && !tabStrip.current?.querySelector('[role="tablist"]')?.contains(active)) return;
-    tabStrip.current?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
+    if (
+      active !== document.body &&
+      active !== pending.source &&
+      !tabStrip.current?.querySelector('[role="tablist"]')?.contains(active)
+    )
+      return;
+    tabStrip.current
+      ?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
+      ?.focus({ preventScroll: true });
   }, [nav.tab, vaultPath]);
   // An agent is a page (M55.12). A library path naming one — a stale link, a
   // history entry from before — forwards there, replacing this slot so Back
@@ -133,7 +152,16 @@ export function LibraryPage() {
   };
 
   if (nav.tab === 'workflow')
-    return <WorkflowLibrary key={vaultPath ?? 'no-vault'} vaultKey={vaultPath} workflowId={nav.workflowId} onTab={changeTab} tabStripRef={tabStrip} onSelect={(workflowId) => go({ tab: 'workflow', workflowId })} />;
+    return (
+      <WorkflowLibrary
+        key={vaultPath ?? 'no-vault'}
+        vaultKey={vaultPath}
+        workflowId={nav.workflowId}
+        onTab={changeTab}
+        tabStripRef={tabStrip}
+        onSelect={(workflowId) => go({ tab: 'workflow', workflowId })}
+      />
+    );
 
   if (forwardTo !== null) return null;
 
@@ -144,7 +172,8 @@ export function LibraryPage() {
     return (
       <LibraryIndex
         tab={tab}
-        onTab={changeTab} tabStripRef={tabStrip}
+        onTab={changeTab}
+        tabStripRef={tabStrip}
         query={query}
         onQuery={setQuery}
         entries={entries}

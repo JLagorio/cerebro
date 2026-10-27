@@ -69,7 +69,9 @@ export function readSelection(raw: unknown): Selection | null {
     }
     case 'library':
       if (raw.tab === 'workflow')
-        return optionalText(raw.workflowId) ? { kind, tab: 'workflow', ...pick('workflowId') } : null;
+        return optionalText(raw.workflowId)
+          ? { kind, tab: 'workflow', ...pick('workflowId') }
+          : null;
       return optionalText(raw.path) &&
         (raw.tab === undefined ||
           raw.tab === 'skill' ||

@@ -110,7 +110,12 @@ fn material_definition(m: &DefinitionMaterial) -> Result<ActionDefinition, Actio
 }
 impl ActionCatalog {
     /// Immutable compiled metadata only; never scoped callable authority.
-    pub(super) fn definitions(&self)->Vec<ActionDefinition>{self.entries.values().map(|entry|entry.definition.clone()).collect()}
+    pub(super) fn definitions(&self) -> Vec<ActionDefinition> {
+        self.entries
+            .values()
+            .map(|entry| entry.definition.clone())
+            .collect()
+    }
 
     pub(super) fn insert(
         &mut self,

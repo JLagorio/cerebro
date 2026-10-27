@@ -79,39 +79,63 @@ struct Watching {
     worker: Option<crate::spawn::retained_thread::RetainedThread>,
 }
 impl Drop for Watching {
-    fn drop(&mut self) { self.stop.store(true, Ordering::Release); }
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+    }
 }
 struct AmbientTransition<'a>(&'a AtomicBool);
 impl Drop for AmbientTransition<'_> {
-    fn drop(&mut self) { self.0.store(false, Ordering::Release); }
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 #[cfg(test)]
 #[derive(Debug, Clone)]
-pub enum Action { Unchanged, Start(Arc<AtomicBool>) }
+pub enum Action {
+    Unchanged,
+    Start(Arc<AtomicBool>),
+}
 impl AmbientState {
     fn transition(&self) -> Result<AmbientTransition<'_>, String> {
-        self.changing.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        self.changing
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "An ambient lifecycle transition is still running.".to_owned())?;
         Ok(AmbientTransition(&self.changing))
     }
     fn stop_owned(&self, timeout: Duration) -> Result<(), String> {
-        let mut current = self.inner.lock().map_err(|_| "Ambient ownership is unavailable.".to_owned())?.take();
-        let Some(mut current) = current.take() else { return Ok(()); };
+        let mut current = self
+            .inner
+            .lock()
+            .map_err(|_| "Ambient ownership is unavailable.".to_owned())?
+            .take();
+        let Some(mut current) = current.take() else {
+            return Ok(());
+        };
         current.stop.store(true, Ordering::Release);
         if let Some(worker) = current.worker.as_mut() {
             if let Err(error) = worker.wait_within(timeout) {
-                *self.inner.lock().map_err(|_| "Ambient ownership is unavailable.".to_owned())? = Some(current);
+                *self
+                    .inner
+                    .lock()
+                    .map_err(|_| "Ambient ownership is unavailable.".to_owned())? = Some(current);
                 return Err(error);
             }
         }
         Ok(())
     }
     pub(crate) fn request_stop(&self) -> Result<(), String> {
-        let current = self.inner.lock().map_err(|_| "Ambient ownership is unavailable.".to_owned())?;
-        if let Some(current) = current.as_ref() { current.stop.store(true, Ordering::Release); }
+        let current = self
+            .inner
+            .lock()
+            .map_err(|_| "Ambient ownership is unavailable.".to_owned())?;
+        if let Some(current) = current.as_ref() {
+            current.stop.store(true, Ordering::Release);
+        }
         Ok(())
     }
-    pub fn stop(&self) -> Result<(), String> { self.stop_within(Duration::from_secs(2)) }
+    pub fn stop(&self) -> Result<(), String> {
+        self.stop_within(Duration::from_secs(2))
+    }
     fn stop_within(&self, timeout: Duration) -> Result<(), String> {
         let _transition = self.transition()?;
         self.stop_owned(timeout)
@@ -119,25 +143,59 @@ impl AmbientState {
     /// Metadata-only fixture compatibility; real start owns the spawned handle.
     #[cfg(test)]
     pub fn retarget(&self, vault: &Path) -> Action {
-        let Ok(_transition) = self.transition() else { return Action::Unchanged; };
-        if self.inner.lock().ok().and_then(|current| current.as_ref().map(|current| current.vault == vault && !current.stop.load(Ordering::Acquire))).unwrap_or(false) {
+        let Ok(_transition) = self.transition() else {
+            return Action::Unchanged;
+        };
+        if self
+            .inner
+            .lock()
+            .ok()
+            .and_then(|current| {
+                current
+                    .as_ref()
+                    .map(|current| current.vault == vault && !current.stop.load(Ordering::Acquire))
+            })
+            .unwrap_or(false)
+        {
             return Action::Unchanged;
         }
-        if self.stop_owned(Duration::from_secs(2)).is_err() { return Action::Unchanged; }
+        if self.stop_owned(Duration::from_secs(2)).is_err() {
+            return Action::Unchanged;
+        }
         let stop = Arc::new(AtomicBool::new(false));
-        let Ok(mut current) = self.inner.lock() else { return Action::Unchanged; };
-        *current = Some(Watching { vault: vault.to_path_buf(), stop: stop.clone(), worker: None });
+        let Ok(mut current) = self.inner.lock() else {
+            return Action::Unchanged;
+        };
+        *current = Some(Watching {
+            vault: vault.to_path_buf(),
+            stop: stop.clone(),
+            worker: None,
+        });
         Action::Start(stop)
     }
     pub fn watching(&self) -> Option<PathBuf> {
-        self.inner.lock().ok()?.as_ref().map(|current| current.vault.clone())
+        self.inner
+            .lock()
+            .ok()?
+            .as_ref()
+            .map(|current| current.vault.clone())
     }
 }
 
-pub fn start(app: &AppHandle, state: &AmbientState, vault: &Path, config_dir: &Path) -> Result<bool, String> {
+pub fn start(
+    app: &AppHandle,
+    state: &AmbientState,
+    vault: &Path,
+    config_dir: &Path,
+) -> Result<bool, String> {
     let _transition = state.transition()?;
-    if state.inner.lock().map_err(|_| "Ambient ownership is unavailable.".to_owned())?.as_ref()
-        .is_some_and(|current| current.vault == vault && !current.stop.load(Ordering::Acquire)) {
+    if state
+        .inner
+        .lock()
+        .map_err(|_| "Ambient ownership is unavailable.".to_owned())?
+        .as_ref()
+        .is_some_and(|current| current.vault == vault && !current.stop.load(Ordering::Acquire))
+    {
         return Ok(false);
     }
     state.stop_owned(Duration::from_secs(2))?;
@@ -146,27 +204,37 @@ pub fn start(app: &AppHandle, state: &AmbientState, vault: &Path, config_dir: &P
     let app = app.clone();
     let worker_vault = vault.to_path_buf();
     let config_dir = config_dir.to_path_buf();
-    let handle = std::thread::Builder::new().name("ambient-ingest".into()).spawn(move || {
-        let stop = worker_stop;
-        let vault = worker_vault;
-        if !sleep_until(&stop, Duration::from_secs(SETTLE_SECONDS)) {
-            return;
-        }
-        loop {
-            if let Err(detail) = tick_once(&app, &vault, &config_dir) {
-                // Never fatal to the loop. An ambient pass that could not run
-                // is a condition to report, and a supervisor that exited on
-                // the first bad tick would stop working for the rest of the
-                // session without saying so.
-                log::warn!("ambient ingest: {detail}");
-            }
-            if !sleep_until(&stop, Duration::from_secs(INTERVAL_SECONDS)) {
+    let handle = std::thread::Builder::new()
+        .name("ambient-ingest".into())
+        .spawn(move || {
+            let stop = worker_stop;
+            let vault = worker_vault;
+            if !sleep_until(&stop, Duration::from_secs(SETTLE_SECONDS)) {
                 return;
             }
-        }
-    }).map_err(|_| "Ambient worker could not start.".to_owned())?;
-    let owner = Watching { vault: vault.to_path_buf(), stop, worker: Some(crate::spawn::retained_thread::RetainedThread::new(handle)) };
-    *state.inner.lock().map_err(|_| "Ambient ownership is unavailable.".to_owned())? = Some(owner);
+            loop {
+                if let Err(detail) = tick_once(&app, &vault, &config_dir) {
+                    // Never fatal to the loop. An ambient pass that could not run
+                    // is a condition to report, and a supervisor that exited on
+                    // the first bad tick would stop working for the rest of the
+                    // session without saying so.
+                    log::warn!("ambient ingest: {detail}");
+                }
+                if !sleep_until(&stop, Duration::from_secs(INTERVAL_SECONDS)) {
+                    return;
+                }
+            }
+        })
+        .map_err(|_| "Ambient worker could not start.".to_owned())?;
+    let owner = Watching {
+        vault: vault.to_path_buf(),
+        stop,
+        worker: Some(crate::spawn::retained_thread::RetainedThread::new(handle)),
+    };
+    *state
+        .inner
+        .lock()
+        .map_err(|_| "Ambient ownership is unavailable.".to_owned())? = Some(owner);
     Ok(true)
 }
 
@@ -987,17 +1055,29 @@ mod shutdown_lifetime_tests {
         let state = AmbientState::default();
         let (entered_send, entered) = std::sync::mpsc::sync_channel(0);
         let (release, wait) = std::sync::mpsc::sync_channel(0);
-        let handle = std::thread::spawn(move || { entered_send.send(()).unwrap(); let _ = wait.recv(); });
+        let handle = std::thread::spawn(move || {
+            entered_send.send(()).unwrap();
+            let _ = wait.recv();
+        });
         *state.inner.lock().unwrap() = Some(Watching {
-            vault: PathBuf::from("/ambient-fixture"), stop: Arc::new(AtomicBool::new(false)),
+            vault: PathBuf::from("/ambient-fixture"),
+            stop: Arc::new(AtomicBool::new(false)),
             worker: Some(crate::spawn::retained_thread::RetainedThread::new(handle)),
         });
         entered.recv().unwrap();
         let first = state.stop_within(Duration::ZERO);
-        let retained = state.inner.lock().unwrap().as_ref().is_some_and(|owner| owner.worker.is_some());
+        let retained = state
+            .inner
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|owner| owner.worker.is_some());
         release.send(()).unwrap();
         let final_result = state.stop_within(Duration::from_secs(2));
-        assert!(first.is_err(), "a stop flag is not completion of an in-flight deterministic tick");
+        assert!(
+            first.is_err(),
+            "a stop flag is not completion of an in-flight deterministic tick"
+        );
         assert!(retained);
         assert!(final_result.is_ok());
         assert!(state.inner.lock().unwrap().is_none());

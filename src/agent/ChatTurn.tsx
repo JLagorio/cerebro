@@ -93,7 +93,15 @@ export const Message = memo(function Message(props: MessageProps) {
   );
 });
 
-function UserMessage({ message, arriving = false, onOpenPath }: { message: ChatMessage; arriving?: boolean; onOpenPath:(path:string)=>void }) {
+function UserMessage({
+  message,
+  arriving = false,
+  onOpenPath,
+}: {
+  message: ChatMessage;
+  arriving?: boolean;
+  onOpenPath: (path: string) => void;
+}) {
   const arrival = useArrival(arriving);
   const [expanded, setExpanded] = useState(false);
   const { text, addressed } = message;
@@ -124,8 +132,23 @@ function UserMessage({ message, arriving = false, onOpenPath }: { message: ChatM
               : `To ${addressed.title}`}
           </span>
         )}
-        {message.archiveAttachmentRefs !== undefined && message.archiveAttachmentRefs.length > 0 && <ul className="m-0 list-none p-0 text-xs text-n-500">{message.archiveAttachmentRefs.map((path)=><li key={path}><button type="button" className="motion-hover border-0 bg-transparent p-0 text-inherit underline" onClick={()=>onOpenPath(path)}>{path}</button></li>)}</ul>}
-        <ArchivePersistence message={message}/>
+        {message.archiveAttachmentRefs !== undefined &&
+          message.archiveAttachmentRefs.length > 0 && (
+            <ul className="m-0 list-none p-0 text-xs text-n-500">
+              {message.archiveAttachmentRefs.map((path) => (
+                <li key={path}>
+                  <button
+                    type="button"
+                    className="motion-hover border-0 bg-transparent p-0 text-inherit underline"
+                    onClick={() => onOpenPath(path)}
+                  >
+                    {path}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        <ArchivePersistence message={message} />
         {long && (
           <button
             type="button"
@@ -321,7 +344,7 @@ function AssistantMessage({
             </span>
           </Arrival>
         )}
-        <ArchivePersistence message={message}/>
+        <ArchivePersistence message={message} />
         {/* M58.3: what each of this reply's runs changed, from its own commit. */}
         {message.changesets !== undefined && message.changesets.length > 0 && (
           <TurnChangeset
@@ -358,9 +381,36 @@ function AssistantMessage({
   );
 }
 
-function ArchivePersistence({message}:{message:ChatMessage}) {
-  const record=message.archiveRecord;if(record===undefined)return null;
-  return <span className="text-xs text-n-500" data-testid="archive-persistence">Archive: {record.persistence}{record.origin==='browser_cache'&&<> · Imported from recent history{record.completedAt===undefined?' · Completion time unavailable here':record.completedAt===null?' · Completion time not recorded':''}</>}{record.persistence==='retained' ? record.expiresAt===null ? ' · No expiry' : <> · Expires <time dateTime={record.expiresAt}>{new Date(record.expiresAt).toLocaleString()}</time></> : null}</span>;
+function ArchivePersistence({ message }: { message: ChatMessage }) {
+  const record = message.archiveRecord;
+  if (record === undefined) return null;
+  return (
+    <span className="text-xs text-n-500" data-testid="archive-persistence">
+      Archive: {record.persistence}
+      {record.origin === 'browser_cache' && (
+        <>
+          {' '}
+          · Imported from recent history
+          {record.completedAt === undefined
+            ? ' · Completion time unavailable here'
+            : record.completedAt === null
+              ? ' · Completion time not recorded'
+              : ''}
+        </>
+      )}
+      {record.persistence === 'retained' ? (
+        record.expiresAt === null ? (
+          ' · No expiry'
+        ) : (
+          <>
+            {' '}
+            · Expires{' '}
+            <time dateTime={record.expiresAt}>{new Date(record.expiresAt).toLocaleString()}</time>
+          </>
+        )
+      ) : null}
+    </span>
+  );
 }
 
 /**

@@ -585,28 +585,55 @@ mod recovery_counts;
 #[path = "selected_external_body_tests.rs"]
 mod external_bodies;
 
-
 #[test]
 fn checklist_expected_metadata_revision_refuses_after_fresh_snapshot() {
-    let f=fixture("checklist-metadata-interleave");
+    let f = fixture("checklist-metadata-interleave");
     f.run(|| {
-        let journal=journal(&f,true);
-        let snapshot=crate::read_editor_body(f.root.to_string_lossy().into_owned(),"page.md".into(),target()).unwrap();
-        let mut request=fresh(); request.expected_version=Some(snapshot.version.clone());
-        let by=crate::vault::receipt::WriteReceipt::ipc(crate::knowledge::guard_human_write("page.md").unwrap());
-        selected::set_full_width(&f.root,"page.md",&snapshot.version,SelectedMode::Default,&by).unwrap();
-        let current=f.version(); let metadata=metadata_source(&f); let before=state(&f); let receipts=receipt_count(&f);
-        assert_eq!(current.body_hash,snapshot.version.body_hash,"interleaving changes metadata only");
-        let result=save(&f,&journal,AFTER,request);
-        assert!(result.is_err(),"a dependent tick must refuse the stale metadata revision: {result:?}");
-        assert_eq!(f.version(),current); assert_eq!(state(&f),before); assert_eq!(metadata_source(&f),metadata);
-        assert_eq!(receipt_count(&f),receipts); assert_eq!(fs::read(f.root.join("page.md")).unwrap(),BEFORE.as_bytes());
-        assert!(!pending(&f).exists()); assert_eq!(count_copies(&f,"committed"),0);
+        let journal = journal(&f, true);
+        let snapshot = crate::read_editor_body(
+            f.root.to_string_lossy().into_owned(),
+            "page.md".into(),
+            target(),
+        )
+        .unwrap();
+        let mut request = fresh();
+        request.expected_version = Some(snapshot.version.clone());
+        let by = crate::vault::receipt::WriteReceipt::ipc(
+            crate::knowledge::guard_human_write("page.md").unwrap(),
+        );
+        selected::set_full_width(
+            &f.root,
+            "page.md",
+            &snapshot.version,
+            SelectedMode::Default,
+            &by,
+        )
+        .unwrap();
+        let current = f.version();
+        let metadata = metadata_source(&f);
+        let before = state(&f);
+        let receipts = receipt_count(&f);
+        assert_eq!(
+            current.body_hash, snapshot.version.body_hash,
+            "interleaving changes metadata only"
+        );
+        let result = save(&f, &journal, AFTER, request);
+        assert!(
+            result.is_err(),
+            "a dependent tick must refuse the stale metadata revision: {result:?}"
+        );
+        assert_eq!(f.version(), current);
+        assert_eq!(state(&f), before);
+        assert_eq!(metadata_source(&f), metadata);
+        assert_eq!(receipt_count(&f), receipts);
+        assert_eq!(fs::read(f.root.join("page.md")).unwrap(), BEFORE.as_bytes());
+        assert!(!pending(&f).exists());
+        assert_eq!(count_copies(&f, "committed"), 0);
     });
 }
 #[test]
 fn checklist_expected_body_refuses_external_change_after_fresh_snapshot() {
-    let f=fixture("checklist-external-body-interleave");
+    let f = fixture("checklist-external-body-interleave");
     f.run(|| {
         let journal=journal(&f,true);
         let snapshot=crate::read_editor_body(f.root.to_string_lossy().into_owned(),"page.md".into(),target()).unwrap();
@@ -623,37 +650,71 @@ fn checklist_expected_body_refuses_external_change_after_fresh_snapshot() {
 }
 #[test]
 fn checklist_expected_version_must_name_the_same_canonical_record() {
-    let f=fixture("checklist-expected-wrong-record");
+    let f = fixture("checklist-expected-wrong-record");
     f.run(|| {
-        let journal=journal(&f,false); let mut expected=f.version(); expected.record_id=TYPE.into();
-        let mut request=fresh(); request.expected_version=Some(expected);
-        let before=state(&f); let result=save(&f,&journal,AFTER,request);
-        assert!(result.is_err(),"an expectation cannot lend another record's identity: {result:?}");
-        assert_eq!(state(&f),before); assert_eq!(receipt_count(&f),0); assert_eq!(selected::read_body(&f.root,"page.md").unwrap(),BEFORE);
+        let journal = journal(&f, false);
+        let mut expected = f.version();
+        expected.record_id = TYPE.into();
+        let mut request = fresh();
+        request.expected_version = Some(expected);
+        let before = state(&f);
+        let result = save(&f, &journal, AFTER, request);
+        assert!(
+            result.is_err(),
+            "an expectation cannot lend another record's identity: {result:?}"
+        );
+        assert_eq!(state(&f), before);
+        assert_eq!(receipt_count(&f), 0);
+        assert_eq!(selected::read_body(&f.root, "page.md").unwrap(), BEFORE);
     });
 }
 #[test]
 fn checklist_matching_expected_version_reuses_actual_paired_writer_and_preserves_metadata() {
-    let f=fixture("checklist-matching-cas-control");
+    let f = fixture("checklist-matching-cas-control");
     f.run(|| {
-        let journal=journal(&f,true); let mut request=fresh(); request.expected_version=Some(f.version());
-        let metadata=metadata_source(&f); let before=state(&f);
-        let version=applied(save(&f,&journal,AFTER,request).unwrap());
-        assert_eq!(metadata_source(&f),metadata); assert_eq!(state(&f),(before.0+1,before.1,before.2+1));
-        assert_eq!(version.body_hash,crate::ledger::sha256_hex(AFTER.as_bytes())); assert_eq!(receipt_count(&f),1);
-        assert_eq!(count_copies(&f,"committed"),1); assert!(!pending(&f).exists());
+        let journal = journal(&f, true);
+        let mut request = fresh();
+        request.expected_version = Some(f.version());
+        let metadata = metadata_source(&f);
+        let before = state(&f);
+        let version = applied(save(&f, &journal, AFTER, request).unwrap());
+        assert_eq!(metadata_source(&f), metadata);
+        assert_eq!(state(&f), (before.0 + 1, before.1, before.2 + 1));
+        assert_eq!(
+            version.body_hash,
+            crate::ledger::sha256_hex(AFTER.as_bytes())
+        );
+        assert_eq!(receipt_count(&f), 1);
+        assert_eq!(count_copies(&f, "committed"), 1);
+        assert!(!pending(&f).exists());
     });
 }
 #[test]
 fn checklist_original_receipt_resolution_does_not_reapply_stale_expected_version() {
-    let f=fixture("checklist-cas-resolve-control");
+    let f = fixture("checklist-cas-resolve-control");
     f.run(|| {
-        let journal=journal(&f,true); let mut request=fresh(); request.expected_version=Some(f.version());
-        let ack=save(&f,&journal,AFTER,request.clone()).unwrap();
-        let crate::NoteSaveResult::Selected(EditorSaveResult::Applied { operation,.. })=ack else { panic!("actual paired save not acknowledged"); };
-        let request=EditorSaveRequest { original:Some(operation.clone()), ..resolve(&request) };
-        let replay=save(&f,&journal,AFTER,request).unwrap();
-        let crate::NoteSaveResult::Selected(EditorSaveResult::Applied { operation:confirmed,.. })=replay else { panic!("original receipt not resolved"); };
-        assert_eq!(confirmed,operation); assert_eq!(receipt_count(&f),1); assert_eq!(count_copies(&f,"committed"),1);
+        let journal = journal(&f, true);
+        let mut request = fresh();
+        request.expected_version = Some(f.version());
+        let ack = save(&f, &journal, AFTER, request.clone()).unwrap();
+        let crate::NoteSaveResult::Selected(EditorSaveResult::Applied { operation, .. }) = ack
+        else {
+            panic!("actual paired save not acknowledged");
+        };
+        let request = EditorSaveRequest {
+            original: Some(operation.clone()),
+            ..resolve(&request)
+        };
+        let replay = save(&f, &journal, AFTER, request).unwrap();
+        let crate::NoteSaveResult::Selected(EditorSaveResult::Applied {
+            operation: confirmed,
+            ..
+        }) = replay
+        else {
+            panic!("original receipt not resolved");
+        };
+        assert_eq!(confirmed, operation);
+        assert_eq!(receipt_count(&f), 1);
+        assert_eq!(count_copies(&f, "committed"), 1);
     });
 }

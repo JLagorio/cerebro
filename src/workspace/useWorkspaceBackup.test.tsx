@@ -41,24 +41,42 @@ vi.mock('@/stores/vaultStore', async () => {
   };
 });
 vi.mock('@/stores/uiStore', () => ({ useUiStore: { getState: () => ({ toast: native.toast }) } }));
-vi.mock('@/editor/openPages', () => ({ flushOpenPages: native.flush, unresolvedOpenPages: native.unresolved }));
+vi.mock('@/editor/openPages', () => ({
+  flushOpenPages: native.flush,
+  unresolvedOpenPages: native.unresolved,
+}));
 vi.mock('@/app/useOpenPath', () => ({ useOpenPath: () => vi.fn() }));
 import { useVaultStore } from '@/stores/vaultStore';
 import { useWorkspaceBackupHost, workspaceBackupWorkflow } from './useWorkspaceBackup';
 import { WorkspaceBackupSettings } from './WorkspaceBackupSettings';
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((settle) => { resolve = settle; });
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
   return { promise, resolve };
 }
 const labels = { source: '/original-vault', input: null, output: '/original-backup' };
-const running: WorkspaceBackupOperation = { kind: 'running', operationId: 'original-operation', mode: 'create', labels };
+const running: WorkspaceBackupOperation = {
+  kind: 'running',
+  operationId: 'original-operation',
+  mode: 'create',
+  labels,
+};
 const completed: WorkspaceBackupOperation = {
-  kind: 'terminal', operationId: 'original-operation', mode: 'create', labels,
-  result: { kind: 'completed', workspaceId: null, summary: null, output: {
-    kind: 'completed_but_response_unavailable',
-    location: { displayLocation: '/original-backup', verification: 'original_spelling_only' },
-  } },
+  kind: 'terminal',
+  operationId: 'original-operation',
+  mode: 'create',
+  labels,
+  result: {
+    kind: 'completed',
+    workspaceId: null,
+    summary: null,
+    output: {
+      kind: 'completed_but_response_unavailable',
+      location: { displayLocation: '/original-backup', verification: 'original_spelling_only' },
+    },
+  },
 };
 function Host({ settings = true }: { settings?: boolean }) {
   useWorkspaceBackupHost();
@@ -66,7 +84,9 @@ function Host({ settings = true }: { settings?: boolean }) {
 }
 async function mount() {
   const view = render(<Host />);
-  await act(async () => { await Promise.resolve(); });
+  await act(async () => {
+    await Promise.resolve();
+  });
   return view;
 }
 beforeEach(async () => {
@@ -74,8 +94,22 @@ beforeEach(async () => {
   vi.resetAllMocks();
   native.opening = 1;
   useVaultStore.setState({ vaultPath: '/original-vault' });
-  native.availability.mockResolvedValue({ kind: 'available', sourceLabel: '/original-vault', checkRestore: true });
-  native.choose.mockResolvedValue({ kind: 'review', review: { operationId: 'original-operation', token: 'original-token', mode: 'create', labels, summary: null, expiresAt: null } });
+  native.availability.mockResolvedValue({
+    kind: 'available',
+    sourceLabel: '/original-vault',
+    checkRestore: true,
+  });
+  native.choose.mockResolvedValue({
+    kind: 'review',
+    review: {
+      operationId: 'original-operation',
+      token: 'original-token',
+      mode: 'create',
+      labels,
+      summary: null,
+      expiresAt: null,
+    },
+  });
   native.cancel.mockResolvedValue({ kind: 'cancelled' });
   native.operation.mockResolvedValue({ kind: 'none' });
   native.listen.mockResolvedValue(vi.fn());
@@ -95,13 +129,21 @@ describe('App-owned backup host', () => {
     const ack = deferred<WorkspaceBackupCommitResult>();
     native.commit.mockReturnValueOnce(ack.promise);
     await mount();
-    await act(async () => { await workspaceBackupWorkflow.chooseCreate(); });
+    await act(async () => {
+      await workspaceBackupWorkflow.chooseCreate();
+    });
     let committing!: Promise<boolean>;
-    await act(async () => { committing = workspaceBackupWorkflow.commit(); await Promise.resolve(); });
+    await act(async () => {
+      committing = workspaceBackupWorkflow.commit();
+      await Promise.resolve();
+    });
     expect(native.commit).toHaveBeenCalledExactlyOnceWith('original-token');
     native.operation.mockResolvedValue(completed);
     const beforeEvent = native.operation.mock.calls.length;
-    await act(async () => { native.listen.mock.calls[0][0](); await Promise.resolve(); });
+    await act(async () => {
+      native.listen.mock.calls[0][0]();
+      await Promise.resolve();
+    });
     expect(native.operation.mock.calls.length).toBe(beforeEvent + 1);
     expect(workspaceBackupWorkflow.getSnapshot().operation).toBeNull();
     await act(async () => {
@@ -109,34 +151,57 @@ describe('App-owned backup host', () => {
       await committing;
     });
     expect(screen.getByRole('status', { name: 'Backup in progress' })).toBeTruthy();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
     expect(screen.getByLabelText('Backup result').textContent).toContain('/original-backup');
     expect(screen.queryByRole('status', { name: 'Backup in progress' })).toBeNull();
     expect(native.commit).toHaveBeenCalledTimes(1);
     expect(native.choose).toHaveBeenCalledTimes(1);
   });
   it('releases a listener resolved after host unmount and ignores its late events', async () => {
-    const setup = deferred<() => void>(); const release = vi.fn();
+    const setup = deferred<() => void>();
+    const release = vi.fn();
     native.listen.mockReturnValueOnce(setup.promise);
-    const view = await mount(); const lateEvent = native.listen.mock.calls[0][0];
-    view.unmount(); native.operation.mockClear();
-    await act(async () => { setup.resolve(release); await Promise.resolve(); });
+    const view = await mount();
+    const lateEvent = native.listen.mock.calls[0][0];
+    view.unmount();
+    native.operation.mockClear();
+    await act(async () => {
+      setup.resolve(release);
+      await Promise.resolve();
+    });
     expect(release).toHaveBeenCalledTimes(1);
-    await act(async () => { lateEvent(); await vi.advanceTimersByTimeAsync(2000); });
+    await act(async () => {
+      lateEvent();
+      await vi.advanceTimersByTimeAsync(2000);
+    });
     expect(native.operation).not.toHaveBeenCalled();
   });
   it('keeps original running operation across Settings remount and vault switch until its actual terminal status', async () => {
     native.operation.mockResolvedValue(running);
     const view = await mount();
-    expect(screen.getByRole('status', { name: 'Backup in progress' }).textContent).toContain('/original-vault');
+    expect(screen.getByRole('status', { name: 'Backup in progress' }).textContent).toContain(
+      '/original-vault',
+    );
     view.rerender(<Host settings={false} />);
-    await act(async () => { native.opening += 1; useVaultStore.setState({ vaultPath: '/new-vault' }); await Promise.resolve(); });
+    await act(async () => {
+      native.opening += 1;
+      useVaultStore.setState({ vaultPath: '/new-vault' });
+      await Promise.resolve();
+    });
     view.rerender(<Host />);
-    expect(screen.getByRole('status', { name: 'Backup in progress' }).textContent).toContain('/original-backup');
-    expect((screen.getByRole('button', { name: 'Create backup…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('status', { name: 'Backup in progress' }).textContent).toContain(
+      '/original-backup',
+    );
+    expect(
+      (screen.getByRole('button', { name: 'Create backup…' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
     expect(native.cancel).not.toHaveBeenCalled();
     native.operation.mockResolvedValue(completed);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
     expect(screen.getByLabelText('Backup result').textContent).toContain('/original-vault');
     expect(screen.getByLabelText('Backup result').textContent).toContain('/original-backup');
     expect(native.commit).not.toHaveBeenCalled();

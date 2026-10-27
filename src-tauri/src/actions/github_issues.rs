@@ -57,7 +57,9 @@ fn policy() -> &'static Policy {
     })
 }
 /// The managed account must belong to the same fixed issuer as this adapter.
-pub(super) fn account_issuer() -> &'static str { &policy().web_base }
+pub(super) fn account_issuer() -> &'static str {
+    &policy().web_base
+}
 
 pub(super) struct IssuePlan {
     endpoint: String,
@@ -71,8 +73,12 @@ pub(super) struct IssuePlan {
 }
 
 impl IssuePlan {
-    pub(super) fn target(&self) -> &AdapterTarget { &self.target }
-    pub(super) fn preview(&self) -> &SafeEffectPreview { &self.preview }
+    pub(super) fn target(&self) -> &AdapterTarget {
+        &self.target
+    }
+    pub(super) fn preview(&self) -> &SafeEffectPreview {
+        &self.preview
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -324,5 +330,8 @@ mod tests;
 mod native;
 
 #[cfg(any(test, target_os = "macos"))]
-#[expect(unused_imports, reason = "retained native action dispatcher is the next integration boundary")]
+#[expect(
+    unused_imports,
+    reason = "retained native action dispatcher is the next integration boundary"
+)]
 pub(super) use native::{execute, TransportOutcome};

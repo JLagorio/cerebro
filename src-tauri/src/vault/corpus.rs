@@ -239,7 +239,11 @@ impl CorpusCache {
     /// strict ordinary corpus cache with text-flattened canonical metadata.
     pub(crate) fn search_snapshot(&self, vault: &Path) -> Result<Arc<Corpus>, String> {
         match crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)? {
-            crate::workspace_service::authority::Authority::Selected => crate::workspace_service::selected::search_snapshot(vault).map(Arc::new).map_err(|error| error.message),
+            crate::workspace_service::authority::Authority::Selected => {
+                crate::workspace_service::selected::search_snapshot(vault)
+                    .map(Arc::new)
+                    .map_err(|error| error.message)
+            }
             crate::workspace_service::authority::Authority::Legacy => self.snapshot(vault),
         }
     }

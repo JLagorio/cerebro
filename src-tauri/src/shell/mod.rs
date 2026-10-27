@@ -225,10 +225,9 @@ mod tests {
             "a hidden window must keep its timers running"
         );
 
-        let smoke: tauri::Config = serde_json::from_str(include_str!(
-            "../../native-read-smoke/tauri.conf.json"
-        ))
-        .expect("native smoke config parses as tauri's own Config");
+        let smoke: tauri::Config =
+            serde_json::from_str(include_str!("../../native-read-smoke/tauri.conf.json"))
+                .expect("native smoke config parses as tauri's own Config");
         let smoke_main = smoke
             .app
             .windows

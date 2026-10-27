@@ -8,13 +8,25 @@ const STORE: &str = "preview-store";
 const ACTOR: &str = "process:digest";
 
 fn at(raw: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(raw).unwrap().with_timezone(&Utc)
+    DateTime::parse_from_rfc3339(raw)
+        .unwrap()
+        .with_timezone(&Utc)
 }
 
-fn now() -> DateTime<Utc> { at("2026-10-27T10:00:00Z") }
-fn small() -> Reservation { Reservation { total_tokens: 10, output_tokens: 5 } }
+fn now() -> DateTime<Utc> {
+    at("2026-10-27T10:00:00Z")
+}
+fn small() -> Reservation {
+    Reservation {
+        total_tokens: 10,
+        output_tokens: 5,
+    }
+}
 fn settings_in(zone: &str) -> Settings {
-    Settings { ceilings: shipped_defaults().unwrap(), timezone_id: zone.into() }
+    Settings {
+        ceilings: shipped_defaults().unwrap(),
+        timezone_id: zone.into(),
+    }
 }
 
 fn empty() -> Connection {
@@ -42,21 +54,36 @@ fn snapshot(conn: &Connection) -> Snapshot {
     let mut table_query = conn.prepare(
         "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     ).unwrap();
-    let names = table_query.query_map([], |row| row.get::<_, String>(0)).unwrap()
-        .collect::<Result<Vec<_>, _>>().unwrap();
-    names.into_iter().map(|name| {
-        let mut query = conn.prepare(&format!("SELECT * FROM \"{}\"", name.replace('"', "\"\""))).unwrap();
-        let columns = query.column_count();
-        let mut rows = query.query_map([], |row| {
-            (0..columns).map(|index| row.get::<_, Value>(index)).collect::<rusqlite::Result<Vec<_>>>()
-        }).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
-        rows.sort_by_key(|row| format!("{row:?}"));
-        (name, rows)
-    }).collect()
+    let names = table_query
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    names
+        .into_iter()
+        .map(|name| {
+            let mut query = conn
+                .prepare(&format!("SELECT * FROM \"{}\"", name.replace('"', "\"\"")))
+                .unwrap();
+            let columns = query.column_count();
+            let mut rows = query
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|index| row.get::<_, Value>(index))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            rows.sort_by_key(|row| format!("{row:?}"));
+            (name, rows)
+        })
+        .collect()
 }
 
 fn changes(conn: &Connection) -> i64 {
-    conn.query_row("SELECT total_changes()", [], |row| row.get(0)).unwrap()
+    conn.query_row("SELECT total_changes()", [], |row| row.get(0))
+        .unwrap()
 }
 
 fn read<T>(conn: &Connection, work: impl FnOnce(&Connection) -> T) -> T {
@@ -66,7 +93,11 @@ fn read<T>(conn: &Connection, work: impl FnOnce(&Connection) -> T) -> T {
     let tx = Transaction::new_unchecked(conn, TransactionBehavior::Deferred).unwrap();
     let result = work(&tx);
     assert_eq!(snapshot(&tx), before, "preview changed a recorded fact");
-    assert_eq!(changes(&tx), writes, "preview attempted a successful row write");
+    assert_eq!(
+        changes(&tx),
+        writes,
+        "preview attempted a successful row write"
+    );
     tx.rollback().unwrap();
     conn.pragma_update(None, "query_only", false).unwrap();
     result
@@ -87,7 +118,10 @@ fn production(conn: &Connection, clock: DateTime<Utc>) -> (Decision, Day) {
 fn preview_refuses_a_non_snapshot_connection() {
     let conn = ready();
     let before = snapshot(&conn);
-    assert_eq!(preview(&conn, now()).unwrap_err(), "budget preview requires an active transaction");
+    assert_eq!(
+        preview(&conn, now()).unwrap_err(),
+        "budget preview requires an active transaction"
+    );
     assert_eq!(snapshot(&conn), before);
 }
 
@@ -96,7 +130,9 @@ fn preview_does_not_initialize_missing_settings_or_a_day() {
     let conn = empty();
     assert!(read(&conn, |db| preview(db, now())).is_err());
     assert_eq!(latest_version(&conn).unwrap(), None);
-    let days: i64 = conn.query_row("SELECT count(*) FROM budget_days", [], |row| row.get(0)).unwrap();
+    let days: i64 = conn
+        .query_row("SELECT count(*) FROM budget_days", [], |row| row.get(0))
+        .unwrap();
     assert_eq!(days, 0);
 }
 
@@ -105,7 +141,9 @@ fn preview_does_not_open_a_day_when_only_settings_exist() {
     let conn = empty();
     append_version(&conn, &settings_in("UTC"), now()).unwrap();
     assert!(read(&conn, |db| preview(db, now())).is_err());
-    let days: i64 = conn.query_row("SELECT count(*) FROM budget_days", [], |row| row.get(0)).unwrap();
+    let days: i64 = conn
+        .query_row("SELECT count(*) FROM budget_days", [], |row| row.get(0))
+        .unwrap();
     assert_eq!(days, 0);
 }
 
@@ -125,9 +163,14 @@ fn preview_uses_a_recorded_day_without_reserving_or_recording_a_decision() {
 fn preview_refuses_an_unrecorded_new_day_instead_of_reusing_yesterday() {
     let conn = ready();
     // Reach the actual positive branch before testing its rollover refusal.
-    assert_eq!(read(&conn, |db| preview(db, now())).unwrap().0, Decision::Proceed);
+    assert_eq!(
+        read(&conn, |db| preview(db, now())).unwrap().0,
+        Decision::Proceed
+    );
     assert!(read(&conn, |db| preview(db, at("2026-10-28T00:00:00Z"))).is_err());
-    let days: i64 = conn.query_row("SELECT count(*) FROM budget_days", [], |row| row.get(0)).unwrap();
+    let days: i64 = conn
+        .query_row("SELECT count(*) FROM budget_days", [], |row| row.get(0))
+        .unwrap();
     assert_eq!(days, 1);
 }
 
@@ -147,7 +190,12 @@ fn preview_keeps_copied_settings_while_a_new_version_waits_for_handover() {
 #[test]
 fn preview_uses_the_short_timezone_handover_day_not_a_second_window_algorithm() {
     let conn = ready();
-    append_version(&conn, &settings_in("America/New_York"), at("2026-10-27T11:00:00Z")).unwrap();
+    append_version(
+        &conn,
+        &settings_in("America/New_York"),
+        at("2026-10-27T11:00:00Z"),
+    )
+    .unwrap();
     let clock = at("2026-10-28T01:00:00Z");
     ensure_day(&conn, clock).unwrap();
     let observed = read(&conn, |db| preview(db, clock)).unwrap();
@@ -165,9 +213,23 @@ fn preview_collects_both_pauses_for_the_selected_actor_and_vault() {
     settings::set_global_pause(&conn, true).unwrap();
     settings::set_agent_paused(&conn, VAULT, ACTOR, true).unwrap();
     let observed = read(&conn, |db| preview(db, now())).unwrap();
-    assert_eq!(observed.0, Decision::Deferred(vec![GateReason::AgentPaused, GateReason::GlobalPause]));
+    assert_eq!(
+        observed.0,
+        Decision::Deferred(vec![GateReason::AgentPaused, GateReason::GlobalPause])
+    );
     assert_eq!(observed, production(&conn, now()));
-    let another = read(&conn, |db| preview_rows(db, VAULT, STORE, "filed", Some("process:other"), small(), now())).unwrap();
+    let another = read(&conn, |db| {
+        preview_rows(
+            db,
+            VAULT,
+            STORE,
+            "filed",
+            Some("process:other"),
+            small(),
+            now(),
+        )
+    })
+    .unwrap();
     assert_eq!(another.0, Decision::Deferred(vec![GateReason::GlobalPause]));
 }
 
@@ -177,27 +239,57 @@ fn preview_preserves_unknown_accounting_and_disabled_lane_as_separate_reasons() 
     mark_accounting_unknown(&conn, "2026-10-27T00:00:00.000Z").unwrap();
     settings::set_lane_enabled(&conn, VAULT, "filed", false).unwrap();
     let observed = read(&conn, |db| preview(db, now())).unwrap();
-    assert_eq!(observed.0, Decision::Deferred(vec![GateReason::AccountingUnknown, GateReason::LaneDisabled]));
+    assert_eq!(
+        observed.0,
+        Decision::Deferred(vec![
+            GateReason::AccountingUnknown,
+            GateReason::LaneDisabled
+        ])
+    );
     assert_eq!(observed, production(&conn, now()));
 }
 
 #[test]
 fn preview_separates_insufficient_remaining_headroom_from_a_per_run_cap() {
     let conn = ready();
-    conn.execute("UPDATE budget_days SET ambient_tokens_used=199995", []).unwrap();
+    conn.execute("UPDATE budget_days SET ambient_tokens_used=199995", [])
+        .unwrap();
     let observed = read(&conn, |db| preview(db, now())).unwrap();
-    assert_eq!(observed.0, Decision::Deferred(vec![GateReason::ReservationExceedsRemaining]));
+    assert_eq!(
+        observed.0,
+        Decision::Deferred(vec![GateReason::ReservationExceedsRemaining])
+    );
     assert_eq!(observed, production(&conn, now()));
-    let too_large = read(&conn, |db| preview_rows(db, VAULT, STORE, "filed", Some(ACTOR),
-        Reservation { total_tokens: 20001, output_tokens: 5 }, now())).unwrap();
-    assert_eq!(too_large.0, Decision::Deferred(vec![GateReason::ReservationExceedsRunCap]));
+    let too_large = read(&conn, |db| {
+        preview_rows(
+            db,
+            VAULT,
+            STORE,
+            "filed",
+            Some(ACTOR),
+            Reservation {
+                total_tokens: 20001,
+                output_tokens: 5,
+            },
+            now(),
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        too_large.0,
+        Decision::Deferred(vec![GateReason::ReservationExceedsRunCap])
+    );
 }
 
 #[test]
 fn preview_uses_the_production_lane_priority_ramp() {
     let conn = ready();
-    conn.execute("UPDATE budget_days SET ambient_tokens_used=160000", []).unwrap();
-    let low = read(&conn, |db| preview_rows(db, VAULT, STORE, "schema", Some(ACTOR), small(), now())).unwrap();
+    conn.execute("UPDATE budget_days SET ambient_tokens_used=160000", [])
+        .unwrap();
+    let low = read(&conn, |db| {
+        preview_rows(db, VAULT, STORE, "schema", Some(ACTOR), small(), now())
+    })
+    .unwrap();
     assert_eq!(low.0, Decision::Deferred(vec![GateReason::DailyTokens]));
     let high = read(&conn, |db| preview(db, now())).unwrap();
     assert_eq!(high.0, Decision::Proceed);
@@ -211,11 +303,42 @@ fn preview_respects_scoped_failure_counts_and_the_explicit_backoff_clock() {
         rusqlite::params![VAULT, STORE]).unwrap();
     conn.execute("INSERT INTO backoff(vault_id,lane,until,reason,quota_window_key) VALUES(NULL,'filed','2026-10-27T11:00:00.000Z','quota','preview')", []).unwrap();
     let observed = read(&conn, |db| preview(db, now())).unwrap();
-    assert_eq!(observed.0, Decision::Deferred(vec![GateReason::ConsecutiveFailures, GateReason::QuotaBackoff]));
+    assert_eq!(
+        observed.0,
+        Decision::Deferred(vec![
+            GateReason::ConsecutiveFailures,
+            GateReason::QuotaBackoff
+        ])
+    );
     assert_eq!(observed, production(&conn, now()));
-    let another = read(&conn, |db| preview_rows(db, VAULT, "different-store", "filed", Some(ACTOR), small(), now())).unwrap();
-    assert_eq!(another.0, Decision::Deferred(vec![GateReason::QuotaBackoff]));
-    let expired = read(&conn, |db| preview_rows(db, VAULT, "different-store", "filed", Some(ACTOR), small(), at("2026-10-27T11:00:00Z"))).unwrap();
+    let another = read(&conn, |db| {
+        preview_rows(
+            db,
+            VAULT,
+            "different-store",
+            "filed",
+            Some(ACTOR),
+            small(),
+            now(),
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        another.0,
+        Decision::Deferred(vec![GateReason::QuotaBackoff])
+    );
+    let expired = read(&conn, |db| {
+        preview_rows(
+            db,
+            VAULT,
+            "different-store",
+            "filed",
+            Some(ACTOR),
+            small(),
+            at("2026-10-27T11:00:00Z"),
+        )
+    })
+    .unwrap();
     assert_eq!(expired.0, Decision::Proceed);
 }
 
@@ -231,34 +354,57 @@ fn preview_measures_live_leases_without_claiming_or_recovering_them() {
         rusqlite::params![VAULT, STORE],
     ).unwrap();
     let observed = read(&conn, |db| preview(db, now())).unwrap();
-    assert_eq!(observed.0, Decision::Deferred(vec![GateReason::AmbientBusy]));
+    assert_eq!(
+        observed.0,
+        Decision::Deferred(vec![GateReason::AmbientBusy])
+    );
     assert_eq!(observed, production(&conn, now()));
     let expired = read(&conn, |db| preview(db, at("2026-10-27T11:00:00Z"))).unwrap();
     assert_eq!(expired.0, Decision::Proceed);
-    let leases: i64 = conn.query_row("SELECT count(*) FROM ambient_dispatch", [], |row| row.get(0)).unwrap();
+    let leases: i64 = conn
+        .query_row("SELECT count(*) FROM ambient_dispatch", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
     assert_eq!(leases, 1, "preview must not perform recovery");
 }
 
 #[test]
 fn preview_does_not_turn_an_unreadable_required_table_into_permission() {
     let conn = ready();
-    assert_eq!(read(&conn, |db| preview(db, now())).unwrap().0, Decision::Proceed);
+    assert_eq!(
+        read(&conn, |db| preview(db, now())).unwrap().0,
+        Decision::Proceed
+    );
     conn.execute_batch("DROP TABLE ambient_gate_state").unwrap();
     assert!(read(&conn, |db| preview(db, now())).is_err());
 }
-
 
 #[test]
 fn production_gate_without_an_actor_refuses_unreadable_settings_instead_of_using_absent_defaults() {
     let conn = ready();
     // Legitimately absent pause/concurrency/override rows retain production defaults.
     let tx = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate).unwrap();
-    assert_eq!(gate(&tx, VAULT, STORE, "filed", None, small(), now()).unwrap().0, Decision::Proceed);
+    assert_eq!(
+        gate(&tx, VAULT, STORE, "filed", None, small(), now())
+            .unwrap()
+            .0,
+        Decision::Proceed
+    );
     tx.rollback().unwrap();
     conn.execute_batch("DROP TABLE settings").unwrap();
     let tx = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate).unwrap();
     assert!(gate(&tx, VAULT, STORE, "filed", None, small(), now()).is_err(),
         "an unreadable settings table is not an observed unpaused subscription with default concurrency");
     tx.rollback().unwrap();
-    assert!(read(&conn, |db| preview_rows(db, VAULT, STORE, "filed", None, small(), now())).is_err());
+    assert!(read(&conn, |db| preview_rows(
+        db,
+        VAULT,
+        STORE,
+        "filed",
+        None,
+        small(),
+        now()
+    ))
+    .is_err());
 }

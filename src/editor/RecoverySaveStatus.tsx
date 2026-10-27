@@ -27,7 +27,13 @@ export function recoveryOutcomeText(outcome: RecoveryOutcome | EditorRecoveryVie
         : null;
   }
 }
-export function RecoverySaveStatus({ owner, onCheck }: { owner: DocumentOwner; onCheck?: () => void }) {
+export function RecoverySaveStatus({
+  owner,
+  onCheck,
+}: {
+  owner: DocumentOwner;
+  onCheck?: () => void;
+}) {
   return (
     <OwnerRecoveryStatus
       key={`${owner.key.vaultId}:${owner.key.path}:${owner.key.ownerId}`}
@@ -139,7 +145,9 @@ function OwnerRecoveryStatus({ owner, onCheck }: { owner: DocumentOwner; onCheck
           {state.selectedSave.status !== 'reconcile' && (
             <>
               {' '}
-              <Button size="sm" variant="ghost"
+              <Button
+                size="sm"
+                variant="ghost"
                 type="button"
                 disabled={state.inFlightGeneration !== null}
                 onClick={() => {
@@ -161,7 +169,9 @@ function OwnerRecoveryStatus({ owner, onCheck }: { owner: DocumentOwner; onCheck
       )}
       {error && <p data-testid="section-unavailable">{error}</p>}
       {valid && (
-        <Button size="sm" variant="ghost"
+        <Button
+          size="sm"
+          variant="ghost"
           type="button"
           onClick={() => {
             if (!permit.current() || permit.expiresAt * 1000 <= Date.now()) {

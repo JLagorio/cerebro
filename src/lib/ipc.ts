@@ -172,12 +172,32 @@ export function readEditorBody(
 }
 
 /** Guarded native canonical value only; the browser has no selected store. */
-export function readSelectedProperty(vault:string,path:string,target:SelectedEditorTarget,field:string):Promise<SelectedPropertySnapshot>{
- return inTauri()?invokeTauri<SelectedPropertySnapshot>('read_selected_property',{vault,path,target,field}):Promise.reject(selectedBrowserUnavailable());
+export function readSelectedProperty(
+  vault: string,
+  path: string,
+  target: SelectedEditorTarget,
+  field: string,
+): Promise<SelectedPropertySnapshot> {
+  return inTauri()
+    ? invokeTauri<SelectedPropertySnapshot>('read_selected_property', {
+        vault,
+        path,
+        target,
+        field,
+      })
+    : Promise.reject(selectedBrowserUnavailable());
 }
 /** Retain the real invoke through quit/leave; timeout never cancels its owner. */
-export function patchSelectedMetadata(vault:string,path:string,request:MetadataPatchRequest):Promise<MetadataPatchResult>{
- return pageWrite<MetadataPatchResult>(inTauri()?invokeTauri<MetadataPatchResult>('patch_selected_metadata',{vault,path,request}):Promise.reject({kind:'metadata_refused',error:selectedBrowserUnavailable()}));
+export function patchSelectedMetadata(
+  vault: string,
+  path: string,
+  request: MetadataPatchRequest,
+): Promise<MetadataPatchResult> {
+  return pageWrite<MetadataPatchResult>(
+    inTauri()
+      ? invokeTauri<MetadataPatchResult>('patch_selected_metadata', { vault, path, request })
+      : Promise.reject({ kind: 'metadata_refused', error: selectedBrowserUnavailable() }),
+  );
 }
 
 /** Whole bytes and their hash from one read, for a save that compares versions. */
@@ -2165,88 +2185,160 @@ export async function onWorkspaceBackupChanged(handler: () => void): Promise<() 
 
 /** Workflow selectors are data; native commands bind the actual authenticated opening. */
 function workflowUnavailable(): Promise<never> {
-  return Promise.reject({ code: 'unavailable', diagnostics: [] } satisfies import('./generated/workflows').WorkflowError);
+  return Promise.reject({
+    code: 'unavailable',
+    diagnostics: [],
+  } satisfies import('./generated/workflows').WorkflowError);
 }
 export function workflowContext(): Promise<import('./generated/workflows').WorkflowContext> {
   return inTauri() ? invokeTauri('workflow_context') : workflowUnavailable();
 }
-export function workflowCatalog(context: import('./generated/workflows').WorkflowContext, after: string | null): Promise<import('./generated/workflows').WorkflowCatalog> {
+export function workflowCatalog(
+  context: import('./generated/workflows').WorkflowContext,
+  after: string | null,
+): Promise<import('./generated/workflows').WorkflowCatalog> {
   return inTauri() ? invokeTauri('workflow_catalog', { context, after }) : workflowUnavailable();
 }
-export function workflowDocument(context: import('./generated/workflows').WorkflowContext, workflowId: string): Promise<import('./generated/workflows').WorkflowDocument> {
-  return inTauri() ? invokeTauri('workflow_document', { context, workflowId }) : workflowUnavailable();
+export function workflowDocument(
+  context: import('./generated/workflows').WorkflowContext,
+  workflowId: string,
+): Promise<import('./generated/workflows').WorkflowDocument> {
+  return inTauri()
+    ? invokeTauri('workflow_document', { context, workflowId })
+    : workflowUnavailable();
 }
-export function workflowVersion(context: import('./generated/workflows').WorkflowContext, version: import('./generated/workflows').WorkflowVersionRef): Promise<import('./generated/workflows').WorkflowDraft> {
+export function workflowVersion(
+  context: import('./generated/workflows').WorkflowContext,
+  version: import('./generated/workflows').WorkflowVersionRef,
+): Promise<import('./generated/workflows').WorkflowDraft> {
   return inTauri() ? invokeTauri('workflow_version', { context, version }) : workflowUnavailable();
 }
-export function workflowSave(request: import('./generated/workflows').WorkflowSaveRequest): Promise<import('./generated/workflows').WorkflowDraftSnapshot> {
+export function workflowSave(
+  request: import('./generated/workflows').WorkflowSaveRequest,
+): Promise<import('./generated/workflows').WorkflowDraftSnapshot> {
   return inTauri() ? invokeTauri('workflow_save', { request }) : workflowUnavailable();
 }
-export function workflowPublish(request: import('./generated/workflows').WorkflowPublishRequest): Promise<import('./generated/workflows').WorkflowPublication> {
+export function workflowPublish(
+  request: import('./generated/workflows').WorkflowPublishRequest,
+): Promise<import('./generated/workflows').WorkflowPublication> {
   return inTauri() ? invokeTauri('workflow_publish', { request }) : workflowUnavailable();
 }
-export function workflowUnpublish(request: import('./generated/workflows').WorkflowUnpublishRequest): Promise<import('./generated/workflows').WorkflowUnpublishAck> {
+export function workflowUnpublish(
+  request: import('./generated/workflows').WorkflowUnpublishRequest,
+): Promise<import('./generated/workflows').WorkflowUnpublishAck> {
   return inTauri() ? invokeTauri('workflow_unpublish', { request }) : workflowUnavailable();
 }
-export function workflowValidate(context: import('./generated/workflows').WorkflowContext, draft: import('./generated/workflows').WorkflowDraft): Promise<import('./generated/workflows').WorkflowValidation> {
+export function workflowValidate(
+  context: import('./generated/workflows').WorkflowContext,
+  draft: import('./generated/workflows').WorkflowDraft,
+): Promise<import('./generated/workflows').WorkflowValidation> {
   return inTauri() ? invokeTauri('workflow_validate', { context, draft }) : workflowUnavailable();
 }
-export function workflowActions(context: import('./generated/workflows').WorkflowContext): Promise<import('./generated/actions').ActionDefinition[]> {
+export function workflowActions(
+  context: import('./generated/workflows').WorkflowContext,
+): Promise<import('./generated/actions').ActionDefinition[]> {
   return inTauri() ? invokeTauri('workflow_actions', { context }) : workflowUnavailable();
 }
 
-export function workflowStart(request: import('./generated/workflows').WorkflowStartRequest): Promise<import('./generated/workflows').WorkflowStartAck> {
+export function workflowStart(
+  request: import('./generated/workflows').WorkflowStartRequest,
+): Promise<import('./generated/workflows').WorkflowStartAck> {
   return inTauri() ? invokeTauri('workflow_start', { request }) : workflowUnavailable();
 }
-export function workflowContinue(request: import('./generated/workflows').WorkflowRunRequest): Promise<import('./generated/workflows').WorkflowStartAck> {
+export function workflowContinue(
+  request: import('./generated/workflows').WorkflowRunRequest,
+): Promise<import('./generated/workflows').WorkflowStartAck> {
   return inTauri() ? invokeTauri('workflow_continue', { request }) : workflowUnavailable();
 }
-export function workflowReauthorize(request: import('./generated/workflows').WorkflowReauthorizeRequest): Promise<import('./generated/workflows').WorkflowStartAck> {
+export function workflowReauthorize(
+  request: import('./generated/workflows').WorkflowReauthorizeRequest,
+): Promise<import('./generated/workflows').WorkflowStartAck> {
   return inTauri() ? invokeTauri('workflow_reauthorize', { request }) : workflowUnavailable();
 }
-export function workflowCancel(request: import('./generated/workflows').WorkflowRunRequest): Promise<import('./generated/workflows').WorkflowRunView> {
+export function workflowCancel(
+  request: import('./generated/workflows').WorkflowRunRequest,
+): Promise<import('./generated/workflows').WorkflowRunView> {
   return inTauri() ? invokeTauri('workflow_cancel', { request }) : workflowUnavailable();
 }
-export function workflowRuns(context: import('./generated/workflows').WorkflowContext, after: string | null): Promise<import('./generated/workflows').WorkflowRunCatalog> {
+export function workflowRuns(
+  context: import('./generated/workflows').WorkflowContext,
+  after: string | null,
+): Promise<import('./generated/workflows').WorkflowRunCatalog> {
   return inTauri() ? invokeTauri('workflow_runs', { context, after }) : workflowUnavailable();
 }
-export function workflowRun(context: import('./generated/workflows').WorkflowContext, runId: string): Promise<import('./generated/workflows').WorkflowRunView> {
+export function workflowRun(
+  context: import('./generated/workflows').WorkflowContext,
+  runId: string,
+): Promise<import('./generated/workflows').WorkflowRunView> {
   return inTauri() ? invokeTauri('workflow_run', { context, runId }) : workflowUnavailable();
 }
-export function workflowValue(request: import('./generated/workflows').WorkflowValueRequest): Promise<import('./generated/workflows').WorkflowValueDetail> {
+export function workflowValue(
+  request: import('./generated/workflows').WorkflowValueRequest,
+): Promise<import('./generated/workflows').WorkflowValueDetail> {
   return inTauri() ? invokeTauri('workflow_value', { request }) : workflowUnavailable();
 }
-export function workflowActionDetails(context: import('./generated/workflows').WorkflowContext, runId: string, invocationId: string): Promise<import('./generated/actions').ActionEffectDetails> {
-  return inTauri() ? invokeTauri('workflow_action_details', { context, runId, invocationId }) : workflowUnavailable();
+export function workflowActionDetails(
+  context: import('./generated/workflows').WorkflowContext,
+  runId: string,
+  invocationId: string,
+): Promise<import('./generated/actions').ActionEffectDetails> {
+  return inTauri()
+    ? invokeTauri('workflow_action_details', { context, runId, invocationId })
+    : workflowUnavailable();
 }
-export function workflowAnswerAction(request: import('./generated/workflows').WorkflowActionAnswer): Promise<import('./generated/workflows').WorkflowRunView> {
+export function workflowAnswerAction(
+  request: import('./generated/workflows').WorkflowActionAnswer,
+): Promise<import('./generated/workflows').WorkflowRunView> {
   return inTauri() ? invokeTauri('workflow_answer_action', { request }) : workflowUnavailable();
 }
-export function workflowAnswerWait(request: import('./generated/workflows').WorkflowWaitAnswer): Promise<import('./generated/workflows').WorkflowRunView> {
+export function workflowAnswerWait(
+  request: import('./generated/workflows').WorkflowWaitAnswer,
+): Promise<import('./generated/workflows').WorkflowRunView> {
   return inTauri() ? invokeTauri('workflow_answer_wait', { request }) : workflowUnavailable();
 }
 
 /** Recorded original ceiling and current selection; metadata is never native authority. */
-export function workflowAccess(context: import('./generated/workflows').WorkflowContext, runId: string): Promise<import('./generated/workflows').WorkflowAccessView> {
+export function workflowAccess(
+  context: import('./generated/workflows').WorkflowContext,
+  runId: string,
+): Promise<import('./generated/workflows').WorkflowAccessView> {
   return inTauri() ? invokeTauri('workflow_access', { context, runId }) : workflowUnavailable();
 }
 
 /** Explicit schedule configuration and monitoring; browser preview never executes. */
-export function workflowSchedule(context: import('./generated/workflows').WorkflowContext, workflow: string): Promise<import('./generated/workflows').WorkflowScheduleView> {
- return inTauri() ? invokeTauri('workflow_schedule', { context, workflow }) : workflowUnavailable();
+export function workflowSchedule(
+  context: import('./generated/workflows').WorkflowContext,
+  workflow: string,
+): Promise<import('./generated/workflows').WorkflowScheduleView> {
+  return inTauri()
+    ? invokeTauri('workflow_schedule', { context, workflow })
+    : workflowUnavailable();
 }
-export function workflowScheduleEnable(request: import('./generated/workflows').WorkflowScheduleEnableRequest): Promise<import('./generated/workflows').WorkflowScheduleAck> {
- return inTauri() ? invokeTauri('workflow_schedule_enable', { request }) : workflowUnavailable();
+export function workflowScheduleEnable(
+  request: import('./generated/workflows').WorkflowScheduleEnableRequest,
+): Promise<import('./generated/workflows').WorkflowScheduleAck> {
+  return inTauri() ? invokeTauri('workflow_schedule_enable', { request }) : workflowUnavailable();
 }
-export function workflowSchedulePause(request: import('./generated/workflows').WorkflowScheduleChangeRequest): Promise<import('./generated/workflows').WorkflowScheduleAck> {
- return inTauri() ? invokeTauri('workflow_schedule_pause', { request }) : workflowUnavailable();
+export function workflowSchedulePause(
+  request: import('./generated/workflows').WorkflowScheduleChangeRequest,
+): Promise<import('./generated/workflows').WorkflowScheduleAck> {
+  return inTauri() ? invokeTauri('workflow_schedule_pause', { request }) : workflowUnavailable();
 }
-export function workflowScheduleRemove(request: import('./generated/workflows').WorkflowScheduleChangeRequest): Promise<import('./generated/workflows').WorkflowScheduleAck> {
- return inTauri() ? invokeTauri('workflow_schedule_remove', { request }) : workflowUnavailable();
+export function workflowScheduleRemove(
+  request: import('./generated/workflows').WorkflowScheduleChangeRequest,
+): Promise<import('./generated/workflows').WorkflowScheduleAck> {
+  return inTauri() ? invokeTauri('workflow_schedule_remove', { request }) : workflowUnavailable();
 }
-export function workflowSchedulePreview(context: import('./generated/workflows').WorkflowContext, workflow: string): Promise<import('./generated/workflows').WorkflowSchedulePreview> {
- return inTauri() ? invokeTauri('workflow_schedule_preview', { context, workflow }) : workflowUnavailable();
+export function workflowSchedulePreview(
+  context: import('./generated/workflows').WorkflowContext,
+  workflow: string,
+): Promise<import('./generated/workflows').WorkflowSchedulePreview> {
+  return inTauri()
+    ? invokeTauri('workflow_schedule_preview', { context, workflow })
+    : workflowUnavailable();
 }
-export function workflowScheduleWake(context: import('./generated/workflows').WorkflowContext): Promise<import('./generated/workflows').WorkflowScheduleMonitorAck> {
- return inTauri() ? invokeTauri('workflow_schedule_wake', { context }) : workflowUnavailable();
+export function workflowScheduleWake(
+  context: import('./generated/workflows').WorkflowContext,
+): Promise<import('./generated/workflows').WorkflowScheduleMonitorAck> {
+  return inTauri() ? invokeTauri('workflow_schedule_wake', { context }) : workflowUnavailable();
 }

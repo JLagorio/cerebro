@@ -600,7 +600,9 @@ impl Checker<'_> {
             value: map.get("value").cloned(),
         };
         if let Some(validate) = self.canonical_rule {
-            for problem in validate(&rule, info) { self.add(path, problem); }
+            for problem in validate(&rule, info) {
+                self.add(path, problem);
+            }
             return;
         }
         let value_problems = query::check_view_rule_value(&rule, info, self.kinds);

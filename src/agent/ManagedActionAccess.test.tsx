@@ -46,14 +46,12 @@ const view: RunActionAccessView = {
 function setup() {
   const api = {
     read: vi.fn<RunActionAccessApi['read']>().mockResolvedValue(view),
-    set: vi
-      .fn<RunActionAccessApi['set']>()
-      .mockResolvedValue({
-        state: 'changed',
-        view: { ...view, accessRequestId: null },
-        sourceCurrent: true,
-        requestClosed: true,
-      }),
+    set: vi.fn<RunActionAccessApi['set']>().mockResolvedValue({
+      state: 'changed',
+      view: { ...view, accessRequestId: null },
+      sourceCurrent: true,
+      requestClosed: true,
+    }),
   };
   const session = createRunActionAccessSession(41, 'request-a', api);
   const close = vi.fn();

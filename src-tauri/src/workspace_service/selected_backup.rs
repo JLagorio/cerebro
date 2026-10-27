@@ -204,13 +204,20 @@ impl Source {
     pub(crate) fn open(root: &Path) -> Result<Self, AuthorityError> {
         Self::open_inner(root, None)
     }
-    pub(crate) fn open_expected(expected: authority::AdmittedBackupRead) -> Result<Self, AuthorityError> {
+    pub(crate) fn open_expected(
+        expected: authority::AdmittedBackupRead,
+    ) -> Result<Self, AuthorityError> {
         let root = expected.root().to_path_buf();
         Self::open_inner(&root, Some(expected))
     }
-    fn open_inner(root: &Path, expected: Option<authority::AdmittedBackupRead>) -> Result<Self, AuthorityError> {
+    fn open_inner(
+        root: &Path,
+        expected: Option<authority::AdmittedBackupRead>,
+    ) -> Result<Self, AuthorityError> {
         let binding = authority::selected_binding(root)?;
-        if let Some(expected) = expected.as_ref() { expected.validate_binding(&binding)?; }
+        if let Some(expected) = expected.as_ref() {
+            expected.validate_binding(&binding)?;
+        }
         let guard = store::read_guard_readonly(&binding)?
             .ok_or_else(|| missing("Portable backup requires an existing paired lock."))?;
         let conn = sqlite_pin::PinnedConnection::open(
@@ -405,15 +412,28 @@ impl Source {
 }
 /// Validates an immutable bounded capture in a readonly in-memory database.
 /// No SQLite call reopens the source path or discovers any journal/WAL sidecar.
-pub(crate) fn read_offline(bytes:&[u8],workspace:&str,cap:u64)->Result<BackupFacts,AuthorityError> {
-    read_offline_profile(bytes,workspace,cap,false)
+pub(crate) fn read_offline(
+    bytes: &[u8],
+    workspace: &str,
+    cap: u64,
+) -> Result<BackupFacts, AuthorityError> {
+    read_offline_profile(bytes, workspace, cap, false)
 }
 /// Descriptive initial-stage validation on the same bounded SQLite image.
 /// Ordinary backups retain their supported original request/receipt history.
-pub(crate) fn read_fresh_stage_offline(bytes:&[u8],workspace:&str,cap:u64)->Result<BackupFacts,AuthorityError> {
-    read_offline_profile(bytes,workspace,cap,true)
+pub(crate) fn read_fresh_stage_offline(
+    bytes: &[u8],
+    workspace: &str,
+    cap: u64,
+) -> Result<BackupFacts, AuthorityError> {
+    read_offline_profile(bytes, workspace, cap, true)
 }
-fn read_offline_profile(bytes:&[u8],workspace:&str,cap:u64,initial_stage:bool)->Result<BackupFacts,AuthorityError> {
+fn read_offline_profile(
+    bytes: &[u8],
+    workspace: &str,
+    cap: u64,
+    initial_stage: bool,
+) -> Result<BackupFacts, AuthorityError> {
     if !authority::uuid_valid(workspace) {
         return Err(invalid(
             "Portable workspace identity is not a supported UUID.",
@@ -440,11 +460,18 @@ fn read_offline_profile(bytes:&[u8],workspace:&str,cap:u64,initial_stage:bool)->
         .map_err(|_| invalid("Readonly snapshot policy is unavailable."))?;
     let snapshot = read_snapshot_with_journal(&conn, workspace, "memory")?;
     if initial_stage {
-        if store::schema_version(&conn)?!=metadata::schema_version() {
-            return Err(error(AuthorityErrorKind::UnsupportedFormat,"Initial selected staging requires its explicit supported schema."));
+        if store::schema_version(&conn)? != metadata::schema_version() {
+            return Err(error(
+                AuthorityErrorKind::UnsupportedFormat,
+                "Initial selected staging requires its explicit supported schema.",
+            ));
         }
         let history:(i64,i64)=conn.query_row("SELECT (SELECT count(*) FROM metadata_receipts),(SELECT count(*) FROM metadata_requests)",[],|row|Ok((row.get(0)?,row.get(1)?))).map_err(|_|invalid("Initial-stage history is unreadable."))?;
-        if history!=(0,0) {return Err(invalid("An initial inactive stage cannot contain mutation or original-request history."));}
+        if history != (0, 0) {
+            return Err(invalid(
+                "An initial inactive stage cannot contain mutation or original-request history.",
+            ));
+        }
     }
     facts_with_snapshot(&conn, workspace, snapshot)
 }

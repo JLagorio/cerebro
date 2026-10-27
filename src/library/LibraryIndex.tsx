@@ -254,12 +254,20 @@ export function LibraryIndex({
           ariaLabel="Library section"
           value={tab}
           onChange={(v) => onTab(v as LibraryTab)}
-          options={[...LIBRARY_KINDS.map((k) => ({
-            value: k,
-            label: `${libraryLabelPlural(k)}${counts[k] === 0 ? '' : ` ${counts[k]}`}`,
-            icon: libraryIcon(k),
-            testId: `library-tab-${k}`,
-          })), { value: 'workflow', label: 'Workflows', icon: 'workflow', testId: 'library-tab-workflow' }]}
+          options={[
+            ...LIBRARY_KINDS.map((k) => ({
+              value: k,
+              label: `${libraryLabelPlural(k)}${counts[k] === 0 ? '' : ` ${counts[k]}`}`,
+              icon: libraryIcon(k),
+              testId: `library-tab-${k}`,
+            })),
+            {
+              value: 'workflow',
+              label: 'Workflows',
+              icon: 'workflow',
+              testId: 'library-tab-workflow',
+            },
+          ]}
         />
         <span className="flex-1" />
         <Input

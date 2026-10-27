@@ -189,14 +189,20 @@ impl AgentState {
         preparation: &RunPreparation,
         vault: &Path,
     ) -> Result<Publication<'_>, String> {
-        let vault=vault_key(vault);
-        let generation=lock(&self.admission.state);
-        if !preparation.matches(&self.admission,&generation,&vault)||self.closing() {
+        let vault = vault_key(vault);
+        let generation = lock(&self.admission.state);
+        if !preparation.matches(&self.admission, &generation, &vault) || self.closing() {
             return Err(CLOSED.into());
         }
-        Ok(Publication {_held:generation,entry:EntryWitness {
-            owner:Arc::downgrade(&self.admission.state),entry:Arc::downgrade(&preparation.entry),generation:preparation.generation,vault,
-        }})
+        Ok(Publication {
+            _held: generation,
+            entry: EntryWitness {
+                owner: Arc::downgrade(&self.admission.state),
+                entry: Arc::downgrade(&preparation.entry),
+                generation: preparation.generation,
+                vault,
+            },
+        })
     }
 
     /// Hold through seat/config/child/slot/journal publication, never through

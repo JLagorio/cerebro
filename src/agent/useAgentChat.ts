@@ -133,7 +133,7 @@ export interface WaitingCard {
 
 export interface AgentChat {
   /** Attach verified archive metadata by stable message ID without restoring/detaching a live turn. */
-  applyArchiveReadback?(marks:readonly import('./conversations').ArchiveReadbackMark[]):void;
+  applyArchiveReadback?(marks: readonly import('./conversations').ArchiveReadbackMark[]): void;
   messages: ChatMessage[];
   /** A turn is in flight, a turn waiting on the person's answer included
    * (M57.1). */
@@ -291,10 +291,15 @@ export function useAgentChat(
   const endRun = useUiStore((s) => s.endRun);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   useEffect(() => {
-    const now=Date.now();const next=nextArchiveExpiry(messages,now);if(next===null)return;
-    const timer=window.setTimeout(()=>setMessages((held)=>expireArchivedMessages(held,Date.now())),Math.min(2_147_483_647,Math.max(1,next-now)));
-    return()=>window.clearTimeout(timer);
-  },[messages]);
+    const now = Date.now();
+    const next = nextArchiveExpiry(messages, now);
+    if (next === null) return;
+    const timer = window.setTimeout(
+      () => setMessages((held) => expireArchivedMessages(held, Date.now())),
+      Math.min(2_147_483_647, Math.max(1, next - now)),
+    );
+    return () => window.clearTimeout(timer);
+  }, [messages]);
   // The latest messages, for a stop that names the reply it waits on.
   const messagesRef = useRef<ChatMessage[]>(messages);
   messagesRef.current = messages;
@@ -801,18 +806,20 @@ export function useAgentChat(
       const assistantId = nextId();
       const userId = nextId();
       const archiveBinding: import('@/lib/generated/conversations').AttemptBinding | null =
-        turn.conversationId === null ? null : {
-          threadId: turn.conversationId,
-          userMessageId: userId,
-          assistantMessageId: assistantId,
-          parentThreadId: turn.archiveAncestry?.parentThreadId ?? null,
-          branchMessageId: turn.archiveAncestry?.branchMessageId ?? null,
-          displayMessage: {
-            text: trimmed,
-            addressedLabel: address === null ? null : (addressedTo?.title ?? address.handle),
-            attachmentRefs: [...(turn.archiveAttachmentRefs ?? [])],
-          },
-        };
+        turn.conversationId === null
+          ? null
+          : {
+              threadId: turn.conversationId,
+              userMessageId: userId,
+              assistantMessageId: assistantId,
+              parentThreadId: turn.archiveAncestry?.parentThreadId ?? null,
+              branchMessageId: turn.archiveAncestry?.branchMessageId ?? null,
+              displayMessage: {
+                text: trimmed,
+                addressedLabel: address === null ? null : (addressedTo?.title ?? address.handle),
+                attachmentRefs: [...(turn.archiveAttachmentRefs ?? [])],
+              },
+            };
       // One key belongs to this logical send, before saves or expansion can
       // yield. Neither a re-render nor an approval resume allocates another.
       const generationRequestKey = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
@@ -1731,10 +1738,22 @@ export function useAgentChat(
     [detachTurn, reattach, setLive, showInteraction, waitOnCard],
   );
 
-  const applyArchiveReadback=useCallback((marks:readonly import('./conversations').ArchiveReadbackMark[])=>{
-    const records=new Map(marks.map((mark)=>[mark.messageId,mark.record]));
-    setMessages((previous)=>{let changed=false;const next=previous.map((message)=>{const record=records.get(message.id);if(record===undefined)return message;changed=true;return {...message,archiveRecord:record};});return changed?next:previous;});
-  },[]);
+  const applyArchiveReadback = useCallback(
+    (marks: readonly import('./conversations').ArchiveReadbackMark[]) => {
+      const records = new Map(marks.map((mark) => [mark.messageId, mark.record]));
+      setMessages((previous) => {
+        let changed = false;
+        const next = previous.map((message) => {
+          const record = records.get(message.id);
+          if (record === undefined) return message;
+          changed = true;
+          return { ...message, archiveRecord: record };
+        });
+        return changed ? next : previous;
+      });
+    },
+    [],
+  );
   return {
     applyArchiveReadback,
     messages,

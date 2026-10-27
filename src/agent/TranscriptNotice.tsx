@@ -28,11 +28,20 @@ function words(
 ): { title: string; body: string | null } {
   switch (reason) {
     case 'archive_partial':
-      return {title:'Partial archived conversation',body:'Some content expired, was not retained or is outside this page. Settings’ Conversation archive shows older messages and each retained message’s status.'};
+      return {
+        title: 'Partial archived conversation',
+        body: 'Some content expired, was not retained or is outside this page. Settings’ Conversation archive shows older messages and each retained message’s status.',
+      };
     case 'archive_unavailable':
-      return {title:'Conversation archive unavailable',body:'The archive could not be read. No turn was resent.'};
+      return {
+        title: 'Conversation archive unavailable',
+        body: 'The archive could not be read. No turn was resent.',
+      };
     case 'archive_elsewhere':
-      return {title:'Archived in another vault',body:'Open the original vault to read this conversation’s archive.'};
+      return {
+        title: 'Archived in another vault',
+        body: 'Open the original vault to read this conversation’s archive.',
+      };
     case 'expired':
       return {
         title: 'Cleared by Claude Code',

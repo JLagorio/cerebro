@@ -593,10 +593,17 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
             // A known width ACK does not supply a complete metadata snapshot.
             // Keep a carrier only when its native metadata hash already matches;
             // otherwise exact properties remain unavailable until actual rescan.
-            const canonicalProperties = version.metadataHash === ack.version.metadataHash
-              ? entry.canonicalProperties
-              : undefined;
-            return { ...entry, properties, canonicalProperties, authority: ack.version, hash: ack.version.bodyHash };
+            const canonicalProperties =
+              version.metadataHash === ack.version.metadataHash
+                ? entry.canonicalProperties
+                : undefined;
+            return {
+              ...entry,
+              properties,
+              canonicalProperties,
+              authority: ack.version,
+              hash: ack.version.bodyHash,
+            };
           }),
         });
         try {

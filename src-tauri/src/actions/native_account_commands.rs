@@ -103,20 +103,33 @@ impl CredentialWorker {
                 let result = if run {
                     match work {
                         #[cfg(not(target_os = "macos"))]
-                        CredentialWork::Unsupported => original_owner.acquisition_failed(&original_ticket, ConnectionError::Unsupported),
+                        CredentialWork::Unsupported => original_owner
+                            .acquisition_failed(&original_ticket, ConnectionError::Unsupported),
                         #[cfg(target_os = "macos")]
                         CredentialWork::NativeImport => {
                             let result = (|| {
-                                let cancellation = original_owner.credential_cancellation(&original_ticket)?;
+                                let cancellation =
+                                    original_owner.credential_cancellation(&original_ticket)?;
                                 #[cfg(test)]
-                                let result = super::native_credential_bundle::run(&original_owner, &original_ticket, &cancellation, native_fixture);
+                                let result = super::native_credential_bundle::run(
+                                    &original_owner,
+                                    &original_ticket,
+                                    &cancellation,
+                                    native_fixture,
+                                );
                                 #[cfg(not(test))]
-                                let result = super::native_credential_bundle::run(&original_owner, &original_ticket, &cancellation);
+                                let result = super::native_credential_bundle::run(
+                                    &original_owner,
+                                    &original_ticket,
+                                    &cancellation,
+                                );
                                 result
                             })();
                             match result {
                                 Ok(()) => Ok(()),
-                                Err(error) => original_owner.acquisition_failed(&original_ticket, error),
+                                Err(error) => {
+                                    original_owner.acquisition_failed(&original_ticket, error)
+                                }
                             }
                         }
                         #[cfg(feature = "native-credential-smoke")]

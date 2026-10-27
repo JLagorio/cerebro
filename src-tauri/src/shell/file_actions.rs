@@ -299,8 +299,14 @@ fn pin_draft_destination(path: PathBuf) -> Result<DraftCopyDestination, Refusal>
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(&parent_path)
         .map_err(|_| refusal("changed"))?;
-    if descriptor_path(&parent)? != parent_path { return Err(refusal("changed")); }
-    Ok(DraftCopyDestination { path, parent, parent_path })
+    if descriptor_path(&parent)? != parent_path {
+        return Err(refusal("changed"));
+    }
+    Ok(DraftCopyDestination {
+        path,
+        parent,
+        parent_path,
+    })
 }
 pub(crate) fn choose_draft_copy(
     app: &tauri::AppHandle,
@@ -365,15 +371,25 @@ pub(crate) fn publish_archive_copy(
     #[cfg(target_os = "macos")]
     {
         let mut protected = vec![
-            original_vault.canonicalize().map_err(|_| refusal("changed"))?,
+            original_vault
+                .canonicalize()
+                .map_err(|_| refusal("changed"))?,
             config.canonicalize().map_err(|_| refusal("changed"))?,
         ];
         for root in protected_roots {
             protected.push(root.canonicalize().map_err(|_| refusal("changed"))?);
         }
         let held_parent = choice.parent.metadata().map_err(|_| refusal("changed"))?;
-        copy_payload_to_pinned(config, &protected, &choice.path, None, Some(&held_parent),
-            Some(&choice.parent_path), Some(protected[0].as_path()), write)?;
+        copy_payload_to_pinned(
+            config,
+            &protected,
+            &choice.path,
+            None,
+            Some(&held_parent),
+            Some(&choice.parent_path),
+            Some(protected[0].as_path()),
+            write,
+        )?;
         Ok(choice.path.to_string_lossy().into_owned())
     }
     #[cfg(not(target_os = "macos"))]
@@ -478,15 +494,29 @@ fn selected_copy_destination(path: &Path) -> Result<(), Refusal> {
 #[cfg(target_os = "macos")]
 fn owned_temporary(parent: &File, name: &std::ffi::CStr, created: &File) -> bool {
     use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
-    let Ok(held) = created.metadata() else { return false; };
+    let Ok(held) = created.metadata() else {
+        return false;
+    };
     let mut named = std::mem::MaybeUninit::<libc::stat>::uninit();
     // SAFETY: live borrowed directory FD, single-component terminated name,
     // and storage for one stat. No symlink is followed and no object is opened.
-    if unsafe { libc::fstatat(parent.as_raw_fd(), name.as_ptr(), named.as_mut_ptr(), libc::AT_SYMLINK_NOFOLLOW) } != 0 { return false; }
+    if unsafe {
+        libc::fstatat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            named.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    } != 0
+    {
+        return false;
+    }
     // SAFETY: successful fstatat initialized the complete stat object.
     let named = unsafe { named.assume_init() };
-    held.is_file() && named.st_mode & libc::S_IFMT == libc::S_IFREG
-        && named.st_dev as u64 == held.dev() && named.st_ino == held.ino()
+    held.is_file()
+        && named.st_mode & libc::S_IFMT == libc::S_IFREG
+        && named.st_dev as u64 == held.dev()
+        && named.st_ino == held.ino()
 }
 
 #[cfg(target_os = "macos")]
@@ -540,9 +570,15 @@ fn copy_payload_to_pinned(
         // The descriptor is the publication authority; names can only deny.
         if actual_parent != parent_path
             || expected_parent_route.is_some_and(|expected| expected != actual_parent)
-            || destination.parent().ok_or_else(|| refusal("changed"))?
-                .canonicalize().map_err(|_| refusal("changed"))? != actual_parent
-        { return Err(refusal("changed")); }
+            || destination
+                .parent()
+                .ok_or_else(|| refusal("changed"))?
+                .canonicalize()
+                .map_err(|_| refusal("changed"))?
+                != actual_parent
+        {
+            return Err(refusal("changed"));
+        }
         if actual_parent.starts_with(&vault)
             || protected_vaults
                 .iter()
@@ -597,7 +633,9 @@ fn copy_payload_to_pinned(
         write(&mut output)?;
         output.sync_all().map_err(|_| refusal("desktop_failed"))?;
         check()?;
-        if !owned_temporary(&parent, &temporary, &output) { return Err(refusal("changed")); }
+        if !owned_temporary(&parent, &temporary, &output) {
+            return Err(refusal("changed"));
+        }
         // SAFETY: both names are single components within the pinned parent.
         // Rename replaces a directory entry; it never follows a destination
         // symlink or writes through an existing hard link into the vault.
@@ -1446,82 +1484,144 @@ mod tests {
     }
     // Actual retained desktop publication seams. No assertions run in Drop.
     fn archive_temporary(parent: &Path) -> PathBuf {
-        std::fs::read_dir(parent).unwrap().map(|entry| entry.unwrap().path())
-            .find(|path| path.file_name().unwrap().to_string_lossy().starts_with(".cerebro-copy-"))
+        std::fs::read_dir(parent)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(".cerebro-copy-")
+            })
             .expect("actual create-new publication temporary")
     }
     #[test]
     fn archive_publication_stream_control_preserves_explicit_overwrite_and_exact_bytes() {
         let vault = temp_vault("archive-publish-control-vault");
         let outside = temp_vault("archive-publish-control-outside");
-        let config = config(&vault); let target = outside.join("conversation.json");
+        let config = config(&vault);
+        let target = outside.join("conversation.json");
         std::fs::write(&target, b"original chosen destination").unwrap();
         let choice = pin_draft_destination(target.clone()).unwrap();
         let result = publish_archive_copy(&config, &[], &vault, choice, |output| {
-            use std::io::Write as _; output.write_all(b"{\"literal\":\"007\"}\r\n").map_err(|_| refusal("desktop_failed"))
+            use std::io::Write as _;
+            output
+                .write_all(b"{\"literal\":\"007\"}\r\n")
+                .map_err(|_| refusal("desktop_failed"))
         });
         assert_eq!(result.unwrap(), target.to_string_lossy().into_owned());
-        assert_eq!(std::fs::read(&target).unwrap(), b"{\"literal\":\"007\"}\r\n");
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"{\"literal\":\"007\"}\r\n"
+        );
         assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 1);
-        for path in [vault, outside, config] { std::fs::remove_dir_all(path).unwrap(); }
+        for path in [vault, outside, config] {
+            std::fs::remove_dir_all(path).unwrap();
+        }
     }
     #[test]
     fn archive_publication_refuses_original_parent_retarget_after_streaming() {
         use std::os::unix::fs::symlink;
         let vault = temp_vault("archive-publish-parent-vault");
-        let outside = temp_vault("archive-publish-parent-outside"); let config = config(&vault);
-        let parent = outside.join("chosen"); let moved = outside.join("original-moved");
-        std::fs::create_dir(&parent).unwrap(); let target = parent.join("conversation.json");
+        let outside = temp_vault("archive-publish-parent-outside");
+        let config = config(&vault);
+        let parent = outside.join("chosen");
+        let moved = outside.join("original-moved");
+        std::fs::create_dir(&parent).unwrap();
+        let target = parent.join("conversation.json");
         std::fs::write(&target, b"keep original destination").unwrap();
         let choice = pin_draft_destination(target.clone()).unwrap();
         let result = publish_archive_copy(&config, &[], &vault, choice, |output| {
-            use std::io::Write as _; output.write_all(b"private archive body").unwrap();
-            std::fs::rename(&parent, &moved).unwrap(); symlink(&vault, &parent).unwrap(); Ok(())
+            use std::io::Write as _;
+            output.write_all(b"private archive body").unwrap();
+            std::fs::rename(&parent, &moved).unwrap();
+            symlink(&vault, &parent).unwrap();
+            Ok(())
         });
-        assert!(result.is_err(), "a moved original choice cannot be recaptured through a fresh route");
-        assert_eq!(std::fs::read(moved.join("conversation.json")).unwrap(), b"keep original destination");
+        assert!(
+            result.is_err(),
+            "a moved original choice cannot be recaptured through a fresh route"
+        );
+        assert_eq!(
+            std::fs::read(moved.join("conversation.json")).unwrap(),
+            b"keep original destination"
+        );
         assert!(!vault.join("conversation.json").exists());
-        assert_eq!(std::fs::read_dir(&moved).unwrap().count(), 1, "owned original temporary is cleaned through its held parent");
-        for path in [vault, outside, config] { std::fs::remove_dir_all(path).unwrap(); }
+        assert_eq!(
+            std::fs::read_dir(&moved).unwrap().count(),
+            1,
+            "owned original temporary is cleaned through its held parent"
+        );
+        for path in [vault, outside, config] {
+            std::fs::remove_dir_all(path).unwrap();
+        }
     }
     #[test]
     fn archive_publication_does_not_publish_a_replaced_temporary() {
         let vault = temp_vault("archive-publish-temp-vault");
-        let outside = temp_vault("archive-publish-temp-outside"); let config = config(&vault);
-        let target = outside.join("conversation.json"); std::fs::write(&target, b"keep chosen destination").unwrap();
+        let outside = temp_vault("archive-publish-temp-outside");
+        let config = config(&vault);
+        let target = outside.join("conversation.json");
+        std::fs::write(&target, b"keep chosen destination").unwrap();
         let choice = pin_draft_destination(target.clone()).unwrap();
         let mut replaced = None;
         let result = publish_archive_copy(&config, &[], &vault, choice, |output| {
-            use std::io::Write as _; output.write_all(b"private archive body").unwrap();
+            use std::io::Write as _;
+            output.write_all(b"private archive body").unwrap();
             let temporary = archive_temporary(&outside);
             std::fs::rename(&temporary, outside.join("externally-displaced-original")).unwrap();
-            std::fs::write(&temporary, b"unrelated replacement").unwrap(); replaced = Some(temporary); Ok(())
+            std::fs::write(&temporary, b"unrelated replacement").unwrap();
+            replaced = Some(temporary);
+            Ok(())
         });
-        assert!(result.is_err(), "publication must bind the temporary name to the original created FD");
+        assert!(
+            result.is_err(),
+            "publication must bind the temporary name to the original created FD"
+        );
         assert_eq!(std::fs::read(&target).unwrap(), b"keep chosen destination");
-        assert_eq!(std::fs::read(replaced.unwrap()).unwrap(), b"unrelated replacement");
-        assert_eq!(std::fs::read(outside.join("externally-displaced-original")).unwrap(), b"private archive body");
-        for path in [vault, outside, config] { std::fs::remove_dir_all(path).unwrap(); }
+        assert_eq!(
+            std::fs::read(replaced.unwrap()).unwrap(),
+            b"unrelated replacement"
+        );
+        assert_eq!(
+            std::fs::read(outside.join("externally-displaced-original")).unwrap(),
+            b"private archive body"
+        );
+        for path in [vault, outside, config] {
+            std::fs::remove_dir_all(path).unwrap();
+        }
     }
     #[test]
     fn archive_publication_failed_stream_cleanup_preserves_a_replaced_temporary() {
         let vault = temp_vault("archive-publish-cleanup-vault");
-        let outside = temp_vault("archive-publish-cleanup-outside"); let config = config(&vault);
-        let target = outside.join("conversation.json"); std::fs::write(&target, b"keep chosen destination").unwrap();
+        let outside = temp_vault("archive-publish-cleanup-outside");
+        let config = config(&vault);
+        let target = outside.join("conversation.json");
+        std::fs::write(&target, b"keep chosen destination").unwrap();
         let choice = pin_draft_destination(target.clone()).unwrap();
         let mut replaced = None;
         let result = publish_archive_copy(&config, &[], &vault, choice, |output| {
-            use std::io::Write as _; output.write_all(b"private partial archive").unwrap();
+            use std::io::Write as _;
+            output.write_all(b"private partial archive").unwrap();
             let temporary = archive_temporary(&outside);
             std::fs::rename(&temporary, outside.join("externally-displaced-original")).unwrap();
-            std::fs::write(&temporary, b"unrelated replacement").unwrap(); replaced = Some(temporary);
+            std::fs::write(&temporary, b"unrelated replacement").unwrap();
+            replaced = Some(temporary);
             Err(refusal("desktop_failed"))
         });
         assert!(result.is_err());
         assert_eq!(std::fs::read(&target).unwrap(), b"keep chosen destination");
-        assert_eq!(std::fs::read(replaced.unwrap()).unwrap(), b"unrelated replacement", "failed cleanup must not unlink a replacement");
-        assert_eq!(std::fs::read(outside.join("externally-displaced-original")).unwrap(), b"private partial archive");
-        for path in [vault, outside, config] { std::fs::remove_dir_all(path).unwrap(); }
+        assert_eq!(
+            std::fs::read(replaced.unwrap()).unwrap(),
+            b"unrelated replacement",
+            "failed cleanup must not unlink a replacement"
+        );
+        assert_eq!(
+            std::fs::read(outside.join("externally-displaced-original")).unwrap(),
+            b"private partial archive"
+        );
+        for path in [vault, outside, config] {
+            std::fs::remove_dir_all(path).unwrap();
+        }
     }
-
 }

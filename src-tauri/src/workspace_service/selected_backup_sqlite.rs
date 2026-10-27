@@ -331,7 +331,9 @@ impl PinnedConnection {
         Ok(pinned)
     }
     /// Identity of the already-owned pin; no extra database pathname handle.
-    pub(super) fn identity(&self) -> (u64, u64) { self.owner.identity }
+    pub(super) fn identity(&self) -> (u64, u64) {
+        self.owner.identity
+    }
     pub(super) fn validate(&self) -> Result<(), AuthorityError> {
         no_sidecars(&self.owner.source)?;
         let current = fs::symlink_metadata(&self.owner.source).map_err(|_| {

@@ -265,7 +265,7 @@ pub(crate) fn prepare_storage(app: &AppHandle) -> OwnerResult<()> {
         Some(owner) => {
             owner.action_cancellations = Arc::downgrade(&state.action_cancellations);
             owner.validate()
-        },
+        }
         None => RuntimeOwner::open_existing(&state.registration.origin).map(|mut owner| {
             owner.action_cancellations = Arc::downgrade(&state.action_cancellations);
             storage.owner = Some(owner);
@@ -306,8 +306,13 @@ pub(crate) fn recover_unstarted_children(
 /// successful legacy publication released ActiveRoot. Missing provenance is
 /// never written here. No action, account or RunGrant authority is created.
 /// Opening-binding-only observation. No proof/owner accessor or other consumer.
-pub(crate) struct OpeningBindingObservation { proof: AttendedWindowProof }
-pub(crate) fn observe_opening_binding(app: &AppHandle, window: &WebviewWindow) -> OwnerResult<OpeningBindingObservation> {
+pub(crate) struct OpeningBindingObservation {
+    proof: AttendedWindowProof,
+}
+pub(crate) fn observe_opening_binding(
+    app: &AppHandle,
+    window: &WebviewWindow,
+) -> OwnerResult<OpeningBindingObservation> {
     authenticate(app, window).map(|proof| OpeningBindingObservation { proof })
 }
 pub(crate) fn bind_opening(
@@ -720,7 +725,11 @@ pub(crate) fn register_published_root(
                 Ok(row.revision)
             })?;
             // The only production strong-seal capture follows a successful commit.
-            Ok((publication.retain_original_entry(), revision, owner.runtime_seal.clone()))
+            Ok((
+                publication.retain_original_entry(),
+                revision,
+                owner.runtime_seal.clone(),
+            ))
         })
         .map_err(unavailable)??;
     let agents = entry.agents;
@@ -849,8 +858,10 @@ fn with_action_read<T>(
                 .owner
                 .as_mut()
                 .ok_or(NativeOwnerError::Unavailable)?;
-            owner.action_cancellations=Arc::downgrade(&origin.owner.action_cancellations);
-            if !Arc::ptr_eq(&owner.runtime_seal,&origin.runtime_seal) { return Err(NativeOwnerError::Unavailable); }
+            owner.action_cancellations = Arc::downgrade(&origin.owner.action_cancellations);
+            if !Arc::ptr_eq(&owner.runtime_seal, &origin.runtime_seal) {
+                return Err(NativeOwnerError::Unavailable);
+            }
             owner.read_snapshot(|read| {
                 origin.store.recheck()?;
                 let rules = super::native_rules::admission_rules();
@@ -1186,7 +1197,11 @@ impl RuntimeOwner {
     fn validate(&mut self) -> OwnerResult<()> {
         let result = self.validate_inner();
         if result.is_err() {
-            retire_credential_owner(&mut self.retired, &self.credential_cancellations, &self.action_cancellations);
+            retire_credential_owner(
+                &mut self.retired,
+                &self.credential_cancellations,
+                &self.action_cancellations,
+            );
         }
         result
     }
@@ -1206,11 +1221,19 @@ impl RuntimeOwner {
         // A helper unexpectedly ending its transaction cannot be interpreted as
         // a safe rollback. Only this owner may cross the commit boundary.
         if tx.is_autocommit() {
-            retire_credential_owner(&mut self.retired, &self.credential_cancellations, &self.action_cancellations);
+            retire_credential_owner(
+                &mut self.retired,
+                &self.credential_cancellations,
+                &self.action_cancellations,
+            );
             return Outcome::CommitUncertain;
         }
         if self.validate_inner().is_err() {
-            retire_credential_owner(&mut self.retired, &self.credential_cancellations, &self.action_cancellations);
+            retire_credential_owner(
+                &mut self.retired,
+                &self.credential_cancellations,
+                &self.action_cancellations,
+            );
             return Outcome::NotCommitted(NativeOwnerError::Unavailable);
         }
         let value = match result {
@@ -1218,12 +1241,20 @@ impl RuntimeOwner {
             Err(error) => return Outcome::NotCommitted(error),
         };
         if tx.commit().is_err() {
-            retire_credential_owner(&mut self.retired, &self.credential_cancellations, &self.action_cancellations);
+            retire_credential_owner(
+                &mut self.retired,
+                &self.credential_cancellations,
+                &self.action_cancellations,
+            );
             return Outcome::CommitUncertain;
         }
         #[cfg(test)]
         if tests::transaction_ack_lost() {
-            retire_credential_owner(&mut self.retired, &self.credential_cancellations, &self.action_cancellations);
+            retire_credential_owner(
+                &mut self.retired,
+                &self.credential_cancellations,
+                &self.action_cancellations,
+            );
             return Outcome::CommitUncertain;
         }
         Outcome::Committed(value)
@@ -1248,7 +1279,11 @@ impl RuntimeOwner {
             .query_row("PRAGMA query_only", [], |r| r.get(0))
             .map_err(unavailable)?;
         if self.conn.pragma_update(None, "query_only", true).is_err() {
-            retire_credential_owner(&mut self.retired, &self.credential_cancellations, &self.action_cancellations);
+            retire_credential_owner(
+                &mut self.retired,
+                &self.credential_cancellations,
+                &self.action_cancellations,
+            );
             return Err(NativeOwnerError::Unavailable);
         }
         // Unwind restores query_only too; an un-restorable owner is retired.
@@ -1266,7 +1301,11 @@ impl RuntimeOwner {
             .is_err()
             || self.validate_inner().is_err()
         {
-            retire_credential_owner(&mut self.retired, &self.credential_cancellations, &self.action_cancellations);
+            retire_credential_owner(
+                &mut self.retired,
+                &self.credential_cancellations,
+                &self.action_cancellations,
+            );
             return Err(NativeOwnerError::Unavailable);
         }
         match result {
@@ -1501,74 +1540,151 @@ pub(crate) use native_chat_recovery::inspect as chat_recovery_inspect;
 
 #[path = "native_chat_generation.rs"]
 mod native_chat_generation;
-pub(crate) use native_chat_generation::{GenerationStart, NativeGenerationRun, NativeGenerationSettlement};
+pub(crate) use native_chat_generation::{
+    GenerationStart, NativeGenerationRun, NativeGenerationSettlement,
+};
 
 #[path = "native_credential_cancel.rs"]
 mod credential_cancel;
 
-fn retire_credential_owner(retired: &mut bool, book: &std::sync::Weak<credential_cancel::CancellationBook>, actions: &std::sync::Weak<native_actions::cancellation::CancellationBook>) {
+fn retire_credential_owner(
+    retired: &mut bool,
+    book: &std::sync::Weak<credential_cancel::CancellationBook>,
+    actions: &std::sync::Weak<native_actions::cancellation::CancellationBook>,
+) {
     *retired = true;
-    if let Some(book) = book.upgrade() { book.cancel_all(); }
-    if let Some(book) = actions.upgrade() { book.cancel_all(); }
+    if let Some(book) = book.upgrade() {
+        book.cancel_all();
+    }
+    if let Some(book) = actions.upgrade() {
+        book.cancel_all();
+    }
 }
 
 #[cfg(target_os = "macos")]
 #[path = "native_credential_bundle.rs"]
 mod native_credential_bundle;
 
-#[path="native_actions.rs"]
+#[path = "native_actions.rs"]
 mod native_actions;
 
 impl NativeActionReadOrigin {
     /// Stop/opening invalidation notification only: no storage, I/O or joins.
-    pub(crate) fn cancel_action_workers(&self) { self.owner.action_cancellations.cancel_run(self.receipt.run_id()); }
+    pub(crate) fn cancel_action_workers(&self) {
+        self.owner
+            .action_cancellations
+            .cancel_run(self.receipt.run_id());
+    }
 }
 
 /// Explicit app-level Stop-all also reaches owned actions after their CLI slot ended.
 /// This control notification does not retire the book or mint any action authority.
-pub(crate) fn stop_action_workers(app:&AppHandle) {
+pub(crate) fn stop_action_workers(app: &AppHandle) {
     native_workflows::worker::stop(app);
-    if let Some(owner)=app.try_state::<Arc<NativeOwnerState>>() { owner.action_cancellations.stop_all(); }
+    if let Some(owner) = app.try_state::<Arc<NativeOwnerState>>() {
+        owner.action_cancellations.stop_all();
+    }
 }
 
-#[path="native_workflow_rows.rs"]
+#[path = "native_workflow_rows.rs"]
 mod workflow_rows;
 
-#[path="native_workflows.rs"]
+#[path = "native_workflows.rs"]
 mod native_workflows;
 
-pub(crate) use native_actions::operations::grants::{RunActionAccessView,SetRunActionAccess,SetRunActionAccessResult,RunActionGrantSelection,RunActionSelection,GrantInputSelection,RunActionGrantView,GrantInputView,RunActionAccountChoice};
-pub(crate) fn read_managed_action_access(app:&tauri::AppHandle,window:&tauri::WebviewWindow,run:u64)->Result<RunActionAccessView,crate::actions::effect_types::ActionError>{native_actions::operations::grants::read(app,window,run)}
-pub(crate) fn set_managed_action_access(app:&tauri::AppHandle,window:&tauri::WebviewWindow,run:u64,request:SetRunActionAccess)->SetRunActionAccessResult{native_actions::operations::grants::set(app,window,run,request)}
+pub(crate) use native_actions::operations::grants::{
+    GrantInputSelection, GrantInputView, RunActionAccessView, RunActionAccountChoice,
+    RunActionGrantSelection, RunActionGrantView, RunActionSelection, SetRunActionAccess,
+    SetRunActionAccessResult,
+};
+pub(crate) fn read_managed_action_access(
+    app: &tauri::AppHandle,
+    window: &tauri::WebviewWindow,
+    run: u64,
+) -> Result<RunActionAccessView, crate::actions::effect_types::ActionError> {
+    native_actions::operations::grants::read(app, window, run)
+}
+pub(crate) fn set_managed_action_access(
+    app: &tauri::AppHandle,
+    window: &tauri::WebviewWindow,
+    run: u64,
+    request: SetRunActionAccess,
+) -> SetRunActionAccessResult {
+    native_actions::operations::grants::set(app, window, run, request)
+}
 
 /// Process-owned workflow worker joins after actual provider cleanup on exit.
-pub(crate) fn shutdown_workflow_workers(app:&AppHandle){native_workflows::worker::shutdown(app);}
+pub(crate) fn shutdown_workflow_workers(app: &AppHandle) {
+    native_workflows::worker::shutdown(app);
+}
 
-pub(crate) use native_workflows::commands::{workflow_context,workflow_catalog,workflow_document,workflow_version,workflow_save,workflow_publish,workflow_unpublish,workflow_validate,workflow_actions};
+pub(crate) use native_workflows::commands::{
+    workflow_actions, workflow_catalog, workflow_context, workflow_document, workflow_publish,
+    workflow_save, workflow_unpublish, workflow_validate, workflow_version,
+};
 
 /// Existing compiled metadata bounds only; no origin, grant or execution proof.
-pub(crate) fn managed_call_limits()->(usize,std::time::Duration){
- (super::schema::history_limits().max_id_bytes,super::effect_kernel::approval_lifetime().to_std().unwrap_or_default())
+pub(crate) fn managed_call_limits() -> (usize, std::time::Duration) {
+    (
+        super::schema::history_limits().max_id_bytes,
+        super::effect_kernel::approval_lifetime()
+            .to_std()
+            .unwrap_or_default(),
+    )
 }
 
 /// Private matched-call route only; no renderer/grant view can construct caller.
-pub(crate) fn managed_action_tool(app:&tauri::AppHandle,caller:&crate::mcp::NativeManagedCall,name:&str,args:&serde_json::Map<String,serde_json::Value>)->Result<serde_json::Value,super::read_types::ActionError>{native_actions::operations::managed_call::invoke(app,caller,name,args)}
+pub(crate) fn managed_action_tool(
+    app: &tauri::AppHandle,
+    caller: &crate::mcp::NativeManagedCall,
+    name: &str,
+    args: &serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Value, super::read_types::ActionError> {
+    native_actions::operations::managed_call::invoke(app, caller, name, args)
+}
 /// Returns None only for an ordinary legacy card. A managed acknowledgement
 /// contains no run handle and only follows its actual original worker commit.
-pub(crate) fn answer_held_managed_interaction(app:&tauri::AppHandle,window:&tauri::WebviewWindow,vault:&std::path::Path,id:&str,answer:&crate::agent::interaction::PersonAnswer,edited:Option<&serde_json::Value>)->Option<Result<(),crate::agent::interaction::Refusal>>{native_actions::operations::managed_call::person_answer(app,window,vault,id,answer,edited)}
+pub(crate) fn answer_held_managed_interaction(
+    app: &tauri::AppHandle,
+    window: &tauri::WebviewWindow,
+    vault: &std::path::Path,
+    id: &str,
+    answer: &crate::agent::interaction::PersonAnswer,
+    edited: Option<&serde_json::Value>,
+) -> Option<Result<(), crate::agent::interaction::Refusal>> {
+    native_actions::operations::managed_call::person_answer(app, window, vault, id, answer, edited)
+}
 
 // Actual authenticated workflow command facade; DTOs are selectors only.
-pub(crate) use native_workflows::runtime_commands::{workflow_start,workflow_continue,workflow_reauthorize,workflow_cancel,workflow_runs,workflow_run,workflow_value,workflow_action_details,workflow_answer_action,workflow_answer_wait};
+pub(crate) use native_workflows::runtime_commands::{
+    workflow_action_details, workflow_answer_action, workflow_answer_wait, workflow_cancel,
+    workflow_continue, workflow_reauthorize, workflow_run, workflow_runs, workflow_start,
+    workflow_value,
+};
 
 pub(crate) use native_workflows::runtime_commands::workflow_access;
 
-#[cfg(feature="native-action-smoke")]
-pub(crate) use native_actions::operations::smoke::{Fixture as NativeActionSmokeFixture,seed as seed_native_action_smoke,entries as native_action_smoke_entries,input as native_action_smoke_input,output_digest as native_action_smoke_output_digest};
+#[cfg(feature = "native-action-smoke")]
+pub(crate) use native_actions::operations::smoke::{
+    entries as native_action_smoke_entries, input as native_action_smoke_input,
+    output_digest as native_action_smoke_output_digest, seed as seed_native_action_smoke,
+    Fixture as NativeActionSmokeFixture,
+};
 
 // Awake schedule doors capture the injected native opening themselves.
-pub(crate) use native_workflows::schedule_commands::{workflow_schedule,workflow_schedule_enable,workflow_schedule_pause,workflow_schedule_remove,workflow_schedule_preview};
-pub(crate) use native_workflows::worker::monitor::{workflow_schedule_wake,opened as workflow_schedule_opened};
+pub(crate) use native_workflows::schedule_commands::{
+    workflow_schedule, workflow_schedule_enable, workflow_schedule_pause,
+    workflow_schedule_preview, workflow_schedule_remove,
+};
+pub(crate) use native_workflows::worker::monitor::{
+    opened as workflow_schedule_opened, workflow_schedule_wake,
+};
 
-#[path="native_conversations.rs"]
+#[path = "native_conversations.rs"]
 mod native_conversations;
-pub(crate) use native_conversations::{context as conversation_context,setting as conversation_retention,set_retention as conversation_set_retention,list as conversation_list,messages as conversation_messages,delete as conversation_delete,prune as conversation_prune,export as conversation_export,import as conversation_import};
+pub(crate) use native_conversations::{
+    context as conversation_context, delete as conversation_delete, export as conversation_export,
+    import as conversation_import, list as conversation_list, messages as conversation_messages,
+    prune as conversation_prune, set_retention as conversation_set_retention,
+    setting as conversation_retention,
+};

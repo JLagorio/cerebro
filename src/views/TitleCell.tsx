@@ -56,8 +56,16 @@ function TitleCellValue({
       </button>
     );
   if (entry.authority?.kind === 'sqlite_metadata')
-    return vault === null ? <span role="status">Open the original vault to edit this title.</span> :
-      <SelectedTitleInput key={entry.authority.workspaceId + ':' + entry.authority.recordId} entry={entry} vault={vault} onEnd={() => setEditing(false)} />;
+    return vault === null ? (
+      <span role="status">Open the original vault to edit this title.</span>
+    ) : (
+      <SelectedTitleInput
+        key={entry.authority.workspaceId + ':' + entry.authority.recordId}
+        entry={entry}
+        vault={vault}
+        onEnd={() => setEditing(false)}
+      />
+    );
   return (
     <FocusedFieldInput
       identity={identity}

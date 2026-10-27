@@ -1,4 +1,8 @@
-import { selectedConfigIssue, selectedLegacyProperties, selectedResolvedField } from './selectedEntryProjection';
+import {
+  selectedConfigIssue,
+  selectedLegacyProperties,
+  selectedResolvedField,
+} from './selectedEntryProjection';
 import type {
   DisplayConfig,
   Entry,
@@ -333,10 +337,21 @@ export function buildSchema(entries: Entry[]): Schema {
   for (const e of entries) {
     if (e.type !== 'Type') continue;
     const properties = selectedLegacyProperties(e);
-    const unavailableReason = selectedConfigIssue(e, ['fields', 'statuses', 'deadline', 'email_domain', 'icon', 'color', 'folder', 'views', 'display', 'layout', 'tabs']);
+    const unavailableReason = selectedConfigIssue(e, [
+      'fields',
+      'statuses',
+      'deadline',
+      'email_domain',
+      'icon',
+      'color',
+      'folder',
+      'views',
+      'display',
+      'layout',
+      'tabs',
+    ]);
     const fields = parseFields((properties as Record<string, unknown>).fields);
-    const deadline =
-      typeof properties.deadline === 'string' ? properties.deadline.trim() : null;
+    const deadline = typeof properties.deadline === 'string' ? properties.deadline.trim() : null;
     const emailDomain =
       typeof properties.email_domain === 'string' ? properties.email_domain.trim() : null;
     types.set(e.title, {
@@ -381,7 +396,9 @@ export function buildSchema(entries: Entry[]): Schema {
     if (projectPath !== null) {
       const project = byPath.get(projectPath);
       if (project !== undefined) {
-        const override = parseStatuses((selectedLegacyProperties(project) as Record<string, unknown>).statuses);
+        const override = parseStatuses(
+          (selectedLegacyProperties(project) as Record<string, unknown>).statuses,
+        );
         if (override.length > 0) return override;
       }
     }
@@ -396,7 +413,9 @@ export function buildSchema(entries: Entry[]): Schema {
     if (e.project !== null) {
       const project = byPath.get(e.project);
       if (project !== undefined) {
-        const override = parseStatuses((selectedLegacyProperties(project) as Record<string, unknown>).statuses);
+        const override = parseStatuses(
+          (selectedLegacyProperties(project) as Record<string, unknown>).statuses,
+        );
         if (override.length > 0) return override;
       }
     }
@@ -418,7 +437,9 @@ export function buildSchema(entries: Entry[]): Schema {
     if (e.project !== null) {
       const project = byPath.get(e.project);
       if (project !== undefined) {
-        const override = parseStatuses((selectedLegacyProperties(project) as Record<string, unknown>).statuses);
+        const override = parseStatuses(
+          (selectedLegacyProperties(project) as Record<string, unknown>).statuses,
+        );
         if (override.length > 0) return 'project';
       }
     }
@@ -510,14 +531,27 @@ export function buildSchema(entries: Entry[]): Schema {
     const def = declaredDef(e, field);
     if (e.authority?.kind === 'sqlite_metadata' && isVirtualField(field)) {
       const raw = virtualValue(e, field);
-      const display = typeof raw === 'string' ? (field === 'createdAt' || field === 'modifiedAt' ? formatTimestamp(raw) : raw) : '';
+      const display =
+        typeof raw === 'string'
+          ? field === 'createdAt' || field === 'modifiedAt'
+            ? formatTimestamp(raw)
+            : raw
+          : '';
       return { def, raw, display, color: null, ghost: false };
     }
     const typeIssue = e.type ? types.get(e.type)?.unavailableReason : undefined;
     if (def?.kind !== 'created_time' && def?.kind !== 'last_edited_time') {
       const selected = selectedResolvedField(e, field, def, typeIssue);
       if (selected !== null) return selected;
-      if (typeIssue) return { def, raw: undefined, display: 'Unavailable', color: null, ghost: false, unavailableReason: typeIssue };
+      if (typeIssue)
+        return {
+          def,
+          raw: undefined,
+          display: 'Unavailable',
+          color: null,
+          ghost: false,
+          unavailableReason: typeIssue,
+        };
     }
     const relTargets = e.relationships[field];
     const raw: unknown = relTargets !== undefined ? relTargets : e.properties[field];

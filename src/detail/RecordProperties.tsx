@@ -35,7 +35,16 @@ import { isStructured, StructuredValue } from '@/detail/StructuredValue';
 function undeclaredDisplay(entry: Entry, name: string, schema: Schema): React.ReactNode {
   if (entry.authority?.kind === 'sqlite_metadata') {
     const resolved = schema.resolveField(entry, name);
-    return <span>{resolved.display || 'Empty'}{resolved.unavailableReason && <span role="status" className="block text-xs text-n-600">{resolved.unavailableReason}</span>}</span>;
+    return (
+      <span>
+        {resolved.display || 'Empty'}
+        {resolved.unavailableReason && (
+          <span role="status" className="block text-xs text-n-600">
+            {resolved.unavailableReason}
+          </span>
+        )}
+      </span>
+    );
   }
   if (name in entry.relationships) return entry.relationships[name].join(', ');
   const value = entry.properties[name];
@@ -198,7 +207,11 @@ export function RecordProperties({
 
   return (
     <div className="cb-record-properties mb-4 flex flex-col gap-1">
-      {(selectedEntryIssue(entry) ?? typeDef?.unavailableReason) && <p role="status" className="section-unavailable text-xs text-n-600">{selectedEntryIssue(entry) ?? typeDef?.unavailableReason}</p>}
+      {(selectedEntryIssue(entry) ?? typeDef?.unavailableReason) && (
+        <p role="status" className="section-unavailable text-xs text-n-600">
+          {selectedEntryIssue(entry) ?? typeDef?.unavailableReason}
+        </p>
+      )}
       {layout.flat ? (
         /* Declared fields get their own container: the sortable measures its
            children as the rows, and undeclared keys are not part of the type's

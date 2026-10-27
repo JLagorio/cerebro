@@ -240,7 +240,10 @@ impl Seat {
         }
     }
 
-    pub(crate) fn with_generation(mut self, tracking: Option<Arc<crate::actions::native_owner::NativeGenerationSettlement>>) -> Self {
+    pub(crate) fn with_generation(
+        mut self,
+        tracking: Option<Arc<crate::actions::native_owner::NativeGenerationSettlement>>,
+    ) -> Self {
         self.generation_bound = tracking.is_some();
         self.generation_settlement = tracking;
         self
@@ -423,8 +426,14 @@ impl PersonAnswer {
     /// Finite held-action control, not person admission. Only the native answer
     /// command constructs this value from IPC; the original ACT worker still
     /// authenticates its owner and commits the real approval separately.
-    pub(crate) fn managed_choice(&self)->Option<bool>{
-        match self {Self::Allow{remember:Remember::Once}=>Some(true),Self::Deny{..}=>Some(false),_=>None}
+    pub(crate) fn managed_choice(&self) -> Option<bool> {
+        match self {
+            Self::Allow {
+                remember: Remember::Once,
+            } => Some(true),
+            Self::Deny { .. } => Some(false),
+            _ => None,
+        }
     }
     /// The webview's answer, cleaned: a deny message trimmed, its control
     /// characters (C0, DEL, C1) turned into spaces, and cut at 2000
@@ -624,23 +633,38 @@ pub struct InteractionCard {
     pub asked_at: String,
 }
 
-
 impl Serialize for InteractionCard {
- fn serialize<S:serde::Serializer>(&self,serializer:S)->Result<S::Ok,S::Error>{
-  use serde::ser::SerializeMap;
-  let mut wire=serializer.serialize_map(None)?;
-  wire.serialize_entry("id",&self.id)?;wire.serialize_entry("kind",&self.kind)?;
-  let managed=matches!(self.kind,Kind::ManagedAction|Kind::ManagedAccess);
-  if managed{wire.serialize_entry("answering",&self.answering.unwrap_or(false))?;wire.serialize_entry("run",&self.run)?;}
-  wire.serialize_entry("tool_name",&self.tool_name)?;
-  let tool_id=if managed&&self.tool_id.is_empty(){None}else{Some(&self.tool_id)};
-  wire.serialize_entry("tool_id",&tool_id)?;wire.serialize_entry("session_id",&self.session_id)?;
-  wire.serialize_entry("summary",&self.summary)?;wire.serialize_entry("family",&self.family)?;
-  wire.serialize_entry("subject",&self.subject)?;wire.serialize_entry("title",&self.title)?;
-  wire.serialize_entry("target",&self.target)?;wire.serialize_entry("actor",&self.actor)?;
-  if let Some(questions)=&self.questions{wire.serialize_entry("questions",questions)?;}
-  wire.serialize_entry("input",&self.input)?;wire.serialize_entry("asked_at",&self.asked_at)?;wire.end()
- }
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut wire = serializer.serialize_map(None)?;
+        wire.serialize_entry("id", &self.id)?;
+        wire.serialize_entry("kind", &self.kind)?;
+        let managed = matches!(self.kind, Kind::ManagedAction | Kind::ManagedAccess);
+        if managed {
+            wire.serialize_entry("answering", &self.answering.unwrap_or(false))?;
+            wire.serialize_entry("run", &self.run)?;
+        }
+        wire.serialize_entry("tool_name", &self.tool_name)?;
+        let tool_id = if managed && self.tool_id.is_empty() {
+            None
+        } else {
+            Some(&self.tool_id)
+        };
+        wire.serialize_entry("tool_id", &tool_id)?;
+        wire.serialize_entry("session_id", &self.session_id)?;
+        wire.serialize_entry("summary", &self.summary)?;
+        wire.serialize_entry("family", &self.family)?;
+        wire.serialize_entry("subject", &self.subject)?;
+        wire.serialize_entry("title", &self.title)?;
+        wire.serialize_entry("target", &self.target)?;
+        wire.serialize_entry("actor", &self.actor)?;
+        if let Some(questions) = &self.questions {
+            wire.serialize_entry("questions", questions)?;
+        }
+        wire.serialize_entry("input", &self.input)?;
+        wire.serialize_entry("asked_at", &self.asked_at)?;
+        wire.end()
+    }
 }
 
 /// What an answer resumes: the run's request, on the same session, in the
@@ -658,7 +682,6 @@ pub struct Resume {
     pub approval: Option<WriteApproval>,
 }
 
-
 /// Minted only while the original interaction is accepted for an answer. IDs
 /// copied out of a card or CLI session cannot construct or reactivate this link.
 #[derive(Debug, Clone)]
@@ -672,20 +695,38 @@ pub(crate) struct AnswerLink {
     generation_bound: bool,
 }
 impl AnswerLink {
-    pub(crate) fn source_run(&self)->&str {&self.source_run}
-    pub(crate) fn session(&self)->&str {&self.session}
-    pub(crate) fn answer_key(&self)->&str {&self.answer_key}
-    pub(crate) fn generation_bound(&self)->bool {self.generation_bound}
-    pub(crate) fn belongs_to(&self, interactions:&Interactions)->bool {self.book.ptr_eq(&Arc::downgrade(&interactions.book))}
-    fn matches(&self, book:&Book)->bool {
-        book.entries.iter().any(|entry|entry.id==self.id && entry.run_id==self.source_run
-            && entry.session_id==self.session && entry.vault==self.vault
-            && entry.answer_key.as_deref()==Some(&self.answer_key)
-            && matches!(entry.state,State::Answering(_)) && !entry.consumed && entry.resume_run.is_none())
+    pub(crate) fn source_run(&self) -> &str {
+        &self.source_run
     }
-    pub(crate) fn validate(&self,vault:&Path)->bool {
-        let Some(book)=self.book.upgrade() else {return false};
-        vault==self.vault && self.matches(&lock(&book))
+    pub(crate) fn session(&self) -> &str {
+        &self.session
+    }
+    pub(crate) fn answer_key(&self) -> &str {
+        &self.answer_key
+    }
+    pub(crate) fn generation_bound(&self) -> bool {
+        self.generation_bound
+    }
+    pub(crate) fn belongs_to(&self, interactions: &Interactions) -> bool {
+        self.book.ptr_eq(&Arc::downgrade(&interactions.book))
+    }
+    fn matches(&self, book: &Book) -> bool {
+        book.entries.iter().any(|entry| {
+            entry.id == self.id
+                && entry.run_id == self.source_run
+                && entry.session_id == self.session
+                && entry.vault == self.vault
+                && entry.answer_key.as_deref() == Some(&self.answer_key)
+                && matches!(entry.state, State::Answering(_))
+                && !entry.consumed
+                && entry.resume_run.is_none()
+        })
+    }
+    pub(crate) fn validate(&self, vault: &Path) -> bool {
+        let Some(book) = self.book.upgrade() else {
+            return false;
+        };
+        vault == self.vault && self.matches(&lock(&book))
     }
 }
 
@@ -1302,18 +1343,36 @@ impl Interactions {
     /// runs.
     #[cfg(test)]
     pub fn open_seat(&self, seat: Seat, pending: Option<PendingDeferral>) {
-        let _=self.open_seat_inner(seat,pending,false);
+        let _ = self.open_seat_inner(seat, pending, false);
     }
-    pub(crate) fn open_unlinked_seat(&self,seat:Seat,pending:Option<PendingDeferral>)->Result<(),String> {
-        self.open_seat_inner(seat,pending,true)
+    pub(crate) fn open_unlinked_seat(
+        &self,
+        seat: Seat,
+        pending: Option<PendingDeferral>,
+    ) -> Result<(), String> {
+        self.open_seat_inner(seat, pending, true)
     }
-    fn open_seat_inner(&self,mut seat:Seat,pending:Option<PendingDeferral>,checked:bool)->Result<(),String> {
+    fn open_seat_inner(
+        &self,
+        mut seat: Seat,
+        pending: Option<PendingDeferral>,
+        checked: bool,
+    ) -> Result<(), String> {
         let mut book = lock(&self.book);
         let session = seat.session_id.clone();
-        if checked && book.entries.iter().any(|entry|entry.session_id==session && entry.generation_bound && !entry.consumed && matches!(entry.state,State::Answering(_) | State::Answered(_))) {
-            return Err("This conversation is resuming a waiting call. Nothing was started.".into());
+        if checked
+            && book.entries.iter().any(|entry| {
+                entry.session_id == session
+                    && entry.generation_bound
+                    && !entry.consumed
+                    && matches!(entry.state, State::Answering(_) | State::Answered(_))
+            })
+        {
+            return Err(
+                "This conversation is resuming a waiting call. Nothing was started.".into(),
+            );
         }
-        let mut cancelled_generations=Vec::new();
+        let mut cancelled_generations = Vec::new();
         let answering = book
             .entries
             .iter_mut()
@@ -1376,20 +1435,29 @@ impl Interactions {
         book.bound(&session);
         book.seats.insert(seat.run_id.clone(), seat);
         drop(book);
-        for generation in cancelled_generations {generation.cancel_wait();}
+        for generation in cancelled_generations {
+            generation.cancel_wait();
+        }
         Ok(())
     }
 
     pub(crate) fn open_answer_seat(&self, seat: Seat, link: &AnswerLink) -> Result<(), String> {
-        let mut book=lock(&self.book);
-        if !link.book.ptr_eq(&Arc::downgrade(&self.book)) || !link.matches(&book)
-            || seat.vault!=link.vault || seat.session_id!=link.session
-            || seat.generation_bound!=link.generation_bound {
+        let mut book = lock(&self.book);
+        if !link.book.ptr_eq(&Arc::downgrade(&self.book))
+            || !link.matches(&book)
+            || seat.vault != link.vault
+            || seat.session_id != link.session
+            || seat.generation_bound != link.generation_bound
+        {
             return Err("The waiting call changed. Nothing was started.".into());
         }
-        let entry=book.entries.iter_mut().find(|entry|entry.id==link.id).expect("checked above");
-        entry.resume_run=Some(seat.run_id.clone());
-        book.seats.insert(seat.run_id.clone(),seat);
+        let entry = book
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == link.id)
+            .expect("checked above");
+        entry.resume_run = Some(seat.run_id.clone());
+        book.seats.insert(seat.run_id.clone(), seat);
         Ok(())
     }
 
@@ -1399,7 +1467,11 @@ impl Interactions {
     /// it read are dropped.
     pub fn close_seat(&self, run_id: &str) -> bool {
         let mut book = lock(&self.book);
-        let restored = book.entries.iter().any(|entry|entry.resume_run.as_deref()==Some(run_id) && !entry.consumed && matches!(entry.state,State::Answering(_) | State::Answered(_)));
+        let restored = book.entries.iter().any(|entry| {
+            entry.resume_run.as_deref() == Some(run_id)
+                && !entry.consumed
+                && matches!(entry.state, State::Answering(_) | State::Answered(_))
+        });
         let seat = book.seats.remove(run_id);
         self.close_managed_run(run_id);
         // M57.4: an approval dies with the run that resumed its call.
@@ -1556,7 +1628,9 @@ impl Interactions {
                             return GateAnswer::Deny(tool_approval::question_malformed(&reason))
                         }
                     },
-                    Kind::Permission | Kind::Write | Kind::ManagedAction | Kind::ManagedAccess => None,
+                    Kind::Permission | Kind::Write | Kind::ManagedAction | Kind::ManagedAccess => {
+                        None
+                    }
                 };
                 let seq = book.next_seq();
                 book.entries.push(Entry {
@@ -1834,7 +1908,12 @@ impl Interactions {
 
     /// Cancel a call no one has answered. True when this cancelled it; a
     /// second cancel, or one after an answer, is false.
-    pub fn cancel(&self,id:&str,reason:CancelReason)->bool{if self.cancel_managed(id){return true;}self.cancel_inner(id,reason)}
+    pub fn cancel(&self, id: &str, reason: CancelReason) -> bool {
+        if self.cancel_managed(id) {
+            return true;
+        }
+        self.cancel_inner(id, reason)
+    }
     fn cancel_inner(&self, id: &str, reason: CancelReason) -> bool {
         let mut book = lock(&self.book);
         let Some(entry) = book.entries.iter_mut().find(|e| e.id == id) else {
@@ -1844,11 +1923,13 @@ impl Interactions {
             return false;
         }
         entry.state = State::Cancelled(reason);
-        let generation=entry.generation_settlement.clone();
+        let generation = entry.generation_settlement.clone();
         let session = entry.session_id.clone();
         book.bound(&session);
         drop(book);
-        if let Some(generation)=generation {generation.cancel_wait();}
+        if let Some(generation) = generation {
+            generation.cancel_wait();
+        }
         true
     }
 
@@ -1857,12 +1938,18 @@ impl Interactions {
     /// forgotten (M57.2). Returns the cards it cancelled.
     pub fn cancel_other_vaults(&self, vault: &Path) -> Vec<String> {
         let mut book = lock(&self.book);
-        let retired_runs:Vec<_>=book.seats.iter().filter(|(_,seat)|seat.vault!=vault).map(|(run,_)|run.clone()).collect();
-        let managed_cancelled=self.cancel_managed_other_vaults(vault,&retired_runs);
-        #[cfg(test)] managed_action_wait::probes::after_other_scan();
+        let retired_runs: Vec<_> = book
+            .seats
+            .iter()
+            .filter(|(_, seat)| seat.vault != vault)
+            .map(|(run, _)| run.clone())
+            .collect();
+        let managed_cancelled = self.cancel_managed_other_vaults(vault, &retired_runs);
+        #[cfg(test)]
+        managed_action_wait::probes::after_other_scan();
         book.grants.forget_other_vaults(vault);
         let mut cancelled = Vec::new();
-        let mut generations=Vec::new();
+        let mut generations = Vec::new();
         let mut sessions = Vec::new();
         for entry in book.entries.iter_mut() {
             if entry.vault != vault && matches!(entry.state, State::Waiting | State::Registered) {
@@ -1876,7 +1963,9 @@ impl Interactions {
             book.bound(&session);
         }
         drop(book);
-        for generation in generations {generation.cancel_wait();}
+        for generation in generations {
+            generation.cancel_wait();
+        }
         cancelled.extend(managed_cancelled);
         cancelled
     }
@@ -1889,11 +1978,12 @@ impl Interactions {
         let mut book = lock(&self.book);
         book.seats.clear();
         self.cancel_managed_all();
-        #[cfg(test)] managed_action_wait::probes::after_all_scan();
+        #[cfg(test)]
+        managed_action_wait::probes::after_all_scan();
         book.grants = ConversationGrants::default();
         book.approvals.clear();
         let mut sessions = HashSet::new();
-        let mut generations=Vec::new();
+        let mut generations = Vec::new();
         for entry in &mut book.entries {
             if entry.consumed {
                 // The hook already delivered this answer. Finalize that
@@ -1916,7 +2006,9 @@ impl Interactions {
             book.bound(&session);
         }
         drop(book);
-        for generation in generations {generation.cancel_wait();}
+        for generation in generations {
+            generation.cancel_wait();
+        }
     }
 
     /// Record a person's Allow of a write (M57.4): the one writer of the
@@ -2030,8 +2122,11 @@ impl Interactions {
             .filter(|e| e.vault == vault && e.state == State::Waiting)
             .collect();
         waiting.sort_by_key(|e| e.seq);
-        let mut cards:Vec<_>=waiting.into_iter().map(Entry::card).collect();
-        drop(book);cards.extend(self.managed_pending(vault));cards.sort_by(|a,b|a.asked_at.cmp(&b.asked_at));cards
+        let mut cards: Vec<_> = waiting.into_iter().map(Entry::card).collect();
+        drop(book);
+        cards.extend(self.managed_pending(vault));
+        cards.sort_by(|a, b| a.asked_at.cmp(&b.asked_at));
+        cards
     }
 }
 
@@ -3040,32 +3135,49 @@ mod tests {
         for (name, body) in &sources {
             // Exact cfg(test)-owned fixture files may exercise the existing
             // parser/control values. No production file gains mint permission.
-            let fixture_owner=match name.as_str(){
-                "agent/managed_action_wait_tests.rs"=>Some(("agent/managed_action_wait.rs","#[cfg(test)]#[path=\"managed_action_wait_tests.rs\"]modtests;")),
-                "actions/native_chat_generation_tests.rs"=>Some(("actions/native_chat_generation.rs","#[cfg(test)]#[path=\"native_chat_generation_tests.rs\"]modtests;")),
-                _=>None,
+            let fixture_owner = match name.as_str() {
+                "agent/managed_action_wait_tests.rs" => Some((
+                    "agent/managed_action_wait.rs",
+                    "#[cfg(test)]#[path=\"managed_action_wait_tests.rs\"]modtests;",
+                )),
+                "actions/native_chat_generation_tests.rs" => Some((
+                    "actions/native_chat_generation.rs",
+                    "#[cfg(test)]#[path=\"native_chat_generation_tests.rs\"]modtests;",
+                )),
+                _ => None,
             };
-            if let Some((owner,expected))=fixture_owner{
-                let owner=&sources.iter().find(|(name,_)|name==owner).unwrap().1;
-                let compact:String=owner.split_whitespace().collect();
-                assert!(compact.contains(expected),"{name} must have its exact cfg(test) source owner");
+            if let Some((owner, expected)) = fixture_owner {
+                let owner = &sources.iter().find(|(name, _)| name == owner).unwrap().1;
+                let compact: String = owner.split_whitespace().collect();
+                assert!(
+                    compact.contains(expected),
+                    "{name} must have its exact cfg(test) source owner"
+                );
             }
             let mints = body.matches("PersonAnswer::from_ipc(").count();
             match name.as_str() {
                 "lib.rs" => assert_eq!(mints, 1, "the answer command mints it once"),
                 "agent/interaction.rs" => {}
-                _ if fixture_owner.is_some()=>{},
+                _ if fixture_owner.is_some() => {}
                 _ => assert_eq!(mints, 0, "{name} mints a person's answer"),
             }
             if name != "agent/interaction.rs" && fixture_owner.is_none() {
-                for built in ["PersonAnswer::Allow","PersonAnswer::Deny","PersonAnswer::Answers"]{
-                    assert!(!body.contains(built),"{name} builds {built}");
+                for built in [
+                    "PersonAnswer::Allow",
+                    "PersonAnswer::Deny",
+                    "PersonAnswer::Answers",
+                ] {
+                    assert!(!body.contains(built), "{name} builds {built}");
                 }
             }
         }
-        let mcp=&sources.iter().find(|(name,_)|name=="mcp.rs").unwrap().1;
-        assert!(!mcp.contains("begin_answer"),"no MCP path records an answer");
-        assert!(!mcp.contains("finish_answer"));assert!(!mcp.contains("PersonAnswer"));
+        let mcp = &sources.iter().find(|(name, _)| name == "mcp.rs").unwrap().1;
+        assert!(
+            !mcp.contains("begin_answer"),
+            "no MCP path records an answer"
+        );
+        assert!(!mcp.contains("finish_answer"));
+        assert!(!mcp.contains("PersonAnswer"));
     }
 
     #[test]
@@ -4154,32 +4266,50 @@ mod tests {
     }
     #[test]
     fn generation_answer_link_comes_from_the_original_entry_and_dies_on_abort() {
-        let book=book(); let card=waiting(&book);
-        let resume=book.begin_answer(Path::new("/v"),&card.id,allow()).unwrap();
-        assert_eq!(resume.link.source_run(),"run-1");
-        assert_eq!(resume.link.session(),"s-1");
+        let book = book();
+        let card = waiting(&book);
+        let resume = book
+            .begin_answer(Path::new("/v"), &card.id, allow())
+            .unwrap();
+        assert_eq!(resume.link.source_run(), "run-1");
+        assert_eq!(resume.link.session(), "s-1");
         assert!(resume.link.validate(Path::new("/v")));
         assert!(!resume.link.validate(Path::new("/wrong")));
         book.abort_answer(&resume.id);
         assert!(!resume.link.validate(Path::new("/v")));
-        let next=book.begin_answer(Path::new("/v"),&card.id,allow()).unwrap();
-        assert_ne!(next.link.answer_key(),resume.link.answer_key());
+        let next = book
+            .begin_answer(Path::new("/v"), &card.id, allow())
+            .unwrap();
+        assert_ne!(next.link.answer_key(), resume.link.answer_key());
         assert!(!resume.link.validate(Path::new("/v")));
     }
     #[test]
     fn generation_answer_seat_cannot_take_another_books_or_sessions_answer() {
-        let book=book(); let card=waiting(&book);
-        let resume=book.begin_answer(Path::new("/v"),&card.id,allow()).unwrap();
-        assert!(book.open_answer_seat(seat("run-2","wrong","/v"),&resume.link).is_err());
-        let other=Interactions::default();
-        assert!(other.open_answer_seat(seat("run-2","s-1","/v"),&resume.link).is_err());
-        book.open_answer_seat(seat("run-2","s-1","/v"),&resume.link).unwrap();
-        book.finish_answer(&resume.id,"run-2");
-        assert!(matches!(book.gate("run-2",&call("s-1","t1",ASKED)),GateAnswer::Allow {..}));
-        assert!(!resume.link.validate(Path::new("/v")),"consumed answer is not a launch credential");
+        let book = book();
+        let card = waiting(&book);
+        let resume = book
+            .begin_answer(Path::new("/v"), &card.id, allow())
+            .unwrap();
+        assert!(book
+            .open_answer_seat(seat("run-2", "wrong", "/v"), &resume.link)
+            .is_err());
+        let other = Interactions::default();
+        assert!(other
+            .open_answer_seat(seat("run-2", "s-1", "/v"), &resume.link)
+            .is_err());
+        book.open_answer_seat(seat("run-2", "s-1", "/v"), &resume.link)
+            .unwrap();
+        book.finish_answer(&resume.id, "run-2");
+        assert!(matches!(
+            book.gate("run-2", &call("s-1", "t1", ASKED)),
+            GateAnswer::Allow { .. }
+        ));
+        assert!(
+            !resume.link.validate(Path::new("/v")),
+            "consumed answer is not a launch credential"
+        );
     }
-
 }
 
-#[path="managed_action_wait.rs"]
+#[path = "managed_action_wait.rs"]
 pub(crate) mod managed_action_wait;

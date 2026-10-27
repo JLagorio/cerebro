@@ -114,13 +114,30 @@ pub(crate) fn dispatched(conn: &Connection) -> rusqlite::Result<Vec<String>> {
 
 /// Physical ownership pins original descriptors; names may be renamed while a
 /// completed fact still needs settlement. New owners must match durable pins.
-pub(crate) struct SubmissionOwner{files:super::physical_lease::LeaseFiles,invocation:String}
-impl SubmissionOwner{
-    pub(crate) fn matches_retained(&self,invocation:&str,identity:(u64,u64))->bool{self.invocation==invocation&&self.files.matches_original(identity)}
+pub(crate) struct SubmissionOwner {
+    files: super::physical_lease::LeaseFiles,
+    invocation: String,
+}
+impl SubmissionOwner {
+    pub(crate) fn matches_retained(&self, invocation: &str, identity: (u64, u64)) -> bool {
+        self.invocation == invocation && self.files.matches_original(identity)
+    }
     #[cfg(test)]
-    pub(crate) fn matches(&self,data_dir:&std::path::Path,invocation:&str)->Result<bool,String>{
-        #[cfg(unix)]{let(_,identity)=submission_database(data_dir)?;Ok(self.matches_retained(invocation,identity))}
-        #[cfg(not(unix))]{let _=(data_dir,invocation);Err("submission ownership is unsupported on this platform".into())}
+    pub(crate) fn matches(
+        &self,
+        data_dir: &std::path::Path,
+        invocation: &str,
+    ) -> Result<bool, String> {
+        #[cfg(unix)]
+        {
+            let (_, identity) = submission_database(data_dir)?;
+            Ok(self.matches_retained(invocation, identity))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (data_dir, invocation);
+            Err("submission ownership is unsupported on this platform".into())
+        }
     }
 }
 #[cfg(all(test, unix))]
@@ -143,40 +160,127 @@ fn submission_database(
 /// Fixture-only path discovery and explicit transaction owner. Never nest or
 /// commit a caller's transaction, and never promote this path facade to native.
 #[cfg(test)]
-pub(crate) fn try_submission_owner(conn:&Connection,data_dir:&std::path::Path,invocation:&str)->Result<Option<SubmissionOwner>,String>{
-    if !conn.is_autocommit(){return Err("fixture submission owner cannot nest a transaction".into());}
-    #[cfg(unix)]{
-        use std::os::unix::fs::MetadataExt;
-        let(database,identity)=submission_database(data_dir)?;let directory=database.parent().ok_or("submission storage is unavailable")?;let metadata=directory.metadata().map_err(|_|"submission anchor is unavailable")?;
-        let tx=rusqlite::Transaction::new_unchecked(conn,rusqlite::TransactionBehavior::Immediate).map_err(|_|"submission pin transaction unavailable")?;
-        let result=try_retained_submission_owner(&tx,directory,identity,(metadata.dev(),metadata.ino()),invocation)?;
-        tx.commit().map_err(|_|"submission pin commit unavailable")?;Ok(result)
+pub(crate) fn try_submission_owner(
+    conn: &Connection,
+    data_dir: &std::path::Path,
+    invocation: &str,
+) -> Result<Option<SubmissionOwner>, String> {
+    if !conn.is_autocommit() {
+        return Err("fixture submission owner cannot nest a transaction".into());
     }
-    #[cfg(not(unix))]{let _=(conn,data_dir,invocation);Err("submission ownership is unsupported on this platform".into())}
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let (database, identity) = submission_database(data_dir)?;
+        let directory = database
+            .parent()
+            .ok_or("submission storage is unavailable")?;
+        let metadata = directory
+            .metadata()
+            .map_err(|_| "submission anchor is unavailable")?;
+        let tx =
+            rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+                .map_err(|_| "submission pin transaction unavailable")?;
+        let result = try_retained_submission_owner(
+            &tx,
+            directory,
+            identity,
+            (metadata.dev(), metadata.ino()),
+            invocation,
+        )?;
+        tx.commit()
+            .map_err(|_| "submission pin commit unavailable")?;
+        Ok(result)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (conn, data_dir, invocation);
+        Err("submission ownership is unsupported on this platform".into())
+    }
 }
-fn identity_text(value:u64)->String{format!("{value:016x}")}
-fn pin_namespace(conn:&Connection,identity:&super::physical_lease::LeaseIdentity)->Result<(),String>{
+fn identity_text(value: u64) -> String {
+    format!("{value:016x}")
+}
+fn pin_namespace(
+    conn: &Connection,
+    identity: &super::physical_lease::LeaseIdentity,
+) -> Result<(), String> {
     use crate::connections::metadata::bounded_text;
-    let expected=[identity_text(identity.runtime.0),identity_text(identity.runtime.1),identity_text(identity.parent.0),identity_text(identity.parent.1),identity_text(identity.directory.0),identity_text(identity.directory.1)];
+    let expected = [
+        identity_text(identity.runtime.0),
+        identity_text(identity.runtime.1),
+        identity_text(identity.parent.0),
+        identity_text(identity.parent.1),
+        identity_text(identity.directory.0),
+        identity_text(identity.directory.1),
+    ];
     let stored:Option<(i64,[String;6])>=conn.query_row("SELECT protocol,runtime_device,runtime_inode,parent_device,parent_inode,directory_device,directory_inode FROM action_submission_namespace WHERE singleton=1",[],|row|Ok((row.get(0)?,[bounded_text(row,"runtime_device",16)?,bounded_text(row,"runtime_inode",16)?,bounded_text(row,"parent_device",16)?,bounded_text(row,"parent_inode",16)?,bounded_text(row,"directory_device",16)?,bounded_text(row,"directory_inode",16)?]))).optional().map_err(|_|"submission namespace unavailable")?;
-    if let Some((protocol,stored))=stored{if protocol!=1||stored!=expected{return Err("submission namespace identity changed".into());}return Ok(());}
-    conn.execute("INSERT INTO action_submission_namespace(singleton,protocol,runtime_device,runtime_inode,parent_device,parent_inode,directory_device,directory_inode) VALUES(1,1,?1,?2,?3,?4,?5,?6)",rusqlite::params![expected[0],expected[1],expected[2],expected[3],expected[4],expected[5]]).map_err(|_|"submission namespace pin unavailable")?;Ok(())
+    if let Some((protocol, stored)) = stored {
+        if protocol != 1 || stored != expected {
+            return Err("submission namespace identity changed".into());
+        }
+        return Ok(());
+    }
+    conn.execute("INSERT INTO action_submission_namespace(singleton,protocol,runtime_device,runtime_inode,parent_device,parent_inode,directory_device,directory_inode) VALUES(1,1,?1,?2,?3,?4,?5,?6)",rusqlite::params![expected[0],expected[1],expected[2],expected[3],expected[4],expected[5]]).map_err(|_|"submission namespace pin unavailable")?;
+    Ok(())
 }
-fn pin_submission_file(conn:&Connection,invocation:&str,file:(u64,u64))->Result<(),String>{
+fn pin_submission_file(
+    conn: &Connection,
+    invocation: &str,
+    file: (u64, u64),
+) -> Result<(), String> {
     use crate::connections::metadata::bounded_text;
-    let expected=(identity_text(file.0),identity_text(file.1));
+    let expected = (identity_text(file.0), identity_text(file.1));
     let stored:Option<(i64,String,String)>=conn.query_row("SELECT namespace_id,lock_device,lock_inode FROM action_submission_files WHERE invocation_id=?1",[invocation],|row|Ok((row.get(0)?,bounded_text(row,"lock_device",16)?,bounded_text(row,"lock_inode",16)?))).optional().map_err(|_|"submission file identity unavailable")?;
-    if let Some((namespace,device,inode))=stored{if namespace!=1||(device,inode)!=expected{return Err("submission file identity changed".into());}return Ok(());}
-    conn.execute("INSERT INTO action_submission_files(invocation_id,namespace_id,lock_device,lock_inode) VALUES(?1,1,?2,?3)",rusqlite::params![invocation,expected.0,expected.1]).map_err(|_|"submission file pin unavailable")?;Ok(())
+    if let Some((namespace, device, inode)) = stored {
+        if namespace != 1 || (device, inode) != expected {
+            return Err("submission file identity changed".into());
+        }
+        return Ok(());
+    }
+    conn.execute("INSERT INTO action_submission_files(invocation_id,namespace_id,lock_device,lock_inode) VALUES(?1,1,?2,?3)",rusqlite::params![invocation,expected.0,expected.1]).map_err(|_|"submission file pin unavailable")?;
+    Ok(())
 }
 /// Native caller owns an existing transaction and validates original storage.
 /// No caller may select another namespace or rebind an existing physical inode.
-pub(crate) fn try_retained_submission_owner(conn:&Connection,data_dir:&std::path::Path,identity:(u64,u64),directory_identity:(u64,u64),invocation:&str)->Result<Option<SubmissionOwner>,String>{
-    if conn.is_autocommit(){return Err("submission pin requires a caller transaction".into());}
-    let exists:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM action_invocations WHERE invocation_id=?1)",[invocation],|row|row.get(0)).map_err(|_|"submission record unavailable")?;
-    if !exists{return Err("submission record was not found".into());}
-    super::physical_lease::try_acquire(conn,data_dir,identity,directory_identity,super::physical_lease::LeaseDomain::ActionSubmission,invocation,|tx,pinned|{pin_namespace(tx,pinned)?;pin_submission_file(tx,invocation,pinned.file)})
-        .map(|files|files.map(|files|SubmissionOwner{files,invocation:invocation.into()}))
+pub(crate) fn try_retained_submission_owner(
+    conn: &Connection,
+    data_dir: &std::path::Path,
+    identity: (u64, u64),
+    directory_identity: (u64, u64),
+    invocation: &str,
+) -> Result<Option<SubmissionOwner>, String> {
+    if conn.is_autocommit() {
+        return Err("submission pin requires a caller transaction".into());
+    }
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE invocation_id=?1)",
+            [invocation],
+            |row| row.get(0),
+        )
+        .map_err(|_| "submission record unavailable")?;
+    if !exists {
+        return Err("submission record was not found".into());
+    }
+    super::physical_lease::try_acquire(
+        conn,
+        data_dir,
+        identity,
+        directory_identity,
+        super::physical_lease::LeaseDomain::ActionSubmission,
+        invocation,
+        |tx, pinned| {
+            pin_namespace(tx, pinned)?;
+            pin_submission_file(tx, invocation, pinned.file)
+        },
+    )
+    .map(|files| {
+        files.map(|files| SubmissionOwner {
+            files,
+            invocation: invocation.into(),
+        })
+    })
 }
 
 #[cfg(test)]

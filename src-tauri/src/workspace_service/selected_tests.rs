@@ -1,11 +1,11 @@
 #![cfg(test)]
 //! Fixture-only activation. Exercises the actual existing native command doors.
 #[cfg(unix)]
-#[path = "paired_tests.rs"]
-mod paired;
-#[cfg(unix)]
 #[path = "selected_metadata_tests.rs"]
 mod metadata_requests;
+#[cfg(unix)]
+#[path = "paired_tests.rs"]
+mod paired;
 use super::{
     authority,
     types::{selected::*, StoreErrorCode},

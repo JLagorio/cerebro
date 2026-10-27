@@ -179,7 +179,18 @@ export function DatabaseBlockView({
     [shown, database, entries, schema],
   );
 
-  const selectedUnavailable = surface?.unavailable ?? (surface === null ? undefined : selectedViewIssue(surface.entries, schema, surface.presentation, undefined, database, search));
+  const selectedUnavailable =
+    surface?.unavailable ??
+    (surface === null
+      ? undefined
+      : selectedViewIssue(
+          surface.entries,
+          schema,
+          surface.presentation,
+          undefined,
+          database,
+          search,
+        ));
   const fields = useMemo(
     () =>
       surface === null
@@ -364,7 +375,7 @@ export function DatabaseBlockView({
         <div className="mt-1 flex min-h-0 flex-col overflow-hidden">
           <ViewProblems problems={problems} source={resolved.database} />
           <ViewCanvas
-        unavailable={selectedUnavailable}
+            unavailable={selectedUnavailable}
             embedded
             entries={selectedUnavailable ? [] : searchEntries(surface.entries, search)}
             allEntries={entries}

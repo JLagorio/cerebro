@@ -372,53 +372,129 @@ describe('selected retained DocumentOwner protocol', () => {
   });
 });
 
-
-describe('dependent selected transform expectations',()=>{
-  it('freezes the complete expected version into the actual first request',async()=>{
-    const{calls,write}=writer(({request,body})=>applied(request,body));
-    const owner=new DocumentOwner(key,'initial',write,target);const expected=version('initial');
+describe('dependent selected transform expectations', () => {
+  it('freezes the complete expected version into the actual first request', async () => {
+    const { calls, write } = writer(({ request, body }) => applied(request, body));
+    const owner = new DocumentOwner(key, 'initial', write, target);
+    const expected = version('initial');
     expect(owner.expectSelectedVersion(expected)).toBe(true);
-    owner.edit('checkbox A','source');await owner.flush();
-    expect(calls).toHaveLength(1);expect(calls[0].request.expectedVersion).toEqual(expected);
+    owner.edit('checkbox A', 'source');
+    await owner.flush();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].request.expectedVersion).toEqual(expected);
   });
-  it('cannot rebase expected version during a transport-unknown original attempt',async()=>{
-    const{calls,write}=writer(({request,body},index)=>{if(index===1)throw new Error('lost reply');return applied(request,body);});
-    const owner=new DocumentOwner(key,'initial',write,target);const expected=version('initial');
-    expect(owner.expectSelectedVersion(expected)).toBe(true);owner.edit('checkbox A','source');
-    expect(await owner.flush()).toMatchObject({kind:'pending',status:'unknown'});
-    expect(owner.expectSelectedVersion({...version('newer body'),metadataRevision:'9007199254740994'})).toBe(false);
-    await owner.retry();expect(calls).toHaveLength(2);
-    expect(calls[1].request).toMatchObject({phase:'resolve',requestKey:calls[0].request.requestKey,expectedVersion:expected});
+  it('cannot rebase expected version during a transport-unknown original attempt', async () => {
+    const { calls, write } = writer(({ request, body }, index) => {
+      if (index === 1) throw new Error('lost reply');
+      return applied(request, body);
+    });
+    const owner = new DocumentOwner(key, 'initial', write, target);
+    const expected = version('initial');
+    expect(owner.expectSelectedVersion(expected)).toBe(true);
+    owner.edit('checkbox A', 'source');
+    expect(await owner.flush()).toMatchObject({ kind: 'pending', status: 'unknown' });
+    expect(
+      owner.expectSelectedVersion({
+        ...version('newer body'),
+        metadataRevision: '9007199254740994',
+      }),
+    ).toBe(false);
+    await owner.retry();
+    expect(calls).toHaveLength(2);
+    expect(calls[1].request).toMatchObject({
+      phase: 'resolve',
+      requestKey: calls[0].request.requestKey,
+      expectedVersion: expected,
+    });
     expect(calls[1].body).toBe(calls[0].body);
   });
-  it('only the validated explicit whole-page choice rebases the next dependent attempt',async()=>{
-    const{calls,write}=writer(({request,body},index)=>index===1?{kind:'selected_outcome_unknown',error}:applied(request,body));
-    const owner=new DocumentOwner(key,'initial',write,target);expect(owner.expectSelectedVersion(version('initial'))).toBe(true);
-    owner.edit('checkbox A','source');await owner.flush();const state=owner.snapshot();
-    const observed={path:key.path,target,body:'new paired body',observedBodyHash:sha256Hex('new paired body'),version:{...version('new paired body'),metadataRevision:'9007199254740994'},coherence:'paired' as const,editable:true};
+  it('only the validated explicit whole-page choice rebases the next dependent attempt', async () => {
+    const { calls, write } = writer(({ request, body }, index) =>
+      index === 1 ? { kind: 'selected_outcome_unknown', error } : applied(request, body),
+    );
+    const owner = new DocumentOwner(key, 'initial', write, target);
+    expect(owner.expectSelectedVersion(version('initial'))).toBe(true);
+    owner.edit('checkbox A', 'source');
+    await owner.flush();
+    const state = owner.snapshot();
+    const observed = {
+      path: key.path,
+      target,
+      body: 'new paired body',
+      observedBodyHash: sha256Hex('new paired body'),
+      version: { ...version('new paired body'), metadataRevision: '9007199254740994' },
+      coherence: 'paired' as const,
+      editable: true,
+    };
     expect(owner.expectSelectedVersion(observed.version)).toBe(false);
-    expect(owner.settleSelectedReconcile({requestKey:calls[0].request.requestKey,generation:state.generation,snapshot:observed,choice:'mine'})).toBe(true);
-    await owner.flush();expect(calls).toHaveLength(2);
-    expect(calls[1].request).toMatchObject({phase:'start',expectedVersion:observed.version});
+    expect(
+      owner.settleSelectedReconcile({
+        requestKey: calls[0].request.requestKey,
+        generation: state.generation,
+        snapshot: observed,
+        choice: 'mine',
+      }),
+    ).toBe(true);
+    await owner.flush();
+    expect(calls).toHaveLength(2);
+    expect(calls[1].request).toMatchObject({ phase: 'start', expectedVersion: observed.version });
     expect(calls[1].request.requestKey).not.toBe(calls[0].request.requestKey);
   });
 });
 
-
-describe('explicit selected refusal comparison',()=>{
-  it('promotes only the idle failed original retry into the existing choice state without dispatch or rebase',async()=>{
-    const{calls,write}=writer(()=>{throw {kind:'selected_refused',error:{code:'capability_unavailable',kind:'stale_metadata',message:'Canonical metadata changed.',retryable:true}};});
-    const owner=new DocumentOwner(key,'initial',write,target);const expected=version('initial');expect(owner.expectSelectedVersion(expected)).toBe(true);
-    owner.edit('# Authored title\n','source');expect(await owner.flush()).toMatchObject({kind:'failed'});
-    const before=owner.snapshot();expect(owner.compareSelectedRefusal()).toBe(true);
-    expect(owner.snapshot()).toMatchObject({latestDraft:before.latestDraft,generation:before.generation,acknowledgedGeneration:before.acknowledgedGeneration,selectedSave:{status:'reconcile',requestKey:calls[0].request.requestKey,reason:'refused'}});
-    expect(calls).toHaveLength(1);expect(owner.expectSelectedVersion({...version('later'),metadataRevision:'9007199254740994'})).toBe(false);
-    expect(await owner.flush()).toMatchObject({kind:'blocked',reason:'reconcile'});expect(calls).toHaveLength(1);
+describe('explicit selected refusal comparison', () => {
+  it('promotes only the idle failed original retry into the existing choice state without dispatch or rebase', async () => {
+    const { calls, write } = writer(() => {
+      throw {
+        kind: 'selected_refused',
+        error: {
+          code: 'capability_unavailable',
+          kind: 'stale_metadata',
+          message: 'Canonical metadata changed.',
+          retryable: true,
+        },
+      };
+    });
+    const owner = new DocumentOwner(key, 'initial', write, target);
+    const expected = version('initial');
+    expect(owner.expectSelectedVersion(expected)).toBe(true);
+    owner.edit('# Authored title\n', 'source');
+    expect(await owner.flush()).toMatchObject({ kind: 'failed' });
+    const before = owner.snapshot();
+    expect(owner.compareSelectedRefusal()).toBe(true);
+    expect(owner.snapshot()).toMatchObject({
+      latestDraft: before.latestDraft,
+      generation: before.generation,
+      acknowledgedGeneration: before.acknowledgedGeneration,
+      selectedSave: {
+        status: 'reconcile',
+        requestKey: calls[0].request.requestKey,
+        reason: 'refused',
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(
+      owner.expectSelectedVersion({ ...version('later'), metadataRevision: '9007199254740994' }),
+    ).toBe(false);
+    expect(await owner.flush()).toMatchObject({ kind: 'blocked', reason: 'reconcile' });
+    expect(calls).toHaveLength(1);
   });
-  it.each(['pending','unknown'] as const)('does not convert a live %s original into a discardable/comparable retry',async(status)=>{
-    const{calls,write}=writer(({request,body})=>{if(status==='unknown')throw new Error('lost reply');return pending(request,body);});
-    const owner=new DocumentOwner(key,'initial',write,target);expect(owner.expectSelectedVersion(version('initial'))).toBe(true);owner.edit('# Authored title\n','source');
-    await owner.flush();const before=owner.snapshot();expect(owner.compareSelectedRefusal()).toBe(false);
-    expect(owner.snapshot()).toEqual(before);expect(owner.snapshot().selectedSave?.status).toBe(status);expect(calls).toHaveLength(1);
-  });
+  it.each(['pending', 'unknown'] as const)(
+    'does not convert a live %s original into a discardable/comparable retry',
+    async (status) => {
+      const { calls, write } = writer(({ request, body }) => {
+        if (status === 'unknown') throw new Error('lost reply');
+        return pending(request, body);
+      });
+      const owner = new DocumentOwner(key, 'initial', write, target);
+      expect(owner.expectSelectedVersion(version('initial'))).toBe(true);
+      owner.edit('# Authored title\n', 'source');
+      await owner.flush();
+      const before = owner.snapshot();
+      expect(owner.compareSelectedRefusal()).toBe(false);
+      expect(owner.snapshot()).toEqual(before);
+      expect(owner.snapshot().selectedSave?.status).toBe(status);
+      expect(calls).toHaveLength(1);
+    },
+  );
 });

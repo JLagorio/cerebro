@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum MetadataPatchPhase { Start, Resolve }
+pub(crate) enum MetadataPatchPhase {
+    Start,
+    Resolve,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -60,25 +63,42 @@ pub(crate) enum MetadataPatchResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
-#[cfg_attr(not(unix), expect(dead_code, reason = "Requested property wire is not produced outside the supported native adapter."))]
-#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
-pub(crate) enum SelectedPropertyValue { Absent {}, Present { value:PropertyValue } }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
-#[cfg_attr(not(unix), expect(dead_code, reason = "Requested property wire is not produced outside the supported native adapter."))]
-#[serde(rename_all="camelCase",deny_unknown_fields)]
-pub(crate) struct SelectedPropertySnapshot {
-    pub(crate) target:SelectedEditorTarget,
-    pub(crate) path:String,
-    pub(crate) field:String,
-    pub(crate) version:SelectedRecordVersion,
-    pub(crate) value:SelectedPropertyValue,
-    pub(crate) observed_body_hash:String,
-    pub(crate) coherence:super::EditorBodyCoherence,
-    pub(crate) editable:bool,
-    pub(crate) read_only_reason:Option<String>,
+#[cfg_attr(
+    not(unix),
+    expect(
+        dead_code,
+        reason = "Requested property wire is not produced outside the supported native adapter."
+    )
+)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum SelectedPropertyValue {
+    Absent {},
+    Present { value: PropertyValue },
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
-#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
-pub(crate) enum MetadataPatchRefusal { MetadataRefused { error:AuthorityError } }
+#[cfg_attr(
+    not(unix),
+    expect(
+        dead_code,
+        reason = "Requested property wire is not produced outside the supported native adapter."
+    )
+)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SelectedPropertySnapshot {
+    pub(crate) target: SelectedEditorTarget,
+    pub(crate) path: String,
+    pub(crate) field: String,
+    pub(crate) version: SelectedRecordVersion,
+    pub(crate) value: SelectedPropertyValue,
+    pub(crate) observed_body_hash: String,
+    pub(crate) coherence: super::EditorBodyCoherence,
+    pub(crate) editable: bool,
+    pub(crate) read_only_reason: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum MetadataPatchRefusal {
+    MetadataRefused { error: AuthorityError },
+}

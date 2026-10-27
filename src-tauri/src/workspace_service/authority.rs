@@ -64,8 +64,14 @@ pub(crate) use opening::OpeningAttempt;
 #[cfg(unix)]
 pub(crate) use opening::{AdmittedBackupRead, OutputReservation, SelectedBackupOpening};
 #[cfg(unix)]
-#[cfg_attr(not(test), expect(unused_imports, reason = "Progress DTOs await the disabled native worker sink composition."))]
-pub(crate) use opening::{OutputProgress, OutputLocation, OutputObservation};
+#[cfg_attr(
+    not(test),
+    expect(
+        unused_imports,
+        reason = "Progress DTOs await the disabled native worker sink composition."
+    )
+)]
+pub(crate) use opening::{OutputLocation, OutputObservation, OutputProgress};
 #[derive(Default)]
 struct ActiveRoot {
     generation: u64,

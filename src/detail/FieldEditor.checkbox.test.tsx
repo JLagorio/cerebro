@@ -1,29 +1,295 @@
 // @vitest-environment jsdom
-import { act,cleanup,fireEvent,render,screen,waitFor } from '@testing-library/react';
-import { afterEach,beforeEach,expect,it,vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as ipc from '@/lib/ipc';
-import type { MetadataPatchRequest,MetadataPatchResult,MetadataPatchOperation,SelectedPropertySnapshot,SelectedRecordVersion } from '@/lib/generated/workspace';
+import type {
+  MetadataPatchRequest,
+  MetadataPatchResult,
+  MetadataPatchOperation,
+  SelectedPropertySnapshot,
+  SelectedRecordVersion,
+} from '@/lib/generated/workspace';
 import { makeEntry } from '@/test/factories';
 import { buildSchema } from '@/engine/schema';
-import { __resetRescans,useVaultStore } from '@/stores/vaultStore';
-import { __resetOpenPages,flushOpenPages } from '@/editor/openPages';
+import { __resetRescans, useVaultStore } from '@/stores/vaultStore';
+import { __resetOpenPages, flushOpenPages } from '@/editor/openPages';
 import { SelectedMetadataRecoveryHost } from '@/editor/SelectedMetadataRecoveryHost';
 import { FieldEditor } from './FieldEditor';
-const path='records/page.md';const field='flag';
-const target={workspaceId:'915781f1-6812-478c-8063-3f41322547f5',recordId:'76b64da5-34b6-45f2-8ab2-e2779227ace3'};
-let vault='';let serial=0;let canonical:SelectedRecordVersion;let value:boolean|null|undefined=true;let editable=true;
-const frame=():SelectedPropertySnapshot=>({path,target:{...target},field,version:{...canonical},value:value===undefined?{kind:'absent'}:{kind:'present',value:value===null?{kind:'null'}:{kind:'boolean',value}},editable,readOnlyReason:editable?null:'This stored checkbox needs another typed editor.',coherence:'paired',observedBodyHash:canonical.bodyHash});
-function operation(q:MetadataPatchRequest):MetadataPatchOperation{const after={...q.expectedVersion,metadataRevision:(BigInt(q.expectedVersion.metadataRevision)+1n).toString(),metadataHash:'c'.repeat(64)};return{path,target:{...q.target},requestKey:q.requestKey,operationId:'fca816d3-e22f-47a9-8c19-3fa5ef6aa85c',version:after,receipt:{workspaceId:target.workspaceId,recordId:target.recordId,epoch:'2',previousRevision:q.expectedVersion.metadataRevision,revision:after.metadataRevision,metadataBeforeHash:q.expectedVersion.metadataHash,metadataAfterHash:after.metadataHash,bodyBeforeHash:q.expectedVersion.bodyHash,bodyAfterHash:after.bodyHash,actor:'human:me',operation:'metadata.patch',at:'2026-10-26T00:00:00Z'}};}
-function applied(q:MetadataPatchRequest):MetadataPatchResult{const op=q.original??operation(q);canonical={...op.version};const change=q.changes[0];if(change?.op==='set'&&change.value.kind==='boolean')value=change.value.value;return{kind:'applied',operation:op,currentVersion:{...canonical},reconcileRequired:false};}
-beforeEach(()=>{cleanup();__resetOpenPages();__resetRescans();vi.restoreAllMocks();vault='/selected-checkbox-'+(++serial);value=true;editable=true;canonical={kind:'sqlite_metadata',...target,metadataRevision:'9007199254740993',metadataHash:'a'.repeat(64),bodyHash:'b'.repeat(64)};useVaultStore.setState({vaultPath:vault,entriesVault:vault,status:'ready',error:null,entries:[makeEntry({path,title:'Page',type:'Task',authority:{...canonical},hash:canonical.bodyHash,properties:{flag:true,unrelated:'keep'},canonicalProperties:{value:{kind:'object',value:{type:{kind:'string',value:'Task'},flag:{kind:'boolean',value:true},unrelated:{kind:'string',value:'keep'}}},unavailableLegacyKeys:[]}})],rescan:vi.fn(async()=>{}),patchFrontmatter:vi.fn(async()=>true)});vi.spyOn(ipc,'supportsSelectedEditor').mockReturnValue(true);vi.spyOn(ipc,'readSelectedProperty').mockImplementation(async()=>frame());vi.spyOn(ipc,'patchSelectedMetadata').mockImplementation(async(_vault,_path,q)=>applied(q));vi.spyOn(ipc,'saveNoteBody');});
-afterEach(()=>{cleanup();__resetOpenPages();__resetRescans();vi.restoreAllMocks();});
-function mount(){const entry=useVaultStore.getState().entries[0];return render(<><FieldEditor entry={entry} def={{name:field,kind:'checkbox'}} schema={buildSchema([entry])}/><SelectedMetadataRecoveryHost/></>);}
-async function open(){fireEvent.click(screen.getByRole('button',{name:'Edit Flag'}));return screen.findByRole('switch',{name:'Flag'});}
-async function toggle(input:HTMLElement){fireEvent.click(input);await waitFor(()=>expect(ipc.patchSelectedMetadata).toHaveBeenCalledOnce());expect(useVaultStore.getState().patchFrontmatter).not.toHaveBeenCalled();expect(ipc.saveNoteBody).not.toHaveBeenCalled();}
-it('selected checkbox reads before authoring then sends exact false with its original whole version',async()=>{const expected={...canonical};mount();const input=await open();expect(input).toHaveProperty('checked',true);await toggle(input);expect(ipc.readSelectedProperty).toHaveBeenCalledWith(vault,path,target,field);expect(vi.mocked(ipc.patchSelectedMetadata).mock.calls[0]).toMatchObject([vault,path,{expectedVersion:expected,phase:'start',changes:[{op:'set',key:field,value:{kind:'boolean',value:false}}]}]);expect(value).toBe(false);});
-it('metadata-only change after guarded checkbox capture refuses without rebasing the Boolean',async()=>{mount();const input=await open();const expected={...canonical};canonical={...canonical,metadataHash:'d'.repeat(64),metadataRevision:'9007199254740994'};vi.mocked(ipc.patchSelectedMetadata).mockRejectedValue({kind:'metadata_refused',error:{code:'capability_unavailable',kind:'stale_metadata',message:'Canonical metadata changed.',retryable:false}});await toggle(input);expect(vi.mocked(ipc.patchSelectedMetadata).mock.calls[0][2].expectedVersion).toEqual(expected);await waitFor(()=>expect(screen.getByRole('status').textContent).toMatch(/changed.*draft/i));expect(value).toBe(true);});
-it('unknown Boolean remains original after unmount and vault switch until Check save resolves',async()=>{vi.mocked(ipc.patchSelectedMetadata).mockRejectedValueOnce(new Error('reply lost'));const view=mount();await toggle(await open());const first=structuredClone(vi.mocked(ipc.patchSelectedMetadata).mock.calls[0]);view.unmount();act(()=>useVaultStore.setState({vaultPath:'/another-checkbox-vault',entriesVault:'/another-checkbox-vault',entries:[]}));render(<SelectedMetadataRecoveryHost/>);fireEvent.click(await screen.findByRole('button',{name:'Check save'}));await waitFor(()=>expect(ipc.patchSelectedMetadata).toHaveBeenCalledTimes(2));expect(vi.mocked(ipc.patchSelectedMetadata).mock.calls[1]).toEqual([first[0],first[1],{...first[2],phase:'resolve'}]);await act(async()=>{await flushOpenPages();});expect(ipc.patchSelectedMetadata).toHaveBeenCalledTimes(2);expect(value).toBe(false);});
-it('Use current after terminal unknown checkbox does not replay its old false intent',async()=>{vi.mocked(ipc.patchSelectedMetadata).mockImplementationOnce(async(_vault,_path,q)=>{canonical={...canonical,metadataHash:'d'.repeat(64),metadataRevision:'9007199254740994'};return{kind:'outcome_unknown',requestKey:q.requestKey,error:{code:'capability_unavailable',kind:'metadata_unavailable',message:'Original Boolean result unknown.',retryable:false}};});const view=mount();await toggle(await open());view.unmount();render(<SelectedMetadataRecoveryHost/>);fireEvent.click(await screen.findByRole('button',{name:'Compare versions'}));fireEvent.click(await screen.findByRole('button',{name:'Use current'}));await act(async()=>{await flushOpenPages();});expect(ipc.patchSelectedMetadata).toHaveBeenCalledOnce();expect(value).toBe(true);});
-it('native readonly checkbox observation never enters another field editor or legacy writer',async()=>{editable=false;mount();fireEvent.click(screen.getByRole('button',{name:'Edit Flag'}));await waitFor(()=>expect(ipc.readSelectedProperty).toHaveBeenCalledOnce());expect(screen.queryByRole('switch')).toBeNull();expect(screen.getByText('This stored checkbox needs another typed editor.')).toBeTruthy();expect(ipc.patchSelectedMetadata).not.toHaveBeenCalled();expect(useVaultStore.getState().patchFrontmatter).not.toHaveBeenCalled();});
-it.each([{label:'Not set',stored:undefined},{label:'Null',stored:null}])('$label is distinct from false and explicit Set off authors Boolean false',async row=>{value=row.stored;mount();await open();expect(screen.getByText(row.label)).toBeTruthy();fireEvent.click(screen.getByRole('button',{name:'Set off'}));await waitFor(()=>expect(ipc.patchSelectedMetadata).toHaveBeenCalledOnce());expect(vi.mocked(ipc.patchSelectedMetadata).mock.calls[0][2].changes).toEqual([{op:'set',key:field,value:{kind:'boolean',value:false}}]);expect(value).toBe(false);});
-it('caller-owned checkbox draft preserves legacy one-click onPatch without native mutation',()=>{const entry=useVaultStore.getState().entries[0];const onPatch=vi.fn();render(<FieldEditor entry={entry} def={{name:field,kind:'checkbox'}} schema={buildSchema([entry])} onPatch={onPatch}/>);fireEvent.click(screen.getByRole('switch'));expect(onPatch).toHaveBeenCalledWith(false);expect(ipc.readSelectedProperty).not.toHaveBeenCalled();expect(ipc.patchSelectedMetadata).not.toHaveBeenCalled();});
+const path = 'records/page.md';
+const field = 'flag';
+const target = {
+  workspaceId: '915781f1-6812-478c-8063-3f41322547f5',
+  recordId: '76b64da5-34b6-45f2-8ab2-e2779227ace3',
+};
+let vault = '';
+let serial = 0;
+let canonical: SelectedRecordVersion;
+let value: boolean | null | undefined = true;
+let editable = true;
+const frame = (): SelectedPropertySnapshot => ({
+  path,
+  target: { ...target },
+  field,
+  version: { ...canonical },
+  value:
+    value === undefined
+      ? { kind: 'absent' }
+      : { kind: 'present', value: value === null ? { kind: 'null' } : { kind: 'boolean', value } },
+  editable,
+  readOnlyReason: editable ? null : 'This stored checkbox needs another typed editor.',
+  coherence: 'paired',
+  observedBodyHash: canonical.bodyHash,
+});
+function operation(q: MetadataPatchRequest): MetadataPatchOperation {
+  const after = {
+    ...q.expectedVersion,
+    metadataRevision: (BigInt(q.expectedVersion.metadataRevision) + 1n).toString(),
+    metadataHash: 'c'.repeat(64),
+  };
+  return {
+    path,
+    target: { ...q.target },
+    requestKey: q.requestKey,
+    operationId: 'fca816d3-e22f-47a9-8c19-3fa5ef6aa85c',
+    version: after,
+    receipt: {
+      workspaceId: target.workspaceId,
+      recordId: target.recordId,
+      epoch: '2',
+      previousRevision: q.expectedVersion.metadataRevision,
+      revision: after.metadataRevision,
+      metadataBeforeHash: q.expectedVersion.metadataHash,
+      metadataAfterHash: after.metadataHash,
+      bodyBeforeHash: q.expectedVersion.bodyHash,
+      bodyAfterHash: after.bodyHash,
+      actor: 'human:me',
+      operation: 'metadata.patch',
+      at: '2026-10-26T00:00:00Z',
+    },
+  };
+}
+function applied(q: MetadataPatchRequest): MetadataPatchResult {
+  const op = q.original ?? operation(q);
+  canonical = { ...op.version };
+  const change = q.changes[0];
+  if (change?.op === 'set' && change.value.kind === 'boolean') value = change.value.value;
+  return {
+    kind: 'applied',
+    operation: op,
+    currentVersion: { ...canonical },
+    reconcileRequired: false,
+  };
+}
+beforeEach(() => {
+  cleanup();
+  __resetOpenPages();
+  __resetRescans();
+  vi.restoreAllMocks();
+  vault = '/selected-checkbox-' + ++serial;
+  value = true;
+  editable = true;
+  canonical = {
+    kind: 'sqlite_metadata',
+    ...target,
+    metadataRevision: '9007199254740993',
+    metadataHash: 'a'.repeat(64),
+    bodyHash: 'b'.repeat(64),
+  };
+  useVaultStore.setState({
+    vaultPath: vault,
+    entriesVault: vault,
+    status: 'ready',
+    error: null,
+    entries: [
+      makeEntry({
+        path,
+        title: 'Page',
+        type: 'Task',
+        authority: { ...canonical },
+        hash: canonical.bodyHash,
+        properties: { flag: true, unrelated: 'keep' },
+        canonicalProperties: {
+          value: {
+            kind: 'object',
+            value: {
+              type: { kind: 'string', value: 'Task' },
+              flag: { kind: 'boolean', value: true },
+              unrelated: { kind: 'string', value: 'keep' },
+            },
+          },
+          unavailableLegacyKeys: [],
+        },
+      }),
+    ],
+    rescan: vi.fn(async () => {}),
+    patchFrontmatter: vi.fn(async () => true),
+  });
+  vi.spyOn(ipc, 'supportsSelectedEditor').mockReturnValue(true);
+  vi.spyOn(ipc, 'readSelectedProperty').mockImplementation(async () => frame());
+  vi.spyOn(ipc, 'patchSelectedMetadata').mockImplementation(async (_vault, _path, q) => applied(q));
+  vi.spyOn(ipc, 'saveNoteBody');
+});
+afterEach(() => {
+  cleanup();
+  __resetOpenPages();
+  __resetRescans();
+  vi.restoreAllMocks();
+});
+function mount() {
+  const entry = useVaultStore.getState().entries[0];
+  return render(
+    <>
+      <FieldEditor
+        entry={entry}
+        def={{ name: field, kind: 'checkbox' }}
+        schema={buildSchema([entry])}
+      />
+      <SelectedMetadataRecoveryHost />
+    </>,
+  );
+}
+async function open() {
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Flag' }));
+  return screen.findByRole('switch', { name: 'Flag' });
+}
+async function toggle(input: HTMLElement) {
+  fireEvent.click(input);
+  await waitFor(() => expect(ipc.patchSelectedMetadata).toHaveBeenCalledOnce());
+  expect(useVaultStore.getState().patchFrontmatter).not.toHaveBeenCalled();
+  expect(ipc.saveNoteBody).not.toHaveBeenCalled();
+}
+it('selected checkbox reads before authoring then sends exact false with its original whole version', async () => {
+  const expected = { ...canonical };
+  mount();
+  const input = await open();
+  expect(input).toHaveProperty('checked', true);
+  await toggle(input);
+  expect(ipc.readSelectedProperty).toHaveBeenCalledWith(vault, path, target, field);
+  expect(vi.mocked(ipc.patchSelectedMetadata).mock.calls[0]).toMatchObject([
+    vault,
+    path,
+    {
+      expectedVersion: expected,
+      phase: 'start',
+      changes: [{ op: 'set', key: field, value: { kind: 'boolean', value: false } }],
+    },
+  ]);
+  expect(value).toBe(false);
+});
+it('metadata-only change after guarded checkbox capture refuses without rebasing the Boolean', async () => {
+  mount();
+  const input = await open();
+  const expected = { ...canonical };
+  canonical = { ...canonical, metadataHash: 'd'.repeat(64), metadataRevision: '9007199254740994' };
+  vi.mocked(ipc.patchSelectedMetadata).mockRejectedValue({
+    kind: 'metadata_refused',
+    error: {
+      code: 'capability_unavailable',
+      kind: 'stale_metadata',
+      message: 'Canonical metadata changed.',
+      retryable: false,
+    },
+  });
+  await toggle(input);
+  expect(vi.mocked(ipc.patchSelectedMetadata).mock.calls[0][2].expectedVersion).toEqual(expected);
+  await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/changed.*draft/i));
+  expect(value).toBe(true);
+});
+it('unknown Boolean remains original after unmount and vault switch until Check save resolves', async () => {
+  vi.mocked(ipc.patchSelectedMetadata).mockRejectedValueOnce(new Error('reply lost'));
+  const view = mount();
+  await toggle(await open());
+  const first = structuredClone(vi.mocked(ipc.patchSelectedMetadata).mock.calls[0]);
+  view.unmount();
+  act(() =>
+    useVaultStore.setState({
+      vaultPath: '/another-checkbox-vault',
+      entriesVault: '/another-checkbox-vault',
+      entries: [],
+    }),
+  );
+  render(<SelectedMetadataRecoveryHost />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Check save' }));
+  await waitFor(() => expect(ipc.patchSelectedMetadata).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(ipc.patchSelectedMetadata).mock.calls[1]).toEqual([
+    first[0],
+    first[1],
+    { ...first[2], phase: 'resolve' },
+  ]);
+  await act(async () => {
+    await flushOpenPages();
+  });
+  expect(ipc.patchSelectedMetadata).toHaveBeenCalledTimes(2);
+  expect(value).toBe(false);
+});
+it('Use current after terminal unknown checkbox does not replay its old false intent', async () => {
+  vi.mocked(ipc.patchSelectedMetadata).mockImplementationOnce(async (_vault, _path, q) => {
+    canonical = {
+      ...canonical,
+      metadataHash: 'd'.repeat(64),
+      metadataRevision: '9007199254740994',
+    };
+    return {
+      kind: 'outcome_unknown',
+      requestKey: q.requestKey,
+      error: {
+        code: 'capability_unavailable',
+        kind: 'metadata_unavailable',
+        message: 'Original Boolean result unknown.',
+        retryable: false,
+      },
+    };
+  });
+  const view = mount();
+  await toggle(await open());
+  view.unmount();
+  render(<SelectedMetadataRecoveryHost />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Compare versions' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Use current' }));
+  await act(async () => {
+    await flushOpenPages();
+  });
+  expect(ipc.patchSelectedMetadata).toHaveBeenCalledOnce();
+  expect(value).toBe(true);
+});
+it('native readonly checkbox observation never enters another field editor or legacy writer', async () => {
+  editable = false;
+  mount();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Flag' }));
+  await waitFor(() => expect(ipc.readSelectedProperty).toHaveBeenCalledOnce());
+  expect(screen.queryByRole('switch')).toBeNull();
+  expect(screen.getByText('This stored checkbox needs another typed editor.')).toBeTruthy();
+  expect(ipc.patchSelectedMetadata).not.toHaveBeenCalled();
+  expect(useVaultStore.getState().patchFrontmatter).not.toHaveBeenCalled();
+});
+it.each([
+  { label: 'Not set', stored: undefined },
+  { label: 'Null', stored: null },
+])('$label is distinct from false and explicit Set off authors Boolean false', async (row) => {
+  value = row.stored;
+  mount();
+  await open();
+  expect(screen.getByText(row.label)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Set off' }));
+  await waitFor(() => expect(ipc.patchSelectedMetadata).toHaveBeenCalledOnce());
+  expect(vi.mocked(ipc.patchSelectedMetadata).mock.calls[0][2].changes).toEqual([
+    { op: 'set', key: field, value: { kind: 'boolean', value: false } },
+  ]);
+  expect(value).toBe(false);
+});
+it('caller-owned checkbox draft preserves legacy one-click onPatch without native mutation', () => {
+  const entry = useVaultStore.getState().entries[0];
+  const onPatch = vi.fn();
+  render(
+    <FieldEditor
+      entry={entry}
+      def={{ name: field, kind: 'checkbox' }}
+      schema={buildSchema([entry])}
+      onPatch={onPatch}
+    />,
+  );
+  fireEvent.click(screen.getByRole('switch'));
+  expect(onPatch).toHaveBeenCalledWith(false);
+  expect(ipc.readSelectedProperty).not.toHaveBeenCalled();
+  expect(ipc.patchSelectedMetadata).not.toHaveBeenCalled();
+});

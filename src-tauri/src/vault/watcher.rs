@@ -189,21 +189,38 @@ struct WatcherOwner {
 }
 struct WatcherTransition<'a>(&'a std::sync::atomic::AtomicBool);
 impl Drop for WatcherTransition<'_> {
-    fn drop(&mut self) { self.0.store(false, std::sync::atomic::Ordering::Release); }
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 impl WatcherState {
     fn transition(&self) -> Result<WatcherTransition<'_>, String> {
-        self.changing.compare_exchange(false, true, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire)
+        self.changing
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
             .map_err(|_| "A watcher lifecycle transition is still running.".to_owned())?;
         Ok(WatcherTransition(&self.changing))
     }
     fn stop_owned(&self, timeout: Duration) -> Result<(), String> {
-        let mut owner = self.inner.lock().map_err(|_| "watcher state poisoned".to_owned())?.take();
-        let Some(mut owner) = owner.take() else { return Ok(()); };
+        let mut owner = self
+            .inner
+            .lock()
+            .map_err(|_| "watcher state poisoned".to_owned())?
+            .take();
+        let Some(mut owner) = owner.take() else {
+            return Ok(());
+        };
         drop(owner.watcher.take());
         if let Err(error) = owner.worker.wait_within(timeout) {
             // Do not detach on timeout or overwrite this retained stopping slot.
-            *self.inner.lock().map_err(|_| "watcher state poisoned".to_owned())? = Some(owner);
+            *self
+                .inner
+                .lock()
+                .map_err(|_| "watcher state poisoned".to_owned())? = Some(owner);
             return Err(error);
         }
         Ok(())
@@ -258,10 +275,18 @@ fn start_mode(
         .watch(&vault, RecursiveMode::Recursive)
         .map_err(|e| e.to_string())?;
     let vault_root = normalize(&vault);
-    let handle = std::thread::Builder::new().name("vault-watcher".into())
-        .spawn(move || debounce_loop(app, vault_root, rx, selected)).map_err(|_| "watcher callback could not start".to_owned())?;
-    let owner = WatcherOwner { watcher: Some(watcher), worker: crate::spawn::retained_thread::RetainedThread::new(handle) };
-    let mut slot = state.inner.lock().map_err(|_| "watcher state poisoned".to_string())?;
+    let handle = std::thread::Builder::new()
+        .name("vault-watcher".into())
+        .spawn(move || debounce_loop(app, vault_root, rx, selected))
+        .map_err(|_| "watcher callback could not start".to_owned())?;
+    let owner = WatcherOwner {
+        watcher: Some(watcher),
+        worker: crate::spawn::retained_thread::RetainedThread::new(handle),
+    };
+    let mut slot = state
+        .inner
+        .lock()
+        .map_err(|_| "watcher state poisoned".to_string())?;
     *slot = Some(owner);
     Ok(())
 }
@@ -611,17 +636,29 @@ mod shutdown_lifetime_tests {
         let state = WatcherState::default();
         let (entered_send, entered) = mpsc::sync_channel(0);
         let (release, wait) = mpsc::sync_channel(0);
-        let handle = std::thread::spawn(move || { entered_send.send(()).unwrap(); let _ = wait.recv(); });
-        *state.inner.lock().unwrap() = Some(WatcherOwner { watcher: None, worker: crate::spawn::retained_thread::RetainedThread::new(handle) });
+        let handle = std::thread::spawn(move || {
+            entered_send.send(()).unwrap();
+            let _ = wait.recv();
+        });
+        *state.inner.lock().unwrap() = Some(WatcherOwner {
+            watcher: None,
+            worker: crate::spawn::retained_thread::RetainedThread::new(handle),
+        });
         entered.recv().unwrap();
         let first = stop_within(&state, Duration::ZERO);
         let retained = state.inner.lock().unwrap().is_some();
         release.send(()).unwrap();
         let final_result = stop_within(&state, Duration::from_secs(2));
-        assert!(first.is_err(), "dropping notifier does not settle an in-flight callback");
+        assert!(
+            first.is_err(),
+            "dropping notifier does not settle an in-flight callback"
+        );
         assert!(retained, "timeout must retain exact callback owner");
         assert!(final_result.is_ok());
-        assert!(state.inner.lock().unwrap().is_none(), "actual join precedes success");
+        assert!(
+            state.inner.lock().unwrap().is_none(),
+            "actual join precedes success"
+        );
     }
 }
 
@@ -632,12 +669,18 @@ mod panicked_shutdown_tests {
     fn panicked_callback_owner_is_retained_across_repeated_stop() {
         let state = WatcherState::default();
         let handle = std::thread::spawn(|| panic!("synthetic watcher callback failure"));
-        *state.inner.lock().unwrap() = Some(WatcherOwner { watcher: None, worker: crate::spawn::retained_thread::RetainedThread::new(handle) });
+        *state.inner.lock().unwrap() = Some(WatcherOwner {
+            watcher: None,
+            worker: crate::spawn::retained_thread::RetainedThread::new(handle),
+        });
         let first = stop_within(&state, Duration::from_secs(2));
         let second = stop_within(&state, Duration::ZERO);
         let retained = state.inner.lock().unwrap().is_some();
         assert!(first.is_err());
         assert!(second.is_err());
-        assert!(retained, "failed cleanup must not be cleared by another stop");
+        assert!(
+            retained,
+            "failed cleanup must not be cleared by another stop"
+        );
     }
 }

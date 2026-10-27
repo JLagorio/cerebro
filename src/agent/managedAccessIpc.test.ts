@@ -78,12 +78,14 @@ describe('original managed access IPC', () => {
 });
 
 it('reads the actual first native run zero without replacing its selector', async () => {
-  native(); invoke.mockResolvedValueOnce(view);
+  native();
+  invoke.mockResolvedValueOnce(view);
   await expect(readManagedActionAccess(0)).resolves.toEqual(view);
   expect(invoke).toHaveBeenCalledExactlyOnceWith('read_managed_action_access', { run: 0 });
 });
 it('saves explicit access for actual first native run zero with unchanged original request', async () => {
-  native(); const result = { state: 'changed', view, sourceCurrent: true, requestClosed: true };
+  native();
+  const result = { state: 'changed', view, sourceCurrent: true, requestClosed: true };
   invoke.mockResolvedValueOnce(result);
   await expect(setManagedActionAccess(0, request)).resolves.toEqual(result);
   expect(invoke).toHaveBeenCalledExactlyOnceWith('set_managed_action_access', { run: 0, request });

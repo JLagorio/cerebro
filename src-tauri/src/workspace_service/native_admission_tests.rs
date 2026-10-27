@@ -655,15 +655,33 @@ fn recovery_history_uses_only_current_legacy_root_and_cannot_be_disabled_by_payl
     fs::remove_dir_all(legacy).unwrap();
 }
 
-
 #[test]
 fn actual_workflow_and_managed_access_selectors_preserve_the_outer_selected_boundary() {
     let source = include_str!("../lib.rs");
-    let handler = source.split_once("tauri::generate_handler![").unwrap().1.split_once(']').unwrap().0;
-    let text = handler.lines().map(|line| line.split("//").next().unwrap()).collect::<Vec<_>>().join("\n");
-    let names: Vec<_> = text.split(',').map(str::trim).filter(|s| !s.is_empty())
+    let handler = source
+        .split_once("tauri::generate_handler![")
+        .unwrap()
+        .1
+        .split_once(']')
+        .unwrap()
+        .0;
+    let text = handler
+        .lines()
+        .map(|line| line.split("//").next().unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let names: Vec<_> = text
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
         .map(|s| s.rsplit("::").next().unwrap())
-        .filter(|name| name.starts_with("workflow_") || matches!(*name, "read_managed_action_access" | "set_managed_action_access"))
+        .filter(|name| {
+            name.starts_with("workflow_")
+                || matches!(
+                    *name,
+                    "read_managed_action_access" | "set_managed_action_access"
+                )
+        })
         .collect();
     assert_eq!(names.len(), 28);
     let f = Fixture::new("workflow-access-selectors");
@@ -676,19 +694,36 @@ fn actual_workflow_and_managed_access_selectors_preserve_the_outer_selected_boun
         // This outer gate protects selected storage; the authenticated inner
         // handler owns the original-opening requirement, including no opening.
         native::dispatch_checked(&context, request, || entered.set(true)).unwrap();
-        assert!(entered.get(), "{name} must delegate missing-opening authentication to its existing native handler");
+        assert!(
+            entered.get(),
+            "{name} must delegate missing-opening authentication to its existing native handler"
+        );
         entered.set(false);
         let opening = context.begin_open().unwrap();
         context.publish_open(opening, &f.root).unwrap();
-        let request = native::request(name, &tauri::ipc::InvokeBody::Json(json!({"vault":legacy,"authority":"legacy"}))).unwrap();
+        let request = native::request(
+            name,
+            &tauri::ipc::InvokeBody::Json(json!({"vault":legacy,"authority":"legacy"})),
+        )
+        .unwrap();
         let error = native::dispatch_checked(&context, request, || entered.set(true)).unwrap_err();
-        assert_eq!(error.kind, AuthorityErrorKind::UnsupportedOperation, "{name}");
-        assert!(!entered.get(), "{name} must refuse selected storage before its handler");
+        assert_eq!(
+            error.kind,
+            AuthorityErrorKind::UnsupportedOperation,
+            "{name}"
+        );
+        assert!(
+            !entered.get(),
+            "{name} must refuse selected storage before its handler"
+        );
         let opening = context.begin_open().unwrap();
         context.publish_open(opening, &legacy).unwrap();
         let request = native::request(name, &tauri::ipc::InvokeBody::Json(json!({}))).unwrap();
         native::dispatch_checked(&context, request, || entered.set(true)).unwrap();
-        assert!(entered.get(), "{name} must reach its existing authenticated handler on a current legacy root");
+        assert!(
+            entered.get(),
+            "{name} must reach its existing authenticated handler on a current legacy root"
+        );
     }
     fs::remove_dir_all(legacy).unwrap();
 }
