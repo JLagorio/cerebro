@@ -50,6 +50,7 @@ import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import './chat-turn.css';
+import { SectionBoundary } from '@/components/ui/SectionBoundary';
 
 /**
  * Transcript rows drawn by the tool manifest's renderer (M56.8), on the AI
@@ -435,7 +436,16 @@ function StepText({
  * this. The reasoning says how long it took only when both its times were
  * recorded (CV-05).
  */
-export function StepItem({ item, ...context }: RowContext & { item: TurnItem }) {
+export function StepItem(props: RowContext & { item: TurnItem }) {
+  // M93.12: one malformed tool result draws this step unavailable, not the turn.
+  return (
+    <SectionBoundary label="This step" compact resetKey={props.item.key}>
+      <StepBody {...props} />
+    </SectionBoundary>
+  );
+}
+
+function StepBody({ item, ...context }: RowContext & { item: TurnItem }) {
   switch (item.kind) {
     case 'reasoning':
       return (

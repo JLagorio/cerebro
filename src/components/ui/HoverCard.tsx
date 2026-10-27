@@ -14,6 +14,7 @@ import { isInsideLayerAbove } from '@/components/ui/layers';
 import { useEscapeLayer } from '@/components/ui/Popover';
 import { arrivingScale, useGhostOnUnmount } from './motion';
 import { readPortalViewport, toPortalRect } from './portalGeometry';
+import { SectionBoundary } from './SectionBoundary';
 
 /**
  * A card that opens over a link while the pointer rests on it (M59.7).
@@ -407,7 +408,9 @@ export function HoverCard({
                   onMouseDown={(e) => e.stopPropagation()}
                   onKeyDown={(e) => e.stopPropagation()}
                 >
-                  {content({ close: () => close() })}
+                  <SectionBoundary label="This card" compact>
+                    {content({ close: () => close() })}
+                  </SectionBoundary>
                 </div>
               </HoverCardContext.Provider>,
               document.body,

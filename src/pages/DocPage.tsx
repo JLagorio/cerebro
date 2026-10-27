@@ -910,16 +910,18 @@ function LegacyDocPage({ selection }: { selection: DocSelection }) {
       <Presence<HTMLElement>
         open={sideDrawn}
         render={({ closing, ref }) => (
-          <DocSidePanel
-            ref={ref}
-            closing={closing}
-            overlay={sideDrawer}
-            entry={entry}
-            schema={schema}
-            panel={panel}
-            concept={concept}
-            comments={comments}
-          />
+          <Contained label="This panel" resetKey={panel} compact>
+            <DocSidePanel
+              ref={ref}
+              closing={closing}
+              overlay={sideDrawer}
+              entry={entry}
+              schema={schema}
+              panel={panel}
+              concept={concept}
+              comments={comments}
+            />
+          </Contained>
         )}
       />
       <div className="cb-page-frame-body">

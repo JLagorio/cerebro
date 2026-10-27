@@ -69,6 +69,26 @@ describe('SectionBoundary (M93.12)', () => {
     expect(screen.getByText('B drawn')).toBeTruthy();
   });
 
+  it('stays down after a second fault, until a new reset key', () => {
+    const { rerender } = render(
+      <SectionBoundary label="This step" resetKey="a">
+        <Fragile name="Step" />
+      </SectionBoundary>,
+    );
+    fireEvent.click(screen.getByTestId('section-retry'));
+    expect(screen.getByTestId('section-unavailable').textContent).toContain(
+      'This step stopped drawing again',
+    );
+    expect(screen.queryByTestId('section-retry')).toBeNull();
+    trouble.throws = false;
+    rerender(
+      <SectionBoundary label="This step" resetKey="b">
+        <Fragile name="Step" />
+      </SectionBoundary>,
+    );
+    expect(screen.getByText('Step drawn')).toBeTruthy();
+  });
+
   it('mounts what must keep answering only while the section is down', () => {
     const Host = () => <p>host</p>;
     render(

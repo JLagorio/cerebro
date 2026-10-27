@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { useFocusRestore } from '@/hooks/useFocusRestore';
 import { isTopLayer, ownsEscape, useLayer } from '@/components/ui/layers';
 import { useGhostOnUnmount } from '@/components/ui/motion';
+import { SectionBoundary } from './SectionBoundary';
 
 const css = `
 .cb-dlg-scrim{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:flex-start;justify-content:center;--dialog-edge:clamp(16px,8vh,64px);padding:var(--dialog-edge) 24px;z-index:1000;animation:cbFade var(--motion-pop) backwards}
@@ -206,7 +207,11 @@ function DialogCard({
           <h2 id={titleId}>{title}</h2>
           <IconButton icon="x" label="Close" onClick={onClose} />
         </div>
-        <div className="cb-dlg-bd">{children}</div>
+        <div className="cb-dlg-bd">
+          <SectionBoundary label="This dialog" compact>
+            {children}
+          </SectionBoundary>
+        </div>
         {primaryAction || secondaryAction || footerNote ? (
           <div className="cb-dlg-ft">
             {footerNote ? (

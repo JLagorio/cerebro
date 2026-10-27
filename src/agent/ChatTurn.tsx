@@ -36,6 +36,7 @@ import type { Entry } from '@/engine/types';
 import { useTheme } from '@/hooks/useTheme';
 import { useVaultStore } from '@/stores/vaultStore';
 import './chat-turn.css';
+import { SectionBoundary } from '@/components/ui/SectionBoundary';
 
 /**
  * One turn of the conversation (M91.13): the person's message, or the
@@ -86,10 +87,20 @@ export interface MessageProps {
 /** Memoized: a streamed delta replaces only the message it grows, so with
  *  stable handlers from the panel every earlier turn skips the redraw. */
 export const Message = memo(function Message(props: MessageProps) {
-  return props.message.role === 'user' ? (
-    <UserMessage message={props.message} arriving={props.arriving} onOpenPath={props.onOpenPath} />
-  ) : (
-    <AssistantMessage {...props} />
+  // M93.12: one malformed turn draws unavailable; the others, the draft and
+  // any waiting decision stay.
+  return (
+    <SectionBoundary label="This turn" compact>
+      {props.message.role === 'user' ? (
+        <UserMessage
+          message={props.message}
+          arriving={props.arriving}
+          onOpenPath={props.onOpenPath}
+        />
+      ) : (
+        <AssistantMessage {...props} />
+      )}
+    </SectionBoundary>
   );
 });
 

@@ -17,6 +17,7 @@ import { RunsLane } from './RunsLane';
 import { MyWorkLane } from './MyWorkLane';
 import { ProposalsLane } from './ProposalsLane';
 import { useHomeClock } from './useHomeClock';
+import { SectionBoundary } from '@/components/ui/SectionBoundary';
 
 export const HOME_COMPONENTS = {
   mywork: MyWorkLane,
@@ -80,7 +81,12 @@ export function HomeLanes({ only }: { only?: HomeLaneId }) {
         {HOME_LANES.map(({ id }) => {
           if (only !== undefined && only !== id) return null;
           const Component = HOME_COMPONENTS[id];
-          return <Component key={id} now={now} ctx={ctx} />;
+          // M93.12: a lane that throws is that lane's word alone.
+          return (
+            <SectionBoundary key={id} label="This lane" compact>
+              <Component now={now} ctx={ctx} />
+            </SectionBoundary>
+          );
         })}
         <ListSelectionBar count={cursor.state.selected.size} doneHint />
       </div>

@@ -32,6 +32,7 @@ import { toJsxRuntime } from 'hast-util-to-jsx-runtime';
 import type { Highlighter } from 'shiki';
 import { shikiFor } from '@/engine/fileKinds';
 import type { ResolvedTheme } from '@/hooks/useTheme';
+import { retryableOnce } from '@/lib/retryableOnce';
 
 /**
  * The slice of hast this file walks. Narrower than `hast`'s own types on
@@ -58,16 +59,16 @@ export function languageFor(path: string): string | null {
   return shikiFor(path);
 }
 
-let instance: Promise<Highlighter> | null = null;
 const loadedLangs = new Set<string>();
 const loadedThemes = new Set<string>();
 
-async function highlighter(): Promise<Highlighter> {
-  if (instance === null) {
-    instance = import('shiki').then((shiki) => shiki.createHighlighter({ themes: [], langs: [] }));
-  }
-  return instance;
-}
+/** One highlighter, started on first use; a failed start is retried by the
+ * next caller rather than kept until relaunch (M93.12). */
+const highlighter: () => Promise<Highlighter> = retryableOnce(() => {
+  loadedLangs.clear();
+  loadedThemes.clear();
+  return import('shiki').then((shiki) => shiki.createHighlighter({ themes: [], langs: [] }));
+});
 
 /**
  * Unstyled fallback: the file's text, as text — but split into the same

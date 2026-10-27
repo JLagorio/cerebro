@@ -473,15 +473,17 @@ function App() {
                           : '100%',
                     }}
                   >
-                    <AiPanel
-                      key={vaultPath}
-                      room={chatFloating ? null : (rooms?.assistant ?? null)}
-                      presentation={aiPanelPresentation}
-                      onTogglePresentation={() =>
-                        setAiPanelPresentation(chatCanvas ? 'floating' : 'canvas')
-                      }
-                      navigationTarget={chatCanvas ? assistantNavigationTarget : null}
-                    />
+                    <Contained label="The assistant" resetKey={vaultPath}>
+                      <AiPanel
+                        key={vaultPath}
+                        room={chatFloating ? null : (rooms?.assistant ?? null)}
+                        presentation={aiPanelPresentation}
+                        onTogglePresentation={() =>
+                          setAiPanelPresentation(chatCanvas ? 'floating' : 'canvas')
+                        }
+                        navigationTarget={chatCanvas ? assistantNavigationTarget : null}
+                      />
+                    </Contained>
                   </div>
                 )}
                 {/* M52: parked, and saying so. The sidebar's zap stayed pressed

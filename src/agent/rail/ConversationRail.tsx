@@ -22,6 +22,7 @@ import { Rail } from '@/components/ai/Rail';
 import { useMergedRefs } from '@/components/ai/mergeRefs';
 import { leaveGhost, useArrival } from '@/components/ui/motion';
 import { useUiStore } from '@/stores/uiStore';
+import { SectionBoundary } from '@/components/ui/SectionBoundary';
 
 /**
  * A rail row's secondary action, "Open … (leaves full screen)" (M92.1, §1).
@@ -209,35 +210,54 @@ export const ConversationRail = memo(function ConversationRail({
     >
       {drawer && <DrawerExit rail={own} />}
       {/* The cards, in §0 Q5's order. */}
-      <WaitingCard
-        waiting={waiting}
-        vault={vault}
-        thread={thread}
-        folded={quiet}
-        jump={jump}
-        scroller={scroller}
-      />
-      <PlanCard plan={plan} working={working} folded={quiet} />
-      <SubagentsCard subagents={subagents} transcript={transcript} folded={quiet} jump={jump} />
-      <ChangesCard
-        changes={changes}
-        folded={quiet}
-        jump={jump}
-        onOpenPath={onOpenPath}
-        onViewDiff={onViewDiff}
-        reveal={reveal}
-      />
-      <HandoffsCard handoffs={handoffs} folded={quiet} jump={jump} reveal={reveal} />
-      <ContextCard context={context} folded={quiet} />
-      <SourcesCard
-        sources={sources}
-        folded={quiet}
-        jump={jump}
-        onOpenPath={onOpenPath}
-        reveal={reveal}
-      />
-      <ConnectorsCard vault={vault} reach={reach} streaming={streaming} folded={quiet} />
-      <EnvironmentCard vault={vault} reach={reach} folded={quiet} />
+      {/* M93.12: each card faults alone, outside components/ai/ (CV-64). */}
+      <SectionBoundary label="Waiting on you" compact>
+        <WaitingCard
+          waiting={waiting}
+          vault={vault}
+          thread={thread}
+          folded={quiet}
+          jump={jump}
+          scroller={scroller}
+        />
+      </SectionBoundary>
+      <SectionBoundary label="Plan" compact>
+        <PlanCard plan={plan} working={working} folded={quiet} />
+      </SectionBoundary>
+      <SectionBoundary label="Subagents" compact>
+        <SubagentsCard subagents={subagents} transcript={transcript} folded={quiet} jump={jump} />
+      </SectionBoundary>
+      <SectionBoundary label="Changes" compact>
+        <ChangesCard
+          changes={changes}
+          folded={quiet}
+          jump={jump}
+          onOpenPath={onOpenPath}
+          onViewDiff={onViewDiff}
+          reveal={reveal}
+        />
+      </SectionBoundary>
+      <SectionBoundary label="Handed off" compact>
+        <HandoffsCard handoffs={handoffs} folded={quiet} jump={jump} reveal={reveal} />
+      </SectionBoundary>
+      <SectionBoundary label="Context" compact>
+        <ContextCard context={context} folded={quiet} />
+      </SectionBoundary>
+      <SectionBoundary label="Sources" compact>
+        <SourcesCard
+          sources={sources}
+          folded={quiet}
+          jump={jump}
+          onOpenPath={onOpenPath}
+          reveal={reveal}
+        />
+      </SectionBoundary>
+      <SectionBoundary label="Connectors" compact>
+        <ConnectorsCard vault={vault} reach={reach} streaming={streaming} folded={quiet} />
+      </SectionBoundary>
+      <SectionBoundary label="Environment" compact>
+        <EnvironmentCard vault={vault} reach={reach} folded={quiet} />
+      </SectionBoundary>
     </Rail>
   );
 });

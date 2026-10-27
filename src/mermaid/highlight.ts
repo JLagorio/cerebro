@@ -10,12 +10,14 @@
  * heavier to run than wasm on huge files, irrelevant here (one small
  * mermaid block), and it collapses the bundle instead of growing it.
  */
+import { retryableOnce } from '@/lib/retryableOnce';
+
 export type Highlighter = (code: string) => string;
 
-let promise: Promise<Highlighter | null> | null = null;
-
-export function loadMermaidHighlighter(): Promise<Highlighter | null> {
-  promise ??= (async () => {
+/** Null while it cannot load; that answer is not kept, so the next block
+ * tries again (M93.12). */
+export const loadMermaidHighlighter: () => Promise<Highlighter | null> = retryableOnce(
+  async (expire) => {
     try {
       const [
         { createHighlighterCore },
@@ -43,8 +45,8 @@ export function loadMermaidHighlighter(): Promise<Highlighter | null> {
         });
       };
     } catch {
+      expire();
       return null;
     }
-  })();
-  return promise;
-}
+  },
+);

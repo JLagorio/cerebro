@@ -21,6 +21,8 @@ interface SectionBoundaryProps {
 
 interface SectionBoundaryState {
   failed: boolean;
+  /** Faults since the last reset key: a second one stays down. */
+  faults: number;
   /** Keys the children, so Retry draws them fresh. */
   attempt: number;
   resetKey: unknown;
@@ -34,7 +36,12 @@ interface SectionBoundaryState {
  * nothing here reloads the window or clears browser storage.
  */
 export class SectionBoundary extends Component<SectionBoundaryProps, SectionBoundaryState> {
-  state: SectionBoundaryState = { failed: false, attempt: 0, resetKey: this.props.resetKey };
+  state: SectionBoundaryState = {
+    failed: false,
+    faults: 0,
+    attempt: 0,
+    resetKey: this.props.resetKey,
+  };
 
   static getDerivedStateFromError(): Partial<SectionBoundaryState> {
     return { failed: true };
@@ -46,10 +53,11 @@ export class SectionBoundary extends Component<SectionBoundaryProps, SectionBoun
   ): Partial<SectionBoundaryState> | null {
     return Object.is(props.resetKey, state.resetKey)
       ? null
-      : { failed: false, resetKey: props.resetKey };
+      : { failed: false, faults: 0, resetKey: props.resetKey };
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo): void {
+    this.setState((state) => ({ faults: state.faults + 1 }));
     this.props.onCatch?.(error, info);
   }
 
@@ -60,16 +68,20 @@ export class SectionBoundary extends Component<SectionBoundaryProps, SectionBoun
   render() {
     const { label, onBack, compact, fallbackClassName, whileFailed, children } = this.props;
     if (!this.state.failed) return <Fragment key={this.state.attempt}>{children}</Fragment>;
+    // A fault Retry met again would only meet it once more: it stays down.
+    const again = this.state.faults > 1;
     const message = (
       <StateMessage
         state="unavailable"
-        title={`${label} stopped drawing`}
+        title={again ? `${label} stopped drawing again` : `${label} stopped drawing`}
         compact={compact}
         action={
           <>
-            <Button size="sm" onClick={this.retry} testId="section-retry">
-              Retry
-            </Button>
+            {!again && (
+              <Button size="sm" onClick={this.retry} testId="section-retry">
+                Retry
+              </Button>
+            )}
             {onBack && (
               <Button size="sm" variant="ghost" onClick={onBack}>
                 Back
@@ -78,7 +90,9 @@ export class SectionBoundary extends Component<SectionBoundaryProps, SectionBoun
           </>
         }
       >
-        Retry draws it again. It changes nothing on disk.
+        {again
+          ? 'It stays unavailable until you open it again. Nothing on disk changed.'
+          : 'Retry draws it again. It changes nothing on disk.'}
       </StateMessage>
     );
     return (

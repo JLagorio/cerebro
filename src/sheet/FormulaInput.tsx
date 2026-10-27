@@ -9,6 +9,7 @@ import {
   type CatalogEntry,
   type CompletionContext,
 } from '@/engine/sheet/formulaComplete';
+import { retryableOnce } from '@/lib/retryableOnce';
 export interface FormulaCursor {
   context: CompletionContext;
   text: string;
@@ -30,12 +31,10 @@ interface Props {
   onBlur?: () => void;
   onContext?: (cursor: FormulaCursor | null) => void;
 }
-let catalog: Promise<CatalogEntry[]> | undefined;
-function loadCatalog() {
-  return (catalog ??= import('@/engine/sheet/functions.json').then((raw) =>
-    catalogEntries(raw.default),
-  ));
-}
+/** A failed load is retried by the next caret, not kept until relaunch (M93.12). */
+const loadCatalog: () => Promise<CatalogEntry[]> = retryableOnce(() =>
+  import('@/engine/sheet/functions.json').then((raw) => catalogEntries(raw.default)),
+);
 export function FormulaInput(props: Props) {
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const input = props.inputRef ?? ownRef;

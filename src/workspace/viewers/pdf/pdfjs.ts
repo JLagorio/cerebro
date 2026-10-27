@@ -8,15 +8,15 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { findRequest, type PdfMatches } from './find';
 import { clampZoom, type PdfScale } from './zoom';
+import { retryableOnce } from '@/lib/retryableOnce';
 
 export type PdfDocument = PDFDocumentProxy;
 export type PdfOpen =
   { ok: true; doc: PdfDocument } | { ok: false; reason: 'encrypted' | 'corrupt' | 'engine' };
 type Engine = Awaited<ReturnType<typeof makeEngine>>;
-let engine: Promise<Engine> | null = null;
 class PdfEngineError extends Error {}
 
-async function makeEngine() {
+async function makeEngine(expire: () => void) {
   const library = await import('pdfjs-dist/legacy/build/pdf.mjs');
   let port: Worker | undefined;
   if (typeof window === 'undefined') {
@@ -41,9 +41,10 @@ async function makeEngine() {
     port?.addEventListener('error', fail, { once: true });
     port?.addEventListener('messageerror', fail, { once: true });
   });
-  // A shared worker can fail while no document is opening. Future opens still
-  // race the rejected promise; avoid a second, unhandled-rejection report.
-  void failed.catch(() => undefined);
+  // A shared worker can fail while no document is opening. The opens already
+  // racing it see the refusal; the next open starts a fresh engine (M93.12),
+  // and nothing reports the rejection a second time.
+  void failed.catch(expire);
   try {
     await worker.promise;
   } catch (error) {
@@ -54,10 +55,10 @@ async function makeEngine() {
   return { library, worker, failed };
 }
 
-/** Cached once; importing this module starts no worker and loads no renderer. */
-export function loadPdfEngine(): Promise<Engine> {
-  return (engine ??= makeEngine());
-}
+/** Cached while it works; importing this module starts no worker and loads no
+ * renderer. A failed start or a dead worker is forgotten, so the next open
+ * starts again (M93.12). */
+export const loadPdfEngine: () => Promise<Engine> = retryableOnce(makeEngine);
 
 export async function openPdf(bytes: Uint8Array): Promise<PdfOpen> {
   let loaded: Engine;
