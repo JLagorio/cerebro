@@ -1,8 +1,11 @@
 //! Workflow transaction kernel. Rows are not native/ACT authority.
 //! The owning service authenticates and validates immutable definitions first.
-#![expect(
-    dead_code,
-    reason = "M98 runtime boundary precedes native service wiring"
+#![cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "M98 runtime boundary precedes native service wiring"
+    )
 )]
 use rusqlite::Connection;
 
@@ -736,10 +739,7 @@ fn finish_transition(
         "result" if successor.is_none() => (),
         "condition"
             if (output == "true" && successor == step.next.as_deref())
-                || (output == "false" && successor == step.otherwise.as_deref()) =>
-        {
-            ()
-        }
+                || (output == "false" && successor == step.otherwise.as_deref()) => {}
         "result" | "condition" => return Err(Error::Invalid),
         _ if successor.is_some() && successor == step.next.as_deref() => (),
         _ => return Err(Error::Invalid),
@@ -966,7 +966,14 @@ pub(crate) fn resume_rows(
     }
     let wait = wait_row(conn, id)?;
     let run = inspect_rows(conn, scope, &wait.run)?;
-    let (due,expires,schema,old_key,old_digest):(Option<i64>,Option<i64>,Option<String>,Option<String>,Option<String>)=conn.query_row("SELECT due_at,expires_at,schema_ref,signal_key,signal_digest FROM workflow_waits WHERE continuation_id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).map_err(db)?;
+    type WaitRow = (
+        Option<i64>,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+    let (due,expires,schema,old_key,old_digest):WaitRow=conn.query_row("SELECT due_at,expires_at,schema_ref,signal_key,signal_digest FROM workflow_waits WHERE continuation_id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).map_err(db)?;
     let value = match signal {
         Signal::Timer { ready } if wait.kind == "timer" => {
             if !ready {
@@ -1110,10 +1117,6 @@ pub(crate) fn effect_rows(
 ) -> Result<Run, Error> {
     effect_rows_inner(conn, scope, id, expected, effect, false, now)
 }
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the ACT receipt proof binds the existing FLOW transition"
-)]
 pub(crate) fn effect_receipt_rows(
     conn: &Connection,
     scope: Scope<'_>,
@@ -1128,10 +1131,6 @@ pub(crate) fn effect_receipt_rows(
     }
     effect_rows_inner(conn, scope, id, expected, effect, true, now)
 }
-#[expect(
-    clippy::too_many_arguments,
-    reason = "shared projection includes its authenticated receipt disposition"
-)]
 fn effect_rows_inner(
     conn: &Connection,
     scope: Scope<'_>,

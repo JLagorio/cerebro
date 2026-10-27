@@ -608,8 +608,18 @@
   "selectedQuery": {
     "version": 1,
     "fieldKinds": "shared/schema/field-kinds.v1.json",
-    "taggedScalarKinds": ["null", "string", "boolean", "decimal", "date", "instant"],
-    "rawScalarKinds": ["string", "boolean"],
+    "taggedScalarKinds": [
+      "null",
+      "string",
+      "boolean",
+      "decimal",
+      "date",
+      "instant"
+    ],
+    "rawScalarKinds": [
+      "string",
+      "boolean"
+    ],
     "rawNumbers": "canonical_safe_integers_only",
     "rawIntegerLimitRef": "decimal.legacyMaxSafeInteger",
     "arrayOperands": "operator_lists_only",
@@ -619,7 +629,12 @@
     "decimalComparison": "exact_numeric_value",
     "dateStringOperands": "declared_date_family_only",
     "resultValues": "tagged_present_keys_only",
-    "emptyValues": ["absent", "null", "empty_string", "empty_array"],
+    "emptyValues": [
+      "absent",
+      "null",
+      "empty_string",
+      "empty_array"
+    ],
     "sortEmpty": "last",
     "sortTie": "record_id",
     "defaultOrder": "path",
@@ -662,7 +677,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -677,7 +694,9 @@
         }
       },
       "expect": {
-        "paths": ["literal.md"],
+        "paths": [
+          "literal.md"
+        ],
         "values": [
           {
             "value": {
@@ -713,7 +732,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -727,7 +748,9 @@
         }
       },
       "expect": {
-        "paths": ["null.md"],
+        "paths": [
+          "null.md"
+        ],
         "values": [
           {
             "value": {
@@ -762,7 +785,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -773,7 +798,10 @@
         }
       },
       "expect": {
-        "paths": ["absent.md", "null.md"],
+        "paths": [
+          "absent.md",
+          "null.md"
+        ],
         "values": [
           {},
           {
@@ -815,7 +843,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -830,7 +860,9 @@
         }
       },
       "expect": {
-        "paths": ["higher.md"],
+        "paths": [
+          "higher.md"
+        ],
         "values": [
           {
             "value": {
@@ -872,7 +904,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -887,7 +921,9 @@
         }
       },
       "expect": {
-        "paths": ["a.md"],
+        "paths": [
+          "a.md"
+        ],
         "values": [
           {
             "value": {
@@ -929,7 +965,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -944,7 +982,9 @@
         }
       },
       "expect": {
-        "paths": ["tiny.md"],
+        "paths": [
+          "tiny.md"
+        ],
         "values": [
           {
             "value": {
@@ -986,7 +1026,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1001,7 +1043,10 @@
         }
       },
       "expect": {
-        "paths": ["negative.md", "zero.md"],
+        "paths": [
+          "negative.md",
+          "zero.md"
+        ],
         "values": [
           {
             "value": {
@@ -1040,7 +1085,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1055,7 +1102,9 @@
         }
       },
       "expect": {
-        "paths": ["one.md"],
+        "paths": [
+          "one.md"
+        ],
         "values": [
           {
             "value": {
@@ -1106,7 +1155,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "sort": [
           {
             "field": "value",
@@ -1115,7 +1166,11 @@
         ]
       },
       "expect": {
-        "paths": ["b.md", "c.md", "a.md"],
+        "paths": [
+          "b.md",
+          "c.md",
+          "a.md"
+        ],
         "values": [
           {
             "value": {
@@ -1167,7 +1222,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1210,7 +1267,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1257,7 +1316,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1356,7 +1417,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1368,7 +1431,9 @@
         }
       },
       "expect": {
-        "paths": ["today.md"],
+        "paths": [
+          "today.md"
+        ],
         "values": [
           {
             "value": {
@@ -1405,7 +1470,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1420,7 +1487,9 @@
         }
       },
       "expect": {
-        "paths": ["text.md"],
+        "paths": [
+          "text.md"
+        ],
         "values": [
           {
             "value": {
@@ -1460,7 +1529,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1500,7 +1571,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1512,7 +1585,9 @@
         }
       },
       "expect": {
-        "paths": ["null.md"],
+        "paths": [
+          "null.md"
+        ],
         "values": [
           {
             "value": {
@@ -1547,7 +1622,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1583,10 +1660,14 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"]
+        "fields": [
+          "value"
+        ]
       },
       "expect": {
-        "paths": ["instant.md"],
+        "paths": [
+          "instant.md"
+        ],
         "values": [
           {
             "value": {
@@ -1628,7 +1709,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1643,7 +1726,9 @@
         }
       },
       "expect": {
-        "paths": ["higher.md"],
+        "paths": [
+          "higher.md"
+        ],
         "values": [
           {
             "value": {
@@ -1694,7 +1779,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1715,7 +1802,11 @@
         }
       },
       "expect": {
-        "paths": ["high.md", "low.md", "middle.md"],
+        "paths": [
+          "high.md",
+          "low.md",
+          "middle.md"
+        ],
         "values": [
           {
             "value": {
@@ -1779,7 +1870,9 @@
       ],
       "args": {
         "type": "Record",
-        "fields": ["value"],
+        "fields": [
+          "value"
+        ],
         "filters": {
           "all": [
             {
@@ -1791,7 +1884,9 @@
         }
       },
       "expect": {
-        "paths": ["false.md"],
+        "paths": [
+          "false.md"
+        ],
         "values": [
           {
             "value": {
@@ -1805,7 +1900,10 @@
   ],
   "selectedSavedView": {
     "version": 1,
-    "layouts": ["table", "list"],
+    "layouts": [
+      "table",
+      "list"
+    ],
     "maxRows": 100,
     "defaultRows": 100,
     "defaultColumnCount": 6,

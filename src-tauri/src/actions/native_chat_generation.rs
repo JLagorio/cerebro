@@ -2,6 +2,10 @@
 use super::*;
 use crate::runtime::chat_generations::{self as rows, Admission, Error, Receipt, Scope};
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a start is returned once and matched at once; New hands its one-use ticket over by value"
+)]
 pub(crate) enum GenerationStart {
     New(NativeGenerationRun),
     Observed(Receipt),

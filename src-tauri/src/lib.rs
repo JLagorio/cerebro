@@ -1,3 +1,6 @@
+// The workspace store's schema bundle test builds one `serde_json::json!`
+// literal deeper than the default limit of 128.
+#![recursion_limit = "256"]
 #[cfg(all(
     feature = "native-read-smoke",
     any(not(target_os = "macos"), not(debug_assertions))

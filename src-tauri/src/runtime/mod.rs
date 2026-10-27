@@ -3871,13 +3871,6 @@ fn validate_v47(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "native workflow producer follows causal ownership tests"
-    )
-)]
 pub(crate) mod workflow_submission;
 
 fn validate_v48(conn: &Connection) -> Result<(), String> {

@@ -225,18 +225,18 @@ fn verify_schema_with_journal(
                 }
             }
             "index" if row.get_ref(3).ok() == Some(ValueRef::Null) => {
-                if !matches!(
+                if !(matches!(
                     (name.as_str(), table.as_str()),
                     ("sqlite_autoindex_workspace_1", "workspace")
                         | ("sqlite_autoindex_records_1", "records")
                         | ("sqlite_autoindex_records_2", "records")
-                ) && !(version == metadata::schema_version()
+                ) || (version == metadata::schema_version()
                     && matches!(
                         (name.as_str(), table.as_str()),
                         ("sqlite_autoindex_metadata_requests_1", "metadata_requests")
                             | ("sqlite_autoindex_metadata_requests_2", "metadata_requests")
                             | ("sqlite_autoindex_metadata_requests_3", "metadata_requests")
-                    ))
+                    )))
                     || !automatic.insert(name)
                 {
                     return Err(invalid("Canonical indexes are unsupported."));

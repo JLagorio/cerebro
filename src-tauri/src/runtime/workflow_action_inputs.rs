@@ -1,15 +1,12 @@
 //! Frozen workflow/ACT request identities; no duplicated input body or authority.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "V45 frozen action request rows precede retained native runner wiring"
-    )
-)]
 use super::workflows::{self, Claim, Error, Scope};
 use crate::actions::workflow_requests::{self, FrozenRequest, Selectors};
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
+#[expect(
+    dead_code,
+    reason = "nothing reads this alias; runtime/mod.rs migrates and validates V45 through schema::SCHEMA_V45 directly"
+)]
 pub(crate) const SCHEMA_V45: &str = super::schema::SCHEMA_V45;
 #[derive(PartialEq, Eq)]
 struct Frozen {

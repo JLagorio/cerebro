@@ -419,7 +419,14 @@ pub(in crate::actions::native_owner) fn value_rows(
             (Some(reference), Some(run.input_digest), 0, "run_input")
         }
         WorkflowValueRole::StepInput | WorkflowValueRole::StepOutput => {
-            let row:Option<(Option<String>,Option<String>,Option<String>,Option<String>,i64)>=conn.query_row("SELECT input_ref,input_digest,output_ref,output_digest,attempt_ordinal FROM workflow_steps WHERE run_id=?1 AND step_id=?2",params![run.id,request.step_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional().map_err(db)?;
+            type StepValueRow = (
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                i64,
+            );
+            let row:Option<StepValueRow>=conn.query_row("SELECT input_ref,input_digest,output_ref,output_digest,attempt_ordinal FROM workflow_steps WHERE run_id=?1 AND step_id=?2",params![run.id,request.step_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional().map_err(db)?;
             let (input, input_digest, output, output_digest, ordinal) =
                 row.ok_or(flow::Error::Denied)?;
             let ordinal = u64::try_from(ordinal).map_err(|_| flow::Error::Unavailable)?;

@@ -1135,7 +1135,7 @@ pub struct AgentState {
     /// Readers still closing their runs' books: admitted, and not yet past
     /// `Done`. Quitting waits on this, for EXIT_BOOKS_WAIT at most.
     books: Arc<AtomicUsize>,
-    book_scopes: Arc<Mutex<HashMap<PathBuf, usize>>>,
+    book_scopes: BookScopes,
     /// Raised by `shut_down`. Nothing is admitted after it.
     closing: Arc<AtomicBool>,
     /// The ask seam's book (M57.1): seats and the calls waiting for the
@@ -1149,11 +1149,14 @@ pub struct AgentState {
     context: Arc<meter::ContextBook>,
 }
 
+/// Open books per canonical vault: `AgentState::book_scopes`.
+type BookScopes = Arc<Mutex<HashMap<PathBuf, usize>>>;
+
 /// A reader's place in `AgentState::books`: taken when its run is admitted,
 /// given back when the reader is done, however it ends, a panic included.
 struct Books {
     count: Arc<AtomicUsize>,
-    scope: Option<(Arc<Mutex<HashMap<PathBuf, usize>>>, PathBuf)>,
+    scope: Option<(BookScopes, PathBuf)>,
 }
 impl Books {
     #[cfg(test)]

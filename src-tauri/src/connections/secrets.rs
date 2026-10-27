@@ -28,13 +28,6 @@ pub(crate) use super::metadata::SecretRef;
 pub(crate) trait SecretStore {
     fn put(&self, reference: &SecretRef, secret: &SecretValue) -> Result<(), ConnectionError>;
     #[cfg(any(test, feature = "native-keychain-smoke", target_os = "macos"))]
-    #[cfg_attr(
-        not(any(test, feature = "native-keychain-smoke")),
-        expect(
-            dead_code,
-            reason = "secret resolution belongs to provider dispatch; initial import creates/deletes exact references"
-        )
-    )]
     fn resolve(&self, reference: &SecretRef) -> Result<SecretValue, ConnectionError>;
     fn delete(&self, reference: &SecretRef) -> Result<(), ConnectionError>;
 }

@@ -412,7 +412,6 @@ impl PrivateCapture {
         });
         if !ready {
             self.state.failure = Some(FailureKind::Pipe);
-            return;
         }
         #[cfg(test)]
         self.driver.record(NativeEvent::NonblockingReady);

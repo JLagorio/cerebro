@@ -283,10 +283,9 @@ fn two_store_handles_cannot_overwrite_same_expected_publication_revision() {
         (left.join().unwrap(), right.join().unwrap())
     });
     assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
-    let refused = if left.is_err() {
-        left.unwrap_err()
-    } else {
-        right.unwrap_err()
+    let refused = match left {
+        Err(refused) => refused,
+        Ok(_) => right.unwrap_err(),
     };
     assert!(matches!(refused, FileError::Busy | FileError::Conflict));
     assert_eq!(first.read_publication().unwrap().unwrap().revision, 2);

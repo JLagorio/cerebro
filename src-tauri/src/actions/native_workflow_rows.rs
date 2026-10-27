@@ -1,12 +1,5 @@
 //! Transaction-owned durable workflow origin metadata. Rows are not authority.
 //! Only the native owning start/resume service authenticates OpeningFacts inputs.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "native workflow producer follows causal row tests"
-    )
-)]
 use crate::runtime::workflows as flow;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};

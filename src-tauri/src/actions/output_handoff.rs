@@ -1,12 +1,5 @@
 //! ACT-owned recovery bytes for one explicitly registered FLOW consumer.
 //! No path opener, provider executor or native authority constructor lives here.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "native ACT/FLOW dispatch remains disabled until retained-owner integration"
-    )
-)]
 use super::{
     effect_kernel::{self as kernel, MutationContext},
     effect_record::{self, ActionInvocation},
@@ -231,7 +224,18 @@ pub(super) fn register_rows(
     {
         return Err(flow::Error::Stale);
     }
-    let (revision,lease,key,input,body,invocation,act_scope,act_run,reserved):(u64,Option<String>,String,String,String,Option<String>,Option<String>,Option<String>,usize)=conn.query_row("SELECT s.revision,s.lease_token,a.request_key,a.input_digest,v.canonical_json,a.invocation_id,r.act_scope_digest,r.act_run_id,r.reserved_bytes FROM workflow_runs r JOIN workflow_steps s ON s.run_id=r.run_id AND s.step_id=?2 JOIN workflow_attempts a ON a.run_id=s.run_id AND a.step_id=s.step_id AND a.ordinal=?3 JOIN workflow_values v ON v.run_id=a.run_id AND v.value_ref=a.input_ref WHERE r.run_id=?1 AND s.kind='action' AND s.state='running' AND s.attempt_ordinal=?3",params![claim.run,claim.step,integer(claim.ordinal)?],|r|Ok((sql_counter(r,0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,sql_size(r,8)?))).map_err(db)?;
+    type StepRequestRow = (
+        u64,
+        Option<String>,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        usize,
+    );
+    let (revision,lease,key,input,body,invocation,act_scope,act_run,reserved):StepRequestRow=conn.query_row("SELECT s.revision,s.lease_token,a.request_key,a.input_digest,v.canonical_json,a.invocation_id,r.act_scope_digest,r.act_run_id,r.reserved_bytes FROM workflow_runs r JOIN workflow_steps s ON s.run_id=r.run_id AND s.step_id=?2 JOIN workflow_attempts a ON a.run_id=s.run_id AND a.step_id=s.step_id AND a.ordinal=?3 JOIN workflow_values v ON v.run_id=a.run_id AND v.value_ref=a.input_ref WHERE r.run_id=?1 AND s.kind='action' AND s.state='running' AND s.attempt_ordinal=?3",params![claim.run,claim.step,integer(claim.ordinal)?],|r|Ok((sql_counter(r,0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,sql_size(r,8)?))).map_err(db)?;
     let original =
         schema::validate_input(&record.definition, &record.request.input).map_err(action)?;
     let act_digest = effect_record::scope_key(subject).map_err(action)?;

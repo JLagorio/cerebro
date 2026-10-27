@@ -229,6 +229,10 @@ fn wait_for_access(
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "both variants are kilobytes, so boxing New leaves Observed as large; prepare_held matches the one capture at once"
+)]
 enum CapturedPrepare {
     New(OriginalPrepared),
     Observed(ActionInvocation),
@@ -662,11 +666,9 @@ fn prepare_held(
         }
         CapturedPrepare::New(mut prepared) => {
             let result = run_prepared(app, witness, &mut prepared, current);
-            if result.is_err() {
-                if prepared.original_cancel().is_ok() {
-                    if let Some(approval) = &prepared.record.approval {
-                        closed(app, &prepared.origin, &approval.view.approval_id.0);
-                    }
+            if result.is_err() && prepared.original_cancel().is_ok() {
+                if let Some(approval) = &prepared.record.approval {
+                    closed(app, &prepared.origin, &approval.view.approval_id.0);
                 }
             }
             result

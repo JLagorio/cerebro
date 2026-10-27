@@ -222,6 +222,13 @@ impl<T: IdentityTransport> IdentityReader for GithubIdentityReader<T> {
 #[path = "github_identity_native.rs"]
 mod native;
 #[cfg(target_os = "macos")]
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "its one caller, native_credential_bundle::run, takes the injected fixture instead under test"
+    )
+)]
 pub(crate) fn native_reader(
     cancelled: impl Fn() -> bool + Send + 'static,
 ) -> Box<dyn IdentityReader + Send> {

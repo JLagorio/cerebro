@@ -2374,7 +2374,7 @@ fn admitted_restore_refuses_an_otherwise_valid_replacement_input_root_before_out
         let context = authority::context().unwrap();
         let choice = backup::NewDirectoryChoice::new(&f.output, "Restored copy").unwrap();
         let (lease, ()) = context
-            .reserve_output(choice, &[bundle.clone()], || Ok(()))
+            .reserve_output(choice, std::slice::from_ref(&bundle), || Ok(()))
             .unwrap();
         let error = backup::restore_admitted(input, lease).unwrap_err();
         assert_eq!(error.kind, BackupErrorKind::SourceChanged);
@@ -2453,7 +2453,7 @@ fn admitted_restore_holds_real_output_lease_through_publication_and_leaves_both_
         let context = authority::context().unwrap();
         let choice = backup::NewDirectoryChoice::new(&f.output, "Restored copy").unwrap();
         let (lease, ()) = context
-            .reserve_output(choice, &[bundle.clone()], || Ok(()))
+            .reserve_output(choice, std::slice::from_ref(&bundle), || Ok(()))
             .unwrap();
         let concurrent = context.clone();
         let output = f.output.clone();
@@ -2532,7 +2532,7 @@ fn admitted_restore_error_retains_preparing_bytes_then_releases_lease_after_reso
         let context = authority::context().unwrap();
         let choice = backup::NewDirectoryChoice::new(&f.output, "Restored copy").unwrap();
         let (lease, ()) = context
-            .reserve_output(choice, &[bundle.clone()], || Ok(()))
+            .reserve_output(choice, std::slice::from_ref(&bundle), || Ok(()))
             .unwrap();
         let error = backup::with_step_for_test(
             "restore_publish",

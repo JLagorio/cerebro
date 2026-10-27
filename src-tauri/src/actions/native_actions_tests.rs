@@ -88,8 +88,7 @@ fn native_action_transaction_lost_ack_never_returns_dispatch_authority_or_reopen
     });
     assert_eq!(
         outcome
-            .err()
-            .expect("uncertain commit has no returned action value")
+            .expect_err("uncertain commit has no returned action value")
             .code,
         ActionErrorCode::Unavailable
     );

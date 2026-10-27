@@ -50,11 +50,13 @@ impl PartialEq for Key {
     }
 }
 impl Eq for Key {}
+/// One job's body: runs with its stop flag and may hand back a follow-up job.
+type Work = Box<dyn FnOnce(&AtomicBool) -> Option<Job> + Send>;
 struct Job {
     key: Key,
     ready: Instant,
     cancel: Arc<dyn Fn() + Send + Sync>,
-    work: Box<dyn FnOnce(&AtomicBool) -> Option<Job> + Send>,
+    work: Work,
 }
 struct Running {
     key: Key,

@@ -1,12 +1,5 @@
 //! FLOW's same-transaction ACT prepare and output-consumer handoff.
 //! Caller supplies actual admitted context; this module creates no authority.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "retained workflow origin service is composed next"
-    )
-)]
 use super::{
     effect_kernel::MutationContext,
     effect_record::PrepareAction,
@@ -20,10 +13,6 @@ pub(super) struct PreparedWorkflowAction {
     pub(super) run: flow::Run,
     pub(super) inserted: bool,
 }
-#[expect(
-    clippy::too_many_arguments,
-    reason = "same-transaction workflow claim, original ACT subject and request are distinct checked identities"
-)]
 pub(super) fn prepare_claim_rows(
     conn: &Connection,
     scope: Scope<'_>,

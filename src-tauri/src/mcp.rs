@@ -1322,6 +1322,13 @@ enum Reply {
 /// The grant `bearer` resolves to now, or `None` (M53.11). A worker resolves
 /// it when it takes the request off the queue, never when the request was
 /// sent, and `REVOKE_GRACE` is sized against that.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the endpoint's dispatch resolves through resolve_with_publication; only the tests still route through this lookup"
+    )
+)]
 fn bearer_grant(bearer: Option<&str>, running: &Running) -> Option<RunGrant> {
     running.resolve(bearer?, Instant::now())
 }

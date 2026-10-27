@@ -1,7 +1,10 @@
 //! Fixed GitHub issue semantics; native admission owns any eventual execution.
-#![expect(
-    dead_code,
-    reason = "M96 provider adapter is integrated before its guarded native execution door"
+#![cfg_attr(
+    not(any(test, target_os = "macos")),
+    expect(
+        dead_code,
+        reason = "the outcome and response checks serve only the macOS transport and dispatch"
+    )
 )]
 use super::{
     effect_record::AdapterTarget,
@@ -330,8 +333,4 @@ mod tests;
 mod native;
 
 #[cfg(any(test, target_os = "macos"))]
-#[expect(
-    unused_imports,
-    reason = "retained native action dispatcher is the next integration boundary"
-)]
 pub(super) use native::{execute, TransportOutcome};

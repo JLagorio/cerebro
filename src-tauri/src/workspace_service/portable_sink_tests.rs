@@ -85,7 +85,7 @@ fn admitted_restore_report_retains_same_checked_input_summary_after_both_markers
         let context = authority::context().unwrap();
         let output = backup::NewDirectoryChoice::new(&f.output, "Native restore").unwrap();
         let (lease, ()) = context
-            .reserve_output(output, &[bundle.clone()], || Ok(()))
+            .reserve_output(output, std::slice::from_ref(&bundle), || Ok(()))
             .unwrap();
         let report = backup::restore_admitted(input, lease).unwrap();
         assert_summary(

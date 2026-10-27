@@ -193,8 +193,10 @@ pub(in crate::actions::native_owner) enum Stage {
     Reconciled,
 }
 #[cfg(test)]
+type StageHook = Box<dyn FnMut(Stage)>;
+#[cfg(test)]
 thread_local! {
-    static STAGE_HOOK: std::cell::RefCell<Option<Box<dyn FnMut(Stage)>>> = const { std::cell::RefCell::new(None) };
+    static STAGE_HOOK: std::cell::RefCell<Option<StageHook>> = const { std::cell::RefCell::new(None) };
 }
 #[cfg(test)]
 fn stage(point: Stage) {

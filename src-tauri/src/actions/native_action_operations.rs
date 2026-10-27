@@ -419,6 +419,13 @@ pub(in crate::actions::native_owner) fn checkpoint_prepared(inserted: bool) {
     }
 }
 /// Internal Rust interface only. No IPC or MCP route is registered by this module.
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no window-bound attended ACT door calls this yet, in any build; non-test builds carry native_actions.rs's module expectation"
+    )
+)]
 pub(in crate::actions::native_owner) fn prepare(
     app: &AppHandle,
     window: &WebviewWindow,
@@ -432,6 +439,13 @@ pub(in crate::actions::native_owner) fn prepare(
     checkpoint_prepared(rows.inserted);
     Ok(rows.prepared)
 }
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no window-bound attended ACT door calls this yet, in any build; non-test builds carry native_actions.rs's module expectation"
+    )
+)]
 #[expect(
     clippy::too_many_arguments,
     reason = "native person decision supplies finite selectors and expected revisions, never a person/subject proof"
@@ -477,6 +491,13 @@ pub(in crate::actions::native_owner) fn effect_details(
         Ok(kernel::readable(context, AuthorityDb::Retained(read), scope, record)?.details)
     })
 }
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no window-bound attended ACT door calls this yet, in any build; non-test builds carry native_actions.rs's module expectation"
+    )
+)]
 pub(in crate::actions::native_owner) fn effect(
     app: &AppHandle,
     window: &WebviewWindow,
@@ -485,6 +506,13 @@ pub(in crate::actions::native_owner) fn effect(
 ) -> Result<ActionEffectRef, ActionError> {
     Ok(effect_details(app, window, run, id)?.effect)
 }
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no window-bound attended ACT door calls this yet, in any build; non-test builds carry native_actions.rs's module expectation"
+    )
+)]
 pub(in crate::actions::native_owner) fn cancel(
     app: &AppHandle,
     window: &WebviewWindow,
@@ -548,6 +576,13 @@ fn cancel_origin(
 
 /// Restricted in-process composition within the current attended operation.
 /// Context/connection borrows cannot escape; no ActionSubject or provider resolver.
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no window-bound attended ACT door calls this yet, in any build; non-test builds carry native_actions.rs's module expectation"
+    )
+)]
 pub(in crate::actions::native_owner) fn with_attended_mutation<T>(
     app: &AppHandle,
     window: &WebviewWindow,
@@ -587,6 +622,13 @@ pub(in crate::actions::native_owner) fn with_workflow_inspection<T>(
 ) -> Result<T, ActionError> {
     Origin::Workflow(origin.clone()).inspect(app, operation)
 }
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no workflow host calls this yet, in any build; non-test builds carry native_actions.rs's module expectation"
+    )
+)]
 pub(in crate::actions::native_owner) fn cancel_workflow(
     app: &AppHandle,
     origin: &super::super::native_workflows::CurrentWorkflowOrigin,
@@ -656,7 +698,7 @@ fn secret_reference(
     let metadata = conn
         .query_row(
             STATUS_SQL,
-            &[
+            [
                 &record.request.connection_id.0,
                 &native_rules::admission_rules().owner_storage_key,
             ],
@@ -1013,6 +1055,13 @@ fn dispatch_origin(
     dispatch_completed_origin(app, call, id, None).map(|completed| completed.effect)
 }
 #[cfg(target_os = "macos")]
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no window-bound attended ACT door calls this yet, in any build; non-test builds carry native_actions.rs's module expectation"
+    )
+)]
 pub(in crate::actions::native_owner) fn dispatch(
     app: &AppHandle,
     window: &WebviewWindow,
@@ -1038,6 +1087,13 @@ pub(in crate::actions::native_owner) fn dispatch_workflow(
     unavailable()
 }
 #[cfg(not(target_os = "macos"))]
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no window-bound attended ACT door calls this yet, in any build; non-test builds carry native_actions.rs's module expectation"
+    )
+)]
 pub(in crate::actions::native_owner) fn dispatch(
     _app: &AppHandle,
     _window: &WebviewWindow,

@@ -564,10 +564,6 @@ fn binding_denied() -> ActionError {
 impl ScopedCatalog<'_> {
     /// Borrowed, same-snapshot account/grant binding. This projection never
     /// authenticates callers, mints capabilities or resolves credentials.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "native mutation owner is composed next")
-    )]
     pub(super) fn checked_binding(
         &self,
         db: AuthorityDb<'_>,

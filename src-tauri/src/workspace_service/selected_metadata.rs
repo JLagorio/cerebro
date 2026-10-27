@@ -570,15 +570,14 @@ fn declared_fields<'a>(
                 "Type bodies exceed their aggregate bound.",
             ));
         }
-        if store::selected_title(&candidate.path, &exact).to_lowercase() == name.to_lowercase() {
-            if store::selected_title(&candidate.path, &exact) != *name
-                || declaration.replace(value).is_some()
-            {
-                return Err(error(
-                    AuthorityErrorKind::UnsupportedOperation,
-                    "The canonical type declaration is ambiguous.",
-                ));
-            }
+        if store::selected_title(&candidate.path, &exact).to_lowercase() == name.to_lowercase()
+            && (store::selected_title(&candidate.path, &exact) != *name
+                || declaration.replace(value).is_some())
+        {
+            return Err(error(
+                AuthorityErrorKind::UnsupportedOperation,
+                "The canonical type declaration is ambiguous.",
+            ));
         }
     }
     let fields = declaration
@@ -917,7 +916,7 @@ pub(crate) fn patch_metadata(
     let metadata = &plan.metadata;
     // Unchanged compares canonical tagged values, not accidental JSON spacing.
     let unchanged =
-        value::decode_tagged(&metadata).map_err(|e| invalid(&e.message))? == record.metadata;
+        value::decode_tagged(metadata).map_err(|e| invalid(&e.message))? == record.metadata;
     let (operation_id, at) = operation_stamp();
     let (revision, epoch, after_hash) = if unchanged {
         (record.revision, None, observed.metadata_hash.clone())

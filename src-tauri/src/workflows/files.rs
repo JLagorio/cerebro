@@ -255,7 +255,7 @@ mod owned {
     fn stat_identity(stat: &libc::stat) -> Identity {
         Identity {
             dev: stat.st_dev as u64,
-            ino: stat.st_ino as u64,
+            ino: stat.st_ino,
         }
     }
     fn ordinary(meta: &fs::Metadata) -> Result<(), FileError> {

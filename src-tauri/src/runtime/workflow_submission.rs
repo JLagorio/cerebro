@@ -51,7 +51,6 @@ fn pin_execution_file(conn: &Connection, run: &str, file: (u64, u64)) -> Result<
 }
 /// Native caller owns an existing transaction and validates original storage.
 /// No caller may select another namespace or rebind an existing physical inode.
-
 pub(crate) fn try_execution_owner(
     conn: &Connection,
     data_dir: &std::path::Path,

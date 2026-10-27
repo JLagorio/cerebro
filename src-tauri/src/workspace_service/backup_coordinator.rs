@@ -217,6 +217,10 @@ fn authenticate(
 
 // The opaque original source ticket survives every await. Only the real
 // reserve_selected_output consumes it; no same-path/generation recapture.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one choice per backup operation, moved whole from the dialog into Pending and the copy; never held in a collection"
+)]
 enum Choice {
     Create {
         source: crate::workspace_service::authority::SelectedBackupOpening,
@@ -232,6 +236,10 @@ enum Choice {
     #[cfg(test)]
     Fixture {
         mode: Mode,
+        #[expect(
+            dead_code,
+            reason = "held only for its Drop, which counts the fixture choice's release"
+        )]
         resource: ChoiceResource,
     },
 }
@@ -248,6 +256,13 @@ impl Choice {
 }
 // Own source/input evidence through the native dialog callback. Restore can
 // choose only a new output; it cannot substitute the checked input.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::large_enum_variant,
+        reason = "one input per chooser, moved whole into its Choice; under test the Fixture variant is the largest and the gap closes"
+    )
+)]
 enum ChoosingInput {
     Check,
     Create {
@@ -262,6 +277,13 @@ enum ChoosingInput {
         retained: Option<Choice>,
     },
 }
+#[cfg_attr(
+    test,
+    expect(
+        clippy::large_enum_variant,
+        reason = "only the test Fixture variant, a whole Choice, outweighs the others; a completion is matched once"
+    )
+)]
 enum NativeChoice {
     Input(crate::workspace_migration::backup::CheckedBackupInput),
     Output(crate::workspace_migration::backup::NewDirectoryChoice),
@@ -319,6 +341,10 @@ struct Pending {
     choice: Choice,
     slot: ActivityLease,
 }
+#[expect(
+    clippy::large_enum_variant,
+    reason = "each registration holds exactly one book, in its own Mutex, never a collection of them"
+)]
 enum Book {
     Idle,
     Choosing {
@@ -375,6 +401,10 @@ struct RunningWork {
     progress: Option<crate::workspace_service::authority::OutputProgress>,
     slot: Option<ActivityLease>,
 }
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a commit's result is returned once and matched at once by its caller"
+)]
 enum Commit {
     Started(RunningWork),
     AlreadyStarted(Status),
@@ -1140,6 +1170,10 @@ impl Drop for RunningWork {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a test-only request built once per copy and matched at once"
+)]
 pub(crate) enum TestCopyRequest {
     Create {
         source: crate::workspace_service::authority::SelectedBackupOpening,

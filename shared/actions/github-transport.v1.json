@@ -16,17 +16,7 @@
     "blockingThreads": 1
   },
   "operations": [
-    {
-      "actionId": "github.issue.read",
-      "method": "GET",
-      "successStatus": 200,
-      "notAppliedStatuses": [404, 410]
-    },
-    {
-      "actionId": "github.issue.create",
-      "method": "POST",
-      "successStatus": 201,
-      "notAppliedStatuses": [400, 403, 404, 410, 422]
-    }
+    { "actionId": "github.issue.read", "method": "GET", "successStatus": 200, "notAppliedStatuses": [404, 410] },
+    { "actionId": "github.issue.create", "method": "POST", "successStatus": 201, "notAppliedStatuses": [400, 403, 404, 410, 422] }
   ]
 }

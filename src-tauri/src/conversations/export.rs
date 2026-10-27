@@ -167,7 +167,7 @@ pub(super) fn stream(
             break;
         }
     }
-    match format {ExportFormat::Json=>{write!(writer,"],\"partial\":{partial},\"storageNotice\":\"This user-owned export has its own lifetime. Archive expiry does not delete it, SQLite/WAL copies, backups, saved artifacts or CLI-owned sessions.\"}}\n").map_err(unavailable)?;},ExportFormat::Markdown=>writeln!(writer,"\nPartial export: {partial}. This user-owned export has its own lifetime. Archive expiry does not delete it, SQLite/WAL copies, backups, saved artifacts or CLI-owned sessions.").map_err(unavailable)?}
+    match format {ExportFormat::Json=>{writeln!(writer,"],\"partial\":{partial},\"storageNotice\":\"This user-owned export has its own lifetime. Archive expiry does not delete it, SQLite/WAL copies, backups, saved artifacts or CLI-owned sessions.\"}}").map_err(unavailable)?;},ExportFormat::Markdown=>writeln!(writer,"\nPartial export: {partial}. This user-owned export has its own lifetime. Archive expiry does not delete it, SQLite/WAL copies, backups, saved artifacts or CLI-owned sessions.").map_err(unavailable)?}
     writer.flush().map_err(unavailable)?;
     Ok(partial)
 }

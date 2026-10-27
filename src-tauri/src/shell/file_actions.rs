@@ -520,6 +520,10 @@ fn owned_temporary(parent: &File, name: &std::ffi::CStr, created: &File) -> bool
 }
 
 #[cfg(target_os = "macos")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the active vault, protected vaults, source and expected parent and route are separate rechecks against the pinned descriptor before the writer runs"
+)]
 fn copy_payload_to_pinned(
     config: &Path,
     protected_vaults: &[PathBuf],

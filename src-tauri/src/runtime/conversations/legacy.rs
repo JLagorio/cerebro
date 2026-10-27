@@ -268,8 +268,7 @@ pub(crate) fn import_rows(
     now: i64,
 ) -> Result<Vec<ImportItem>, Error> {
     checked(conn, scope)?;
-    if now < 0
-        || now > 9_007_199_254_740_991
+    if !(0..=9_007_199_254_740_991).contains(&now)
         || !opaque(&batch.thread_id)
         || batch.attempts.is_empty()
         || batch.attempts.len() > 128
@@ -309,7 +308,17 @@ pub(crate) fn import_rows(
         let mut attempt = normalized(source);
         // A cache copy may attach to a known terminal metadata-only attempt. Its
         // operational writer remains unchanged; recorded timing is authoritative.
-        let native:Option<(String,String,String,String,String,Option<i64>,Option<String>,String)>=conn.query_row("SELECT b.generation_id,b.thread_id,b.user_message_id,b.assistant_message_id,b.archive_state,b.completed_at,m.cli_session_id,g.state FROM conversation_bindings b JOIN chat_generations g USING(generation_id) JOIN chat_generation_runs m ON m.run_id=g.current_run_id WHERE b.owner_person=?1 AND b.vault_id=?2 AND b.store_uuid=?3 AND (b.user_message_id IN (?4,?5) OR b.assistant_message_id IN (?4,?5)) LIMIT 1",params![scope.owner,scope.vault,scope.store,attempt.user_message_id,attempt.assistant_message_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).optional().map_err(unavailable)?;
+        type NativeRow = (
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<i64>,
+            Option<String>,
+            String,
+        );
+        let native:Option<NativeRow>=conn.query_row("SELECT b.generation_id,b.thread_id,b.user_message_id,b.assistant_message_id,b.archive_state,b.completed_at,m.cli_session_id,g.state FROM conversation_bindings b JOIN chat_generations g USING(generation_id) JOIN chat_generation_runs m ON m.run_id=g.current_run_id WHERE b.owner_person=?1 AND b.vault_id=?2 AND b.store_uuid=?3 AND (b.user_message_id IN (?4,?5) OR b.assistant_message_id IN (?4,?5)) LIMIT 1",params![scope.owner,scope.vault,scope.store,attempt.user_message_id,attempt.assistant_message_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).optional().map_err(unavailable)?;
         let linked = if let Some((
             generation,
             thread,
@@ -418,7 +427,8 @@ pub(crate) fn import_rows(
             continue;
         }
         let source_digest = digest(&attempt)?;
-        let existing:Option<(String,String,String,String,String,String,Option<i64>)>=conn.query_row("SELECT attempt_id,thread_id,user_message_id,assistant_message_id,source_digest,archive_state,expires_at FROM conversation_legacy_attempts WHERE owner_person=?1 AND vault_id=?2 AND store_uuid=?3 AND (user_message_id IN (?4,?5) OR assistant_message_id IN (?4,?5)) LIMIT 1",params![scope.owner,scope.vault,scope.store,attempt.user_message_id,attempt.assistant_message_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?))).optional().map_err(unavailable)?;
+        type ExistingRow = (String, String, String, String, String, String, Option<i64>);
+        let existing:Option<ExistingRow>=conn.query_row("SELECT attempt_id,thread_id,user_message_id,assistant_message_id,source_digest,archive_state,expires_at FROM conversation_legacy_attempts WHERE owner_person=?1 AND vault_id=?2 AND store_uuid=?3 AND (user_message_id IN (?4,?5) OR assistant_message_id IN (?4,?5)) LIMIT 1",params![scope.owner,scope.vault,scope.store,attempt.user_message_id,attempt.assistant_message_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?))).optional().map_err(unavailable)?;
         let attempt_id = if let Some((
             id,
             thread,

@@ -3,7 +3,7 @@ use serde_json::value::RawValue;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum DefinitionError {
+pub(crate) enum DefinitionError {
     InvalidJson,
     UnsupportedFormat,
     LimitExceeded,

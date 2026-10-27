@@ -21,7 +21,7 @@ id!(InvocationId, ApprovalId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
-pub(crate) struct SafeCounter(u64);
+pub struct SafeCounter(u64);
 impl SafeCounter {
     pub(crate) fn new(value: u64) -> Result<Self, ActionError> {
         if value <= 9_007_199_254_740_991 {

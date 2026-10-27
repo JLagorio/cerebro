@@ -98,16 +98,14 @@ impl Collector {
                 tool_id,
                 parent: None,
                 data: ToolResultData::WebFetch { url, .. },
-            } => {
-                if web(url) && !tool_id.is_empty() && tool_id.len() <= 128 {
-                    self.push(
-                        Reference::Source {
-                            tool_id: tool_id.clone(),
-                            url: url.clone(),
-                        },
-                        budget,
-                    );
-                }
+            } if web(url) && !tool_id.is_empty() && tool_id.len() <= 128 => {
+                self.push(
+                    Reference::Source {
+                        tool_id: tool_id.clone(),
+                        url: url.clone(),
+                    },
+                    budget,
+                );
             }
             AgentEvent::ToolResult {
                 tool_id,

@@ -1654,9 +1654,12 @@ mod tests {
 
 /// Read a budget decision from recorded facts without opening a day or
 /// acquiring a dispatch. The caller supplies one existing read transaction.
-#[expect(
-    dead_code,
-    reason = "the native unsaved-draft preview adapter follows this extraction"
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the native unsaved-draft preview adapter follows this extraction"
+    )
 )]
 pub(crate) fn preview_rows(
     conn: &Connection,

@@ -295,7 +295,8 @@ pub(crate) fn settle_rows(
     now: i64,
 ) -> Result<(), Error> {
     checked(conn, scope)?;
-    let pending:Option<(Option<String>,Option<String>,String,Option<i64>)>=conn.query_row("SELECT b.display_json,b.pending_json,g.state,t.tombstone_at FROM conversation_bindings b JOIN chat_generations g USING(generation_id) JOIN conversation_threads t ON t.owner_person=b.owner_person AND t.vault_id=b.vault_id AND t.store_uuid=b.store_uuid AND t.thread_id=b.thread_id WHERE b.generation_id=?1 AND g.current_run_id=?2 AND g.owner_person=?3 AND g.vault_id=?4 AND g.store_uuid=?5 AND b.completed_at IS NULL",params![generation,run,scope.owner,scope.vault,scope.store],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(unavailable)?;
+    type PendingRow = (Option<String>, Option<String>, String, Option<i64>);
+    let pending:Option<PendingRow>=conn.query_row("SELECT b.display_json,b.pending_json,g.state,t.tombstone_at FROM conversation_bindings b JOIN chat_generations g USING(generation_id) JOIN conversation_threads t ON t.owner_person=b.owner_person AND t.vault_id=b.vault_id AND t.store_uuid=b.store_uuid AND t.thread_id=b.thread_id WHERE b.generation_id=?1 AND g.current_run_id=?2 AND g.owner_person=?3 AND g.vault_id=?4 AND g.store_uuid=?5 AND b.completed_at IS NULL",params![generation,run,scope.owner,scope.vault,scope.store],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(unavailable)?;
     let Some((display, pending, state, tombstone)) = pending else {
         return Ok(());
     };

@@ -92,10 +92,9 @@ fn references(
             },
         )
         .map_err(unavailable)?;
-    let values = rows
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(unavailable);
-    values
+
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(unavailable)
 }
 pub(crate) fn delete_rows(
     conn: &Connection,

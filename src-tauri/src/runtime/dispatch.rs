@@ -2030,6 +2030,128 @@ pub(crate) fn crash_wake_fixture(dir: &std::path::Path) -> (Connection, String, 
     (conn, vault, wake)
 }
 
+/// Mirror only an actual finite FLOW terminal state into its exact native
+/// operation, within the caller's transaction. Generic CLI settlement stays out.
+pub(crate) fn finish_workflow_operation_rows(
+    conn: &Connection,
+    workflow: &str,
+) -> Result<(), String> {
+    if conn.is_autocommit() {
+        return Err("workflow terminalization requires a caller transaction".into());
+    }
+    type OriginRow = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        bool,
+    );
+    let row:Option<OriginRow>=conn.query_row("SELECT o.native_run_id,o.authority_id,o.owner_person,o.vault_id,o.store_uuid,o.actor_id,o.canonical_vault_path,w.state,w.updated_at,o.revoked_at IS NOT NULL FROM workflow_run_origins o JOIN workflow_runs w ON w.run_id=o.workflow_run_id AND w.act_run_id=o.native_run_id AND w.owner_person=o.owner_person AND w.vault_id=o.vault_id AND w.store_uuid=o.store_uuid AND w.actor_id=o.actor_id AND w.configuration_digest=o.configuration_digest AND w.definition_hash=o.definition_hash AND w.grant_digest=o.permission_digest WHERE o.workflow_run_id=?1",[workflow],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?))).optional().map_err(|e|e.to_string())?;
+    let Some((run, authority, owner, vault, store, actor, path, state, updated, revoked)) = row
+    else {
+        let origin_exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM workflow_run_origins WHERE workflow_run_id=?1)",
+                [workflow],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        return if origin_exists {
+            Err("workflow native linkage changed".into())
+        } else {
+            Ok(())
+        };
+    };
+    if !matches!(state.as_str(), "succeeded" | "failed" | "cancelled") {
+        return Err("workflow is not terminal".into());
+    }
+    let native = conn
+        .query_row(
+            super::native_runs::RUN_SQL,
+            [&run],
+            super::native_runs::NativeRun::read,
+        )
+        .map_err(|e| e.to_string())?;
+    if native.authority_id != authority
+        || native.revision != 1
+        || native.owner_person != owner
+        || native.vault_id != vault
+        || native.store_uuid != store
+        || native.actor_id != actor
+        || actor != format!("workflow:{run}")
+        || native.source_kind != "attended_operation"
+        || native.canonical_vault_path != path
+        || native.vault_path != path
+        || native.actual_vault.as_deref() != Some(vault.as_str())
+        || native.actual_store.as_deref() != Some(store.as_str())
+        || native.actual_actor.as_deref() != Some(actor.as_str())
+        || native.cli_session_id.is_some()
+        || native.actual_cli.is_some()
+        || native.parent_run_id.is_some()
+        || native.actual_parent.is_some()
+        || native.client_id.is_some()
+        || native.child_job_id.is_some()
+    {
+        return Err("workflow native operation identity changed".into());
+    }
+    let creation: String = conn
+        .query_row(
+            "SELECT creation_session_id FROM workflow_run_origins WHERE workflow_run_id=?1",
+            [workflow],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if native.app_session_id != creation {
+        return Err("workflow native creation identity changed".into());
+    }
+    let close = if state == "cancelled" {
+        if revoked {
+            "revoked"
+        } else {
+            "stopped"
+        }
+    } else {
+        "completed"
+    };
+    let closed: Option<String> = conn
+        .query_row(
+            "SELECT closed_at FROM action_native_runs WHERE run_id=?1",
+            [&run],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if native.outcome == state
+        && native.ended_at.is_some()
+        && native.ended_at == closed
+        && native.close_kind.as_deref() == Some(close)
+    {
+        return Ok(());
+    }
+    if native.outcome != "running"
+        || native.ended_at.is_some()
+        || native.close_kind.is_some()
+        || closed.is_some()
+    {
+        return Err("workflow native operation was already settled differently".into());
+    }
+    let now = DateTime::<Utc>::from_timestamp_millis(updated)
+        .ok_or("workflow terminal timestamp is unavailable")?;
+    let changed=conn.execute("UPDATE runs SET outcome=?2,ended_at=?3,usage_state='unknown',lease_expires_at=NULL WHERE run_id=?1 AND outcome='running' AND ended_at IS NULL",rusqlite::params![run,state,stamp(now)]).map_err(|e|e.to_string())?;
+    if changed != 1 {
+        return Err("workflow native operation changed before settlement".into());
+    }
+    let changed=conn.execute("UPDATE action_native_runs SET close_kind=?2,closed_at=?3 WHERE run_id=?1 AND authority_id=?4 AND revision=1 AND close_kind IS NULL AND closed_at IS NULL",rusqlite::params![run,close,stamp(now),authority]).map_err(|e|e.to_string())?;
+    if changed != 1 {
+        return Err("workflow native provenance changed before settlement".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5417,114 +5539,4 @@ mod tests {
         drop(conn);
         let _ = std::fs::remove_dir_all(dir);
     }
-}
-
-/// Mirror only an actual finite FLOW terminal state into its exact native
-/// operation, within the caller's transaction. Generic CLI settlement stays out.
-pub(crate) fn finish_workflow_operation_rows(
-    conn: &Connection,
-    workflow: &str,
-) -> Result<(), String> {
-    if conn.is_autocommit() {
-        return Err("workflow terminalization requires a caller transaction".into());
-    }
-    let row:Option<(String,String,String,String,String,String,String,String,i64,bool)>=conn.query_row("SELECT o.native_run_id,o.authority_id,o.owner_person,o.vault_id,o.store_uuid,o.actor_id,o.canonical_vault_path,w.state,w.updated_at,o.revoked_at IS NOT NULL FROM workflow_run_origins o JOIN workflow_runs w ON w.run_id=o.workflow_run_id AND w.act_run_id=o.native_run_id AND w.owner_person=o.owner_person AND w.vault_id=o.vault_id AND w.store_uuid=o.store_uuid AND w.actor_id=o.actor_id AND w.configuration_digest=o.configuration_digest AND w.definition_hash=o.definition_hash AND w.grant_digest=o.permission_digest WHERE o.workflow_run_id=?1",[workflow],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?))).optional().map_err(|e|e.to_string())?;
-    let Some((run, authority, owner, vault, store, actor, path, state, updated, revoked)) = row
-    else {
-        let origin_exists: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM workflow_run_origins WHERE workflow_run_id=?1)",
-                [workflow],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        return if origin_exists {
-            Err("workflow native linkage changed".into())
-        } else {
-            Ok(())
-        };
-    };
-    if !matches!(state.as_str(), "succeeded" | "failed" | "cancelled") {
-        return Err("workflow is not terminal".into());
-    }
-    let native = conn
-        .query_row(
-            super::native_runs::RUN_SQL,
-            [&run],
-            super::native_runs::NativeRun::read,
-        )
-        .map_err(|e| e.to_string())?;
-    if native.authority_id != authority
-        || native.revision != 1
-        || native.owner_person != owner
-        || native.vault_id != vault
-        || native.store_uuid != store
-        || native.actor_id != actor
-        || actor != format!("workflow:{run}")
-        || native.source_kind != "attended_operation"
-        || native.canonical_vault_path != path
-        || native.vault_path != path
-        || native.actual_vault.as_deref() != Some(vault.as_str())
-        || native.actual_store.as_deref() != Some(store.as_str())
-        || native.actual_actor.as_deref() != Some(actor.as_str())
-        || native.cli_session_id.is_some()
-        || native.actual_cli.is_some()
-        || native.parent_run_id.is_some()
-        || native.actual_parent.is_some()
-        || native.client_id.is_some()
-        || native.child_job_id.is_some()
-    {
-        return Err("workflow native operation identity changed".into());
-    }
-    let creation: String = conn
-        .query_row(
-            "SELECT creation_session_id FROM workflow_run_origins WHERE workflow_run_id=?1",
-            [workflow],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if native.app_session_id != creation {
-        return Err("workflow native creation identity changed".into());
-    }
-    let close = if state == "cancelled" {
-        if revoked {
-            "revoked"
-        } else {
-            "stopped"
-        }
-    } else {
-        "completed"
-    };
-    let closed: Option<String> = conn
-        .query_row(
-            "SELECT closed_at FROM action_native_runs WHERE run_id=?1",
-            [&run],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if native.outcome == state
-        && native.ended_at.is_some()
-        && native.ended_at == closed
-        && native.close_kind.as_deref() == Some(close)
-    {
-        return Ok(());
-    }
-    if native.outcome != "running"
-        || native.ended_at.is_some()
-        || native.close_kind.is_some()
-        || closed.is_some()
-    {
-        return Err("workflow native operation was already settled differently".into());
-    }
-    let now = DateTime::<Utc>::from_timestamp_millis(updated)
-        .ok_or("workflow terminal timestamp is unavailable")?;
-    let changed=conn.execute("UPDATE runs SET outcome=?2,ended_at=?3,usage_state='unknown',lease_expires_at=NULL WHERE run_id=?1 AND outcome='running' AND ended_at IS NULL",rusqlite::params![run,state,stamp(now)]).map_err(|e|e.to_string())?;
-    if changed != 1 {
-        return Err("workflow native operation changed before settlement".into());
-    }
-    let changed=conn.execute("UPDATE action_native_runs SET close_kind=?2,closed_at=?3 WHERE run_id=?1 AND authority_id=?4 AND revision=1 AND close_kind IS NULL AND closed_at IS NULL",rusqlite::params![run,close,stamp(now),authority]).map_err(|e|e.to_string())?;
-    if changed != 1 {
-        return Err("workflow native provenance changed before settlement".into());
-    }
-    Ok(())
 }

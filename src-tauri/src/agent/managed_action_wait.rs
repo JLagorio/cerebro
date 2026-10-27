@@ -17,7 +17,16 @@ pub(crate) enum ManagedClose {
 pub(crate) enum ManagedReceive {
     Proposal(ManagedProposal),
     AccessCompleted,
-    Closed(ManagedClose),
+    Closed(
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "the native action call refuses every close alike; only the wait tests read which close it was"
+            )
+        )]
+        ManagedClose,
+    ),
     Timeout,
 }
 enum Message {
@@ -92,6 +101,13 @@ impl ManagedCall {
     pub(crate) fn id(&self) -> &str {
         &self.id
     }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the wait tests read the shared flag; the native action call learns of a cancel from recv's Closed"
+        )
+    )]
     pub(crate) fn cancelled(&self) -> Arc<AtomicBool> {
         self.cancelled.clone()
     }

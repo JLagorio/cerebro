@@ -85,6 +85,13 @@ impl CurrentWorkflowOrigin {
     pub(in crate::actions::native_owner) fn store(&self) -> &NativeStoreObservation {
         &self.opening.store
     }
+    #[cfg_attr(
+        test,
+        expect(
+            dead_code,
+            reason = "nothing reads the seal through this accessor yet, in any build; non-test builds carry native_workflows.rs's module expectation"
+        )
+    )]
     pub(in crate::actions::native_owner) fn runtime_seal(&self) -> &Arc<()> {
         &self.opening.runtime_seal
     }
@@ -167,7 +174,7 @@ fn row_transaction<T>(
 }
 
 use super::native_actions::semantics;
-use super::{authenticate, read_native_store, NativeOwnerError, RuntimeTransactionOutcome};
+use super::{authenticate, read_native_store};
 use crate::actions::{
     effect_kernel as kernel,
     effect_record::{AdapterTarget, Binding, PrepareAction},
@@ -542,6 +549,13 @@ pub(in crate::actions::native_owner) struct StartedWorkflow {
         Result<Option<CurrentWorkflowOrigin>, ActionError>,
 }
 /// Actual injected native Start. Definition selectors are data, never grants.
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no window-bound workflow door calls this yet, in any build (the runtime commands capture their own opening); non-test builds carry native_workflows.rs's module expectation"
+    )
+)]
 pub(in crate::actions::native_owner) fn start(
     app: &AppHandle,
     window: &WebviewWindow,
@@ -644,6 +658,13 @@ fn start_captured(
 }
 /// Actual authenticated narrowing/resume of the same immutable native origin.
 /// Original selectors/catalog snapshot and ACT scope are never recaptured.
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no window-bound workflow door calls this yet, in any build (the runtime commands capture their own opening); non-test builds carry native_workflows.rs's module expectation"
+    )
+)]
 pub(in crate::actions::native_owner) fn reauthorize(
     app: &AppHandle,
     window: &WebviewWindow,
@@ -680,6 +701,13 @@ pub(in crate::actions::native_owner) fn reauthorize(
     })?;
     opening.retain(app, origin)
 }
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no window-bound workflow door calls this yet, in any build (the runtime commands capture their own opening); non-test builds carry native_workflows.rs's module expectation"
+    )
+)]
 pub(in crate::actions::native_owner) fn revoke(
     app: &AppHandle,
     window: &WebviewWindow,
@@ -731,6 +759,13 @@ fn original_definition(
 }
 /// Reacquire already-current admission after a previous physical holder settles;
 /// this authenticates the real owner but never changes epoch or permissions.
+#[cfg_attr(
+    test,
+    expect(
+        dead_code,
+        reason = "no window-bound workflow door calls this yet, in any build (the runtime commands capture their own opening); non-test builds carry native_workflows.rs's module expectation"
+    )
+)]
 pub(in crate::actions::native_owner) fn admit_current(
     app: &AppHandle,
     window: &WebviewWindow,

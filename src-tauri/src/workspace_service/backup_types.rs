@@ -177,6 +177,10 @@ pub(crate) enum WorkspaceBackupOperation {
     Unavailable {
         refusal: WorkspaceBackupRefusal,
     },
+    #[expect(
+        dead_code,
+        reason = "only the browser mock answers with this kind; Rust declares it so the committed contract schema names it"
+    )]
     Preview {
         message: String,
     },
@@ -201,10 +205,19 @@ pub(crate) enum WorkspaceBackupAvailability {
         #[serde(rename = "checkRestore")]
         check_restore: bool,
     },
+    #[cfg_attr(
+        target_os = "macos",
+        expect(
+            dead_code,
+            reason = "only the non-macOS availability command constructs it"
+        )
+    )]
     UnsupportedPlatform,
-    Preview {
-        message: String,
-    },
+    #[expect(
+        dead_code,
+        reason = "only the browser mock answers with this kind; Rust declares it so the committed contract schema names it"
+    )]
+    Preview { message: String },
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -217,6 +230,10 @@ pub(crate) enum WorkspaceBackupChoiceResult {
     Refused {
         refusal: WorkspaceBackupRefusal,
     },
+    #[expect(
+        dead_code,
+        reason = "only the browser mock answers with this kind; Rust declares it so the committed contract schema names it"
+    )]
     Preview {
         mode: WorkspaceBackupMode,
         message: String,
@@ -238,6 +255,10 @@ pub(crate) enum WorkspaceBackupCommitResult {
     Refused {
         refusal: WorkspaceBackupRefusal,
     },
+    #[expect(
+        dead_code,
+        reason = "only the browser mock answers with this kind; Rust declares it so the committed contract schema names it"
+    )]
     Preview {
         mode: WorkspaceBackupMode,
         message: String,
@@ -248,9 +269,19 @@ pub(crate) enum WorkspaceBackupCommitResult {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum WorkspaceBackupCancelResult {
     Cancelled,
-    AlreadyStarted { operation: WorkspaceBackupOperation },
-    Refused { refusal: WorkspaceBackupRefusal },
-    Preview { message: String },
+    AlreadyStarted {
+        operation: WorkspaceBackupOperation,
+    },
+    Refused {
+        refusal: WorkspaceBackupRefusal,
+    },
+    #[expect(
+        dead_code,
+        reason = "only the browser mock answers with this kind; Rust declares it so the committed contract schema names it"
+    )]
+    Preview {
+        message: String,
+    },
 }
 
 #[cfg(test)]

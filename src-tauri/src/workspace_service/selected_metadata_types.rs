@@ -34,6 +34,10 @@ pub(crate) struct MetadataPatchOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a wire result built once per patch and serialized at once, never held in a collection"
+)]
 pub(crate) enum MetadataPatchResult {
     Applied {
         operation: Box<MetadataPatchOperation>,

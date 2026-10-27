@@ -89,3 +89,11 @@ docs/superpowers/plans/2026-10-23-m99-store-comparison/*.json
 
 # Rust-owned conversation transport bytes.
 shared/conversations/contracts.v1.json
+
+# Digest- or byte-pinned shared artifacts Rust and TS read (M96, M98, M99):
+# a reflow breaks the pinned digest or the byte comparison.
+shared/actions/github-transport.v1.json
+shared/workflows/contracts.v1.json
+shared/workspace/metadata-patch.v1.json
+shared/workspace/selected-entry-projection-native.v1.json
+shared/workspace/values.v1.json

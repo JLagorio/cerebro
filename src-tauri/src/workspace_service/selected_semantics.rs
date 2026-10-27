@@ -583,6 +583,10 @@ fn ordered(op: &str) -> bool {
 fn text_op(op: &str) -> bool {
     ["contains", "does_not_contain", "starts_with", "ends_with"].contains(&op)
 }
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one rule is checked against the caller's rows, schema, field infos and kind table at its zone and day; view marks a saved-view suggestion, which must name option ids"
+)]
 fn rule_for(
     rule: &legacy::Rule,
     rows: &[&Row],

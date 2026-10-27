@@ -378,9 +378,7 @@ struct ComparableDecimal {
 fn comparable_decimal(source: &str) -> Option<ComparableDecimal> {
     let negative = source.starts_with('-');
     let source = source.strip_prefix('-').unwrap_or(source);
-    let (mantissa, exponent) = source
-        .split_once(|c| c == 'e' || c == 'E')
-        .unwrap_or((source, "0"));
+    let (mantissa, exponent) = source.split_once(['e', 'E']).unwrap_or((source, "0"));
     let fraction = mantissa
         .split_once('.')
         .map(|(_, fraction)| fraction.len())

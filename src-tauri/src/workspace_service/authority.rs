@@ -65,10 +65,10 @@ pub(crate) use opening::OpeningAttempt;
 pub(crate) use opening::{AdmittedBackupRead, OutputReservation, SelectedBackupOpening};
 #[cfg(unix)]
 #[cfg_attr(
-    not(test),
+    not(any(test, target_os = "macos")),
     expect(
         unused_imports,
-        reason = "Progress DTOs await the disabled native worker sink composition."
+        reason = "only the macOS backup dialog (backup_native.rs) reads OutputLocation"
     )
 )]
 pub(crate) use opening::{OutputLocation, OutputObservation, OutputProgress};

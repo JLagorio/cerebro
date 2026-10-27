@@ -20,7 +20,19 @@ fn inspect(
     if ![vault, store, run, actor].into_iter().all(text) {
         return Err(());
     }
-    let original:Option<(String,String,String,String,String,Option<String>,Option<String>,Option<String>,Option<String>,Option<String>)>=conn.query_row("SELECT owner_person,vault_id,store_uuid,actor_id,source_kind,parent_run_id,client_id,child_job_id,closed_at,close_kind FROM action_native_runs WHERE run_id=?1",[run],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?,row.get(9)?))).optional().map_err(|_|())?;
+    type OriginRow = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+    let original:Option<OriginRow>=conn.query_row("SELECT owner_person,vault_id,store_uuid,actor_id,source_kind,parent_run_id,client_id,child_job_id,closed_at,close_kind FROM action_native_runs WHERE run_id=?1",[run],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?,row.get(9)?))).optional().map_err(|_|())?;
     let closed = if let Some((
         owner,
         actual_vault,
