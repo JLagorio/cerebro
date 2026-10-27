@@ -10,6 +10,7 @@ import { useMeasuredWidth } from '@/hooks/useMeasuredWidth';
 import { useCommands, useKeyScope } from '@/lib/keys/useKeys';
 import { PaneContext, useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { Contained } from './Contained';
 import { installOpenIntent } from './openIntent';
 import { paneCapacity, paneParked, PANE_PARK, PANE_TAB } from './shellLayout';
 import { AgentsPage } from '@/pages/AgentsPage';
@@ -95,7 +96,14 @@ function PaneFrame({
         </div>
       )}
       <page.Provider>
-        <PaneOutlet />
+        {/* M93.12: a page that throws takes only its own pane; a new place starts it over. */}
+        <Contained
+          label="This page"
+          resetKey={JSON.stringify(selection)}
+          onBack={() => useNavStore.getState().back(id)}
+        >
+          <PaneOutlet />
+        </Contained>
       </page.Provider>
     </section>
   );

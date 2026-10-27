@@ -31,6 +31,7 @@ import { PageNavigationProvider, type PageNavigationControls } from '@/app/PageN
 import { StatusBar } from '@/app/StatusBar';
 import { QuickOpen } from '@/app/QuickOpen';
 import { CreateLauncher } from '@/app/CreateLauncher';
+import { Contained } from '@/app/Contained';
 import { useQuitHost, useQuitting } from '@/app/quit';
 import { useWorkspaceBackupHost } from '@/workspace/useWorkspaceBackup';
 import { WindowTitle } from '@/app/WindowTitle';
@@ -438,7 +439,9 @@ function App() {
                       inert={chatCanvas}
                       aria-hidden={chatCanvas || undefined}
                     >
-                      <DetailPanel room={rooms?.detail ?? null} besideAssistant={showAssistant} />
+                      <Contained label="This record" resetKey={detailPath}>
+                        <DetailPanel room={rooms?.detail ?? null} besideAssistant={showAssistant} />
+                      </Contained>
                     </div>
                   </PaneContext>
                 )}

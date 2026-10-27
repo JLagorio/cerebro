@@ -19,6 +19,8 @@ const PER_WINDOW = 20;
 
 /** The installed listeners' remover, while they are installed. */
 let installed: (() => void) | null = null;
+/** The installed forwarder, so a caught render fault shares its bounds. */
+let forwarding: ((entry: FrontendLogEntry) => void) | null = null;
 
 /**
  * Forward the window's uncaught errors and unhandled rejections to the
@@ -67,10 +69,28 @@ export function installErrorReporting(): () => void {
     window.removeEventListener('securitypolicyviolation', onViolation);
     window.removeEventListener('error', onError);
     window.removeEventListener('unhandledrejection', onRejection);
-    if (installed === remove) installed = null;
+    if (installed === remove) {
+      installed = null;
+      forwarding = null;
+    }
   };
   installed = remove;
+  forwarding = forward;
   return remove;
+}
+
+/**
+ * A render fault a boundary caught (M93.12). React hands these to the root's
+ * `onCaughtError`, never to `window`, so the listeners above never see them.
+ * Same bounds as every other report; before installation it sends nothing.
+ */
+export function reportCaughtError(error: unknown, componentStack?: string): void {
+  forwarding?.({
+    level: 'error',
+    message: `Render fault: ${describe(error)}`,
+    source: componentStack?.trim().split('\n')[0]?.trim() || undefined,
+    stack: error instanceof Error ? error.stack : undefined,
+  });
 }
 
 function fromError(event: ErrorEvent): FrontendLogEntry {

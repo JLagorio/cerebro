@@ -483,3 +483,21 @@ describe('no native select draws anywhere', () => {
     }
   });
 });
+
+/** M93.12: no fault or recovery path wipes browser storage; tests may. */
+describe('nothing outside a test clears browser storage', () => {
+  const restricted = async (path: string, code: string) => {
+    const [result] = await eslint.lintText(code, { filePath: join(REPO, path) });
+    return result.messages.filter((m) => m.ruleId === 'no-restricted-properties');
+  };
+  it.each([
+    'localStorage.clear();',
+    'sessionStorage.clear();',
+    "indexedDB.deleteDatabase('cerebro');",
+  ])('refuses %s in product code', async (code) => {
+    expect(await restricted('src/app/Probe.ts', code)).toHaveLength(1);
+  });
+  it('lets a test reset storage', async () => {
+    expect(await restricted('src/app/Probe.test.ts', 'localStorage.clear();')).toEqual([]);
+  });
+});

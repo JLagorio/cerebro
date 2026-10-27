@@ -53,6 +53,10 @@ enforced: `.github/workflows/mac-app.yml`
   `lib/gitIpc.ts`, `lib/rootsIpc.ts`, `agent/agentIpc.ts`), and only
   `lib/mockIpc.ts` reads `lib/mockParse.ts` (M53.20). `lab/` is the dev-only
   state lab (`state-lab.html`, M64.1), which Vite never builds.
+  A render fault stays in its section (M93.12): `components/ui/SectionBoundary.tsx`
+  draws it unavailable with Retry, and `app/Contained.tsx` wraps each pane, the
+  peek and the editor, flushing open pages on a catch; `RootBoundary` keeps
+  quit answering while App is down. No fallback reloads or clears storage.
 - **Page titles share the body editor** (M85–M86). `editor/pageTitleProjection.ts`
   presents the first top-level H1 above the body without reordering its Markdown
   or creating another writer. `NoteBodyEditor` owns the stable metadata portal;

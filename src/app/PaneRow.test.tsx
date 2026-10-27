@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -8,9 +8,16 @@ vi.mock('@/hooks/useMeasuredWidth', () => ({
   useMeasuredWidth: () => [() => {}, measurement.width],
 }));
 vi.mock('@/pages/HomePage', () => ({ HomePage: () => <div>Home content</div> }));
-vi.mock('@/pages/SettingsPage', () => ({ SettingsPage: () => <div>Settings content</div> }));
+const fault = vi.hoisted(() => ({ settings: false }));
+vi.mock('@/pages/SettingsPage', () => ({
+  SettingsPage: () => {
+    if (fault.settings) throw new Error('settings broke');
+    return <div>Settings content</div>;
+  },
+}));
 vi.mock('@/pages/DocPage', () => ({ DocPage: () => <textarea aria-label="Page editor" /> }));
 beforeEach(() => {
+  fault.settings = false;
   useNavStore.getState().reset();
   useNavStore.getState().setPaneCapacity(4);
   useVaultStore.setState({ entries: [], views: [], collections: [] });
@@ -19,6 +26,21 @@ beforeEach(() => {
 afterEach(cleanup);
 const panes = () => screen.getAllByTestId('pane');
 describe('PaneRow', () => {
+  it('a page that throws takes only its own pane: the other keeps its draft (M93.12)', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    useNavStore.getState().navigate({ kind: 'doc', path: 'notes/plan.md' });
+    useNavStore.getState().openPane({ kind: 'settings' });
+    fault.settings = true;
+    render(<PaneRow />);
+    const editor = screen.getByLabelText<HTMLTextAreaElement>('Page editor');
+    fireEvent.change(editor, { target: { value: 'unsaved words' } });
+    expect(within(panes()[1]).getByTestId('section-unavailable').textContent).toContain(
+      'This page stopped drawing',
+    );
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Page editor')).toBe(editor);
+    expect(editor.value).toBe('unsaved words');
+    vi.restoreAllMocks();
+  });
   it('one pane has no bar and keeps the enclosing canvas container', () => {
     render(<PaneRow />);
     expect(panes()).toHaveLength(1);

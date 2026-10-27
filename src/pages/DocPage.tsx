@@ -86,6 +86,7 @@ import {
 import { useMeasuredWidth } from '@/hooks/useMeasuredWidth';
 import { useVaultActionGuard } from '@/hooks/useVaultActionGuard';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
+import { Contained } from '@/app/Contained';
 
 export type DocSelection = Extract<Selection, { kind: 'doc' }>;
 
@@ -732,21 +733,23 @@ function LegacyDocPage({ selection }: { selection: DocSelection }) {
     <PageCommentsContext.Provider
       value={readOnlyFile || comments.path === null ? null : { start: comments.start }}
     >
-      <NoteBodyEditor
-        key={entry.path}
-        path={entry.path}
-        onSaveState={setSaveState}
-        onReady={(info) => {
-          editorControls.current = info;
-          setMounted({ path: entry.path, editor: info.editor });
-        }}
-        readOnly={readOnlyFile}
-        sections={concept !== null}
-        pageTitle={knowledgeFile ? undefined : entry.title}
-        pageChrome={pageChrome}
-        bodyVisible={showsEditor}
-        onBodyLoaded={concept !== null ? (path, body) => setViewed({ path, body }) : undefined}
-      />
+      <Contained label="This page's editor" resetKey={entry.path}>
+        <NoteBodyEditor
+          key={entry.path}
+          path={entry.path}
+          onSaveState={setSaveState}
+          onReady={(info) => {
+            editorControls.current = info;
+            setMounted({ path: entry.path, editor: info.editor });
+          }}
+          readOnly={readOnlyFile}
+          sections={concept !== null}
+          pageTitle={knowledgeFile ? undefined : entry.title}
+          pageChrome={pageChrome}
+          bodyVisible={showsEditor}
+          onBodyLoaded={concept !== null ? (path, body) => setViewed({ path, body }) : undefined}
+        />
+      </Contained>
     </PageCommentsContext.Provider>
   );
 

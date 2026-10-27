@@ -296,4 +296,26 @@ export default tseslint.config(
     ],
     rules: rails('select', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
   },
+  {
+    // M93.12 (CX-OUT-10): no fault path wipes what the person kept. A recovery
+    // that clears browser storage drops the open log, done marks, review
+    // notes, pane layout and composer drafts. Its own rule, beside the rails,
+    // so no rail class has to compose it; tests reset storage freely.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/**/*.test.{ts,tsx}', 'src/test/**'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        ...[
+          ['localStorage', 'clear'],
+          ['sessionStorage', 'clear'],
+          ['indexedDB', 'deleteDatabase'],
+        ].map(([object, property]) => ({
+          object,
+          property,
+          message: `Nothing outside a test calls ${object}.${property}: a fault or recovery path never wipes browser storage (M93.12).`,
+        })),
+      ],
+    },
+  },
 );

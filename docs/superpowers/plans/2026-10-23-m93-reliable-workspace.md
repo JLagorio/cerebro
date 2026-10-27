@@ -214,6 +214,20 @@ historical ordinary tickets cannot suppress automatic last-place restoration.
 - [ ] Run the appropriate final code gates once after implementation: `pnpm test:run`, `pnpm lint`, `pnpm typecheck`, `pnpm format:check`, relevant E2E, and Rust test/fmt/clippy when Rust changed. Expected: successful gate output recorded, plus distinct native/live evidence; passing suites never overwrite an unresolved acceptance case.
 - [ ] Review every defect/environment limitation as a release decision. Commit evidence after sanitization; do not claim packaging, performance or native acceptance beyond the measured cases.
 
+### M93.12 — Contain render faults
+
+Added 2026-10-27 from the reference audit (`docs/superpowers/specs/2026-10-24-reference-audit/backlog.md` BL-01, BL-27, BL-195; seven of ten reference apps contain render faults, Cerebro had no boundary).
+
+**Files:** `src/components/ui/SectionBoundary.tsx` (presentation only, CV-64 style: reads no store, the owner injects `onCatch`); `src/app/Contained.tsx` (`Contained`, `RootBoundary`, `keepOpenPages`); `src/main.tsx` (root `onCaughtError`); `src/lib/diagnostics.ts` (`reportCaughtError`); wiring in `src/app/PaneRow.tsx`, `src/App.tsx`, `src/pages/DocPage.tsx`; the storage rule in `eslint.config.js`.
+
+**Interfaces:** `SectionBoundary{label, resetKey?, onCatch?, onBack?, compact?, fallbackClassName?, whileFailed?}`. A fault draws `StateMessage unavailable` ("<label> stopped drawing") with Retry (a keyed remount; it writes nothing) and an owner-supplied Back. `Contained` injects `keepOpenPages`: `prepareOpenPages()` then `flushOpenPages()`, as a leave does. `RootBoundary` wraps App; its fallback mounts the quit host, so ⌘Q, the close button and ⌘W still save and quit while the window is down. No fallback reloads or clears browser storage.
+
+- [x] BL-01 core: root `onCaughtError` reaches the diagnostic log under its bounds; boundaries on each pane body (reset by the place it shows, Back through the pane's history), the record peek and the page editor; `RootBoundary` around App. Tests: `SectionBoundary.test.tsx`, `Contained.test.tsx` (prepare then flush; quit host only while down), `PaneRow.test.tsx` (a throwing pane leaves the other pane's editor mounted with its typed text), `diagnostics.test.ts`.
+- [x] Storage rule: `no-restricted-properties` refuses `localStorage.clear`, `sessionStorage.clear` and `indexedDB.deleteDatabase` outside tests (`scripts/lint-rails.test.ts`).
+- [ ] BL-27: boundaries on the side-panel slot, the assistant presentation root, each `ChatTurn`, each `StepItem` renderer, each rail card (in `ConversationRail.tsx`, never inside `components/ai/`), the archive adapter, each Home lane, Dialog body, HoverCard content and each lab section; an assistant remount re-attaches through `agent_events_since` (CV-30); a second fault stays unavailable; the top boundary offers Reload only when nothing is unresolved.
+- [ ] BL-195: `retryableOnce()` for the pdf.js engine, Shiki highlighter, formula catalog and mermaid highlighter.
+- [ ] Native: a root throw in the packaged app still answers ⌘Q within Rust's deadline (M93.11 evidence).
+
 ## Coverage and self-review
 
 | Spec requirement | Tasks                         |
@@ -229,5 +243,6 @@ historical ordinary tickets cannot suppress automatic last-place restoration.
 | REL-11           | M93.9, conditional owner gate |
 | REL-12           | M93.10                        |
 | REL-13           | M93.11 with CHAT evidence     |
+| Render faults    | M93.12 (audit BL-01/27/195)   |
 
 Author self-review completed against the draft spec: ownership, save/result types, cursor ordering and history origin match; all five Review Focus classes have named assertions. Conditional journal/cache decisions are explicit bounded gates, not invented current capabilities. Child detail mounting is retained as implemented. No test outcomes, benchmark improvement or native/live acceptance are claimed by this plan. Main unresolved owner choices are construct scope, accessible scale candidate, recovery retention and source eligibility for governed pages.

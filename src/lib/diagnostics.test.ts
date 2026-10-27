@@ -7,7 +7,7 @@ const { logFrontend } = vi.hoisted(() => ({
 }));
 vi.mock('./ipc', () => ({ logFrontend }));
 
-import { installErrorReporting } from './diagnostics';
+import { installErrorReporting, reportCaughtError } from './diagnostics';
 
 let uninstall: (() => void) | null = null;
 
@@ -158,4 +158,21 @@ it('forwards CSP directives and blocked origins once, never document paths or qu
   uninstall();
   report('https://other.test/private');
   expect(sent()).toHaveLength(2);
+});
+
+describe('a caught render fault (M93.12)', () => {
+  it('reaches the log only once reporting is installed, under the same bounds', () => {
+    reportCaughtError(new Error('before'));
+    expect(logFrontend).not.toHaveBeenCalled();
+    uninstall = installErrorReporting();
+    const stack = '\n    at Fragile (src/pages/Fragile.tsx:3:9)\n    at SectionBoundary';
+    reportCaughtError(new Error('pane broke'), stack);
+    reportCaughtError(new Error('pane broke'), stack);
+    expect(logFrontend).toHaveBeenCalledTimes(1);
+    expect(logFrontend.mock.calls[0][0]).toMatchObject({
+      level: 'error',
+      message: 'Render fault: Error: pane broke',
+      source: 'at Fragile (src/pages/Fragile.tsx:3:9)',
+    });
+  });
 });
