@@ -12,6 +12,7 @@
 /* DS theme for BlockNote (M2 Task 9): map the mantine flavor's CSS
    variables onto Cerebro tokens, scoped under our wrapper. */
 .cerebro-editor .bn-container {
+  color-scheme: inherit;
   --bn-colors-editor-text: var(--n-900);
   --bn-colors-editor-background: transparent;
   --bn-colors-menu-text: var(--n-700);
@@ -68,6 +69,12 @@
 .cb-held-selection {
   background: var(--cortex-100);
   box-shadow: inset 0 -1px var(--cortex-400);
+}
+/* Atomic link chips suppress native text highlighting. Keep the editor's
+   selected occurrence visible when a source passage lands on a whole chip. */
+.cerebro-editor .ProseMirror-selectednode [data-chip='wikilink'] {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
 }
 .cb-peek-icon {
   padding-left: 26px;
@@ -1182,4 +1189,28 @@
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+/* Source is another presentation of the retained document; keep the rich
+   owner mounted so metadata portals and its save debounce retain identity. */
+.cb-page-presentation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  padding: var(--sp-2) 54px;
+}
+.cerebro-editor-compact .cb-page-presentation {
+  padding-inline: 28px 8px;
+}
+.cb-doc-narrow .cb-page-presentation {
+  padding-right: 8px;
+}
+.cb-source-mode .cerebro-editor {
+  flex: 0 0 auto;
+}
+.cb-source-mode .cerebro-editor:not(.cb-page-editor) {
+  display: none;
+}
+.cb-source-mode .cb-page-title-block > .bn-block > .bn-block-content {
+  display: none;
 }

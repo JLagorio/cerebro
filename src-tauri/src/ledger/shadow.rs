@@ -439,9 +439,7 @@ fn replace_active(next: Active) {
     }
 }
 
-/// Drop the active shadow target (releases the ledger lock). Used by tests;
-/// the app itself just replaces the target on vault switch.
-#[cfg(test)]
+/// Drop the legacy shadow target before entering a selected workspace.
 pub(crate) fn deactivate() {
     if let Ok(mut guard) = active().lock() {
         *guard = None;

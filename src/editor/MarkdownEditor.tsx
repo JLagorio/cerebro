@@ -43,7 +43,7 @@ import { canInsertColumnsAt, COLUMN_COUNTS, newColumnList } from './columnComman
 import { codeBlockSpec } from './codeBlock';
 import { onAgentEvent, runAgent, startedOrThrow } from '@/agent/agentIpc';
 import { createLinkedPage } from '@/app/listActions';
-import { AskAiPopover } from '@/editor/AskAiPopover';
+import { AskAiPopover, type SelectionApplyResult } from '@/editor/AskAiPopover';
 import { isAiBlockRunning, setAiBlockRunning } from '@/editor/aiBlockRuns';
 import { AiFormattingToolbar, CarriedBlockMenu, type Preset } from '@/editor/SelectionToolbar';
 import { PromoteDialog } from './PromoteDialog';
@@ -109,6 +109,7 @@ import {
   escapeMarkerLines,
   lossyImportCause,
   markdownToBlocks,
+  markdownToBlocksNow,
   type LossyCause,
   unwrapReplyFence,
 } from './markdown';
@@ -389,7 +390,7 @@ export interface MarkdownEditorProps {
    * debounce. Flush before a deliberate save (⌘S) or before an agent turn
    * starts (M53.6): it emits a pending edit, and its promise settles once
    * `onChange`'s has, including a save the debounce had already started. It
-   * never rejects. Cancel before the file is written out of band (template
+   * refuses preparation while a sheet has an unresolved cell draft. Cancel before the file is written out of band (template
    * apply), so the stale in-editor body can't be written back over it.
    *
    * `applyExternal` takes an outside write in place (M55.6), as its own undo
@@ -407,6 +408,12 @@ export interface MarkdownEditorProps {
   readOnly?: boolean;
   /** A user edit was made and a save is now pending (fires per keystroke). */
   onDirty?: () => void;
+  /** Capture exact text before a debounce or presentation unmount. */
+  onDraft?: (markdown: string) => void;
+  /** Synchronous lease over preparation, serialization and its owning save. */
+  onBeginSave?: () => () => void;
+  /** Source shares this debounce, never a second writer or timer. */
+  getSaveDraft?: () => string | null;
   /** Page metadata is presentation inside the same editor, never document content. */
   pageChromeHost?: HTMLElement;
   pageTitle?: string;
@@ -444,8 +451,15 @@ export interface EditorReadyInfo {
   loadedAs: string;
   flushPendingSave: () => Promise<void>;
   cancelPendingSave: () => void;
+  schedulePendingSave: () => void;
+  presentMarkdown: (
+    raw: string,
+    allowLoss?: boolean,
+  ) => Promise<{ lossy: LossyCause | null; canonical: string }>;
   /** The page as markdown, now. */
   serialize: () => string;
+  /** Match retained sheet source through the same recursive parser as the page. */
+  sheetSources: (markdown?: string) => ReturnType<typeof sheetSourcesOf>;
   /** Record `md` as saved, so an emit of the same text writes nothing. */
   markSaved: (md: string) => void;
   /** Apply `next`, the file's body as read, against `base`, the canonical text
@@ -463,6 +477,9 @@ export function MarkdownEditor({
   autoFocus = false,
   readOnly = false,
   onDirty,
+  onDraft,
+  onBeginSave,
+  getSaveDraft,
   pageChromeHost,
   pageTitle,
   bodyVisible = true,
@@ -606,17 +623,24 @@ export function MarkdownEditor({
     y: number;
     preset?: string;
   } | null>(null);
-  /**
-   * The range the rewrite will replace, cloned when the popover OPENS.
-   *
-   * Not read back at apply time. Opening the popover moves focus into its
-   * input, which collapses the document selection — so by the time there is a
-   * decision to apply, `window.getSelection()` describes the text box the user
-   * typed the instruction into, not the passage they picked. A cloned Range
-   * keeps live node references, so it survives the editor re-rendering around
-   * an untouched passage.
-   */
-  const target = useRef<Range | null>(null);
+  // A rewrite owns a model range and version, never a live DOM Range. Focus
+  // and HeldSelection's paint may change while its input owns the keyboard.
+  const selectionVersion = useRef(0);
+  useEffect(
+    () =>
+      editor.onChange(() => {
+        selectionVersion.current += 1;
+      }),
+    [editor],
+  );
+  const target = useRef<{
+    text: string;
+    from: number;
+    to: number;
+    doc: CerebroEditor['prosemirrorState']['doc'];
+    version: number;
+    current: () => boolean;
+  } | null>(null);
   // Assign-task popover (M2.x feedback): opened from the checklist row's
   // side-menu button, floats NEXT TO the task line (not a modal); writes
   // assignee/due chips into that block.
@@ -633,7 +657,7 @@ export function MarkdownEditor({
   }, [editor, exclusiveTool, asking]);
   const [assignee, setAssignee] = useState('');
   const [dueDate, setDueDate] = useState('');
-  const lastSaved = useRef<string | null>(null);
+  const lastEmitted = useRef<string | null>(null);
   const timer = useRef<number | null>(null);
   // Up while an outside write is applied (M55.6): its change events are not
   // the person's edits, so they neither mark the page dirty nor save.
@@ -644,6 +668,13 @@ export function MarkdownEditor({
   onChangeRef.current = onChange;
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
+  const getSaveDraftRef = useRef(getSaveDraft);
+  getSaveDraftRef.current = getSaveDraft;
+  const schedulePendingRef = useRef<() => void>(() => {});
+  const onDraftRef = useRef(onDraft);
+  onDraftRef.current = onDraft;
+  const onBeginSaveRef = useRef(onBeginSave);
+  onBeginSaveRef.current = onBeginSave;
   const onDirtyRef = useRef(onDirty);
   onDirtyRef.current = onDirty;
   // Read-only is checked through a ref so unlocking a lossy import takes
@@ -670,11 +701,27 @@ export function MarkdownEditor({
   const lastEmit = useRef<Promise<void>>(Promise.resolve());
   const emitRef = useRef(() => {});
   emitRef.current = () => {
-    const emitted = blocksToMarkdown(editor).then((md) => {
-      if (md === lastSaved.current) return;
-      lastSaved.current = md;
-      return onChangeRef.current(md);
-    });
+    try {
+      settleSheetDrafts(editor);
+    } catch {
+      // Keep the body generation and the exact cell draft unresolved. The
+      // mounted participant reports preparation failure; autosave must not
+      // publish an older sheet source behind that visible draft.
+      return;
+    }
+    const write = onChangeRef.current;
+    const finish = onBeginSaveRef.current?.();
+    const emitted = (async () => {
+      try {
+        const override = getSaveDraftRef.current?.();
+        const md = await (override == null ? blocksToMarkdown(editor) : Promise.resolve(override));
+        if (md === lastEmitted.current) return;
+        lastEmitted.current = md;
+        await write(md);
+      } finally {
+        finish?.();
+      }
+    })();
     lastEmit.current = Promise.allSettled([lastEmit.current, emitted]).then(() => undefined);
   };
 
@@ -717,7 +764,8 @@ export function MarkdownEditor({
     settleSheetDrafts(editor);
     const wasPending = timer.current !== null;
     cancelPendingSave();
-    if (wasPending && !readOnlyRef.current) emitRef.current();
+    if (wasPending && (!readOnlyRef.current || getSaveDraftRef.current?.() != null))
+      emitRef.current();
     return lastEmit.current;
   }).current;
 
@@ -754,7 +802,7 @@ export function MarkdownEditor({
     quietly(() => inPlace(editor, () => applySteps(editor, plan.steps)));
     // The page now stands on the write: undoing it differs from this, so the
     // undo is saved like any edit.
-    lastSaved.current = plan.next;
+    lastEmitted.current = plan.next;
     openChoices.current = new Map(plan.choices.map((choice) => [choice.id, choice]));
     if (plan.choices.length > 0) return { kind: 'choices', next: plan.next, choices: openViews() };
     return {
@@ -789,16 +837,32 @@ export function MarkdownEditor({
       // it, so mounting (and the trailing-block plugin) never writes back.
       const roundTripped = await blocksToMarkdown(editor);
       if (cancelled) return;
-      lastSaved.current = roundTripped;
+      lastEmitted.current = roundTripped;
       setLoaded({
         editor,
         lossyCause: lossyImportCause(markdown, roundTripped),
         loadedAs: roundTripped,
         flushPendingSave,
         cancelPendingSave,
+        schedulePendingSave: () => schedulePendingRef.current(),
+        presentMarkdown: async (raw, allowLoss = false) => {
+          const blocks = await markdownToBlocks(editor, raw);
+          const canonical = blocksToMarkdownNow(editor, blocks);
+          const lossy = lossyImportCause(raw, canonical);
+          if (lossy !== null && !allowLoss) return { lossy, canonical };
+          quietly(() => {
+            editor.replaceBlocks(editor.document, blocks);
+          });
+          lastEmitted.current = canonical;
+          return { lossy, canonical };
+        },
         serialize: () => blocksToMarkdownNow(editor),
+        sheetSources: (source) =>
+          sheetSourcesOf(
+            source === undefined ? editor.document : markdownToBlocksNow(editor, source),
+          ),
         markSaved: (md) => {
-          lastSaved.current = md;
+          lastEmitted.current = md;
         },
         applyExternal: (next, base, opts) => external.current.applyExternal(next, base, opts),
         choose: (id, pick) => external.current.choose(id, pick),
@@ -825,7 +889,16 @@ export function MarkdownEditor({
     // A read-only document must not be able to schedule a write at all — the
     // editable flag alone would still let a programmatic change through.
     if (readOnlyRef.current) return;
+    onDraftRef.current?.(blocksToMarkdownNow(editor));
     onDirtyRef.current?.();
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
+      emitRef.current();
+    }, debounceMs);
+  };
+
+  schedulePendingRef.current = () => {
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       timer.current = null;
@@ -839,7 +912,7 @@ export function MarkdownEditor({
       if (timer.current !== null) {
         window.clearTimeout(timer.current);
         timer.current = null;
-        if (!readOnlyRef.current) emitRef.current();
+        if (!readOnlyRef.current || getSaveDraftRef.current?.() != null) emitRef.current();
       }
     },
     [],
@@ -1541,21 +1614,15 @@ export function MarkdownEditor({
       return;
     }
     if (e.key !== 'k' || !(e.metaKey || e.ctrlKey)) return;
-    const text = window.getSelection()?.toString() ?? '';
-    // Nothing selected is not an error — it is the other feature (a slash
-    // menu), and stealing the keystroke to show an empty rewrite would be
-    // worse than not binding it.
-    if (text.trim() === '') return;
+    if (
+      exclusiveTool ||
+      !(e.target instanceof Element) ||
+      e.target.closest('.bn-editor') !== editor.domElement ||
+      editor.prosemirrorState.selection.empty
+    )
+      return;
     e.preventDefault();
-    const live = window.getSelection()?.getRangeAt(0);
-    target.current = live?.cloneRange() ?? null;
-    editor.getExtension(HeldSelection)?.hold();
-    const rect = live?.getBoundingClientRect();
-    setAsking({
-      text,
-      x: rect?.left ?? 80,
-      y: (rect?.bottom ?? 80) + 6,
-    });
+    askFromToolbar();
   };
 
   /**
@@ -1566,7 +1633,11 @@ export function MarkdownEditor({
    * pointer, while ProseMirror still owns the person's exact text selection.
    */
   const askFromToolbar = (preset?: Preset) => {
-    const { from, to } = editor.prosemirrorState.selection;
+    if (readOnlyRef.current) return;
+    const {
+      doc,
+      selection: { from, to },
+    } = editor.prosemirrorState;
     if (from === to) return;
     const text = editor.getSelectedText();
     if (text.trim() === '') return;
@@ -1575,9 +1646,18 @@ export function MarkdownEditor({
     const range = document.createRange();
     range.setStart(start.node, start.offset);
     range.setEnd(end.node, end.offset);
-    target.current = range;
-    editor.getExtension(HeldSelection)?.hold();
+    target.current = {
+      text,
+      from,
+      to,
+      doc,
+      version: selectionVersion.current,
+      current: captureAttachmentOwner(),
+    };
+    // Read geometry before decorating: holding the selection can replace the
+    // text nodes and detach the temporary DOM range used only for positioning.
     const rect = range.getBoundingClientRect();
+    editor.getExtension(HeldSelection)?.hold();
     setAsking({
       text,
       x: rect.left,
@@ -1586,24 +1666,29 @@ export function MarkdownEditor({
     });
   };
 
-  /**
-   * Replace the selected text with the decided passage.
-   *
-   * Through the DOM selection rather than by block id, because the selection
-   * may span several blocks and part of one — "rewrite this sentence" is the
-   * common case, and a block-granular replace would take the paragraph. One
-   * edit, so it is one undo step and one debounce, which is the whole reason
-   * the rewrite is not streamed in.
-   */
-  const replaceSelection = (text: string) => {
-    const range = target.current;
-    if (range === null) return;
-    range.deleteContents();
-    range.insertNode(document.createTextNode(text));
-    // The range now describes the text just inserted; dropping it stops a
-    // second Apply — from a stale popover — writing into it again.
+  const selectionIsCurrent = () => {
+    const captured = target.current;
+    if (captured === null || !captured.current() || readOnlyRef.current) return false;
+    const { doc } = editor.prosemirrorState;
+    return (
+      doc === captured.doc &&
+      selectionVersion.current === captured.version &&
+      captured.from < captured.to &&
+      captured.to <= doc.content.size &&
+      doc.textBetween(captured.from, captured.to) === captured.text
+    );
+  };
+
+  /** One editor transaction, through the existing guarded save and Undo path. */
+  const replaceSelection = (text: string): SelectionApplyResult => {
+    if (!selectionIsCurrent()) return { kind: 'conflict' };
+    const captured = target.current!;
     target.current = null;
-    scheduleEmit();
+    if (text === captured.text) return { kind: 'unchanged' };
+    inPlace(editor, () => {
+      editor.transact((tr) => tr.insertText(text, captured.from, captured.to));
+    });
+    return { kind: 'applied' };
   };
 
   const finishPromotion = (results: PromotionResult[]): PromotionResult[] => {
@@ -1870,6 +1955,7 @@ export function MarkdownEditor({
               selection={asking.text}
               preset={asking.preset}
               onReplace={replaceSelection}
+              isCurrent={selectionIsCurrent}
               onClose={() => {
                 setAsking(null);
                 editor.focus();

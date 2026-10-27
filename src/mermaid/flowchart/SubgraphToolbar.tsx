@@ -1,4 +1,5 @@
-import { useMemo, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
+import { registerSavePreparation } from '@/editor/openPages';
 import { Icon } from '@/components/ui/Icon';
 import { type Direction, type FlowchartModel, subgraphs } from './model';
 import {
@@ -91,6 +92,20 @@ export function SubgraphToolbar({
     // apply's byte guard makes the nothing-pending case a true no-op.
     apply(withPendingRename());
   };
+  const prepare = useRef<() => void>(() => {});
+  prepare.current = () => {
+    if (renameRefusal !== null) throw new Error(SUBGRAPH_REFUSAL_TEXT[renameRefusal]);
+    commitRename();
+  };
+  useEffect(() => {
+    const unregister = registerSavePreparation(() => prepare.current());
+    return () => {
+      // Dismissing this local rename cancels it. A retained preparation
+      // failure must not call a retired toolbar or undo that explicit cancel.
+      prepare.current = () => {};
+      unregister();
+    };
+  }, []);
 
   const setDirection = (dir: Direction | null): void => {
     if (directionRefusal !== null || entry === undefined) return;

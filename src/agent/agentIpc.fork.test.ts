@@ -50,7 +50,7 @@ async function ask(
   fork?: ForkPoint,
 ): Promise<RunHandle> {
   const started = await start(message, sessionId, fork);
-  if ('deferred' in started || 'settled' in started) {
+  if ('deferred' in started || 'settled' in started || 'observed_generation' in started) {
     throw new Error('an attended run is never deferred or settled');
   }
   await new Promise<void>((resolve) => {

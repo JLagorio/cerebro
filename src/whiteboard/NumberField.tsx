@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
 import { useDragGesture } from '@/hooks/useDragGesture';
 import { MIXED } from '@/engine/scene/inspect';
+import { useBoardDraft, type BoardDraftOwner } from './pendingText';
 
 export function NumberField({
   label,
@@ -10,8 +10,10 @@ export function NumberField({
   onScrub,
   onScrubEnd,
   disabled = false,
+  draftOwner,
 }: {
   label: string;
+  draftOwner?: BoardDraftOwner;
   value: number | typeof MIXED;
   disabled?: boolean;
   onCommit(value: number): boolean | void;
@@ -20,21 +22,18 @@ export function NumberField({
   onScrubEnd?(commit: boolean): void;
 }) {
   const display = value === MIXED ? '' : String(value);
-  const [draft, setDraft] = useState(display),
-    [dirty, setDirty] = useState(false);
+  const {
+    draft,
+    error,
+    prepare: commit,
+    change,
+    discard,
+  } = useBoardDraft(draftOwner, display, (text) => {
+    const number = text.trim() === '' ? NaN : Number(text);
+    if (!Number.isFinite(number) || !Number.isInteger(number)) return false;
+    return number === value || onCommit(number) !== false ? text : false;
+  });
   const gesture = useDragGesture();
-  useEffect(() => {
-    setDraft(display);
-    setDirty(false);
-  }, [display]);
-  const commit = () => {
-    if (!dirty) return;
-    const number = draft.trim() === '' ? NaN : Number(draft);
-    setDirty(false);
-    if (Number.isFinite(number) && Number.isInteger(number)) {
-      if (number !== value && onCommit(number) === false) setDraft(display);
-    } else setDraft(display);
-  };
   return (
     <div className="flex items-center gap-2">
       <button
@@ -90,12 +89,12 @@ export function NumberField({
         aria-label={label}
         disabled={disabled}
         inputMode="numeric"
+        aria-invalid={error}
         value={draft}
         placeholder={value === MIXED ? 'Mixed' : undefined}
         className="w-full min-w-0 rounded-md border border-n-200 bg-n-0 px-2 py-1 text-xs text-n-700"
         onChange={(event) => {
-          setDraft(event.target.value);
-          setDirty(true);
+          change(event.target.value);
         }}
         onBlur={commit}
         onKeyDown={(event) => {
@@ -106,17 +105,15 @@ export function NumberField({
           } else if (event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();
-            setDirty(false);
-            setDraft(display);
+            discard();
           } else if (
             (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
             typeof value === 'number'
           ) {
             event.preventDefault();
-            setDirty(false);
             const next = value + (event.key === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 10 : 1);
-            setDraft(String(next));
-            if (onCommit(next) === false) setDraft(display);
+            change(String(next));
+            commit();
           }
         }}
       />

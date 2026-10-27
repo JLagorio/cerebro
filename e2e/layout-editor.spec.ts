@@ -51,7 +51,7 @@ test('layout editor: strip to vault bytes, inert preview, and the eye folds the 
   await expect(panel.getByTestId('heading-strip')).toBeVisible();
   await expect(panel.getByTestId('property-row')).toHaveCount(0);
 
-  // -- View details unfolds the full stack, Planning group and all -----
+  // -- Show all properties unfolds the full stack, Planning group and all -----
   await panel.getByTestId('view-details-toggle').click();
   await expect(panel.getByTestId('property-row').first()).toBeVisible();
   await expect(panel.getByTestId('property-group').filter({ hasText: 'Planning' })).toBeVisible();

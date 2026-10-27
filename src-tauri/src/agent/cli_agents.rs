@@ -88,7 +88,7 @@ pub(crate) fn subagent_brief() -> String {
 }
 
 /// The standing prompt of the preset named `name`, trimmed.
-fn preset_prompt(name: &str) -> Option<&'static str> {
+pub(crate) fn preset_prompt(name: &str) -> Option<&'static str> {
     PRESET_PROMPTS
         .iter()
         .find(|(preset, _)| *preset == name)

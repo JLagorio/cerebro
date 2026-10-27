@@ -1,0 +1,535 @@
+# Stage-1 findings index — reference audit 2026-10-24
+
+> 389 findings from 18 dossiers (the two Cerebro baselines carry strengths and gaps, not findings). Generated from the stage-1 structured returns. One line per finding: id · [verdict] · pattern · phases · dossier. A finding tagged for several milestones appears under each. Verdicts are stage-1 claims, unverified until stage 2.
+
+Dossier prefixes: AFN1–5 AFFiNE · OUT1–5 Outline · TOL Tolaria · PLN Plane · APC Activepieces · N8N n8n · MAC Macro · AFY AppFlowy · MOR Morrow · TDK Thought Desk.
+
+## M93 — Reliable workspace (M93.1–M93.11) (42)
+
+- OUT1-13 [adapt] Client identity map: merge in place, dedupe in-flight fetches, evict on 403/404, declared relation cascade — M93.7 — outline-1-architecture.md
+- OUT1-14 [adapt] Push invalidation descriptors {id, updatedAt}; skip own echoes; refetch through the authorized read — M93.7 — outline-1-architecture.md
+- OUT1-15 [already-have] Save loop: snapshot before I/O, restore the dirty flag on failure, canonicalize, skip no-ops — M93.1 — outline-1-architecture.md
+- OUT1-20 [already-have] Keyset paging with a PK tie-break; limit+1 detects a next page — M93.3, M99.4 — outline-1-architecture.md
+- OUT2-01 [adapt] Lazy serialization on change (onChange passes a value() getter; only save serializes) — M93.1, M93.6, M93.7 — outline-2-editor.md
+- OUT2-02 [adapt] Incremental plugin work: map decorations, rebuild only on structural change — M93.6, M93.7 — outline-2-editor.md
+- OUT2-08 [adapt] One trigger engine for all menus, with IME/CJK handling and full-width ＠ trigger — M93.11, M94.9 — outline-2-editor.md
+- OUT2-19 [already-have] Debounced revisions, skip identical — M93.9 — outline-2-editor.md
+- OUT2-22 [already-have] Restore as one undoable editor transaction through the normal save path — M95.4, M93.9 — outline-2-editor.md
+- AFN1-08 [watch] Derived-index watermark plus version committed atomically with the index; a corrupt index reads as IndexNotReady — M93.7, M97 — affine-1-architecture-storage.md
+- AFN1-09 [adapt] Markdown peer: per-doc baseline checkpoint, never overwrite differing bytes, review candidates, round-trip gate, missing file never deletes — M99.6, M93.8 — affine-1-architecture-storage.md
+- AFN1-14 [already-have] Per-doc job queue with coalesced saves, ref-counted priority and a waitForUpdated flush — M93.1, M93.2 — affine-1-architecture-storage.md
+- AFN1-20 [already-have] Flush the docs the agent will read before the AI request — M93.2, M95.1 — affine-1-architecture-storage.md
+- AFN4-03 [adapt] One explorer engine shared by every doc list, configured by a display preference — M94.3, M94.6, M93.7 — affine-4-product-surfaces.md
+- AFN3-21 [watch] Computed masonry with optional virtual scroll — M93.7 — affine-3-design-system.md
+- AFN2-01 [adapt] Unknown data survives a round trip: verbatim pointer-fence source — NEW:carriers, M99.8, M93.1 — affine-2-editor-blocks.md
+- AFN2-12 [already-have] Virtual table behind an off-by-default canary flag, with little ARIA — M93.7 — affine-2-editor-blocks.md
+- AFN2-18 [watch] Whiteboard scale stack: 3000px grid index, viewport culling, stacked canvases; turbo renderer off by default — M93.6, M93.7 — affine-2-editor-blocks.md
+- AFN2-23 [avoid] Y.UndoManager transactions; transact swallows errors so earlier operations stay committed — M93.1 — affine-2-editor-blocks.md
+- OUT4-09 [already-have] Restore a version as an ordinary write — M93.9 — outline-4-product-surfaces.md
+- TOL-02 [adapt] Pin every upstream editor patch with a regression test that imports the library source — NEW M93.12, M93.11 — delta-tolaria.md
+- TOL-03 [adapt] Static boot shell in index.html, reused as the Suspense fallback; ready flag; one-shot reload watchdog — NEW M93.12, M93.6 — delta-tolaria.md
+- TOL-04 [adapt] Narrow list of WKWebView-reserved chords (⌘O, ⌘F, ⌘⇧L), each verified natively — M93.11, M94.9, NEW M94.10 — delta-tolaria.md
+- TOL-07 [adapt] Each shortcut declares how it is proven: renderer event, native menu, or manual native check — M93.11, M94.9 — delta-tolaria.md
+- TOL-11 [adapt] Status-stability tests that sample an indicator every 100 ms through typing and autosave — M94.9, M93.1 — delta-tolaria.md
+- TOL-12 [adapt] Rows show save and git status dots — M93.2, M94.5 — delta-tolaria.md
+- TOL-15 [watch] Table of contents built lazily and off the main thread in a worker — M93.6, M93.7 — delta-tolaria.md
+- TOL-16 [adapt] Cursor and scroll position carried across the rich/source mode switch — M93.8 — delta-tolaria.md
+- APC-14 [adapt] Layered error boundaries: app with copyable diagnostics; per-renderer retry once, then escalate — M93.12 — delta-activepieces.md
+- APC-16 [watch] Virtualize only above a threshold, against the nearest scroll parent — M93.7 — delta-activepieces.md
+- N8N-19 [watch] Paging and explicit size gates; virtualizer lacks offscreen accessibility — M93.7 — delta-n8n.md
+- MAC-13 [adapt] Per-setting search catalogue with target slugs shared by the catalogue and the markup — M94.8, M93.10 — delta-macro.md
+- MAC-14 [avoid] Virtualize simple lists, not the editable grid; Macro's lists lack set-size semantics — M93.7 — delta-macro.md
+- MAC-19 [watch] WebKit text-column flex-basis 0 for long unbroken runs — M93.6 — delta-macro.md
+- MOR-03 [adapt] Failure copy says what failed, what is kept, and the next action — M94.2, M94.8, M93.2 — delta-morrow.md
+- MOR-18 [already-have] Unknown content opens read-only with a banner — M93.8 — delta-morrow.md
+- AFY-10 [adapt] A trashed page stays open with a banner offering Restore (and Delete permanently) — M94.5, M93.2 — delta-appflowy.md
+- AFY-16 [adapt] Change notifications keyed by subject (source, id, type, payload or error) with a per-subject debounce — M93.7, M99.1 — delta-appflowy.md
+- TDK-03 [adapt] Each board column shows 50 cards, then 'Show more (N left)' — M93.6, M93.7, M94.6 — delta-thought-desk.md
+- TDK-04 [adapt] Reload and stray input treated as leave paths: native context menu only in editable fields, reload keys blocked, mouse Back/Forward — M93.2, M93.11, M94.5 — delta-thought-desk.md
+- TDK-14 [avoid] content-visibility: auto on table rows — M93.7 — delta-thought-desk.md
+- TDK-15 [watch] Only one search in flight; the latest query wins — M93.7 — delta-thought-desk.md
+
+## M94 part A — baseline, composition/role sheet, four-surface slice, release evidence (M94.1–M94.3, M94.9, plain M94) (86)
+
+- OUT3-05 [adapt] One depth (z-index) table — M94.2 — outline-3-design-system.md
+- OUT3-14 [avoid] Small-screen presenters: bottom drawers for menus, full-screen modals, hover and tooltips off — M94.2 — outline-3-design-system.md
+- OUT3-21 [watch] No pointer input while a menu or popover animates open (500ms fallback) — M94.9 — outline-3-design-system.md
+- OUT3-22 [adapt] Desktop window conventions: dim chrome when the window is in the background — M94.9 — outline-3-design-system.md
+- OUT2-08 [adapt] One trigger engine for all menus, with IME/CJK handling and full-width ＠ trigger — M93.11, M94.9 — outline-2-editor.md
+- OUT2-17 [adapt] Per-viewer toggle fold memory with stable id + bounded LRU — NEW:editor-polish, M94.3 — outline-2-editor.md
+- OUT2-21 [already-have] Repair on first edit, never on load — M94.3 — outline-2-editor.md
+- AFN4-03 [adapt] One explorer engine shared by every doc list, configured by a display preference — M94.3, M94.6, M93.7 — affine-4-product-surfaces.md
+- AFN4-04 [adapt] ⌘W closes the foremost thing: peek, then split view, then tab, then window — M94.5, M94.9 — affine-4-product-surfaces.md
+- AFN4-09 [adapt] Display preference per mode, read once per view instance — M94.3 — affine-4-product-surfaces.md
+- AFN3-01 [adapt] Hover/press as translucent state layers (::before hoverOverlay; translucent insideBorder) — M94.2, M94.3 — affine-3-design-system.md
+- AFN3-02 [adapt] Variants/sizes assign component-scoped CSS vars; base rule reads them — M94.2, M94.3 — affine-3-design-system.md
+- AFN3-03 [adapt] Overlay elevation as a role pair (overlayPanel surface + role shadow) distinct in both themes — M94.2, M94.3 — affine-3-design-system.md
+- AFN3-05 [adapt] Two global z-index layer tokens + portals; local z 0-5 — M94.2 — affine-3-design-system.md
+- AFN3-06 [adopt] Concentric inner radius = calc(outer - padding) — M94.2 — affine-3-design-system.md
+- AFN3-07 [already-have] Property disclosure that counts hidden rows and keeps hidden rows laid out for menu anchors — M94.3 — affine-3-design-system.md
+- AFN3-08 [adapt] Primitive specimen matrices (variant x size x state, theme toggle) — M94.2, M94.9 — affine-3-design-system.md
+- AFN3-14 [adapt] Scrolled-under hairline for sticky headers — M94.3 — affine-3-design-system.md
+- AFN3-15 [adapt] Token values exported as JS maps beside CSS vars — M94.2 — affine-3-design-system.md
+- AFN2-13 [adapt] Slash registry (group sort key, when, searchAlias) with IME-safe compositionEnd trigger — NEW:carriers, M94.9 — affine-2-editor-blocks.md
+- AFN2-14 [adapt] CJK alias 【【 converted to the link trigger; triggers off inside code blocks — M94.9 — affine-2-editor-blocks.md
+- AFN2-16 [already-have] Title as a separate root text sharing the doc's undo; Enter splits the title; outline h1-h6; page layout — M94.3 — affine-2-editor-blocks.md
+- OUT4-01 [adapt] Lifecycle meta sentence under the title and on every row, with changed-since-you-viewed highlight — M94.3, M94.6, M99.6 — outline-4-product-surfaces.md
+- OUT4-10 [adapt] Single side-panel slot with panels kept mounted under React.Activity — M94.3 — outline-4-product-surfaces.md
+- OUT4-22 [already-have] Responsive hiding never rewrites stored preferences — M94.3 — outline-4-product-surfaces.md
+- PLN-01 [adapt] Colour roles at call sites (canvas/surface/layer + matched state suffixes, written usage rules) — M94.2, M94.9 — delta-plane.md
+- PLN-03 [adapt] Reading width per block with full-width breakout; one alignment variable for toolbar/body/loader; container-query margins — M94.3 — delta-plane.md
+- PLN-07 [adapt] High-contrast themes first-class; custom theme rewrites only base ramps — NEW:contrast-theme, M94.9 — delta-plane.md
+- PLN-08 [adapt] Elevation as roles (raised vs overlay) on popups — M94.2 — delta-plane.md
+- PLN-16 [already-have] Container queries for geometry — M94.2 — delta-plane.md
+- TOL-04 [adapt] Narrow list of WKWebView-reserved chords (⌘O, ⌘F, ⌘⇧L), each verified natively — M93.11, M94.9, NEW M94.10 — delta-tolaria.md
+- TOL-05 [adapt] In fullscreen, an AppKit monitor sends Escape to the open overlay instead of exiting fullscreen — M94.9, NEW M94.10 — delta-tolaria.md
+- TOL-07 [adapt] Each shortcut declares how it is proven: renderer event, native menu, or manual native check — M93.11, M94.9 — delta-tolaria.md
+- TOL-08 [adapt] App zoom with a persisted level and correct overlay positioning — M94.9, NEW M94.10 — delta-tolaria.md
+- TOL-10 [adapt] Property label column sized to the longest label (fit-content(50%) plus subgrid rows) — M94.3 — delta-tolaria.md
+- TOL-11 [adapt] Status-stability tests that sample an indicator every 100 ms through typing and autosave — M94.9, M93.1 — delta-tolaria.md
+- TOL-13 [watch] Toolbar collapses actions into an overflow menu based on measured widths, with hysteresis — M94.3 — delta-tolaria.md
+- TOL-14 [watch] Overlay title bar with traffic-light inset and startDragging drag regions — NEW:shell, M94.2 — delta-tolaria.md
+- TOL-19 [already-have] Semantic colour roles behind shadcn and compatibility alias layers — M94.2 — delta-tolaria.md
+- TOL-20 [avoid] Pencil .pen design files as the spec — M94.2 — delta-tolaria.md
+- APC-01 [adapt] Each colour step has one job in both themes; dark is written out for every step — M94.2, NEW:colour-contract — delta-activepieces.md
+- APC-02 [adapt] Contrast by construction: contrast-adjusted generator, drift test and property tests — M94.2 — delta-activepieces.md
+- APC-04 [adopt] Lint asks Tailwind whether each class exists and fails any var(--x) with no definer — M94.1 — delta-activepieces.md
+- APC-07 [adapt] Settings composition kit: Page/Header/Section/Panel/Row (role=group, aria-describedby)/sticky SaveBar — M94.2, M94.8 — delta-activepieces.md
+- APC-15 [adapt] One primitive per small recurring interaction (TextWithTooltip, copy), required by AGENTS.md — M94.3, M94.6 — delta-activepieces.md
+- N8N-01 [adapt] One app z-layer table injected as CSS vars — M94.2 — delta-n8n.md
+- N8N-02 [adapt] Utility page composition: 720px column, rhythm set by the following sibling, row anatomy, focus-revealed secondary actions — M94.2, M94.8 — delta-n8n.md
+- N8N-12 [adapt] Per-area design-language doc with review checklist — M94.2, M94.7, M94.8 — delta-n8n.md
+- N8N-18 [already-have] DS-only gallery; visual diffs reviewed by a human, never a failing gate — M94.9 — delta-n8n.md
+- MAC-01 [adapt] Depth-relative surfaces: a Layer depth context sets layer-relative bg-surface/bg-inset — NEW:ds-roles, M94.2 — delta-macro.md
+- MAC-02 [adapt] State washes as translucent ink/accent overlays (overlay-* background-image) — NEW:ds-roles, M94.2 — delta-macro.md
+- MAC-03 [adapt] Elevation as named role bundles (menu-surface, elevated-surface, scrim) — M94.2 — delta-macro.md
+- MAC-05 [adapt] Headless priority-collapse for toolbars and headers (overflow probe, reverse expansion, last-resort truncation) — M94.3, M94.5, M94.7 — delta-macro.md
+- MAC-06 [adapt] Executable component gallery: globbed *.docs.tsx, region demos, @do/@dont JSDoc, coverage page, render-every-demo test — NEW:ds-gallery, M94.2 — delta-macro.md
+- MAC-07 [adapt] AST design-system adoption audit (usage, reskinning, hand-rolled controls) — M94.6, M94.7, M94.8, M94.9 — delta-macro.md
+- MAC-08 [adapt] One control-size vocabulary shared by every button-like control — M94.2 — delta-macro.md
+- MAC-10 [adapt] One row and card anatomy (Item slots) for lists and cards — M94.3, M94.6, M94.8 — delta-macro.md
+- MAC-12 [adapt] Inactive-pane tint by an oklch lightness shift scoped to the pane — M94.3 — delta-macro.md
+- MOR-01 [adapt] Page tree is one ARIA tree: roving tabindex, arrows, F2, Delete, menu key; row actions at tabIndex -1 — M94.3, M94.9 — delta-morrow.md
+- MOR-03 [adapt] Failure copy says what failed, what is kept, and the next action — M94.2, M94.8, M93.2 — delta-morrow.md
+- MOR-06 [adopt] One global appearance:none skin for native checkboxes — M94.2 — delta-morrow.md
+- MOR-07 [adapt] Editor suggestion menus rendered with the app's menu primitives — M94.3 — delta-morrow.md
+- MOR-08 [adapt] Two-step translucent state layer (hover .05, active .085 ink) — M94.2 — delta-morrow.md
+- MOR-10 [adapt] Window background follows the theme; frame saved and restored only when on a visible display — M94.9, NEW M94.10 — delta-morrow.md
+- MOR-14 [already-have] Responsive by viewport media queries (800px, 1360px) — M94.2 — delta-morrow.md
+- MOR-15 [watch] Focus mode: hide chrome, fade the top bar, Escape exits — NEW:composition, M94.2 — delta-morrow.md
+- MOR-16 [watch] All decorative colour behind one Colourful switch — M94.2 — delta-morrow.md
+- AFY-01 [adapt] Hover and selection are role tokens drawn as translucent ink (content-hover 5%, content-visible-hover 10%, theme-select 15%, text-select 20%) — M94.2, M94.3 — delta-appflowy.md
+- AFY-02 [adapt] The primitive owns the state-to-token map; call sites choose a variant, never a colour — M94.2 — delta-appflowy.md
+- AFY-03 [adapt] Design-system adoption needs a counted ratchet; AppFlowy's new layer stalled without one — M94.2, M94.9 — delta-appflowy.md
+- AFY-04 [adapt] Closed modal size scale (S/M/L = 400/560/720) with fixed header/body/footer anatomy — M94.2 — delta-appflowy.md
+- AFY-07 [already-have] Type roles times a closed set of three emphasis weights (400/600/700); body 14/20 and caption 12/18 match Cerebro — M94.2 — delta-appflowy.md
+- AFY-11 [adapt] Breadcrumb collapse: first ancestor, an ellipsis, then the last two crumbs — M94.3 — delta-appflowy.md
+- TDK-02 [adapt] Data scrolls to the pane edge while its first column lines up with the title; the hover gutter hangs in the margin — M94.2, M94.6 — delta-thought-desk.md
+- TDK-05 [adapt] Window stays hidden until painted, native theme and window background follow the app, window size and position restored — NEW:shell, M94.9 — delta-thought-desk.md
+- TDK-06 [adapt] Utility layout spelled out in numbers: fixed 24px section headings, 48/40/72px grouped rows with inset hairlines, standard sheet head/foot — M94.2, M94.8 — delta-thought-desk.md
+- TDK-07 [already-have] Concentric corners: inner radius = outer radius minus padding — M94.2 — delta-thought-desk.md
+- TDK-08 [adapt] Lighter font weights in dark mode, using the variable font — M94.2, M94.3 — delta-thought-desk.md
+- TDK-09 [adapt] text-wrap: balance on titles and headings, pretty on prose — M94.3 — delta-thought-desk.md
+- TDK-10 [adapt] Toolbar hairline only once content scrolls under it; long breadcrumb paths collapse — M94.3 — delta-thought-desk.md
+- TDK-11 [adapt] Fluid insets for spacing, fixed breakpoints only for structural layout changes — M94.2 — delta-thought-desk.md
+- TDK-12 [watch] Split panes as tiled cards: the gap is the divider, the active pane has a firmer edge, drag a page over to open it beside — M94.3, NEW:panes — delta-thought-desk.md
+- TDK-13 [already-have] Pane-relative layout without making each pane the containing block for fixed menus (TD avoids container queries for this) — M94.3 — delta-thought-desk.md
+- TDK-18 [already-have] Motion details: tooltip warm-up, theme reveal, press scale, switch spring, toast pop — M94.2 — delta-thought-desk.md
+- TDK-20 [adapt] Named z-index roles — M94.2 — delta-thought-desk.md
+- TDK-22 [watch] Template starters on an empty page and a click area below the content — M94.3 — delta-thought-desk.md
+
+## M94 part B — destinations/drafts, properties/commands/returns, data views, conversation/agent adoption, utilities/states (M94.4–M94.8, plain M94) (101)
+
+- OUT3-01 [adapt] One action registry feeds every surface: dropdown, context menu, mobile drawer, ⌘K, buttons and bulk bar — M94.5 — outline-3-design-system.md
+- OUT3-02 [adapt] Menu items normalised before drawing: hidden items dropped, separators collapsed, shared icon column, nothing rendered when empty, shortcut on each row — M94.5 — outline-3-design-system.md
+- OUT3-03 [adapt] A context menu is the dropdown primitive in a context variant — M94.5 — outline-3-design-system.md
+- OUT3-04 [adapt] Global bare-key shortcuts stand down inside ARIA keyboard widgets (menu, listbox, tree, grid, dialog and others) — M94.5 — outline-3-design-system.md
+- OUT3-06 [adapt] Error boundaries at surface seams, with a repeated-error guard — NEW:M93.12 render isolation, M94.8 — outline-3-design-system.md
+- OUT3-07 [adapt] Keyed toasts with a tone, updated in place (loading → success/error); action errors toasted centrally — M94.8, M98.9 — outline-3-design-system.md
+- OUT3-08 [adapt] Loading appears after 250ms and keeps its shape with placeholder rows; 'Working…' only after 1s — M94.8 — outline-3-design-system.md
+- OUT3-09 [adapt] Bulk bar reuses row actions against the selection and keeps the selection when a dialog opens — M94.6, M94.8 — outline-3-design-system.md
+- OUT3-10 [adapt] Async action buttons disable themselves while running — M94.4, M94.8 — outline-3-design-system.md
+- OUT3-18 [watch] Alt+↑/↓ steps to the previous/next sidebar row across sections, ordered by DOM position — M94.5 — outline-3-design-system.md
+- OUT3-19 [adapt] Accessible names required by the type — M94.8 — outline-3-design-system.md
+- OUT3-20 [watch] Scroll-edge shadows via onScroll + ResizeObserver; tab overflow fade — M94.6 — outline-3-design-system.md
+- OUT1-01 [adapt] Serialize per-entity abilities with every payload; UI gates only on them; server still authorizes — NEW:abilities, M99.1, M94.5, M94.8 — outline-1-architecture.md
+- OUT1-02 [adapt] One action definition (visible/disabled/dangerous/perform over ActionContext) feeds menus, command bar, buttons and agent tools — M94.5 — outline-1-architecture.md
+- AFN5-03 [adapt] Landings per surface: in-place replace only where the selection is frozen and locked; chat inserts or saves new — M95.4, M94.7 — affine-5-ai-copilot.md
+- AFN5-15 [adopt] e2e asserts the exact set of landings offered per surface — M94.7, M95.4 — affine-5-ai-copilot.md
+- AFN4-01 [adapt] Error boundary around each view, peek and detail page — NEW:M93.12 render-containment, M94.8 — affine-4-product-surfaces.md
+- AFN4-02 [adapt] Creation receipt keyed by attempt ID: preparing written before the create, committed last — M94.4, M98.7 — affine-4-product-surfaces.md
+- AFN4-03 [adapt] One explorer engine shared by every doc list, configured by a display preference — M94.3, M94.6, M93.7 — affine-4-product-surfaces.md
+- AFN4-04 [adapt] ⌘W closes the foremost thing: peek, then split view, then tab, then window — M94.5, M94.9 — affine-4-product-surfaces.md
+- AFN4-05 [adapt] Peek controls: Open, New tab, Split, Copy link, Info — M94.5 — affine-4-product-surfaces.md
+- AFN4-06 [adapt] A trashed doc opens read-only with Restore and Delete — M94.5 — affine-4-product-surfaces.md
+- AFN4-07 [adapt] Closed, typed grammar for collection membership, with matches explained (rule matches ∪ manual picks, trash and empty journals excluded) — NEW:pages-saved-filters, M94.6 — affine-4-product-surfaces.md
+- AFN4-08 [adapt] Shift-click range selection with a floating bulk bar — M94.6 — affine-4-product-surfaces.md
+- AFN4-10 [adapt] Create a page titled with the query when search finds nothing — M94.4, M94.5 — affine-4-product-surfaces.md
+- AFN4-11 [adapt] Journal: a date-keyed page, find-or-create on an explicit Create; the redirect replaces history; empty journals hidden — NEW:journals, M94.4 — affine-4-product-surfaces.md
+- AFN4-12 [adapt] Default page and journal template; New ▸ Template — M94.4, NEW:default-template — affine-4-product-surfaces.md
+- AFN4-13 [already-have] Creation scoped to its context says where the page lands — M94.4 — affine-4-product-surfaces.md
+- AFN4-14 [already-have] Each view keeps its own memory history, with scroll saved per history entry — M94.5 — affine-4-product-surfaces.md
+- AFN4-17 [already-have] Settings opened at a specific tab and scroll anchor — M94.8 — affine-4-product-surfaces.md
+- AFN3-04 [adapt] One menu-item vocabulary rendered by dropdown and context-menu hosts — M94.5 — affine-3-design-system.md
+- AFN3-09 [adapt] Skeleton primitive, per-surface skeletons, slow-load escalation — M94.8 — affine-3-design-system.md
+- AFN3-10 [adapt] Pending state on Button/confirm blocks re-entry — M94.4, M96.3 — affine-3-design-system.md
+- AFN3-11 [adapt] IME-safe onEnter in the input primitive — M94.4 — affine-3-design-system.md
+- AFN3-12 [adapt] Checkbox primitive over native input with indeterminate — M94.8 — affine-3-design-system.md
+- AFN3-13 [adapt] Drop indicator with blocked instruction before release — M94.5 — affine-3-design-system.md
+- AFN3-23 [avoid] Radix wrappers for interaction primitives — M94.5 — affine-3-design-system.md
+- AFN2-08 [adapt] New row seeded from the view's filter so it stays visible (generateDefaultValues) — M94.6 — affine-2-editor-blocks.md
+- AFN2-09 [already-have] Filter/sort/group/stats engine typed by logical type; evalFilter fails open — M94.6 — affine-2-editor-blocks.md
+- OUT4-01 [adapt] Lifecycle meta sentence under the title and on every row, with changed-since-you-viewed highlight — M94.3, M94.6, M99.6 — outline-4-product-surfaces.md
+- OUT4-02 [adapt] Missing target resolved against Trash: read-only notice with countdown, plus Restore, Back and Search — M94.5 — outline-4-product-surfaces.md
+- OUT4-03 [adapt] After delete, land on parent, then container, then home — M94.5 — outline-4-product-surfaces.md
+- OUT4-04 [adapt] Restore elsewhere when the origin is unavailable; read-only view of trashed item — M94.8 — outline-4-product-surfaces.md
+- OUT4-05 [adapt] One searchable keyboard destination tree for move, publish, copy and create, naming the target in the footer — M94.4, M94.5 — outline-4-product-surfaces.md
+- OUT4-06 [adapt] Move confirmation states the access change (from X to Y) — M94.5 — outline-4-product-surfaces.md
+- OUT4-07 [adapt] History compare-to any version, synthetic current version, step n of m changes — NEW:history, M94.8 — outline-4-product-surfaces.md
+- OUT4-11 [adapt] Search landing reuses editor Find (?q= then find, chip, Esc clears) — M97.2, M94.5 — outline-4-product-surfaces.md
+- OUT4-13 [adapt] Checklist progress on page meta and list rows — M94.6, M99.6 — outline-4-product-surfaces.md
+- OUT4-16 [avoid] Page-first create with auto-delete of empty drafts on unmount — M94.4 — outline-4-product-surfaces.md
+- OUT4-21 [adapt] Shortcut help with search filter and Markdown/trigger syntax groups — M94.8 — outline-4-product-surfaces.md
+- PLN-02 [adapt] Render-fault containment per layout with retry-key remount — NEW:fault-containment, M94.8 — delta-plane.md
+- PLN-04 [adapt] Layout-shaped skeleton only on init-loader; mutation/pagination keep content — M94.8, M94.6 — delta-plane.md
+- PLN-05 [adapt] Menu rows as data with a blocked-reason line, shared by context menu and dropdown — M94.5 — delta-plane.md
+- PLN-06 [adapt] Page-pane tab and previewed version held in the location (deep link, Back) — M94.5 — delta-plane.md
+- PLN-09 [adapt] Status glyph shape from fixed status group, colour from option — M94.6 — delta-plane.md
+- PLN-10 [adapt] Tab overflow: container-measured, active tab pinned, user-hidden to More — M94.6 — delta-plane.md
+- PLN-11 [adapt] One Select engine: chrome x size variant, id-first values, disabled-row keyboard skip, slots, query-aware empty/create — M94.6, M96.2, M98.9 — delta-plane.md
+- PLN-13 [adapt] Migration by shape-preserving shims, numbered rulings and call-site counts — M94.6, M94.7, M94.8 — delta-plane.md
+- PLN-21 [already-have] Version timeline with preview overlay beside the list — M94.5 — delta-plane.md
+- TOL-06 [adapt] One JSON command manifest feeds shortcuts, native menu items and menu enablement (Rust reads it with include_str!) — M94.5, NEW M94.10 — delta-tolaria.md
+- TOL-09 [adapt] Loading skeletons keep the real section headers and create buttons live; a test asserts one startup shell — M94.8 — delta-tolaria.md
+- TOL-12 [adapt] Rows show save and git status dots — M93.2, M94.5 — delta-tolaria.md
+- APC-03 [adapt] One categorical palette with mark/surface/ink/line/on roles; store names, not values — M94.6, NEW:colour-contract — delta-activepieces.md
+- APC-05 [adapt] The empty-or-failed decision is a required prop of the shared list primitive — M94.8, CV-44 — delta-activepieces.md
+- APC-07 [adapt] Settings composition kit: Page/Header/Section/Panel/Row (role=group, aria-describedby)/sticky SaveBar — M94.2, M94.8 — delta-activepieces.md
+- APC-08 [adapt] A disabled control states its reason — M94.5 — delta-activepieces.md
+- APC-09 [adapt] Pending state belongs to Button (Activepieces' version loses its label) — M94.4, M94.8 — delta-activepieces.md
+- APC-15 [adapt] One primitive per small recurring interaction (TextWithTooltip, copy), required by AGENTS.md — M94.3, M94.6 — delta-activepieces.md
+- N8N-02 [adapt] Utility page composition: 720px column, rhythm set by the following sibling, row anatomy, focus-revealed secondary actions — M94.2, M94.8 — delta-n8n.md
+- N8N-03 [adapt] Two save modes: instant low-impact vs reviewed draft with save bar; per-field blur commit through a serial queue — M94.8, M96.2, M98.9 — delta-n8n.md
+- N8N-11 [adapt] List state machine: empty vs filtered no-results vs loading-while-deciding, plus persistent filters-hide-items note — M94.6, M94.8 — delta-n8n.md
+- N8N-12 [adapt] Per-area design-language doc with review checklist — M94.2, M94.7, M94.8 — delta-n8n.md
+- N8N-13 [adapt] Picker contract: stays mounted with state across Back, create row first, outcome-named row actions, asset-specific empty copy — M94.5, M96.5, M98.9 — delta-n8n.md
+- N8N-14 [already-have] Modal shell contract (footer order, submit enabled until request, inline errors, nested Escape) — M94.4 — delta-n8n.md
+- N8N-15 [avoid] Approval card autofocus with session-wide allow pre-highlighted; composer replaced — M94.7, M95.5 — delta-n8n.md
+- MAC-04 [adapt] Banded z-index token scale; raw z values only inside a local stacking context — NEW:ds-roles, M94.5 — delta-macro.md
+- MAC-05 [adapt] Headless priority-collapse for toolbars and headers (overflow probe, reverse expansion, last-resort truncation) — M94.3, M94.5, M94.7 — delta-macro.md
+- MAC-07 [adapt] AST design-system adoption audit (usage, reskinning, hand-rolled controls) — M94.6, M94.7, M94.8, M94.9 — delta-macro.md
+- MAC-09 [adapt] Loading that keeps geometry: skeletons from row tokens, 150ms grace, one role=status, per-layout skeletons — M94.6, M94.8 — delta-macro.md
+- MAC-10 [adapt] One row and card anatomy (Item slots) for lists and cards — M94.3, M94.6, M94.8 — delta-macro.md
+- MAC-13 [adapt] Per-setting search catalogue with target slugs shared by the catalogue and the markup — M94.8, M93.10 — delta-macro.md
+- MAC-15 [watch] Board gesture modules: wheel ownership, pointer-intent gating, drag source kept mounted — M94.6 — delta-macro.md
+- MOR-02 [adapt] Following a dangling link creates its page — M94.4, M94.5 — delta-morrow.md
+- MOR-03 [adapt] Failure copy says what failed, what is kept, and the next action — M94.2, M94.8, M93.2 — delta-morrow.md
+- MOR-09 [adapt] Native menu is a view of the action table: display-only accelerators, clicks dispatch command ids, Edit ▸ Undo goes to app undo — M94.5, NEW M94.10 — delta-morrow.md
+- MOR-11 [adapt] Trashed target opens with Restore instead of a dead end — M94.5 — delta-morrow.md
+- MOR-12 [adapt] Error toasts get role=alert and a longer duration; info stays polite — M94.8 — delta-morrow.md
+- MOR-13 [adapt] One menu definition per subject, shared by row and page menus — M94.5 — delta-morrow.md
+- AFY-08 [adapt] The utility composition as a settings kit (Body, Header, Category, divider spacer, row primitives, ActionableInput, danger action), used by 14 pages — M94.8 — delta-appflowy.md
+- AFY-09 [adapt] A per-setting Reset deletes the stored override rather than writing a default — M94.8 — delta-appflowy.md
+- AFY-10 [adapt] A trashed page stays open with a banner offering Restore (and Delete permanently) — M94.5, M93.2 — delta-appflowy.md
+- AFY-12 [adapt] The disclosure label carries the hidden count (Show N hidden properties) — M94.5 — delta-appflowy.md
+- AFY-13 [watch] Command palette previews the hovered result in a pane that hides below 884px — M94.5, M97.2 — delta-appflowy.md
+- AFY-14 [already-have] Cell logic per field kind, drawn by a skin per surface (grid, row detail, card) — M94.6 — delta-appflowy.md
+- AFY-20 [already-have] Chat scroll anchors the question at the top, with a jump-to-latest button — M94.7 — delta-appflowy.md
+- TDK-01 [adapt] Create where the view shows it: new records take the view's filter and group values and stay pinned on top — M94.6, M94.4 — delta-thought-desk.md
+- TDK-02 [adapt] Data scrolls to the pane edge while its first column lines up with the title; the hover gutter hangs in the margin — M94.2, M94.6 — delta-thought-desk.md
+- TDK-03 [adapt] Each board column shows 50 cards, then 'Show more (N left)' — M93.6, M93.7, M94.6 — delta-thought-desk.md
+- TDK-04 [adapt] Reload and stray input treated as leave paths: native context menu only in editable fields, reload keys blocked, mouse Back/Forward — M93.2, M93.11, M94.5 — delta-thought-desk.md
+- TDK-06 [adapt] Utility layout spelled out in numbers: fixed 24px section headings, 48/40/72px grouped rows with inset hairlines, standard sheet head/foot — M94.2, M94.8 — delta-thought-desk.md
+- TDK-19 [already-have] Database view chrome: filter chips written as sentences, N of total, separate copy for empty vs filtered-empty, cards skip empty fields — M94.6 — delta-thought-desk.md
+
+## M95 — Chat and supervised agents (M95.1–M95.7) (30)
+
+- OUT1-09 [already-have] Retention janitors as bounded cron tasks (limit, stagger, partitions, missed runs skipped) — M95.3, M98.3, M98.4 — outline-1-architecture.md
+- AFN5-01 [adapt] Selected scope compiled, frozen on the turn and enforced on read tools — M95.4, M97.4 — affine-5-ai-copilot.md
+- AFN5-02 [adapt] Idempotent two-phase submission (token, then mutex, then durable compatSubmissionId lookup) — M95.2, M95.5 — affine-5-ai-copilot.md
+- AFN5-03 [adapt] Landings per surface: in-place replace only where the selection is frozen and locked; chat inserts or saves new — M95.4, M94.7 — affine-5-ai-copilot.md
+- AFN5-08 [adapt] Citations derived from tool results that survive saving (footnote definitions in the answer) — M95.4, M97.4 — affine-5-ai-copilot.md
+- AFN5-09 [already-have] Canonical ordered render trace per turn (merged deltas, tool-call replaced by its result) — M95.2 — affine-5-ai-copilot.md
+- AFN5-10 [already-have] Fork as a copied prefix with parentSessionId; forked A/B playground — M95.5, M97.7 — affine-5-ai-copilot.md
+- AFN5-11 [avoid] Retry that deletes the prior answer; stream aborted with the client — M95.5 — affine-5-ai-copilot.md
+- AFN5-12 [avoid] Absent usage stored as 0; disabled progress {0,0}; silently dropped unreadable selections; unreported rerank fallback — M96.8, M95.4, M97.8 — affine-5-ai-copilot.md
+- AFN5-14 [adapt] Versioned action recipes (slot, promptRef, strict schema, projection), canonical schema hash, action-run ledger with attempt/retryOf — M95.6, M97.3, M98.1 — affine-5-ai-copilot.md
+- AFN5-15 [adopt] e2e asserts the exact set of landings offered per surface — M94.7, M95.4 — affine-5-ai-copilot.md
+- AFN5-17 [already-have] Background tasks fenced by generation (dispatchGeneration, retry only from failed, stale running fails after 1 h, cron reconcile) — M95.7, M98.3 — affine-5-ai-copilot.md
+- AFN5-20 [already-have] Session lifecycle: tombstone blocks late appends; empty sessions purged; one pinned session; model-generated titles — M95.2, M95.3 — affine-5-ai-copilot.md
+- AFN5-21 [adapt] Chip lifecycle states candidate/processing/finished/failed (but Send is not gated on them) — M95.4 — affine-5-ai-copilot.md
+- AFN5-24 [avoid] Block-addressed apply model (block_id-annotated markdown diff); chat Apply buttons are telemetry stubs; no version check — M95.4 — affine-5-ai-copilot.md
+- OUT2-22 [already-have] Restore as one undoable editor transaction through the normal save path — M95.4, M93.9 — outline-2-editor.md
+- AFN1-06 [adapt] In-process fault injection per SQL statement (RAISE(ABORT) triggers, table rename/drop) — M99.7, M95.3, M98.3 — affine-1-architecture-storage.md
+- AFN1-10 [already-have] Acknowledged outbox: staged in the same tx, replayed on start, compare-and-delete ack by content containment — M95.2, M95.3, M98.3, M99.7 — affine-1-architecture-storage.md
+- AFN1-18 [watch] SQL checked at compile time against the migration list (build.rs plus sqlx query!) — M95.3, M98.2, M99.7 — affine-1-architecture-storage.md
+- AFN1-20 [already-have] Flush the docs the agent will read before the AI request — M93.2, M95.1 — affine-1-architecture-storage.md
+- AFN4-19 [adapt] Every piece of state has a declared tier: workspace DB / per-user userdata DB / per-device local / app-global — M99.8, M95.2 — affine-4-product-surfaces.md
+- AFN2-24 [adapt] Carriers that run without a DOM; AI output inserted through the adapter (drops content silently) — M95.4, NEW:carriers — affine-2-editor-blocks.md
+- OUT5-01 [already-have] No in-app LLM; AI = being a tool server for the user's agent (MCP, skills, WebMCP) — M95, M96 — outline-5-ai-mcp-integrations.md
+- OUT5-09 [adapt] get_document_changes: diff since my_last_edit, a time or a revision, with authors and truncation flags — NEW:agent-read-tools, M95 — outline-5-ai-mcp-integrations.md
+- APC-18 [watch] Delegated tasks: resumable, claim-fenced, end BLOCKED instead of asking the person — M95.6, M95.7 — delta-activepieces.md
+- N8N-05 [adapt] Run-tree tri-state selection: auto-select first error once stopped, identity-following with run-index fallback, labels for renamed/deleted nodes — M98.9, M98.3, M95.7 — delta-n8n.md
+- N8N-10 [adapt] Typed retry allowlist, blocked while a draft, queue or active turn exists; target re-checked after await — M95.5 — delta-n8n.md
+- N8N-15 [avoid] Approval card autofocus with session-wide allow pre-highlighted; composer replaced — M94.7, M95.5 — delta-n8n.md
+- N8N-20 [adapt] Long-run timeline showing waits apart from idle gaps, with outcome filters — M98.3, M98.9, M95.7 — delta-n8n.md
+- AFY-15 [adapt] Each AI-writer command has a fixed follow-up set; explain offers Insert below instead of Replace — M95.4 — delta-appflowy.md
+
+## M96 — Connectors, MCP and actions (M96.1–M96.8) (27)
+
+- OUT3-23 [avoid] UI actions exposed as agent tools (WebMCP) — M96 — outline-3-design-system.md
+- OUT1-11 [already-have] Edge request validation with a schema per route into typed input — M96.1, M99.2 — outline-1-architecture.md
+- OUT1-16 [already-have] On access change, close affected sessions and re-authorize in one place; an empty scope is refused — M96.2, M96.3 — outline-1-architecture.md
+- OUT1-17 [already-have] Same commands and authorize behind HTTP and MCP; tools filtered by scope — M96.4 — outline-1-architecture.md
+- OUT1-18 [adapt] Typed in-tree plugin hook registry (manifest, per-plugin isolated load, enabled gate, uninstall and settings hooks) — M96.5 — outline-1-architecture.md
+- OUT1-22 [avoid] WebMCP: visible, non-dangerous UI actions auto-registered as agent tools — M96.1 — outline-1-architecture.md
+- AFN5-12 [avoid] Absent usage stored as 0; disabled progress {0,0}; silently dropped unreadable selections; unreported rerank fallback — M96.8, M95.4, M97.8 — affine-5-ai-copilot.md
+- AFN5-16 [adapt] Stateless per-workspace MCP server; tokens with access mode, 30/90/365-day expiry and rotation with 24 h grace — NEW:client-access, M96.4 — affine-5-ai-copilot.md
+- AFN3-10 [adapt] Pending state on Button/confirm blocks re-entry — M94.4, M96.3 — affine-3-design-system.md
+- OUT5-01 [already-have] No in-app LLM; AI = being a tool server for the user's agent (MCP, skills, WebMCP) — M95, M96 — outline-5-ai-mcp-integrations.md
+- OUT5-02 [adapt] Stateless MCP server rebuilt per request from the bearer's scopes; serves legacy and 2026-07-28 from one JSON-mode handler — M96.4 — outline-5-ai-mcp-integrations.md
+- OUT5-03 [adapt] Protocol and annotation-invariant test matrix (401 challenge, 405/404 probes, modern headers and _meta, subscriptions/listen, hint invariants, element cap) — M96.1, M96.4 — outline-5-ai-mcp-integrations.md
+- OUT5-04 [adapt] One scope grammar for REST and MCP, including a create-only tier — NEW:client-tokens, M96.4 — outline-5-ai-mcp-integrations.md
+- OUT5-07 [watch] Skills served over MCP (SEP-2640) as digested skill:// resources; Outline does not filter them by scope — M96.4, M96.7 — outline-5-ai-mcp-integrations.md
+- OUT5-10 [already-have] Lean two-block results (JSON metadata plus raw markdown), scoped breadcrumbs, public-only share URLs, offset paging — M96.4 — outline-5-ai-mcp-integrations.md
+- OUT5-11 [avoid] Admin guidance appended to MCP instructions that name tools — M96.4 — outline-5-ai-mcp-integrations.md
+- OUT5-13 [adapt] Unfurl provider chain: cache keyed team+user+URL, single-flight, per-provider TTL by volatility, negative cache, client SWR — M96.5, M96.6 — outline-5-ai-mcp-integrations.md
+- OUT5-14 [avoid] GitHub unfurl falls back to any team installation when none matches the owner — M96.5 — outline-5-ai-mcp-integrations.md
+- OUT5-15 [already-have] Account-scoped issue-source snapshot at connect, refreshed by provider webhooks; token refresh check-lock-check — M96.2, M96.4 — outline-5-ai-mcp-integrations.md
+- PLN-11 [adapt] One Select engine: chrome x size variant, id-first values, disabled-row keyboard skip, slots, query-aware empty/create — M94.6, M96.2, M98.9 — delta-plane.md
+- PLN-12 [adapt] Consequential-confirm funnel with typed in-flight veto of Escape/cancel/outside — M96.3, M96.5 — delta-plane.md
+- APC-10 [adapt] Friendly/Raw output viewer driven by a declared output schema — M96.6 — delta-activepieces.md
+- APC-17 [watch] Theme islands (data-theme subtree) plus LogoPlate for third-party logos — M96.6 — delta-activepieces.md
+- N8N-03 [adapt] Two save modes: instant low-impact vs reviewed draft with save bar; per-field blur commit through a serial queue — M94.8, M96.2, M98.9 — delta-n8n.md
+- N8N-04 [adapt] Derived setup checklist (one card per required credential, consumers, issues, Test state, focus return) — M96.5, M98.7, M98.9 — delta-n8n.md
+- N8N-07 [adapt] Field provenance in mapping: observed vs last-success vs declared schema, dashed pill plus copy — M98.9, M98.5, M96.1 — delta-n8n.md
+- N8N-13 [adapt] Picker contract: stays mounted with state across Back, create row first, outcome-named row actions, asset-specific empty copy — M94.5, M96.5, M98.9 — delta-n8n.md
+
+## M97 — Knowledge, evidence and evaluation (M97.1–M97.8) (24)
+
+- AFN5-01 [adapt] Selected scope compiled, frozen on the turn and enforced on read tools — M95.4, M97.4 — affine-5-ai-copilot.md
+- AFN5-04 [adapt] Hybrid RRF retrieval (1/(60+rank), at most 3 per doc) with retrievalMode/degradedReason — M97.8 — affine-5-ai-copilot.md
+- AFN5-05 [adapt] Derived index fenced to source revision (lease token, generation, recipe/fingerprint, revision recheck under lock) — M97.8, M99.4 — affine-5-ai-copilot.md
+- AFN5-06 [adapt] Untrusted-data rule plus evidence ranking and never-invent-a-source in the one chat prompt; selections wrapped as data — M97.6 — affine-5-ai-copilot.md
+- AFN5-08 [adapt] Citations derived from tool results that survive saving (footnote definitions in the answer) — M95.4, M97.4 — affine-5-ai-copilot.md
+- AFN5-10 [already-have] Fork as a copied prefix with parentSessionId; forked A/B playground — M95.5, M97.7 — affine-5-ai-copilot.md
+- AFN5-12 [avoid] Absent usage stored as 0; disabled progress {0,0}; silently dropped unreadable selections; unreported rerank fallback — M96.8, M95.4, M97.8 — affine-5-ai-copilot.md
+- AFN5-13 [already-have] Compiled-in validated prompt catalog (deny_unknown_fields, partial depth limit, builtins declared, route required) — M97.3 — affine-5-ai-copilot.md
+- AFN5-14 [adapt] Versioned action recipes (slot, promptRef, strict schema, projection), canonical schema hash, action-run ledger with attempt/retryOf — M95.6, M97.3, M98.1 — affine-5-ai-copilot.md
+- AFN5-22 [already-have] Live-model e2e on a separately scheduled workflow (daily cron, secrets, 10 shards) — M97.7 — affine-5-ai-copilot.md
+- OUT2-03 [adapt] Position map emitted by the serializer (block map + atom-aware inline segments) — M97.2, M97.1 — outline-2-editor.md
+- OUT2-12 [adapt] Reveal unfolds toggles and collapsed blocks before scrolling — NEW:comments, M97.2 — outline-2-editor.md
+- OUT2-16 [already-have] Search landing after editor readiness with highlight chip — M97.2 — outline-2-editor.md
+- OUT2-24 [avoid] First-match patch and anchor semantics — M97.1, M97.2 — outline-2-editor.md
+- AFN1-08 [watch] Derived-index watermark plus version committed atomically with the index; a corrupt index reads as IndexNotReady — M93.7, M97 — affine-1-architecture-storage.md
+- AFN4-22 [already-have] Search hits grouped by doc, with the matching passage (blockId) — M97.2 — affine-4-product-surfaces.md
+- AFN2-06 [adapt] Deep-link params feed a one-shot HighlightSelection; reveal waits for the block, fits the canvas camera, pointerdown clears — M97.2, NEW:M97 board_node — affine-2-editor-blocks.md
+- AFN2-07 [already-have] Block ids anchor references, comments and footnotes (works only with a CRDT store; Markdown import mints new ids) — M97.1, M99.3 — affine-2-editor-blocks.md
+- OUT5-08 [adapt] find-and-cite skill: exact quote, one link per claim, show dates on disagreement, abstain — M97.6 — outline-5-ai-mcp-integrations.md
+- OUT5-20 [adapt] Search provider seam plus a per-source query log (results, duration, prefix-collapse, 365 days) plus a popularity boost — M97.7, M97.8 — outline-5-ai-mcp-integrations.md
+- OUT4-11 [adapt] Search landing reuses editor Find (?q= then find, chip, Esc clears) — M97.2, M94.5 — outline-4-product-surfaces.md
+- OUT4-12 [already-have] Search page: URL-held filters, error separate from no-results, recent queries — M97.2 — outline-4-product-surfaces.md
+- TOL-17 [watch] Neighborhood list as a lightweight alternative to a relationship graph (open vs pivot) — M97.5 — delta-tolaria.md
+- AFY-13 [watch] Command palette previews the hovered result in a pane that hides below 884px — M94.5, M97.2 — delta-appflowy.md
+
+## M98 — Workflows and automation (M98.1–M98.9) (29)
+
+- OUT3-07 [adapt] Keyed toasts with a tone, updated in place (loading → success/error); action errors toasted centrally — M94.8, M98.9 — outline-3-design-system.md
+- OUT1-05 [adapt] Typed after-commit fan-out to isolated consumers (applicableEvents, shouldQueue, per-processor retries, onFailed) — M99.7, M98.5 — outline-1-architecture.md
+- OUT1-06 [already-have] Derivations re-read current state and are idempotent; debounce by re-checking the version — M98.2 — outline-1-architecture.md
+- OUT1-07 [already-have] Bounded retries with backoff and jobId single-flight — M98.2 — outline-1-architecture.md
+- OUT1-08 [adapt] Liveness watchdog that detects a queue that is alive but not working — M98.4 — outline-1-architecture.md
+- OUT1-09 [already-have] Retention janitors as bounded cron tasks (limit, stagger, partitions, missed runs skipped) — M95.3, M98.3, M98.4 — outline-1-architecture.md
+- AFN5-14 [adapt] Versioned action recipes (slot, promptRef, strict schema, projection), canonical schema hash, action-run ledger with attempt/retryOf — M95.6, M97.3, M98.1 — affine-5-ai-copilot.md
+- AFN5-17 [already-have] Background tasks fenced by generation (dispatchGeneration, retry only from failed, stale running fails after 1 h, cron reconcile) — M95.7, M98.3 — affine-5-ai-copilot.md
+- AFN1-06 [adapt] In-process fault injection per SQL statement (RAISE(ABORT) triggers, table rename/drop) — M99.7, M95.3, M98.3 — affine-1-architecture-storage.md
+- AFN1-10 [already-have] Acknowledged outbox: staged in the same tx, replayed on start, compare-and-delete ack by content containment — M95.2, M95.3, M98.3, M99.7 — affine-1-architecture-storage.md
+- AFN1-15 [already-have] Doc-scoped errors pause one doc; engine errors back off and retry; permission errors stop — M98.2, M98.3 — affine-1-architecture-storage.md
+- AFN1-18 [watch] SQL checked at compile time against the migration list (build.rs plus sqlx query!) — M95.3, M98.2, M99.7 — affine-1-architecture-storage.md
+- AFN4-02 [adapt] Creation receipt keyed by attempt ID: preparing written before the create, committed last — M94.4, M98.7 — affine-4-product-surfaces.md
+- OUT5-16 [avoid] Webhooks: HMAC t=,s= signature, delivery log, no HTTP retry, auto-disable at >=80% failures over 24 h (min 10), privacy re-check at delivery — M98.4, M98.8 — outline-5-ai-mcp-integrations.md
+- PLN-11 [adapt] One Select engine: chrome x size variant, id-first values, disabled-row keyboard skip, slots, query-aware empty/create — M94.6, M96.2, M98.9 — delta-plane.md
+- PLN-14 [adapt] Filter-tree adapters (toInternal/toExternal) so one condition UI serves views and automations; invalid-condition chip — M98.9 — delta-plane.md
+- APC-11 [adapt] One output-schema resolver feeds both the viewer and the mapping picker; 'no sample yet -> go to step' — M98.9 — delta-activepieces.md
+- APC-12 [adapt] Draft step status flags stale tests (needs-test when lastUpdated > lastTest); Test disabled while saving — M98.5, M98.9 — delta-activepieces.md
+- APC-13 [adapt] Any version opens read-only in the same editor; restore as draft — M98.9 — delta-activepieces.md
+- APC-19 [adapt] Workflow steps reference an agent live; deletion refused while referenced; the reference is guarded at publish — M98.1, M98.9 — delta-activepieces.md
+- N8N-03 [adapt] Two save modes: instant low-impact vs reviewed draft with save bar; per-field blur commit through a serial queue — M94.8, M96.2, M98.9 — delta-n8n.md
+- N8N-04 [adapt] Derived setup checklist (one card per required credential, consumers, issues, Test state, focus return) — M96.5, M98.7, M98.9 — delta-n8n.md
+- N8N-05 [adapt] Run-tree tri-state selection: auto-select first error once stopped, identity-following with run-index fallback, labels for renamed/deleted nodes — M98.9, M98.3, M95.7 — delta-n8n.md
+- N8N-07 [adapt] Field provenance in mapping: observed vs last-success vs declared schema, dashed pill plus copy — M98.9, M98.5, M96.1 — delta-n8n.md
+- N8N-08 [adapt] Pinned samples honoured only in manual/evaluation modes; dirty-node invalidation for partial runs — M98.5, M98.9 — delta-n8n.md
+- N8N-09 [adapt] Version diff keyed by stable step id; retry states original vs current definition; retryOf lineage — M98.9, M98.3, M98.1 — delta-n8n.md
+- N8N-13 [adapt] Picker contract: stays mounted with state across Back, create row first, outcome-named row actions, asset-specific empty copy — M94.5, M96.5, M98.9 — delta-n8n.md
+- N8N-20 [adapt] Long-run timeline showing waits apart from idle gaps, with outcome filters — M98.3, M98.9, M95.7 — delta-n8n.md
+- TDK-17 [watch] System-wide Quick Capture hotkey — M98.7 — delta-thought-desk.md
+
+## M99 — Rust services and storage (M99.1–M99.8) (39)
+
+- OUT1-01 [adapt] Serialize per-entity abilities with every payload; UI gates only on them; server still authorizes — NEW:abilities, M99.1, M94.5, M94.8 — outline-1-architecture.md
+- OUT1-03 [already-have] Uniform mutation pipeline: auth, validate, transaction, scoped load, authorize, command, present — M99.1 — outline-1-architecture.md
+- OUT1-04 [adapt] Mutation record written in the same transaction (actor, authType, changeset previous/next) — M99.6, M99.7 — outline-1-architecture.md
+- OUT1-05 [adapt] Typed after-commit fan-out to isolated consumers (applicableEvents, shouldQueue, per-processor retries, onFailed) — M99.7, M98.5 — outline-1-architecture.md
+- OUT1-10 [already-have] Presenters as explicit allow-list wire projections with public and private variants — M99.1 — outline-1-architecture.md
+- OUT1-11 [already-have] Edge request validation with a schema per route into typed input — M96.1, M99.2 — outline-1-architecture.md
+- OUT1-12 [adapt] Error taxonomy (stable id, status, isReportable) plus one edge normalizer; unknown errors become internal — M99.1 — outline-1-architecture.md
+- OUT1-19 [already-have] Client-version gate at every entry point (API middleware and collab connect) — M99.6 — outline-1-architecture.md
+- OUT1-20 [already-have] Keyset paging with a PK tie-break; limit+1 detects a next page — M93.3, M99.4 — outline-1-architecture.md
+- AFN5-05 [adapt] Derived index fenced to source revision (lease token, generation, recipe/fingerprint, revision recheck under lock) — M97.8, M99.4 — affine-5-ai-copilot.md
+- OUT2-05 [already-have] Markdown as lossy export when JSON is truth (comment marks, colwidth, toggle ids, colours dropped; __ as underline) — M99.5, M99.6 — outline-2-editor.md
+- OUT2-18 [already-have] Version gate refusing older-major writers — M99.6 — outline-2-editor.md
+- AFN1-01 [adapt] Shipped schema is immutable; repair drift explicitly — M99.6, M99.8 — affine-1-architecture-storage.md
+- AFN1-02 [adapt] checkpoint + VACUUM INTO tmp + rename export; validate, copy into app data, re-key on import — M99.8 — affine-1-architecture-storage.md
+- AFN1-03 [adapt] Referenced set built from the index; GC runs only after sync and indexing complete; content-addressed keys; soft delete, then release — M99.8, NEW:attachments — affine-1-architecture-storage.md
+- AFN1-04 [adapt] Values keyed by stable property ID (custom:<id>); definitions table with tombstones — M99.6, M99.8 — affine-1-architecture-storage.md
+- AFN1-06 [adapt] In-process fault injection per SQL statement (RAISE(ABORT) triggers, table rename/drop) — M99.7, M95.3, M98.3 — affine-1-architecture-storage.md
+- AFN1-07 [already-have] Compaction that cannot lose the source: verify the decode, CAS on the exact prior snapshot, re-read rows in the write tx, bounded retries — M99.7 — affine-1-architecture-storage.md
+- AFN1-09 [adapt] Markdown peer: per-doc baseline checkpoint, never overwrite differing bytes, review candidates, round-trip gate, missing file never deletes — M99.6, M93.8 — affine-1-architecture-storage.md
+- AFN1-10 [already-have] Acknowledged outbox: staged in the same tx, replayed on start, compare-and-delete ack by content containment — M95.2, M95.3, M98.3, M99.7 — affine-1-architecture-storage.md
+- AFN1-11 [already-have] Watermarks for stores that others edit are scoped to one connection, never persisted — M99.6, M99.7 — affine-1-architecture-storage.md
+- AFN1-12 [avoid] Legacy store mounted as a read-only sync peer; deleted only after a full sync — M99.6 — affine-1-architecture-storage.md
+- AFN1-13 [avoid] Read-time legacy overlay (the new store wins unless its value is nil) — M99.6 — affine-1-architecture-storage.md
+- AFN1-16 [already-have] One Rust storage core behind feature-gated napi/uniffi bindings; :memory: cargo tests — M99.1 — affine-1-architecture-storage.md
+- AFN1-17 [already-have] TS generated from Rust declarations, with a codegen drift gate — M99.1 — affine-1-architecture-storage.md
+- AFN1-18 [watch] SQL checked at compile time against the migration list (build.rs plus sqlx query!) — M95.3, M98.2, M99.7 — affine-1-architecture-storage.md
+- AFN1-19 [watch] Pull-based import sessions with batch limits and cancel — M99.8 — affine-1-architecture-storage.md
+- AFN4-19 [adapt] Every piece of state has a declared tier: workspace DB / per-user userdata DB / per-device local / app-global — M99.8, M95.2 — affine-4-product-surfaces.md
+- AFN2-01 [adapt] Unknown data survives a round trip: verbatim pointer-fence source — NEW:carriers, M99.8, M93.1 — affine-2-editor-blocks.md
+- AFN2-03 [already-have] One-direction, partly export-only Markdown adapters; the UI offers effects Markdown drops — M99 CORE-10 — affine-2-editor-blocks.md
+- AFN2-04 [already-have] Database rows embedded in the doc (child blocks plus a cells map) — M99.4, M99.5, M99.6 — affine-2-editor-blocks.md
+- AFN2-05 [avoid] Per-block schema version stamped but nothing migrates it; imports re-stamp the current version — M99.8 — affine-2-editor-blocks.md
+- AFN2-07 [already-have] Block ids anchor references, comments and footnotes (works only with a CRDT store; Markdown import mints new ids) — M97.1, M99.3 — affine-2-editor-blocks.md
+- OUT5-19 [adapt] OKF v0.2 bundle export (root index.md with okf_version, per-doc frontmatter) and import via Markdown (title only, lossy) — M99.8, NEW:okf-interchange — outline-5-ai-mcp-integrations.md
+- OUT4-01 [adapt] Lifecycle meta sentence under the title and on every row, with changed-since-you-viewed highlight — M94.3, M94.6, M99.6 — outline-4-product-surfaces.md
+- OUT4-13 [adapt] Checklist progress on page meta and list rows — M94.6, M99.6 — outline-4-product-surfaces.md
+- MOR-05 [adapt] Automatic rolling snapshots of app-private data (changed-only, 10 min and on close, keep 20, atomic, additive restore) — M99.8 — delta-morrow.md
+- AFY-16 [adapt] Change notifications keyed by subject (source, id, type, payload or error) with a per-subject debounce — M93.7, M99.1 — delta-appflowy.md
+- TDK-21 [adapt] Settings shows where the data lives and what to back up — M99.8 — delta-thought-desk.md
+
+## Unassigned or proposed-new phases (NEW:*, proposed numbers beyond the plans, other) (124)
+
+- OUT3-06 [adapt] Error boundaries at surface seams, with a repeated-error guard — NEW:M93.12 render isolation, M94.8 — outline-3-design-system.md
+- OUT3-11 [already-have] Hover preview: delay, re-check still hovered after fetch, show only with data, close on scroll/Escape/outside —  — outline-3-design-system.md
+- OUT3-12 [already-have] Tooltip shortcut plus shared skip-delay —  — outline-3-design-system.md
+- OUT3-13 [already-have] Palette → role tokens per theme; checked custom accent; theme-color/color-scheme sync —  — outline-3-design-system.md
+- OUT3-15 [watch] Central dialog stack (modalStack Map, deferred open, async ConfirmationDialog) —  — outline-3-design-system.md
+- OUT3-16 [already-have] Interaction state in pure tested modules; no component render tests —  — outline-3-design-system.md
+- OUT3-17 [already-have] Command bar: section priority offset, Prefix>WordPrefix>Fuzzy ranking, frozen results while closing —  — outline-3-design-system.md
+- OUT1-01 [adapt] Serialize per-entity abilities with every payload; UI gates only on them; server still authorizes — NEW:abilities, M99.1, M94.5, M94.8 — outline-1-architecture.md
+- OUT1-21 [adapt] Ability-matrix tests assert the full serialized ability set per role and state; auth-negative test per route — NEW:abilities — outline-1-architecture.md
+- AFN5-07 [watch] Leased, revision-stamped reads of the live editor (editorStateId, 15 s deadline, EDITOR_STATE_CHANGED) — NEW:live-editor-read — affine-5-ai-copilot.md
+- AFN5-16 [adapt] Stateless per-workspace MCP server; tokens with access mode, 30/90/365-day expiry and rotation with 24 h grace — NEW:client-access, M96.4 — affine-5-ai-copilot.md
+- AFN5-18 [avoid] Audio transcription and structured meeting summaries —  — affine-5-ai-copilot.md
+- AFN5-19 [avoid] BYOK (server-encrypted keys, local lease sends the key to the server), tier routing, plan quotas —  — affine-5-ai-copilot.md
+- AFN5-23 [watch] Canvas AI: mindmap from a nested list, slides from templates, sandboxed HTML iframe, chat forked to a canvas card — NEW:boards-ai — affine-5-ai-copilot.md
+- OUT2-04 [adapt] Round-trip baseline merge separates intentional change from serializer loss — NEW:M93 rich-save fidelity (beside M93.8) — outline-2-editor.md
+- OUT2-06 [adapt] One class per node with colocated parse/serialize/rules/tests — NEW:editor-carriers — outline-2-editor.md
+- OUT2-07 [already-have] Container carriers nest by fence length (+++ by height, :::style, $$, <br> table cells) — NEW:editor-blocks (math only) — outline-2-editor.md
+- OUT2-09 [adapt] Paste decision ladder (URL→link/mention, VS Code markdown→parse, isMarkdown score, source-specific parseDOM) — NEW:editor-paste — outline-2-editor.md
+- OUT2-10 [already-have] Text anchors with prefix/suffix context —  — outline-2-editor.md
+- OUT2-11 [adapt] Node-level comment anchors (node hash, attrs.marks) — NEW:comments — outline-2-editor.md
+- OUT2-12 [adapt] Reveal unfolds toggles and collapsed blocks before scrolling — NEW:comments, M97.2 — outline-2-editor.md
+- OUT2-13 [adapt] Closest-text hint on a missed quote (bounded edit distance) — NEW:agent-tools — outline-2-editor.md
+- OUT2-14 [adapt] Diff in editor schema: attr/mark encoding, modification detection, change navigation, complexity cap — NEW:history-diff — outline-2-editor.md
+- OUT2-15 [adapt] Diacritic-insensitive find with index map — NEW:editor-find — outline-2-editor.md
+- OUT2-17 [adapt] Per-viewer toggle fold memory with stable id + bounded LRU — NEW:editor-polish, M94.3 — outline-2-editor.md
+- OUT2-20 [watch] Two serializer dialects: internal vs portable CommonMark for clipboard/export — NEW:export — outline-2-editor.md
+- OUT2-23 [avoid] Embed registry rendering iframes —  — outline-2-editor.md
+- AFN1-03 [adapt] Referenced set built from the index; GC runs only after sync and indexing complete; content-addressed keys; soft delete, then release — M99.8, NEW:attachments — affine-1-architecture-storage.md
+- AFN1-05 [adapt] DI scopes per workspace/view/doc/editor with a disposal cascade; ref-counted ObjectPool — NEW:vault-session — affine-1-architecture-storage.md
+- AFN4-01 [adapt] Error boundary around each view, peek and detail page — NEW:M93.12 render-containment, M94.8 — affine-4-product-surfaces.md
+- AFN4-07 [adapt] Closed, typed grammar for collection membership, with matches explained (rule matches ∪ manual picks, trash and empty journals excluded) — NEW:pages-saved-filters, M94.6 — affine-4-product-surfaces.md
+- AFN4-11 [adapt] Journal: a date-keyed page, find-or-create on an explicit Create; the redirect replaces history; empty journals hidden — NEW:journals, M94.4 — affine-4-product-surfaces.md
+- AFN4-12 [adapt] Default page and journal template; New ▸ Template — M94.4, NEW:default-template — affine-4-product-surfaces.md
+- AFN4-15 [watch] One typed drag contract ({entity, from.at}) across all surfaces — NEW:dnd — affine-4-product-surfaces.md
+- AFN4-16 [already-have] Import dialog states, Cancel, per-doc warnings, and a rule for where to land afterwards — watch — affine-4-product-surfaces.md
+- AFN4-18 [already-have] A command's precondition hides it, but its shortcut still fires —  — affine-4-product-surfaces.md
+- AFN4-20 [already-have] Sidebar: fixed actions on top, collapsible collections below; fold state remembered by path —  — affine-4-product-surfaces.md
+- AFN4-21 [avoid] Showcase workspace created automatically on first run —  — affine-4-product-surfaces.md
+- AFN3-16 [watch] User theme overrides map applied inline per mode — NEW:appearance — affine-3-design-system.md
+- AFN3-17 [already-have] Shortcut chips in tooltips —  — affine-3-design-system.md
+- AFN3-18 [already-have] Dialog a11y defaults (hidden title fallback, persistent, nesting depth) —  — affine-3-design-system.md
+- AFN3-19 [already-have] IconData (emoji, icon+token colour, blob) and emoji/icon picker —  — affine-3-design-system.md
+- AFN3-20 [watch] Typed preference registry (zod defaults, safeParse on read) — NEW:preferences — affine-3-design-system.md
+- AFN3-22 [already-have] One CSS-var token layer across React and Lit; duplicated Lit primitives —  — affine-3-design-system.md
+- AFN2-01 [adapt] Unknown data survives a round trip: verbatim pointer-fence source — NEW:carriers, M99.8, M93.1 — affine-2-editor-blocks.md
+- AFN2-02 [adapt] Each block is a feature package (store half: schema and adapters; view half: view, slash, toolbar) wired in through DI registries — NEW:carriers — affine-2-editor-blocks.md
+- AFN2-06 [adapt] Deep-link params feed a one-shot HighlightSelection; reveal waits for the block, fits the canvas camera, pointerdown clears — M97.2, NEW:M97 board_node — affine-2-editor-blocks.md
+- AFN2-10 [watch] Manual order stored in the view (manuallySort, manuallyCardSort), not in records — NEW:views — affine-2-editor-blocks.md
+- AFN2-11 [avoid] Property kind conversion that clamps and invents zeros (number to progress uses v ?? 0) —  — affine-2-editor-blocks.md
+- AFN2-13 [adapt] Slash registry (group sort key, when, searchAlias) with IME-safe compositionEnd trigger — NEW:carriers, M94.9 — affine-2-editor-blocks.md
+- AFN2-15 [watch] Toolbar modules per block type with custom: overlays and scored actions —  — affine-2-editor-blocks.md
+- AFN2-17 [avoid] Comment marks, authorship metadata (back-filled from the current editor) and JSON footnote payloads stored inside the content — CV-31, CV-35 — affine-2-editor-blocks.md
+- AFN2-19 [avoid] Connectors bound by element id plus normalized anchor or free, A* routing; mindmap tree with computed layout — NEW:whiteboard — affine-2-editor-blocks.md
+- AFN2-20 [adapt] Surface-ref: a canvas frame or group region embedded in a doc — NEW:whiteboard — affine-2-editor-blocks.md
+- AFN2-21 [already-have] Preview chosen by fence language (mermaid/typst rendered natively in Rust; HTML preview in a remote iframe) —  — affine-2-editor-blocks.md
+- AFN2-22 [watch] Math syntax $ and $$ with dollar-currency guard tests — NEW:editor-blocks — affine-2-editor-blocks.md
+- AFN2-24 [adapt] Carriers that run without a DOM; AI output inserted through the adapter (drops content silently) — M95.4, NEW:carriers — affine-2-editor-blocks.md
+- OUT5-04 [adapt] One scope grammar for REST and MCP, including a create-only tier — NEW:client-tokens, M96.4 — outline-5-ai-mcp-integrations.md
+- OUT5-05 [watch] OAuth for MCP clients: RFC 9728 challenge, DCR, CIMD, PKCE S256, any-port loopback redirect, session-only consent, purge and revoke on disable — NEW:client-oauth — outline-5-ai-mcp-integrations.md
+- OUT5-06 [already-have] Credential hygiene: prefixed secrets, hash-only storage, last4, optional expiry, throttled lastActive — NEW:client-tokens — outline-5-ai-mcp-integrations.md
+- OUT5-09 [adapt] get_document_changes: diff since my_last_edit, a time or a revision, with authors and truncation flags — NEW:agent-read-tools, M95 — outline-5-ai-mcp-integrations.md
+- OUT5-12 [avoid] WebMCP: command-bar actions registered as browser-agent tools while mounted —  — outline-5-ai-mcp-integrations.md
+- OUT5-17 [already-have] Staged import in task waves, then one-transaction persist; cancellable; 4xx not retried; deleting the import undoes it —  — outline-5-ai-mcp-integrations.md
+- OUT5-18 [avoid] Notion workspace import that flattens databases and skips inaccessible pages silently — NEW:import-notion-db — outline-5-ai-mcp-integrations.md
+- OUT5-19 [adapt] OKF v0.2 bundle export (root index.md with okf_version, per-doc frontmatter) and import via Markdown (title only, lossy) — M99.8, NEW:okf-interchange — outline-5-ai-mcp-integrations.md
+- OUT5-21 [already-have] One switch closes the whole MCP surface (endpoint, metadata, DCR, CIMD, dynamic clients) —  — outline-5-ai-mcp-integrations.md
+- OUT5-22 [watch] Agent lifecycle tools: move, archive or trash with a reason, restore — NEW:agent-lifecycle-tools — outline-5-ai-mcp-integrations.md
+- OUT4-07 [adapt] History compare-to any version, synthetic current version, step n of m changes — NEW:history, M94.8 — outline-4-product-surfaces.md
+- OUT4-08 [already-have] Merged revision and lifecycle-event timeline with per-stream pagination — none — outline-4-product-surfaces.md
+- OUT4-14 [already-have] Comment panel: sort by recent or order in doc, resolved view, collapse long threads, jump to new — none — outline-4-product-surfaces.md
+- OUT4-15 [already-have] Template offered while a page is new; templatize as a non-destructive copy — none — outline-4-product-surfaces.md
+- OUT4-17 [watch] Archive state distinct from Trash, offered in the delete dialog, with a reason — owner-question — outline-4-product-surfaces.md
+- OUT4-18 [watch] Imports as durable, removable jobs (deleting an import removes what it created) — NEW:import — outline-4-product-surfaces.md
+- OUT4-19 [adapt] OKF bundle export/import with a frontmatter mapping — NEW:import — outline-4-product-surfaces.md
+- OUT4-20 [already-have] Onboarding as ordinary docs, including a checklist — none — outline-4-product-surfaces.md
+- OUT4-23 [avoid] Notification inbox with unread counts and subscriptions — none — outline-4-product-surfaces.md
+- OUT4-24 [avoid] Public share/publish links; local copy-as/print/PDF export — NEW:export — outline-4-product-surfaces.md
+- PLN-02 [adapt] Render-fault containment per layout with retry-key remount — NEW:fault-containment, M94.8 — delta-plane.md
+- PLN-07 [adapt] High-contrast themes first-class; custom theme rewrites only base ramps — NEW:contrast-theme, M94.9 — delta-plane.md
+- PLN-15 [watch] Reading preferences per person as scoped token sets (size, family, line spacing, width) — NEW:reading-prefs — delta-plane.md
+- PLN-17 [already-have] Toast as closed data surface (2+1 actions, persistent loading, promise settle) —  — delta-plane.md
+- PLN-18 [already-have] Shared layout data contract (items + groupedItemIds + groups + group-aware onDrop) —  — delta-plane.md
+- PLN-19 [already-have] Peek with focus return to row and layer-guarded outside click —  — delta-plane.md
+- PLN-20 [already-have] Resizable/collapsible sidebar with hover peek —  — delta-plane.md
+- TOL-01 [adapt] Contain render faults: catch known editor errors with a closed set of reasons and remount once; React 19 root error hooks handle the rest — NEW M93.12 — delta-tolaria.md
+- TOL-02 [adapt] Pin every upstream editor patch with a regression test that imports the library source — NEW M93.12, M93.11 — delta-tolaria.md
+- TOL-03 [adapt] Static boot shell in index.html, reused as the Suspense fallback; ready flag; one-shot reload watchdog — NEW M93.12, M93.6 — delta-tolaria.md
+- TOL-04 [adapt] Narrow list of WKWebView-reserved chords (⌘O, ⌘F, ⌘⇧L), each verified natively — M93.11, M94.9, NEW M94.10 — delta-tolaria.md
+- TOL-05 [adapt] In fullscreen, an AppKit monitor sends Escape to the open overlay instead of exiting fullscreen — M94.9, NEW M94.10 — delta-tolaria.md
+- TOL-06 [adapt] One JSON command manifest feeds shortcuts, native menu items and menu enablement (Rust reads it with include_str!) — M94.5, NEW M94.10 — delta-tolaria.md
+- TOL-08 [adapt] App zoom with a persisted level and correct overlay positioning — M94.9, NEW M94.10 — delta-tolaria.md
+- TOL-14 [watch] Overlay title bar with traffic-light inset and startDragging drag regions — NEW:shell, M94.2 — delta-tolaria.md
+- TOL-18 [already-have] App-owned light/dark/system theme runtime; vault-authored themes removed —  — delta-tolaria.md
+- APC-01 [adapt] Each colour step has one job in both themes; dark is written out for every step — M94.2, NEW:colour-contract — delta-activepieces.md
+- APC-03 [adapt] One categorical palette with mark/surface/ink/line/on roles; store names, not values — M94.6, NEW:colour-contract — delta-activepieces.md
+- APC-05 [adapt] The empty-or-failed decision is a required prop of the shared list primitive — M94.8, CV-44 — delta-activepieces.md
+- APC-06 [already-have] A failed read renders in place; a failed write toasts by default —  — delta-activepieces.md
+- APC-14 [adapt] Layered error boundaries: app with copyable diagnostics; per-renderer retry once, then escalate — M93.12 — delta-activepieces.md
+- APC-20 [already-have] An approval link never decides; only a deliberate POST does —  — delta-activepieces.md
+- N8N-06 [already-have] Inspector panel geometry that never persists unmeasured or automatic sizes —  — delta-n8n.md
+- N8N-16 [already-have] Three-layer tokens plus naming lint —  — delta-n8n.md
+- N8N-17 [already-have] Motion mixins with built-in reduced motion —  — delta-n8n.md
+- MAC-01 [adapt] Depth-relative surfaces: a Layer depth context sets layer-relative bg-surface/bg-inset — NEW:ds-roles, M94.2 — delta-macro.md
+- MAC-02 [adapt] State washes as translucent ink/accent overlays (overlay-* background-image) — NEW:ds-roles, M94.2 — delta-macro.md
+- MAC-04 [adapt] Banded z-index token scale; raw z values only inside a local stacking context — NEW:ds-roles, M94.5 — delta-macro.md
+- MAC-06 [adapt] Executable component gallery: globbed *.docs.tsx, region demos, @do/@dont JSDoc, coverage page, render-every-demo test — NEW:ds-gallery, M94.2 — delta-macro.md
+- MAC-11 [watch] Themes as data: 25 input tokens, a derived semantic graph, versioned ThemeV3, scoped theme preview —  — delta-macro.md
+- MAC-16 [already-have] Convention rails tied to style-guide IDs (ast-grep) — NEW:ds-roles — delta-macro.md
+- MAC-17 [already-have] Container-measured shell solver (inline/overlay/replace/hidden detail) —  — delta-macro.md
+- MAC-18 [already-have] Motion reduction and theme contrast guard —  — delta-macro.md
+- MOR-04 [adapt] View error boundary flushes open editors in componentDidCatch and resets on route — NEW M93.12 — delta-morrow.md
+- MOR-09 [adapt] Native menu is a view of the action table: display-only accelerators, clicks dispatch command ids, Edit ▸ Undo goes to app undo — M94.5, NEW M94.10 — delta-morrow.md
+- MOR-10 [adapt] Window background follows the theme; frame saved and restored only when on a visible display — M94.9, NEW M94.10 — delta-morrow.md
+- MOR-15 [watch] Focus mode: hide chrome, fade the top bar, Escape exits — NEW:composition, M94.2 — delta-morrow.md
+- MOR-17 [already-have] Prefs validated on read; view geometry per viewer, never in the file —  — delta-morrow.md
+- AFY-05 [already-have] Two token layers: a primitive palette, with light and dark as semantic alias maps —  — delta-appflowy.md
+- AFY-06 [already-have] Dark elevation is a lighter surface step plus a heavier shadow alpha (12% light vs 48% dark) —  — delta-appflowy.md
+- AFY-17 [watch] Page lock: the editor goes read-only, and Rust refuses to trash or move a locked view — NEW:page-lock — delta-appflowy.md
+- AFY-18 [already-have] Typed icon catalog generated from per-size SVG folders —  — delta-appflowy.md
+- AFY-19 [already-have] One tab per document; secondary side peek that can expand —  — delta-appflowy.md
+- TDK-05 [adapt] Window stays hidden until painted, native theme and window background follow the app, window size and position restored — NEW:shell, M94.9 — delta-thought-desk.md
+- TDK-12 [watch] Split panes as tiled cards: the gap is the divider, the active pane has a firmer edge, drag a page over to open it beside — M94.3, NEW:panes — delta-thought-desk.md
+- TDK-16 [adapt] Page export: print stylesheet, PDF and Word — NEW:export — delta-thought-desk.md
+- TDK-23 [avoid] Many themes: palettes, OKLCH custom theme, accents, page fonts — NEW:theming — delta-thought-desk.md
+

@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { localStamp } from '@/engine/whenText';
-import { __seedFleet, resetMockFs, type FleetRun } from '@/lib/mockIpc';
+import { makeEntry } from '@/engine/testHelpers';
+import { __seedFleet, __seedRunHistoryRegistry, resetMockFs, type FleetRun } from '@/lib/mockIpc';
+import * as ipc from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
 import { AgentRunHistory } from './AgentRunHistory';
 
@@ -37,7 +39,278 @@ describe('AgentRunHistory', () => {
     resetMockFs();
     await useVaultStore.getState().openVault('/demo-vault');
   });
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('retains the selected row through failure and retries it without closing', async () => {
+    const selected = run({ run_id: 'selected', actor: 'process:scout' });
+    __seedFleet([selected]);
+    const details = vi
+      .spyOn(ipc, 'fleetRunDetail')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({
+        run: selected,
+        cost_components: null,
+        assembly: null,
+        model_id: null,
+        refusals: [],
+        refusals_total: 0,
+        wrote: { state: 'not_recorded' },
+      });
+    render(<AgentRunHistory actor="process:scout" />);
+    fireEvent.click(await screen.findByTestId('agent-run'));
+    expect(await screen.findByRole('button', { name: 'Retry run detail' })).toBeTruthy();
+    expect(screen.getByTestId('agent-run').getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry run detail' }));
+    expect((await screen.findByTestId('run-detail')).getAttribute('data-run')).toBe('selected');
+    expect(details).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows only the latest selected run when an older detail reply arrives last', async () => {
+    const a = run({ run_id: 'a', actor: 'process:scout' });
+    const b = run({ run_id: 'b', actor: 'process:scout' });
+    __seedFleet([a, b]);
+    let answerA!: (value: ipc.FleetRunDetail) => void;
+    let answerB!: (value: ipc.FleetRunDetail) => void;
+    vi.spyOn(ipc, 'fleetRunDetail').mockImplementation(
+      (id) =>
+        new Promise((resolve) => {
+          if (id === 'a') answerA = resolve;
+          else answerB = resolve;
+        }),
+    );
+    render(<AgentRunHistory actor="process:scout" />);
+    await screen.findAllByTestId('agent-run');
+    fireEvent.click(document.querySelector('[data-run="a"]')!);
+    fireEvent.click(document.querySelector('[data-run="b"]')!);
+    const detail = (row: FleetRun): ipc.FleetRunDetail => ({
+      run: row,
+      cost_components: null,
+      assembly: null,
+      model_id: null,
+      refusals: [],
+      refusals_total: 0,
+      wrote: { state: 'not_recorded' },
+    });
+    await act(async () => answerB(detail(b)));
+    expect((await screen.findByTestId('run-detail')).getAttribute('data-run')).toBe('b');
+    await act(async () => answerA(detail(a)));
+    expect(screen.getByTestId('run-detail').getAttribute('data-run')).toBe('b');
+  });
+
+  it('does not reopen a loading selection after it was closed', async () => {
+    const selected = run({ run_id: 'selected', actor: 'process:scout' });
+    __seedFleet([selected]);
+    let answer!: (value: ipc.FleetRunDetail) => void;
+    vi.spyOn(ipc, 'fleetRunDetail').mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    render(<AgentRunHistory actor="process:scout" />);
+    fireEvent.click(await screen.findByTestId('agent-run'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Close run detail' }));
+    await act(async () =>
+      answer({
+        run: selected,
+        cost_components: null,
+        assembly: null,
+        model_id: null,
+        refusals: [],
+        refusals_total: 0,
+        wrote: { state: 'not_recorded' },
+      }),
+    );
+    expect(screen.queryByTestId('run-detail')).toBeNull();
+    expect(screen.getByTestId('agent-run').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('invalidates a pending detail when the same actor changes vault scope', async () => {
+    __seedRunHistoryRegistry({ '/one': 'one', '/two': 'two' });
+    const first = run({ run_id: 'first', actor: 'process:scout', vault_id: 'one' });
+    __seedFleet([first, run({ run_id: 'second', actor: 'process:scout', vault_id: 'two' })]);
+    let answer!: (value: ipc.FleetRunDetail) => void;
+    vi.spyOn(ipc, 'fleetRunDetail').mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const { rerender } = render(
+      <AgentRunHistory
+        actor="process:scout"
+        scope={{ kind: 'agent', vault: '/one', actor: 'process:scout' }}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId('agent-run'));
+    rerender(
+      <AgentRunHistory
+        actor="process:scout"
+        scope={{ kind: 'agent', vault: '/two', actor: 'process:scout' }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-run').getAttribute('data-run')).toBe('second'),
+    );
+    await act(async () =>
+      answer({
+        run: first,
+        cost_components: null,
+        assembly: null,
+        model_id: null,
+        refusals: [],
+        refusals_total: 0,
+        wrote: { state: 'not_recorded' },
+      }),
+    );
+    expect(screen.queryByTestId('run-detail')).toBeNull();
+    expect(screen.getByTestId('agent-run').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('keeps the first page visible when Load more fails and retries its original cursor', async () => {
+    __seedFleet(
+      Array.from({ length: 51 }, (_, n) =>
+        run({ run_id: `anchor-${n.toString().padStart(2, '0')}`, actor: 'process:scout' }),
+      ),
+    );
+    const original = ipc.fleetRunsPage;
+    const pages = vi.spyOn(ipc, 'fleetRunsPage').mockImplementation(original);
+    render(
+      <AgentRunHistory
+        actor="process:scout"
+        scope={{ kind: 'agent', vault: '/demo-vault', actor: 'process:scout' }}
+      />,
+    );
+    expect(await screen.findAllByTestId('agent-run')).toHaveLength(50);
+    pages.mockRejectedValueOnce(new Error('offline'));
+    fireEvent.click(screen.getByRole('button', { name: 'Load more runs' }));
+    expect(await screen.findByRole('button', { name: 'Retry more runs' })).toBeTruthy();
+    expect(screen.getAllByTestId('agent-run')).toHaveLength(50);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry more runs' }));
+    await waitFor(() => expect(screen.getAllByTestId('agent-run')).toHaveLength(51));
+  });
+
+  it('finds an older matching vault anchor before the global cap and keeps the parent reference', async () => {
+    __seedFleet([
+      ...Array.from({ length: 250 }, (_, n) => run({ run_id: `new-${n}`, actor: 'process:other' })),
+      run({ run_id: 'wrong-vault', actor: 'process:scout', vault_id: 'other' }),
+      run({
+        run_id: 'old-hop',
+        actor: 'process:scout',
+        started_at: '2025-01-01',
+        parent_run_id: 'parent',
+      }),
+    ]);
+    render(
+      <AgentRunHistory
+        actor="process:scout"
+        scope={{ kind: 'agent', vault: '/demo-vault', actor: 'process:scout' }}
+      />,
+    );
+    expect((await screen.findByTestId('agent-run')).getAttribute('data-run')).toBe('old-hop');
+    expect(screen.getByTestId('agent-run-parent').textContent).toContain('run parent');
+  });
+
+  it('loads the next scoped page without duplicates and only reads descendants when expanded', async () => {
+    __seedFleet([
+      ...Array.from({ length: 51 }, (_, n) =>
+        run({ run_id: `anchor-${n.toString().padStart(2, '0')}`, actor: 'process:scout' }),
+      ),
+      run({
+        run_id: 'child',
+        actor: 'process:other',
+        vault_id: 'other',
+        parent_run_id: 'anchor-50',
+      }),
+    ]);
+    const lineage = vi.spyOn(ipc, 'fleetRunLineage');
+    render(
+      <AgentRunHistory
+        actor="process:scout"
+        scope={{ kind: 'agent', vault: '/demo-vault', actor: 'process:scout' }}
+      />,
+    );
+    expect(await screen.findAllByTestId('agent-run')).toHaveLength(50);
+    expect(lineage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Load more runs' }));
+    await waitFor(() => expect(screen.getAllByTestId('agent-run')).toHaveLength(51));
+    expect(
+      new Set(screen.getAllByTestId('agent-run').map((row) => row.getAttribute('data-run'))).size,
+    ).toBe(51);
+    expect(screen.queryByRole('button', { name: 'Load more runs' })).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Show hops' })[0]);
+    expect((await screen.findByTestId('agent-run-hop')).getAttribute('data-run')).toBe('child');
+    expect(lineage).toHaveBeenCalledTimes(1);
+    lineage.mockRestore();
+  });
+
+  it('announces capped lineage without treating descendants as extra matching anchors', async () => {
+    __seedFleet([
+      run({ run_id: 'root', actor: 'process:scout' }),
+      ...Array.from({ length: 201 }, (_, n) =>
+        run({ run_id: `hop-${n}`, actor: 'process:other', parent_run_id: 'root' }),
+      ),
+    ]);
+    render(
+      <AgentRunHistory
+        actor="process:scout"
+        scope={{ kind: 'agent', vault: '/demo-vault', actor: 'process:scout' }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Show hops' }));
+    expect(await screen.findByText(/More hops exist/)).toBeTruthy();
+    expect(screen.getAllByTestId('agent-run')).toHaveLength(1);
+    expect(screen.getAllByTestId('agent-run-hop')).toHaveLength(200);
+  });
+
+  it('does not borrow a current-vault agent title for a hop from another origin', async () => {
+    useVaultStore.setState({
+      entries: [
+        makeEntry({
+          path: 'agents/other.md',
+          title: 'Wrong local agent',
+          type: 'Agent',
+          properties: { slug: 'other' },
+        }),
+      ],
+    });
+    __seedFleet([
+      run({ run_id: 'root', actor: 'process:scout' }),
+      run({
+        run_id: 'foreign-child',
+        actor: 'process:other',
+        vault_id: 'foreign',
+        parent_run_id: 'root',
+      }),
+    ]);
+    render(
+      <AgentRunHistory
+        actor="process:scout"
+        scope={{ kind: 'agent', vault: '/demo-vault', actor: 'process:scout' }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Show hops' }));
+    const hop = await screen.findByTestId('agent-run-hop');
+    expect(hop.textContent).not.toContain('Wrong local agent');
+    expect(hop.textContent).toContain('process:other');
+  });
+
+  it('shows unavailable for an unknown registry scope and can retry the same scope', async () => {
+    __seedRunHistoryRegistry({});
+    render(
+      <AgentRunHistory
+        actor="process:scout"
+        scope={{ kind: 'agent', vault: '/demo-vault', actor: 'process:scout' }}
+      />,
+    );
+    expect(await screen.findByTestId('agent-runs-unavailable')).toBeTruthy();
+    expect(screen.queryByTestId('agent-runs-empty')).toBeNull();
+    __seedRunHistoryRegistry({ '/demo-vault': 'demo' });
+    __seedFleet([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry history' }));
+    expect(await screen.findByTestId('agent-runs-empty')).toBeTruthy();
+  });
 
   it('names a parent with a NULL actor as an assistant turn', async () => {
     __seedFleet([

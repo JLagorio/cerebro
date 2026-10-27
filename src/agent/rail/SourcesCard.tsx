@@ -6,6 +6,7 @@ import { TraceDescription, TraceIcon, TraceLine, TraceTitle } from '@/components
 import { Icon } from '@/components/ui/Icon';
 import { motionAllowed } from '@/components/ui/motion';
 import { Popover } from '@/components/ui/Popover';
+import { StateMessage } from '@/components/ui/StateMessage';
 import { Tooltip } from '@/components/ui/Tooltip';
 import type { RailSources, RailSourcesMissing } from '@/agent/elements/railSources';
 import { openOutside } from '@/agent/rail/ConversationRail';
@@ -29,6 +30,11 @@ import './sources-card.css';
  * through an href, and the conversation floats first, since the canvas hides
  * the page it opens. Every control is a tab stop of its own (WebKit skips a
  * native button without one).
+ *
+ * A list that may be short says why above it (CV-05). With nothing listed,
+ * the card never reads "None" for what it cannot tell: not recorded, with
+ * that reason, where a reply lost what it drew on, and unavailable where the
+ * transcript could not be read back at all.
  */
 
 /** The card's words. */
@@ -46,6 +52,9 @@ export const RAIL_SOURCES_WORDS = {
     steps: "A subagent's steps weren't kept, so what it used isn't listed.",
     results: "Some web results weren't kept, so they aren't listed.",
   } satisfies Record<RailSourcesMissing, string>,
+  notRecorded: 'Sources not recorded',
+  unavailable: 'Sources unavailable',
+  unavailableDetail: "This conversation's transcript couldn't be read back.",
 } as const;
 
 /** The lines the card lists before "View all". */
@@ -164,7 +173,17 @@ export const SourcesCard = memo(function SourcesCard({
       count={cited.length > 0 ? String(cited.length) : undefined}
       state={state}
     >
-      {missing !== null && <MissingLine missing={missing} />}
+      {state === 'unavailable' ? (
+        <StateMessage compact state="unavailable" title={RAIL_SOURCES_WORDS.unavailable}>
+          {RAIL_SOURCES_WORDS.unavailableDetail}
+        </StateMessage>
+      ) : state === 'not-recorded' && missing !== null ? (
+        <StateMessage compact state="not-recorded" title={RAIL_SOURCES_WORDS.notRecorded}>
+          <MissingLine missing={missing} />
+        </StateMessage>
+      ) : (
+        missing !== null && <MissingLine missing={missing} />
+      )}
       {cited.length > 0 && (
         <SourceLines cited={cited.slice(0, RAIL_SOURCES_SHOWN)} actions={actions} />
       )}

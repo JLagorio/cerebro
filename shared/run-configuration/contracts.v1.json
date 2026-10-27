@@ -1,0 +1,1333 @@
+{
+  "version": 1,
+  "types": {
+    "RunConfigurationManifestV1": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "RunConfigurationManifestV1",
+      "type": "object",
+      "required": [
+        "allowed_tools",
+        "artifacts",
+        "asked_tools",
+        "cli_tools",
+        "connectors",
+        "coverage",
+        "defined_subagents",
+        "denied_tools",
+        "dispatched_at",
+        "effective_grant",
+        "format",
+        "inherits_user_mcp",
+        "message_transport",
+        "observed_cli_version",
+        "observed_model_at_dispatch",
+        "permission_mode",
+        "run_id",
+        "seated",
+        "settings_hardening",
+        "skills",
+        "standing_agent",
+        "user_settings",
+        "vault_id"
+      ],
+      "properties": {
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SelectorIdentity"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ArtifactIdentity"
+          }
+        },
+        "asked_tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SelectorIdentity"
+          }
+        },
+        "cli_tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SelectorIdentity"
+          }
+        },
+        "connectors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConnectorIdentity"
+          }
+        },
+        "coverage": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "defined_subagents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DefinitionIdentity"
+          }
+        },
+        "denied_tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SelectorIdentity"
+          }
+        },
+        "dispatched_at": {
+          "type": "string"
+        },
+        "effective_grant": {
+          "$ref": "#/definitions/EffectiveGrant"
+        },
+        "effective_system_prompt_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format": {
+          "type": "integer",
+          "maximum": 4294967295.0,
+          "minimum": 0.0
+        },
+        "inherits_user_mcp": {
+          "type": "boolean"
+        },
+        "message_transport": {
+          "type": "string"
+        },
+        "observed_cli_version": {
+          "$ref": "#/definitions/Known_for_StrictCliVersion"
+        },
+        "observed_model_at_dispatch": {
+          "$ref": "#/definitions/Known_for_String"
+        },
+        "permission_mode": {
+          "type": "string"
+        },
+        "requested_effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requested_model": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SelectorIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seated": {
+          "type": "boolean"
+        },
+        "settings_hardening": {
+          "type": "boolean"
+        },
+        "skills": {
+          "$ref": "#/definitions/Known_for_Array_of_DefinitionIdentity"
+        },
+        "standing_agent": {
+          "$ref": "#/definitions/Known_for_DefinitionIdentity"
+        },
+        "store_uuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user_settings": {
+          "$ref": "#/definitions/Known_for_Null"
+        },
+        "vault_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ArtifactIdentity": {
+          "type": "object",
+          "required": [
+            "artifact",
+            "sha256"
+          ],
+          "properties": {
+            "artifact": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ConnectorIdentity": {
+          "type": "object",
+          "required": [
+            "cli_id",
+            "spec_identity"
+          ],
+          "properties": {
+            "cli_id": {
+              "$ref": "#/definitions/SelectorIdentity"
+            },
+            "spec_identity": {
+              "$ref": "#/definitions/Known_for_String"
+            }
+          },
+          "additionalProperties": false
+        },
+        "DefinitionIdentity": {
+          "type": "object",
+          "required": [
+            "id",
+            "sha256"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "EffectiveGrant": {
+          "type": "object",
+          "required": [
+            "actor_id",
+            "ask_first",
+            "chain",
+            "read_scope",
+            "run_kind",
+            "tools",
+            "write_scope"
+          ],
+          "properties": {
+            "actor_id": {
+              "$ref": "#/definitions/SelectorIdentity"
+            },
+            "ask_first": {
+              "type": "boolean"
+            },
+            "chain": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SelectorIdentity"
+              }
+            },
+            "read_scope": {
+              "$ref": "#/definitions/ScopeAxis"
+            },
+            "run_kind": {
+              "type": "string"
+            },
+            "tools": {
+              "$ref": "#/definitions/ToolAxis"
+            },
+            "write_scope": {
+              "$ref": "#/definitions/ScopeAxis"
+            }
+          },
+          "additionalProperties": false
+        },
+        "Known_for_Array_of_DefinitionIdentity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "recorded"
+                  ]
+                },
+                "value": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/DefinitionIdentity"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "state"
+              ],
+              "properties": {
+                "reason": {
+                  "$ref": "#/definitions/UnknownReason"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unknown"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "Known_for_DefinitionIdentity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "recorded"
+                  ]
+                },
+                "value": {
+                  "$ref": "#/definitions/DefinitionIdentity"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "state"
+              ],
+              "properties": {
+                "reason": {
+                  "$ref": "#/definitions/UnknownReason"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unknown"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "Known_for_Null": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "recorded"
+                  ]
+                },
+                "value": {
+                  "type": "null"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "state"
+              ],
+              "properties": {
+                "reason": {
+                  "$ref": "#/definitions/UnknownReason"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unknown"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "Known_for_StrictCliVersion": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "recorded"
+                  ]
+                },
+                "value": {
+                  "$ref": "#/definitions/StrictCliVersion"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "state"
+              ],
+              "properties": {
+                "reason": {
+                  "$ref": "#/definitions/UnknownReason"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unknown"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "Known_for_String": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "recorded"
+                  ]
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "state"
+              ],
+              "properties": {
+                "reason": {
+                  "$ref": "#/definitions/UnknownReason"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unknown"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "ScopeAxis": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "unrestricted"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "mode",
+                "selectors"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "prefixes"
+                  ]
+                },
+                "selectors": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/SelectorIdentity"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "SelectorIdentity": {
+          "type": "object",
+          "required": [
+            "sha256"
+          ],
+          "properties": {
+            "metadata_label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "StrictCliVersion": {
+          "type": "object",
+          "required": [
+            "major",
+            "minor",
+            "patch"
+          ],
+          "properties": {
+            "major": {
+              "type": "integer",
+              "maximum": 4294967295.0,
+              "minimum": 0.0
+            },
+            "minor": {
+              "type": "integer",
+              "maximum": 4294967295.0,
+              "minimum": 0.0
+            },
+            "patch": {
+              "type": "integer",
+              "maximum": 4294967295.0,
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "ToolAxis": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "unrestricted"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "mode",
+                "selectors"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "restricted"
+                  ]
+                },
+                "selectors": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/SelectorIdentity"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "UnknownReason": {
+          "type": "string",
+          "enum": [
+            "not_observed_before_dispatch",
+            "not_reported_by_native_probe",
+            "unrecognized_cli_version",
+            "no_native_identity_receipt",
+            "inherited_user_configuration",
+            "spec_identity_not_supplied"
+          ]
+        }
+      }
+    },
+    "CommandReply": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ConfigurationReply",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "manifest",
+            "state"
+          ],
+          "properties": {
+            "manifest": {
+              "$ref": "#/definitions/RunConfigurationManifestV1"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "recorded"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "reason",
+            "state"
+          ],
+          "properties": {
+            "reason": {
+              "$ref": "#/definitions/NotRecordedReason"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "not_recorded"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "state"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "#/definitions/ConfigurationUnavailableCode"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "unavailable"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ],
+      "definitions": {
+        "ArtifactIdentity": {
+          "type": "object",
+          "required": [
+            "artifact",
+            "sha256"
+          ],
+          "properties": {
+            "artifact": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ConfigurationUnavailableCode": {
+          "type": "string",
+          "enum": [
+            "storage_unavailable",
+            "opening_changed",
+            "scope_unavailable"
+          ]
+        },
+        "ConnectorIdentity": {
+          "type": "object",
+          "required": [
+            "cli_id",
+            "spec_identity"
+          ],
+          "properties": {
+            "cli_id": {
+              "$ref": "#/definitions/SelectorIdentity"
+            },
+            "spec_identity": {
+              "$ref": "#/definitions/Known_for_String"
+            }
+          },
+          "additionalProperties": false
+        },
+        "DefinitionIdentity": {
+          "type": "object",
+          "required": [
+            "id",
+            "sha256"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "EffectiveGrant": {
+          "type": "object",
+          "required": [
+            "actor_id",
+            "ask_first",
+            "chain",
+            "read_scope",
+            "run_kind",
+            "tools",
+            "write_scope"
+          ],
+          "properties": {
+            "actor_id": {
+              "$ref": "#/definitions/SelectorIdentity"
+            },
+            "ask_first": {
+              "type": "boolean"
+            },
+            "chain": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SelectorIdentity"
+              }
+            },
+            "read_scope": {
+              "$ref": "#/definitions/ScopeAxis"
+            },
+            "run_kind": {
+              "type": "string"
+            },
+            "tools": {
+              "$ref": "#/definitions/ToolAxis"
+            },
+            "write_scope": {
+              "$ref": "#/definitions/ScopeAxis"
+            }
+          },
+          "additionalProperties": false
+        },
+        "Known_for_Array_of_DefinitionIdentity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "recorded"
+                  ]
+                },
+                "value": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/DefinitionIdentity"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "state"
+              ],
+              "properties": {
+                "reason": {
+                  "$ref": "#/definitions/UnknownReason"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unknown"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "Known_for_DefinitionIdentity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "recorded"
+                  ]
+                },
+                "value": {
+                  "$ref": "#/definitions/DefinitionIdentity"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "state"
+              ],
+              "properties": {
+                "reason": {
+                  "$ref": "#/definitions/UnknownReason"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unknown"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "Known_for_Null": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "recorded"
+                  ]
+                },
+                "value": {
+                  "type": "null"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "state"
+              ],
+              "properties": {
+                "reason": {
+                  "$ref": "#/definitions/UnknownReason"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unknown"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "Known_for_StrictCliVersion": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "recorded"
+                  ]
+                },
+                "value": {
+                  "$ref": "#/definitions/StrictCliVersion"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "state"
+              ],
+              "properties": {
+                "reason": {
+                  "$ref": "#/definitions/UnknownReason"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unknown"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "Known_for_String": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "recorded"
+                  ]
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "state"
+              ],
+              "properties": {
+                "reason": {
+                  "$ref": "#/definitions/UnknownReason"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unknown"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "NotRecordedReason": {
+          "type": "string",
+          "enum": [
+            "legacy",
+            "expired",
+            "deleted",
+            "capture_failed"
+          ]
+        },
+        "RunConfigurationManifestV1": {
+          "type": "object",
+          "required": [
+            "allowed_tools",
+            "artifacts",
+            "asked_tools",
+            "cli_tools",
+            "connectors",
+            "coverage",
+            "defined_subagents",
+            "denied_tools",
+            "dispatched_at",
+            "effective_grant",
+            "format",
+            "inherits_user_mcp",
+            "message_transport",
+            "observed_cli_version",
+            "observed_model_at_dispatch",
+            "permission_mode",
+            "run_id",
+            "seated",
+            "settings_hardening",
+            "skills",
+            "standing_agent",
+            "user_settings",
+            "vault_id"
+          ],
+          "properties": {
+            "allowed_tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SelectorIdentity"
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ArtifactIdentity"
+              }
+            },
+            "asked_tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SelectorIdentity"
+              }
+            },
+            "cli_tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SelectorIdentity"
+              }
+            },
+            "connectors": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ConnectorIdentity"
+              }
+            },
+            "coverage": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "defined_subagents": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DefinitionIdentity"
+              }
+            },
+            "denied_tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SelectorIdentity"
+              }
+            },
+            "dispatched_at": {
+              "type": "string"
+            },
+            "effective_grant": {
+              "$ref": "#/definitions/EffectiveGrant"
+            },
+            "effective_system_prompt_sha256": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "format": {
+              "type": "integer",
+              "maximum": 4294967295.0,
+              "minimum": 0.0
+            },
+            "inherits_user_mcp": {
+              "type": "boolean"
+            },
+            "message_transport": {
+              "type": "string"
+            },
+            "observed_cli_version": {
+              "$ref": "#/definitions/Known_for_StrictCliVersion"
+            },
+            "observed_model_at_dispatch": {
+              "$ref": "#/definitions/Known_for_String"
+            },
+            "permission_mode": {
+              "type": "string"
+            },
+            "requested_effort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "requested_model": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SelectorIdentity"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "run_id": {
+              "type": "string"
+            },
+            "seated": {
+              "type": "boolean"
+            },
+            "settings_hardening": {
+              "type": "boolean"
+            },
+            "skills": {
+              "$ref": "#/definitions/Known_for_Array_of_DefinitionIdentity"
+            },
+            "standing_agent": {
+              "$ref": "#/definitions/Known_for_DefinitionIdentity"
+            },
+            "store_uuid": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "user_settings": {
+              "$ref": "#/definitions/Known_for_Null"
+            },
+            "vault_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ScopeAxis": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "unrestricted"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "mode",
+                "selectors"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "prefixes"
+                  ]
+                },
+                "selectors": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/SelectorIdentity"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "SelectorIdentity": {
+          "type": "object",
+          "required": [
+            "sha256"
+          ],
+          "properties": {
+            "metadata_label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "StrictCliVersion": {
+          "type": "object",
+          "required": [
+            "major",
+            "minor",
+            "patch"
+          ],
+          "properties": {
+            "major": {
+              "type": "integer",
+              "maximum": 4294967295.0,
+              "minimum": 0.0
+            },
+            "minor": {
+              "type": "integer",
+              "maximum": 4294967295.0,
+              "minimum": 0.0
+            },
+            "patch": {
+              "type": "integer",
+              "maximum": 4294967295.0,
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "ToolAxis": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "unrestricted"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "mode",
+                "selectors"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "restricted"
+                  ]
+                },
+                "selectors": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/SelectorIdentity"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "UnknownReason": {
+          "type": "string",
+          "enum": [
+            "not_observed_before_dispatch",
+            "not_reported_by_native_probe",
+            "unrecognized_cli_version",
+            "no_native_identity_receipt",
+            "inherited_user_configuration",
+            "spec_identity_not_supplied"
+          ]
+        }
+      }
+    }
+  }
+}

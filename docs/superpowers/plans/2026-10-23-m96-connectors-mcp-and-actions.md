@@ -16,7 +16,7 @@
 
 ## Global Constraints
 
-- **DRAFT FOR OWNER REVIEW — not approved for execution.** No commands below have been run for this planning task; test names and new files are proposed.
+- **Implementation authorized by the owner on 2026-10-23**, on the existing branch alongside Claude's M92 work. The [implementation record](2026-10-23-m93-m99-implementation-record.md) distinguishes verified foundations from open integration. Platform selection and native/provider acceptance remain explicit gates; M96 is not complete.
 - The user's Claude Code CLI remains the default execution backend.
 - Each connection is `cli` or `cerebro` owned. A Cerebro-owned provider's raw server/credentials must not also be forwarded to the CLI.
 - For Cerebro-owned connections, connector secrets resolve only in Rust through an OS-backed secret store; portable files, prompts, webview and receipts contain references only.
@@ -59,6 +59,16 @@ Commands use Rust test filters so unrelated suites are not the initial feedback
 loop. Final gates are scheduled only after implementation exists.
 
 ### M96.1 — Freeze catalog, schemas and generated service contracts
+
+Execution sequencing amendment (2026-10-23): implement the catalog, bounded
+schema validation and generated contract foundation first. Register the five
+callable broker tools, prompts and operational refusal routes alongside the
+guarded M96.3 service; a DTO does not make an executable route. Until that
+integration passes, existing closed-world and mail-send gates remain active.
+The foundation may export/import immutable catalog material with digest checks,
+but durable catalog storage and restart acceptance belong to service integration.
+The concrete completed field vocabulary is recorded in
+`docs/superpowers/specs/2026-10-23-m96-action-contract.md` during implementation.
 
 **Files:** Create `actions/{mod,types,catalog,schema}.rs`, the shared action/schema
 artifacts and `shared/policy/actions.v1.json`; modify `src-tauri/src/lib.rs`,

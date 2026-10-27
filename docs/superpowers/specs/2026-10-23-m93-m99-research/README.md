@@ -6,6 +6,16 @@ into seven proposed designs and seven implementation plans, joined by a program
 design and master roadmap. Nothing here changes the application or authorizes an
 implementation, provider action or data migration.
 
+## Implementation follow-through
+
+The owner subsequently authorized M93–M99 implementation on the shared branch.
+The original research below remains historical input. See the
+[implementation record](../../plans/2026-10-23-m93-m99-implementation-record.md)
+for verified slices and open work, and the
+[M99 authority decision packet](../2026-10-23-m99-workspace-authority-decision.md)
+for concrete prototype evidence, consumer cutover and backup tradeoffs. No real
+vault conversion or storage authority selection is recorded.
+
 ## Final review entry point
 
 Read the [final review and corrected gaps](final-review.md), [eight-repository source cross-check](reference-crosscheck.md), and the master roadmap's [first build sequence](../../plans/2026-10-23-m93-m99-master-roadmap.md#first-build-sequence-after-this-review). The original research remains below; the final pass incorporates the newer M91 handoff and checks the actual vendored source again.

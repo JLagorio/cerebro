@@ -2,12 +2,14 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QuitRequest } from '@/lib/ipc';
+import type { FlushReport } from '@/editor/documentOwner';
 import {
   __resetQuit,
   beginLeaving,
   isQuitting,
   markLeft,
   prepareQuit,
+  quitDeps,
   QUIT_ANYWAY_MS,
   STAYED_TOAST,
   useQuitHost,
@@ -27,8 +29,10 @@ function harness(overrides: Partial<QuitDeps> = {}) {
   const deps: QuitDeps = {
     blurFocused: () => steps.push('blur'),
     pageWriteFailures: () => failures,
+    hasUnresolved: () => false,
     flushOpenPages: async (ms) => {
       steps.push(`flush ${ms}`);
+      return { outcomes: [], unresolvedOwnerIds: [] };
     },
     settlePageWrites: async (ms) => {
       steps.push(`settle ${ms}`);
@@ -36,6 +40,7 @@ function harness(overrides: Partial<QuitDeps> = {}) {
     },
     beginLeaving: async (ms) => {
       steps.push(`leave ${ms}`);
+      return true;
     },
     endLeaving: () => steps.push('end leaving'),
     finishQuit: async () => {
@@ -85,24 +90,61 @@ describe('prepareQuit', () => {
     ]);
   });
 
-  it('cuts off a hung flush and a hung write, and still finishes before the deadline', async () => {
+  it('cancels a hung flush before the deadline and retains the mounted shell', async () => {
     vi.useFakeTimers();
-    let finishedAt: number | null = null;
+    let cancelledAt: number | null = null;
     const start = Date.now();
     const hang = () => new Promise<never>(() => undefined);
     const h = harness({
       flushOpenPages: hang,
       settlePageWrites: hang,
       beginLeaving: hang,
-      finishQuit: async () => {
-        finishedAt = Date.now() - start;
+      cancelQuit: async () => {
+        cancelledAt = Date.now() - start;
       },
     });
     const outcome = prepareQuit(REQUEST, h.deps);
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(await outcome).toBe('finished');
-    expect(finishedAt).not.toBeNull();
-    expect(finishedAt!).toBeLessThan(5_000);
+    expect(await outcome).toBe('stayed');
+    expect(cancelledAt).not.toBeNull();
+    expect(cancelledAt!).toBeLessThanOrEqual(2_500);
+    expect(h.steps).not.toContain('finish');
+    expect(h.steps.some((step) => step.startsWith('leave'))).toBe(false);
+  });
+
+  it('stays mounted for a failure that existed before quit', async () => {
+    const h = harness({
+      flushOpenPages: async () => ({
+        outcomes: [{ kind: 'failed', ownerId: 'old', generation: 2, code: 'disk_full' }],
+        unresolvedOwnerIds: ['old'],
+      }),
+      hasUnresolved: () => true,
+    });
+    h.fail();
+    expect(await prepareQuit(REQUEST, h.deps)).toBe('stayed');
+    expect(h.steps).toContain('cancel');
+    expect(h.steps.some((step) => step.startsWith('leave'))).toBe(false);
+    expect(h.steps).not.toContain('finish');
+  });
+
+  it('treats a write-drain timeout as unresolved', async () => {
+    const h = harness({ settlePageWrites: async () => false });
+    expect(await prepareQuit(REQUEST, h.deps)).toBe('stayed');
+    expect(h.steps).toContain('cancel');
+    expect(h.steps.some((step) => step.startsWith('leave'))).toBe(false);
+  });
+
+  it('checks a newly dirty owner after the write drain', async () => {
+    let dirty = false;
+    const h = harness({
+      settlePageWrites: async () => {
+        dirty = true;
+        return true;
+      },
+      hasUnresolved: () => dirty,
+    });
+    expect(await prepareQuit(REQUEST, h.deps)).toBe('stayed');
+    expect(h.steps.some((step) => step.startsWith('leave'))).toBe(false);
   });
 
   it('stays open with a toast when a save fails, and neither leaves nor finishes', async () => {
@@ -149,6 +191,7 @@ describe('prepareQuit', () => {
     const h = harness();
     h.deps.flushOpenPages = async () => {
       h.fail();
+      return { outcomes: [], unresolvedOwnerIds: ['failed-before-quit'] };
     };
     expect(await prepareQuit(REQUEST, h.deps, true)).toBe('finished');
     expect(h.steps).toContain('finish');
@@ -181,6 +224,35 @@ describe('prepareQuit', () => {
   });
 });
 
+describe('unconfirmed shell departure', () => {
+  it.each(['timer', 'hung'] as const)(
+    'cancels an unconfirmed %s departure instead of acknowledging a completed leave',
+    async (mode) => {
+      vi.useFakeTimers();
+      const h = harness({
+        beginLeaving: mode === 'timer' ? beginLeaving : () => new Promise(() => {}),
+        endLeaving: quitDeps.endLeaving,
+      });
+      const outcome = prepareQuit(REQUEST, h.deps);
+      await vi.advanceTimersByTimeAsync(REQUEST.deadlineMs);
+      expect(await outcome).toBe('stayed');
+      expect(h.steps).toContain('cancel');
+      expect(h.steps).not.toContain('finish');
+      expect(isQuitting()).toBe(false);
+    },
+  );
+
+  it('preserves explicit Quit anyway after an unconfirmed departure', async () => {
+    vi.useFakeTimers();
+    const h = harness({ beginLeaving });
+    const outcome = prepareQuit(REQUEST, h.deps, true);
+    await vi.advanceTimersByTimeAsync(REQUEST.deadlineMs);
+    expect(await outcome).toBe('finished');
+    expect(h.steps).toContain('finish');
+    expect(h.steps).not.toContain('cancel');
+  });
+});
+
 describe('beginLeaving', () => {
   it('resolves when the quit screen mounts, or at its budget', async () => {
     let left = false;
@@ -202,11 +274,11 @@ describe('beginLeaving', () => {
 
 describe('useQuitHost', () => {
   it('ignores a second request while one runs', async () => {
-    let release!: () => void;
+    let release!: (value: FlushReport) => void;
     const h = harness();
     h.deps.flushOpenPages = (ms) => {
       h.steps.push(`flush ${ms}`);
-      return new Promise<void>((resolve) => (release = resolve));
+      return new Promise<FlushReport>((resolve) => (release = resolve));
     };
     renderHook(() => useQuitHost(h.deps));
     await settle();
@@ -214,7 +286,7 @@ describe('useQuitHost', () => {
     await settle();
     h.ask();
     await settle();
-    release();
+    release({ outcomes: [], unresolvedOwnerIds: [] });
     await vi.waitFor(() => expect(h.steps).toContain('finish'));
     expect(h.steps.filter((step) => step === 'blur')).toHaveLength(1);
   });

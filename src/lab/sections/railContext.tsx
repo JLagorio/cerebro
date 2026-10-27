@@ -127,7 +127,7 @@ export const section: LabSection = {
       },
     },
     partial: {
-      note: 'A reading with no breakdown, as every run’s is until seated runs ask for one (M92.13): the count alone.',
+      note: 'A reading with no breakdown, as a run that took its message in argv files (an answer’s resume, or any run but a seated one, M92.13): the count alone.',
       seed: seed('00000000-0000-4000-8000-000000092143', reading(124_000)),
       expect: {
         present: [`${CARD}[data-state="partial"]`, '[data-testid="rail-context-figure"]'],

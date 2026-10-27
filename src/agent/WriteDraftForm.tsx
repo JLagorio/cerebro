@@ -5,6 +5,8 @@ import {
   changedKeys,
   DRAFT_FIELD,
   draftRefusal,
+  editableJsonNumber,
+  editableJsonNumbers,
   fieldText,
   parseDraft,
   prettyDraft,
@@ -54,6 +56,8 @@ interface Props {
   /** The draft as the agent asked it. */
   draft: Draft;
   disabled?: boolean;
+  /** Refuse numeric text this object-based editor cannot preserve exactly. */
+  exactNumbersOnly?: boolean;
   onChange: (change: DraftChange) => void;
 }
 
@@ -70,6 +74,7 @@ interface State {
 function flatEdits(
   fields: DraftField[],
   edits: State['edits'],
+  exactNumbersOnly = false,
 ): { values: Record<string, unknown>; invalid: boolean } {
   const values: Record<string, unknown> = {};
   let invalid = false;
@@ -80,6 +85,7 @@ function flatEdits(
       values[field.key] = edit;
       continue;
     }
+    if (exactNumbersOnly && numericEditUnsupported(field, edit)) { invalid = true; continue; }
     const read = readFieldText(field, edit);
     if (read === 'invalid') invalid = true;
     else values[field.key] = read.value;
@@ -87,8 +93,13 @@ function flatEdits(
   return { values, invalid };
 }
 
-function changeOf(schema: unknown, asked: Draft, state: State, fields: DraftField[]): DraftChange {
+function numericEditUnsupported(field: DraftField, text: string): boolean {
+  return (field.kind === 'number' || field.kind === 'integer') && text.trim() !== '' && !editableJsonNumber(text.trim());
+}
+
+function changeOf(schema: unknown, asked: Draft, state: State, fields: DraftField[], exactNumbersOnly = false): DraftChange {
   if (state.json !== null && state.json.text !== state.json.seed) {
+    if (exactNumbersOnly && !editableJsonNumbers(state.json.text)) return { input: asked, valid: false, edited: true };
     const parsed = parseDraft(state.json.text);
     if (parsed === null) return { input: asked, valid: false, edited: true };
     return {
@@ -97,7 +108,7 @@ function changeOf(schema: unknown, asked: Draft, state: State, fields: DraftFiel
       edited: changedKeys(asked, parsed).length > 0,
     };
   }
-  const { values, invalid } = flatEdits(fields, state.edits);
+  const { values, invalid } = flatEdits(fields, state.edits, exactNumbersOnly);
   const input = applyDraftEdits(state.base, values);
   return {
     input,
@@ -106,7 +117,7 @@ function changeOf(schema: unknown, asked: Draft, state: State, fields: DraftFiel
   };
 }
 
-export function WriteDraftForm({ title, schema, draft, disabled = false, onChange }: Props) {
+export function WriteDraftForm({ title, schema, draft, disabled = false, exactNumbersOnly = false, onChange }: Props) {
   const id = useId();
   const [state, setState] = useState<State>({ base: draft, edits: {}, json: null });
   const form = useMemo(
@@ -115,22 +126,27 @@ export function WriteDraftForm({ title, schema, draft, disabled = false, onChang
   );
   const flat = form.fields.filter((field) => field.key !== DRAFT_FIELD);
   const jsonOpen = state.json !== null;
-  const jsonInvalid = state.json !== null && parseDraft(state.json.text) === null;
+  const numbersInvalid = exactNumbersOnly && (state.json !== null
+    ? !editableJsonNumbers(state.json.text)
+    : flat.some(field => { const text = state.edits[field.key]; return typeof text === 'string' && numericEditUnsupported(field, text); }));
+  const jsonInvalid = state.json !== null && !numbersInvalid && parseDraft(state.json.text) === null;
   const locked = disabled || jsonOpen;
 
   const update = (next: State) => {
     setState(next);
     const fields =
       next.base === state.base ? flat : projectDraftForm(title, schema, next.base).fields;
-    onChange(changeOf(schema, draft, next, fields));
+    onChange(changeOf(schema, draft, next, fields, exactNumbersOnly));
   };
 
   const edit = (key: string, value: string | boolean) =>
     update({ ...state, edits: { ...state.edits, [key]: value } });
 
   const toggleJson = (open: boolean) => {
+    // Do not let a representation switch discard or normalize an invalid edit.
+    if (exactNumbersOnly && !changeOf(schema, draft, state, flat, true).valid) return;
     if (open) {
-      const current = changeOf(schema, draft, state, flat).input;
+      const current = changeOf(schema, draft, state, flat, exactNumbersOnly).input;
       const seed = prettyDraft(current);
       update({ ...state, json: { seed, text: seed } });
       return;
@@ -146,7 +162,7 @@ export function WriteDraftForm({ title, schema, draft, disabled = false, onChang
         const edited = state.edits[field.key];
         const text = typeof edited === 'string' ? edited : fieldText(field);
         const invalid =
-          typeof edited === 'string' && readFieldText(field, edited) === 'invalid'
+          typeof edited === 'string' && (exactNumbersOnly && numericEditUnsupported(field, edited) || readFieldText(field, edited) === 'invalid')
             ? true
             : undefined;
         const common = {
@@ -243,6 +259,7 @@ export function WriteDraftForm({ title, schema, draft, disabled = false, onChang
           </div>
         );
       })}
+      {numbersInvalid && <p role="alert" className="text-2xs text-danger-600">This edit cannot preserve its exact numbers. Correct the text before approving.</p>}
       {jsonOpen && flat.length > 0 && (
         <div data-testid="write-draft-readonly" className="text-metadata text-(--text-meta)">
           {DRAFT_COPY.readOnly}
@@ -266,7 +283,7 @@ export function WriteDraftForm({ title, schema, draft, disabled = false, onChang
             value={state.json.text}
             readOnly={disabled}
             rows={8}
-            aria-invalid={jsonInvalid || undefined}
+            aria-invalid={jsonInvalid || numbersInvalid || undefined}
             onChange={(e) =>
               update({
                 ...state,

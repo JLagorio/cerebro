@@ -42,6 +42,9 @@ const SHARED_VAULTS: usize = 2;
 /// `SEARCH_BODY_CAP` on a char boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CorpusText {
+    /// Search-only canonical text, never a legacy property DTO or read grant.
+    pub(crate) search_fields: Option<Vec<crate::search::MetaField>>,
+    pub source: Option<crate::source_location::SourceSnapshot>,
     pub body: String,
     /// True when the body was longer than `SEARCH_BODY_CAP` and was cut.
     pub capped: bool,
@@ -108,6 +111,7 @@ impl Stamp {
 #[derive(Default)]
 struct VaultCache {
     stamps: HashMap<String, Stamp>,
+    selected_identity: Option<String>,
     corpus: Arc<Corpus>,
 }
 
@@ -142,7 +146,35 @@ impl CorpusCache {
     /// held only while the cache is brought up to date and is released
     /// before this returns, so nothing ranks under it.
     pub fn snapshot(&self, vault: &Path) -> Result<Arc<Corpus>, String> {
-        let files = note_files(vault)?;
+        if matches!(
+            crate::workspace_service::authority::resolve(vault).map_err(|e| e.message)?,
+            crate::workspace_service::authority::Authority::Selected
+        ) {
+            let fresh = crate::workspace_service::selected::corpus_snapshot(vault)
+                .map_err(|e| e.message)?;
+            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            let old = state
+                .vaults
+                .iter()
+                .position(|(root, _)| root == vault)
+                .map(|i| state.vaults.remove(i).1);
+            let cache = match old {
+                Some(old) if old.selected_identity.as_deref() == Some(&fresh.identity) => old,
+                _ => VaultCache {
+                    selected_identity: Some(fresh.identity),
+                    corpus: Arc::new(fresh.corpus),
+                    ..Default::default()
+                },
+            };
+            let result = Arc::clone(&cache.corpus);
+            state.vaults.push((vault.to_path_buf(), cache));
+            if state.vaults.len() > self.capacity {
+                state.vaults.remove(0);
+            }
+            return Ok(result);
+        }
+        let inventory = note_files(vault)?;
+        let files = &inventory.files;
         // A poisoned lock means a search panicked mid-update. The stamps
         // are only ever replaced whole, so what is there is still sound.
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
@@ -167,7 +199,7 @@ impl CorpusCache {
                     continue;
                 }
                 let read_at = SystemTime::now();
-                let read = super::scan::read_content(file);
+                let read = super::scan::read_content(file).map_err(|e| e.message)?;
                 #[cfg(test)]
                 {
                     state.reads += 1;
@@ -176,6 +208,8 @@ impl CorpusCache {
                 let text = match &read {
                     Ok(content) => text_of(&file.rel, content),
                     Err(_) => CorpusText {
+                        search_fields: None,
+                        source: None,
                         body: String::new(),
                         capped: false,
                     },
@@ -192,12 +226,22 @@ impl CorpusCache {
             cache.corpus = Arc::new(Corpus { entries, texts });
         }
 
+        inventory.boundary.revalidate().map_err(|e| e.message)?;
         let corpus = Arc::clone(&cache.corpus);
         state.vaults.push((vault.to_path_buf(), cache));
         if state.vaults.len() > self.capacity {
             state.vaults.remove(0);
         }
         Ok(corpus)
+    }
+
+    /// Search-only projection. Selected reads are fresh and never replace the
+    /// strict ordinary corpus cache with text-flattened canonical metadata.
+    pub(crate) fn search_snapshot(&self, vault: &Path) -> Result<Arc<Corpus>, String> {
+        match crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)? {
+            crate::workspace_service::authority::Authority::Selected => crate::workspace_service::selected::search_snapshot(vault).map(Arc::new).map_err(|error| error.message),
+            crate::workspace_service::authority::Authority::Legacy => self.snapshot(vault),
+        }
     }
 
     /// How many files this cache has read, for the read-once tests.
@@ -236,19 +280,27 @@ fn text_of(rel: &str, content: &str) -> CorpusText {
     } else {
         parse::split_frontmatter(content).1
     };
-    if body.len() <= SEARCH_BODY_CAP {
-        return CorpusText {
-            body: body.to_string(),
-            capped: false,
-        };
-    }
-    let mut at = SEARCH_BODY_CAP;
+    let mut at = body.len().min(SEARCH_BODY_CAP);
     while !body.is_char_boundary(at) {
         at -= 1;
     }
+    let markdown = rel.ends_with(".md");
+    let capped = at < body.len();
     CorpusText {
+        search_fields: None,
+        source: Some(crate::source_location::SourceSnapshot {
+            raw_sha256: crate::ledger::sha256_hex(content.as_bytes()),
+            carrier: if markdown { "markdown" } else { "unsupported" },
+            body_start_utf8: if markdown {
+                content.len() - body.len()
+            } else {
+                0
+            },
+            searched_body_bytes: at,
+            capped,
+        }),
         body: body[..at].to_string(),
-        capped: true,
+        capped,
     }
 }
 
@@ -285,6 +337,53 @@ mod tests {
 
     fn paths(corpus: &Corpus) -> Vec<&str> {
         corpus.entries.iter().map(|e| e.path.as_str()).collect()
+    }
+
+    #[test]
+    fn failed_read_has_no_source_snapshot() {
+        let vault = testutil::temp_vault("source-unreadable");
+        std::fs::write(vault.join("bad.md"), [0xff, 0xfe]).unwrap();
+        let corpus = CorpusCache::new(1).snapshot(&vault).unwrap();
+        assert!(corpus.entries[0].parse_error.is_some());
+        assert!(corpus.entries[0].hash.is_none());
+        assert!(corpus.texts[0].source.is_none());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn metadata_only_edit_changes_source_snapshot() {
+        let vault = testutil::temp_vault("source-metadata");
+        let old = "---\r\nowner: Ada\r\n---\r\n😀 body";
+        let new = "---\r\nowner: Bo\r\n---\r\n😀 body";
+        write_at(&vault, "a.md", old, settled());
+        let cache = CorpusCache::new(1);
+        let before = cache.snapshot(&vault).unwrap();
+        write_at(&vault, "a.md", new, settled());
+        let after = cache.snapshot(&vault).unwrap();
+        assert_eq!(before.texts[0].body, after.texts[0].body);
+        let first = before.texts[0].source.as_ref().unwrap();
+        let second = after.texts[0].source.as_ref().unwrap();
+        assert_eq!(first.raw_sha256, crate::ledger::sha256_hex(old.as_bytes()));
+        assert_eq!(second.raw_sha256, crate::ledger::sha256_hex(new.as_bytes()));
+        assert_ne!(first.raw_sha256, second.raw_sha256);
+        assert_eq!(first.body_start_utf8, 22);
+        assert_eq!(second.body_start_utf8, 21);
+        assert_eq!(cache.reads(), 2);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn unchanged_search_reuses_source_snapshot() {
+        let vault = testutil::temp_vault("source-reuse");
+        write_at(&vault, "a.md", "# A\n😀 body", settled());
+        let cache = CorpusCache::new(1);
+        let before = cache.snapshot(&vault).unwrap();
+        let after = cache.snapshot(&vault).unwrap();
+        assert!(Arc::ptr_eq(&before, &after));
+        assert_eq!(before.texts[0].source, after.texts[0].source);
+        assert!(before.texts[0].source.is_some());
+        assert_eq!(cache.reads(), 1);
+        let _ = std::fs::remove_dir_all(vault);
     }
 
     #[test]

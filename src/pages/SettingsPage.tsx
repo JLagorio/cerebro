@@ -1,4 +1,8 @@
+import { ConversationRetention } from '@/agent/ConversationRetention';
+import { RecoverySettings } from '@/history/RecoverySettings';
+import { WorkspaceBackupSettings } from '@/workspace/WorkspaceBackupSettings';
 import { ClientAccessSettings } from '@/app/ClientAccessSettings';
+import { ProductHelp } from '@/app/ProductHelp';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -21,6 +25,7 @@ import { Select } from '@/components/ui/Select';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { ConnectorSettings } from '@/app/ConnectorSettings';
+import { ManagedAccountSettings } from '@/app/ManagedAccountSettings';
 import { focusedConnector } from '@/agent/elements/connectorRow';
 import { TrashSettings } from '@/app/TrashSettings';
 import { MailSettings } from '@/app/MailSettings';
@@ -358,36 +363,37 @@ export function SettingsPage() {
   return (
     <div
       ref={scrollHost}
-      className="cb-settings min-h-0 min-w-0 flex-1 overflow-y-auto"
+      className="cb-settings cb-composition min-h-0 min-w-0 flex-1 overflow-y-auto"
       data-testid="settings-page"
     >
       {slot !== null
         ? createPortal(<PageNavigationContent>{sectionNavigation}</PageNavigationContent>, slot)
         : sectionNavigation}
-      <div className="cb-settings-content">
-        <p className="cb-settings-eyebrow">Settings</p>
-        <PageHeader
-          title={section.label}
-          description={section.description}
-          className="cb-settings-header"
-          headingTestId="settings-heading"
-          actions={
-            navigation && (
-              <span ref={sectionsControl}>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon="panel-left"
-                  onClick={() =>
-                    navigation.show(sectionsControl.current?.querySelector('button') ?? undefined)
-                  }
-                >
-                  Sections
-                </Button>
-              </span>
-            )
-          }
-        />
+      <PageHeader
+        title={section.label}
+        composition="utility"
+        metadata="Settings"
+        description={section.description}
+        className="cb-settings-header"
+        headingTestId="settings-heading"
+        actions={
+          navigation && (
+            <span ref={sectionsControl}>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon="panel-left"
+                onClick={() =>
+                  navigation.show(sectionsControl.current?.querySelector('button') ?? undefined)
+                }
+              >
+                Sections
+              </Button>
+            </span>
+          )
+        }
+      />
+      <div className="cb-settings-content cb-composition-content">
         {panel(
           'general',
           <>
@@ -462,6 +468,8 @@ export function SettingsPage() {
             >
               Change vault…
             </Button>
+            {vaultPath !== null && <RecoverySettings vault={vaultPath} />}
+            <WorkspaceBackupSettings />
           </section>,
         )}
         {panel('trash', <TrashSettings />)}
@@ -479,6 +487,7 @@ export function SettingsPage() {
               a card, or directly.
             </p>
             <ClaudeCodeRow active={selected === 'assistant'} />
+            <ConversationRetention active={selected === 'assistant'} />
             {vaultPath !== null && <PanelAgentRow vaultPath={vaultPath} entries={entries} />}
             <ShellAccessRow vaultPath={vaultPath} />
             <SettingRow
@@ -500,6 +509,7 @@ export function SettingsPage() {
               onChange={setConnectors}
             />
             {connectors && <ConnectorSettings active={selected === 'assistant'} />}
+            <ManagedAccountSettings active={selected === 'assistant'} />
             <CliWorkspaceRow />
             <div
               className={`cb-setting-row flex items-start gap-3 py-2 ${connectors ? '' : 'opacity-50'}`}
@@ -584,6 +594,7 @@ export function SettingsPage() {
             <p className="text-sm text-(--text-meta)">
               Cerebro <span className="[font-family:var(--font-mono)]">{APP_VERSION}</span>
             </p>
+            <ProductHelp />
           </section>,
         )}
       </div>

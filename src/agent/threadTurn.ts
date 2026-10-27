@@ -1,7 +1,8 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 import { readAddress } from '@/engine/agents';
 import type { Entry } from '@/engine/types';
-import { flushOpenPages } from '@/editor/openPages';
 import { useUiStore } from '@/stores/uiStore';
+import { getVaultOpening, useVaultStore } from '@/stores/vaultStore';
 import { startThreadTurn } from './agentIpc';
 
 /**
@@ -34,6 +35,17 @@ export async function askAgentInThread({
   text: string;
   entries: Entry[];
 }): Promise<void> {
+  const opening = getVaultOpening();
+  const current = () => {
+    const state = useVaultStore.getState();
+    return (
+      getVaultOpening() === opening &&
+      state.vaultPath === vault &&
+      state.entriesVault === vault &&
+      state.status === 'ready'
+    );
+  };
+  if (!current()) return;
   const address = readAddress(text, entries);
   if (address === null) return;
   const toast = useUiStore.getState().toast;
@@ -42,9 +54,9 @@ export async function askAgentInThread({
     return;
   }
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'block', current)) || !current()) return;
     await startThreadTurn(vault, { page, thread, message, handle: address.handle });
   } catch (err) {
-    toast(err instanceof Error ? err.message : String(err));
+    if (current()) toast(err instanceof Error ? err.message : String(err));
   }
 }

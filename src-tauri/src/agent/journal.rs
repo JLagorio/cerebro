@@ -191,6 +191,16 @@ impl Journal {
         }
     }
 
+    /// Selected opening retains no prior vault's journal. A reader still
+    /// closing its books releases its live journal when it finishes.
+    pub(super) fn release_all(&self) {
+        let mut runs = self.runs();
+        runs.retain(|_, journal| journal.finished.is_none());
+        for journal in runs.values_mut() {
+            journal.retain = false;
+        }
+    }
+
     /// What `run`, under the durable id `run_id`, said after the cursor
     /// `after`. `waiting` names the sessions whose card still waits, which
     /// keep their journals live. Sweeps first.

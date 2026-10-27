@@ -674,7 +674,9 @@ describe('TypePage visit state (M65.4)', () => {
     render(<Place />);
     fireEvent.click(screen.getByTestId('view-control-search'));
     fireEvent.change(screen.getByTestId('view-search-input'), { target: { value: 'flow' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Sort' }));
+    // The consolidated toolbar opens sorting in View options; the retained
+    // filter-bar state is still a visit preference, independently of that panel.
+    act(() => useNavStore.getState().setEntryState('view.controls', true));
     fireEvent.click(screen.getByLabelText('Open Design first-run flow'));
     expect(useUiStore.getState().detailPath).not.toBeNull();
     act(() => useNavStore.getState().navigate({ kind: 'settings' }));

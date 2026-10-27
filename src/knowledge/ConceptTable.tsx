@@ -102,11 +102,12 @@ const CONCEPT_MIN = 320;
  * full-width Status was the table giving up the word you were scanning for).
  * Once Summary and Updated have both stepped aside, a column narrower than
  * its longest title wraps them — the view's Wrap content, a row as tall as its
- * lines — down to this, and below it the table scrolls sideways in its own
- * box. It is low enough that the status, the reason a row is here, stays on
- * screen beside a wrapped title.
+ * lines — down to this. Below the complete Concept/Status budget, the same
+ * two cells stack rather than sacrificing meaningful title width.
  */
 const CONCEPT_WRAP_MIN = 200;
+/** Title nesting slot/icon/gaps, less the status cell's existing 12px inset. */
+const STATUS_TITLE_OFFSET = TITLE_INSET + 16 + 13 + 16 - 12;
 /** A summary narrower than this is a word and an ellipsis; it steps aside. */
 const SUMMARY_MIN = 200;
 /** The status column before its words are measured (jsdom never measures),
@@ -147,6 +148,8 @@ export interface Plan {
    * or at its wrapping floor once it is the one that fills. Null before
    * layout. */
   minWidth: number | null;
+  /** The final two cells share a text track when their complete budget cannot fit. */
+  stacked?: boolean;
 }
 
 /**
@@ -177,6 +180,7 @@ export function planFor(
   // The titles' whole width: while the summary is drawn, the column is this.
   const need = Math.max(CONCEPT_MIN, titleNeed);
   let concept = need;
+  const conceptFloor = CONCEPT_WRAP_MIN;
   if (width !== null) {
     // What the summary would get beside it.
     const room = () => width - set() - need;
@@ -190,7 +194,7 @@ export function planFor(
       // fall under the titles' width — never under `CONCEPT_MIN` — and once
       // it is gone they wrap, down to the floor.
       if (width - set() < need) columns = without('updated');
-      concept = Math.max(CONCEPT_WRAP_MIN, width - set());
+      concept = Math.max(conceptFloor, width - set());
     }
   }
   const fill = columns.includes('summary') ? 'summary' : 'concept';
@@ -205,11 +209,19 @@ export function planFor(
     widths,
     fill,
     wrap: concept < titleNeed,
-    minWidth: width === null ? null : set() + (fill === 'concept' ? CONCEPT_WRAP_MIN : concept),
+    minWidth: width === null ? null : set() + (fill === 'concept' ? conceptFloor : concept),
   };
 }
 
 function cellStyle(plan: Plan, column: Column): React.CSSProperties {
+  if (plan.stacked) {
+    return {
+      gridColumn: 2,
+      gridRow: column === 'concept' ? 1 : 2,
+      minWidth: 0,
+      borderRightWidth: 0,
+    };
+  }
   // The filling column's width is whatever is left, so it is laid out by
   // flex rather than set: a width the plan computed would lag the box by a
   // frame on every resize. The table's own floor keeps it from going under.
@@ -377,6 +389,7 @@ function StatusCell({
   proposals,
   here,
   titleOf,
+  stacked,
 }: {
   layout: Layout;
   status: RowStatus;
@@ -384,6 +397,7 @@ function StatusCell({
   /** The concept this row is, so a link names its other end. */
   here: string;
   titleOf: (path: string) => string;
+  stacked: boolean;
 }) {
   const n = proposals.length;
   const mark = markOf(proposals);
@@ -397,23 +411,34 @@ function StatusCell({
     }),
   ].filter((line) => line !== '');
   return (
-    // Inline and unshrinking, so its box is its words' width even where the
-    // cell clips it — what the column measures to fit.
-    <span data-status-fit className="inline-flex flex-none items-center">
-      <SelectValue
-        color={dotColor(status.dot)}
-        label={status.label}
-        strong={status.strong}
-        title={status.title}
-        testId={status.testId}
-        data={{ ...status.data, 'data-status-value': '' }}
-      />
+    // Each unit keeps its intrinsic width; compact wrapping changes only
+    // the container, never the units used to measure the normal table.
+    <span
+      data-status-fit
+      className="inline-flex flex-none items-center"
+      style={
+        stacked
+          ? { flexWrap: 'wrap', width: '100%', minWidth: 0, paddingLeft: STATUS_TITLE_OFFSET }
+          : undefined
+      }
+    >
+      <span data-status-unit className="inline-flex flex-none whitespace-nowrap">
+        <SelectValue
+          color={dotColor(status.dot)}
+          label={status.label}
+          strong={status.strong}
+          title={status.title}
+          testId={status.testId}
+          data={{ ...status.data, 'data-status-value': '' }}
+        />
+      </span>
       {n > 0 && (
         <span
           data-testid={layout === 'queue' ? 'queue-proposal' : 'concept-proposal'}
+          data-status-unit
           data-count={n}
           data-links={mark.links.length}
-          className="flex-none text-xs font-medium"
+          className="flex-none whitespace-nowrap text-xs font-medium"
           style={{ color: 'var(--text-ai)' }}
         >
           <span title={hover.join('\n')}>{mark.text}</span>
@@ -476,21 +501,40 @@ function Sources({ concept }: { concept: Concept }) {
 /** The gutter a view's row keeps for its insert, checkbox and grip. Nothing
  * here edits, so it holds nothing — and is kept so a title starts where a
  * view's does. */
-function Gutter() {
-  return <div aria-hidden className="flex-none" style={{ width: GUTTER }} />;
+function Gutter({ stacked = false }: { stacked?: boolean }) {
+  return (
+    <div
+      aria-hidden
+      className="flex-none"
+      style={{ width: GUTTER, gridRow: stacked ? '1 / span 2' : undefined }}
+    />
+  );
+}
+
+function stackedRowStyle(plan: Plan): React.CSSProperties | undefined {
+  return plan.stacked
+    ? { display: 'grid', gridTemplateColumns: `${GUTTER}px minmax(0, 1fr)` }
+    : undefined;
 }
 
 function HeaderRow({ plan }: { plan: Plan }) {
   return (
-    <div role="row" className={TABLE_ANATOMY.headerRow}>
-      <Gutter />
+    <div
+      role="row"
+      className={TABLE_ANATOMY.headerRow}
+      style={plan.stacked ? { ...stackedRowStyle(plan), gridTemplateRows: '18px 18px' } : undefined}
+    >
+      <Gutter stacked={plan.stacked} />
       {plan.columns.map((column) => (
         <div
           key={column}
           role="columnheader"
           data-column={column}
           className={`${column === 'concept' ? TABLE_ANATOMY.titleHeader : TABLE_ANATOMY.header} items-center`}
-          style={cellStyle(plan, column)}
+          style={{
+            ...cellStyle(plan, column),
+            paddingLeft: plan.stacked ? TITLE_INSET : undefined,
+          }}
         >
           <Icon name={HEAD[column].icon} size={12} color="var(--n-400)" className="flex-none" />
           <span className="min-w-0 truncate">{HEAD[column].label}</span>
@@ -540,6 +584,9 @@ function ConceptRow({
             type="button"
             data-testid="concept-open"
             aria-label={`Open ${concept.title}`}
+            // This is a text action in an icon-sized shared slot. Keep its
+            // word whole; titleNeed measures the control's actual width.
+            style={{ width: 'max-content', minWidth: 28, paddingInline: 6, whiteSpace: 'nowrap' }}
             className={
               plan.wrap
                 ? // Beside wrapping titles it floats at the end of the first
@@ -551,7 +598,7 @@ function ConceptRow({
                   // under its lower edge — while a one-line title's row is
                   // no taller for it.
                   `${TABLE_ANATOMY.openPill} float-right -mb-[2px] -mt-[3px] ml-1.5`
-                : TABLE_ANATOMY.openPill
+                : `${TABLE_ANATOMY.openPill} order-2`
             }
           >
             Open
@@ -565,26 +612,30 @@ function ConceptRow({
             <Icon name="file-text" size={13} color="var(--n-400)" className="flex-none" />
             <span
               data-concept-title-box
-              className={[
-                // Wrapped rather than cut when the column is narrower than
-                // the title: the view's Wrap content, on the one column that
-                // is never given up.
+              // Wrapped rather than cut when the column is narrower than
+              // its title. Normal rows keep text and Open on one flex line.
+              className={
                 plan.wrap
                   ? `min-w-0 flex-1 text-left text-sm text-n-900 ${TABLE_ANATOMY.wrap}`
-                  : TABLE_ANATOMY.title,
-                replaced ? 'line-through' : '',
-              ].join(' ')}
+                  : `${TABLE_ANATOMY.title} flex items-center gap-2`
+              }
               // M8.7 — struck through, not hidden: what was believed before
               // stays readable.
               style={replaced ? { color: 'var(--n-400)' } : undefined}
             >
-              {/* A float leads what flows around it. */}
-              {plan.wrap && open}
-              {/* Inline, so its box is the text's own width even where the
-                  cell clips it — what the column measures to fit. */}
-              <span data-concept-title>{concept.title}</span>
+              {/* One physical opener in both layouts. A float leads wrapped
+                  text; flex order puts it after the text on a normal row. */}
+              {open}
+              <span
+                data-concept-title
+                className={[
+                  plan.wrap ? '' : 'order-1 min-w-0 flex-1 truncate',
+                  replaced ? 'line-through' : '',
+                ].join(' ')}
+              >
+                {concept.title}
+              </span>
             </span>
-            {!plan.wrap && open}
           </>
         );
       }
@@ -603,9 +654,13 @@ function ConceptRow({
         );
       case 'status':
         return (
-          <span data-testid="concept-status" className="flex min-w-0">
+          <span
+            data-testid="concept-status"
+            className={`flex min-w-0 ${plan.stacked ? 'flex-1' : ''}`}
+          >
             <StatusCell
               layout={layout}
+              stacked={plan.stacked === true}
               status={statusOf(layout, concept, queued, entries, today)}
               proposals={proposals}
               here={concept.entry.path}
@@ -648,8 +703,9 @@ function ConceptRow({
         // The keyboard cursor, drawn as a view's table draws its own.
         'cursor-pointer outline-none has-[:focus-visible]:bg-cortex-50 has-[:focus-visible]:shadow-[inset_2px_0_0_var(--cortex-500)] data-[focused=true]:bg-cortex-50 data-[focused=true]:shadow-[inset_2px_0_0_var(--cortex-500)]',
       ].join(' ')}
+      style={stackedRowStyle(plan)}
     >
-      <Gutter />
+      <Gutter stacked={plan.stacked} />
       {plan.columns.map((column) => (
         <div
           key={column}
@@ -665,7 +721,11 @@ function ConceptRow({
           style={
             column === 'concept'
               ? { ...cellStyle(plan, column), paddingLeft: TITLE_INSET }
-              : cellStyle(plan, column)
+              : {
+                  ...cellStyle(plan, column),
+                  // Compact status keeps space below, without changing measured cell insets.
+                  ...(plan.stacked ? { paddingBottom: 6 } : {}),
+                }
           }
         >
           {cell(column)}
@@ -695,26 +755,40 @@ function titleNeed(table: HTMLElement): number | null {
     const cell = text.closest<HTMLElement>('[role="cell"]');
     if (box === null || cell === null) continue;
     text.style.whiteSpace = 'nowrap';
-    const line = text.getBoundingClientRect().width;
+    // The normal text is a flexible child beside Open. Measure its glyphs,
+    // not that allocated box, to keep the intrinsic title budget unchanged.
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const line = range.getBoundingClientRect().width;
     text.style.whiteSpace = '';
     const style = getComputedStyle(cell);
     const pill = cell.querySelector<HTMLElement>('[data-testid="concept-open"]')?.offsetWidth ?? 0;
     const before = box.getBoundingClientRect().left - cell.getBoundingClientRect().left;
     const after =
-      // `gap-1.5` before the pill, then the cell's padding and its rule.
+      // Keep the established gap allowance, then the cell's padding/rule.
       6 + pill + parseFloat(style.paddingRight) + parseFloat(style.borderRightWidth);
     widest = Math.max(widest, before + line + after);
   }
   return widest > 0 ? Math.ceil(widest) + 2 : null;
 }
 
-function statusNeed(table: HTMLElement): number | null {
+function statusNeed(table: HTMLElement, separateUnits = false): number | null {
   let widest = 0;
   for (const fit of table.querySelectorAll<HTMLElement>('[data-status-fit]')) {
-    widest = Math.max(widest, fit.getBoundingClientRect().width);
+    const cell = fit.closest<HTMLElement>('[role="cell"]');
+    if (cell === null) continue;
+    // Units never shrink or wrap internally. Sum their intrinsic widths,
+    // rather than the fit container, whose compact presentation can wrap.
+    const units = [...fit.querySelectorAll<HTMLElement>('[data-status-unit]')];
+    const widths = units.map((unit) => unit.getBoundingClientRect().width);
+    const content = separateUnits
+      ? Math.max(0, ...widths)
+      : widths.reduce((sum, width) => sum + width, 0);
+    const style = getComputedStyle(cell);
+    const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    widest = Math.max(widest, content + padding + parseFloat(style.borderRightWidth));
   }
-  // The cell's own padding (px-2 each side) and its rule.
-  return widest > 0 ? Math.ceil(widest) + 16 + 1 + 2 : null;
+  return widest > 0 ? Math.ceil(widest) + 2 : null;
 }
 
 /**
@@ -724,10 +798,11 @@ function statusNeed(table: HTMLElement): number | null {
 function useTable(layout: Layout, content: string) {
   const [measureRef, width] = useMeasuredWidth();
   const tableRef = useRef<HTMLDivElement | null>(null);
-  const [need, setNeed] = useState<{ title: number | null; status: number | null }>({
-    title: null,
-    status: null,
-  });
+  const [need, setNeed] = useState<{
+    title: number | null;
+    status: number | null;
+    unit: number | null;
+  }>({ title: null, status: null, unit: null });
   // Nothing is measured before the table has a width: jsdom lays nothing
   // out, and the plan draws every column until it knows better. A width
   // change moves no title's need, so only the first one counts.
@@ -740,10 +815,17 @@ function useTable(layout: Layout, content: string) {
       if (!live) return;
       const title = titleNeed(table);
       const status = statusNeed(table);
+      const unit = statusNeed(table, true);
       setNeed((prev) =>
-        (title ?? prev.title) === prev.title && (status ?? prev.status) === prev.status
+        (title ?? prev.title) === prev.title &&
+        (status ?? prev.status) === prev.status &&
+        (unit ?? prev.unit) === prev.unit
           ? prev
-          : { title: title ?? prev.title, status: status ?? prev.status },
+          : {
+              title: title ?? prev.title,
+              status: status ?? prev.status,
+              unit: unit ?? prev.unit,
+            },
       );
     };
     measure();
@@ -754,10 +836,25 @@ function useTable(layout: Layout, content: string) {
       live = false;
     };
   }, [content, laidOut]);
-  const plan = useMemo(
-    () => planFor(layout, width, need.title ?? CONCEPT_MIN, need.status ?? STATUS_DEFAULT),
-    [layout, width, need],
-  );
+  const plan = useMemo(() => {
+    const normal = planFor(layout, width, need.title ?? CONCEPT_MIN, need.status ?? STATUS_DEFAULT);
+    const stacked =
+      width !== null &&
+      normal.columns.length === 2 &&
+      width < GUTTER + CONCEPT_WRAP_MIN + (normal.widths.status ?? STATUS_DEFAULT);
+    return stacked
+      ? {
+          ...normal,
+          stacked: true,
+          wrap: true,
+          // A complete status/proposal unit can still require real overflow.
+          minWidth: Math.max(
+            GUTTER + CONCEPT_WRAP_MIN,
+            GUTTER + STATUS_TITLE_OFFSET + (need.unit ?? STATUS_DEFAULT),
+          ),
+        }
+      : normal;
+  }, [layout, width, need]);
   return { measureRef, tableRef, plan, width };
 }
 

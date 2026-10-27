@@ -165,3 +165,112 @@ describe('the rail’s Settings focus', () => {
     expect(focusedConnector(null)).toBeNull();
   });
 });
+
+describe('M96.4a connectorRow ownership facts', () => {
+  const legacy = http('m96-http', {
+    url: 'https://m96-route.example.test/mcp',
+    extra: { headers: { Authorization: 'm96-header-sentinel' }, oauth: { scopes: 'read write' } },
+  });
+  const oldApproval = approvalKey(legacy) as string;
+  const marked = (marker: Record<string, unknown>, enabled = true): ConnectorSpec => ({
+    ...legacy,
+    enabled,
+    extra: { ...legacy.extra, ...marker },
+  });
+  const reads: ConnectorStatusRead[] = [
+    { kind: 'loading' },
+    { kind: 'unavailable', reason: 'no runtime database' },
+    ready(),
+    ...(['working', 'needs_sign_in'] as const).map((state) =>
+      ready(
+        seen({
+          connector: legacy.name,
+          cli_name: legacy.name,
+          state,
+          seen_at: '2026-10-13T10:00:00.000Z',
+          run_id: 'historical-run',
+        }),
+      ),
+    ),
+  ];
+
+  it('m96_owner_managed_row_is_non_callable_even_when_off_or_status_is_unavailable', () => {
+    expect(connectorRow(legacy, [oldApproval], reads[3]).status.key).toBe('working');
+    for (const enabled of [true, false]) {
+      for (const status of reads) {
+        const row = connectorRow(
+          marked({ executionOwner: 'cerebro' }, enabled),
+          [oldApproval],
+          status,
+        );
+        expect(row.status.words).toMatch(/managed.*unavailable/i);
+        expect(row.approval).toBeNull();
+        expect(row.signIn).toBe(false);
+        expect(row.command).toBeNull();
+        expect(row.observedAt).toBeNull();
+        expect(row.quiet).toBe(false);
+        expect(row.status.words).not.toMatch(/working|needs sign-in|not observed yet/i);
+      }
+    }
+  });
+
+  it('m96_owner_invalid_and_orphan_rows_need_file_correction_independently_of_status', () => {
+    for (const marker of [
+      ...([null, 7, true, '', 'Cerebro', 'CLI', 'unknown', [], {}] as unknown[]).map(
+        (executionOwner) => ({ executionOwner }),
+      ),
+      { secretRef: null },
+      { executionOwner: 'cli', secretRef: { opaque: 'm96-reference-sentinel' } },
+    ]) {
+      for (const status of reads) {
+        const row = connectorRow(marked(marker), [oldApproval], status);
+        expect(row.status.words).toMatch(/ownership/i);
+        expect(row.status.words).toMatch(/file|correct/i);
+        expect(row.status.words).not.toMatch(/managed.*unavailable/i);
+        expect(row.approval).toBeNull();
+        expect(row.signIn).toBe(false);
+        expect(row.command).toBeNull();
+        expect(row.observedAt).toBeNull();
+        expect(row.quiet).toBe(false);
+      }
+    }
+  });
+
+  it('m96_owner_approval_display_and_signin_fallback_do_not_reveal_raw_routes', () => {
+    for (const marker of [
+      { executionOwner: 'cerebro', secretRef: { opaque: 'm96-reference-sentinel' } },
+      { executionOwner: 'unknown' },
+      { secretRef: null },
+    ]) {
+      for (const spec of [
+        marked(marker),
+        {
+          ...marked(marker),
+          transport: 'stdio' as const,
+          command: 'm96-unexecuted-command',
+          args: ['m96-arg-sentinel'],
+          extra: { ...marker, env: { TOKEN: 'm96-env-sentinel' } },
+        },
+      ]) {
+        const display = approvalLine(spec);
+        for (const payload of [
+          'https://m96-route.example.test/mcp',
+          'm96-header-sentinel',
+          'm96-unexecuted-command',
+          'm96-arg-sentinel',
+          'm96-env-sentinel',
+          'm96-reference-sentinel',
+        ])
+          expect(display).not.toContain(payload);
+        expect(signInWithout(spec)).not.toMatch(/run claude|\/mcp|then sign in/i);
+      }
+    }
+    expect(approvalLine(legacy)).toContain('m96-header-sentinel');
+    expect(connectorRow(legacy, [oldApproval], reads[4]).signIn).toBe(true);
+    const explicit = marked({ executionOwner: 'cli' });
+    expect(connectorRow(explicit, [oldApproval], reads[4])).toEqual({
+      ...connectorRow(legacy, [oldApproval], reads[4]),
+      spec: explicit,
+    });
+  });
+});

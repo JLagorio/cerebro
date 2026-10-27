@@ -14,7 +14,7 @@
 
 **Spec:** [Reliability design](../specs/2026-10-23-m93-reliable-workspace-design.md).
 
-**Status: DRAFT FOR OWNER REVIEW.** All commands/tests below are future instructions; none were executed to establish application behavior for this proposal. No implementation is authorized by this document. Create an isolated workspace at execution time. Do not change the existing uncommitted work during proposal review.
+**Status:** Implementation authorized by the owner on 2026-10-23, on the existing branch alongside Claude's M92 work. The [implementation record](2026-10-23-m93-m99-implementation-record.md) distinguishes verified slices from open work. Commands below are phase requirements, not test results. Conditional owner decisions and native acceptance remain explicit gates; M93 is not complete.
 
 ## Global Constraints
 
@@ -53,7 +53,7 @@
 | Source and recovery              | Proposed `editor/SourceBodyEditor.tsx`; `vault/write.rs`, `vault/parse.rs`; proposed gated `vault/recovery.rs`                                                                     |
 | Help and native evidence         | Proposed `shared/help/`, `scripts/build-help.ts`, `src/app/ProductHelp.tsx`; proposed `docs/acceptance/2026-10-23-reliability/`                                                    |
 
-M93.1 produces `SaveOutcome`/`FlushReport` exactly as REL-02 in the spec; CHAT launch and FLOW capture consume that barrier instead of creating another save path. M93.3 produces stable run identity/origin for CHAT and KNOW. CHAT owns the live CLI case matrix, sanitization and capability proof. ACT reviews a possible help tool through its shared manifest/policy workflow; the human help catalog is independently useful. CORE extraction must preserve these contracts and current file authority. UX owns entry placement and visual consistency, not save/history state semantics.
+M93.1 produces `SaveOutcome`/`FlushReport` as REL-02 in the spec, including the 2026-10-23 `clean` no-op clarification (resolved, with no write or invented hash); CHAT launch and FLOW capture consume that barrier instead of creating another save path. M93.3 produces stable run identity/origin for CHAT and KNOW. CHAT owns the live CLI case matrix, sanitization and capability proof. ACT reviews a possible help tool through its shared manifest/policy workflow; the human help catalog is independently useful. CORE extraction must preserve these contracts and current file authority. UX owns entry placement and visual consistency, not save/history state semantics.
 
 ### M93.1 — Retain document generations and authoritative acknowledgements
 
@@ -100,7 +100,29 @@ Each participant supplies `prepareLeave():Promise<SaveOutcome>` while its view/b
 
 **Files:** Modify `src/status/AgentRunHistory.tsx`, `RunDetailPanel.tsx`, their tests, `src/lib/ipc.ts`, `src/lib/mockIpc.ts`, `src-tauri/src/runtime/fleet.rs`, `src-tauri/src/lib.rs`; add proposed `src/lab/sections/agentRunHistory.tsx` and register it with the existing lab registry discovered at execution.
 
+Review repair file map: `src/app/leaveGuard.ts` and its tests reserve/reuse the
+existing navigation intent; `src/stores/vaultStore.ts` accepts its optional
+handoff; only `src/stores/navStore.ts`'s reset lines transfer a still-current
+accepted intent to the new pane; `src/app/LastPlaceHost.tsx` and its owning tests
+defer automatic restoration to that explicit pending destination.
+
 **Interfaces:** Consumes M93.3 and M93.2. Selection is `{rowKey,runId,originVaultId,requestGeneration}`; detail/subsections use loading/ready/unavailable plus explicit not-recorded values inside ready data. Produces origin resolution `{kind:'registered',vault:string}|{kind:'unavailable'}|{kind:'not_recorded'}` for run links.
+
+2026-10-23 implementation review clarification: origin-link activation retains its
+own latest-intent generation through origin resolution and the save barrier.
+`openVault(path, {stillCurrent?: () => boolean, leaveIntent?: LeaveIntent}?)` remains backward compatible;
+the predicate is checked before reserving a switch request and after flushing,
+immediately before active-vault mutation. A canceled call cannot supersede a
+valid newer request. Once accepted, existing scan/open tickets remain in control.
+Only the activation's own accepted vault switch may hand its destination across
+source-host retirement; run replacement, explicit close and newer activation
+invalidate the old intent. Pending-decision Review links obey this same contract.
+The existing leave guard reserves the pane's intent before the first async
+origin lookup. Reusing it after saves/scans never gives an old request a new
+sequence. Only its own synchronous accepted switch/reset can transfer a still-
+current intent to the new pane; a newer ordinary navigation cancels it during
+origin lookup, save or scan. Explicit reservations retire on completion/cancel;
+historical ordinary tickets cannot suppress automatic last-place restoration.
 
 - [ ] Test rapid A→B with A resolving last, close while pending, same row Retry, scope change, unavailable Knowledge read, missing origin, and matching paths in two vaults. Preserve the current recursive child detail mount with a regression test; do not reimplement it.
 - [ ] Run the two status test files; expect stale-selection/origin assertions to fail before repair.

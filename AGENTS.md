@@ -105,6 +105,15 @@ enforced: `.github/workflows/mac-app.yml`
   the page without taking canvas width. Floating, docked panel
   and roomy canvas presentations share one instance; minimizing and presentation
   changes preserve its thread, draft, streaming turn and pending approvals.
+  In the canvas alone, a 300px rail of "Conversation details" sits beside the
+  transcript (M92.1). It docks when the chat frame is at least 960px wide and
+  opens as a drawer below that. Its header button and ⌥⌘R (`assistant.rail`)
+  toggle it. Where it docks, it shows as the stored `cerebro.chatRailOpen`
+  says (on by default); the drawer is for the session and never writes it.
+  Switched off, or while a new conversation welcomes and nobody has opened
+  it, it is unmounted; a folded rail stays mounted and reads nothing. Its rows
+  act inside the canvas, and a secondary open floats the assistant before it
+  opens a page, since the canvas hides the page and the record peek.
   `app/PageNavigation.tsx` lets
   Inbox, Settings, Work and open Studio projects lend their existing navigation
   to the active pane's context sidebar; Assistant canvas takes priority.
@@ -181,6 +190,26 @@ enforced: `.github/workflows/mac-app.yml`
   CV-56 doors on send (`agent/attachments.ts`); and Settings' Subagents
   switch (`cerebro.agentDelegate`, on by default) sends the delegate ceiling
   with every panel turn (CV-29).
+  The canvas's "Conversation details" rail is `agent/rail/` (M92):
+  `ConversationRail.tsx` wires its cards in one order (Waiting on you, Plan,
+  Subagents, Changes, Handed off, Context, Sources, Connectors, Environment)
+  on the presentation-only `components/ai/Rail.tsx`. It takes memoized views,
+  never the messages, so a streamed word draws no card, and no card reads
+  while the rail is folded. The views are adapters in `agent/elements/`:
+  `railSubagents.ts` and `railWaiting.ts` (M92.4), `conversationChanges.ts`
+  (M92.5), `railSources.ts` (M92.6), `railConnectors.ts` and
+  `railEnvironment.ts` (M92.9), `railHandoffs.ts` (M92.11), `contextCard.ts`
+  (M92.14) and `railPlan.ts` (M92.17); `connectorRow.ts` is the connector
+  derivation the rail shares with Settings (M92.9). A row's jump reaches the
+  transcript through Chat's scroller and `agent/stepReveal.ts` (M92.4). In
+  `engine/ai/`, `threadStatus.ts` ranks the conversation list's Working and
+  Needs you chips, which `agent/threadStatusStore.ts` keeps in memory (M92.3,
+  M92.7); `conversationChanges.ts` sums a conversation's commits run by run
+  for Changes (M92.3); and `contextBreakdown.ts` reads Claude Code's context
+  breakdown off the wire (M92.14). `agent/useChangesHeal.ts` asks
+  `conversation_changes` for the runs no reply holds, and only while the rail
+  shows (M92.12). A reply's chain reads "Worked for", the sum of its runs'
+  `duration_ms`, which rides each turn's journaled Result event (M92.2).
 - `src-tauri/src/` — Rust: `vault/` (scan/parse/write, and `comments.rs`,
   each page's comment sidecar under `.comments/`; `receipt.rs` is the
   receipt every write carries, minted only by its door's guard, M58.1;
@@ -219,7 +248,12 @@ enforced: `.github/workflows/mac-app.yml`
   formula prefixes. Both save outside the vault through a native dialog (M67.4b).
   CSV uses `readCsvText` and the existing raw-record reader. Choosing a file
   writes nothing; Import creates one root page in one undoable human batch,
-  `git/`, `forge.rs` (the human page's read-only GitHub PR state, through the
+  `git/` (`conversation.rs` answers `conversation_changes` for the rail's
+  Changes card: the ended runs runtime.db holds for a conversation's session,
+  read through `ReadOnly`, the commits `run_commits` records for them and one
+  bounded `git show` each, with what only a run's own reader knew read as not
+  recorded, M92.12),
+  `forge.rs` (the human page's read-only GitHub PR state, through the
   person's own `gh`, with bounded children and an in-memory cache; shared
   `pr-urls.json` and `pr-cases.json` hold its frontend contract, M69.11), `mcp.rs`
   (the runs' loopback MCP server, one of whose workers `SeamReserve` keeps
@@ -237,7 +271,12 @@ enforced: `.github/workflows/mac-app.yml`
   name (M91.2b); `meter.rs`'s `ContextBook` holds each attended session's
   latest context reading in memory only, never emitted, journaled, logged or
   stored, for `agent_context_usage` to answer when the composer asks (M91.5,
-  the owner's Q7 narrowing of M25.2); `interaction.rs` is the
+  the owner's Q7 narrowing of M25.2), with Claude Code's own breakdown of it
+  when a seated run answered its context ask, memory files' paths and tool
+  names dropped (M92.13); `turn_input.rs` owns a seated run's stdin, the one
+  writer of its prompt line, its one `get_context_usage` ask and the close
+  (M92.13, CV-65); `mod.rs`'s `Reach` event says what a run reaches, built
+  from the values its argv is built from (M92.8); `interaction.rs` is the
   ask seam's book, where a run waits on a call and only a person's answer
   resumes it, and where the Allow of an ask-first agent's page write waits
   for dispatch: an Agent record's `ask-first:` and the tool manifest's
@@ -327,6 +366,12 @@ enforced: `.github/workflows/mac-app.yml`
   in `docs/superpowers/plans/` and `docs/superpowers/specs/` and are tracked
   normally (the old `docs/archive/superpowers/` path and its `git add -f`
   ritual are gone).
+- **Verification output stays local** (owner direction, 2026-10-25).
+  `docs/acceptance/`, agent scratch, browser captures, run logs and copied source
+  snapshots are ignored. Never force-add them. Keep concise results and decisions
+  in the tracked milestone records; links to raw evidence are local-only and
+  unavailable in a fresh checkout. Maintained tests, fixtures and runner source
+  in `src/`, `src-tauri/`, `scripts/` and `conformance/` remain tracked.
 - `scripts/` — seeders, mac packaging and repo-level guard tests. Typechecked
   via `tsconfig.tools.json`. `scripts/cli-record/` is the CLI recording kit
   (M56.1): it records Claude Code in an isolated config outside the repo
@@ -552,9 +597,11 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   replayed, `transcript.rs` hands the fold the `<session>/subagents/`
   transcripts beside the session file, and the fold merges them by time. A
   third reader of either format is a defect; the meter's Tally reads raw
-  lines for accounting and the context reading only (M91.5), and
-  `transcript::pending_deferral` and `cli_writes::held_call` read the session
-  file's tail only for an open deferral and the call it holds (M57.1, M58.3).
+  lines for accounting and the context reading only (M91.5), and for that
+  reading's breakdown the one `control_response` that answers a seated run's
+  context ask (M92.13); `transcript::pending_deferral` and
+  `cli_writes::held_call` read the session file's tail only for an open
+  deferral and the call it holds (M57.1, M58.3).
   enforced: `src-tauri/src/agent/fold.rs::every_recorded_line_is_classified`, `src/agent/transcript.test.ts::replays the transcript goldens`, `src-tauri/src/agent/fold.rs::a_subagent_replays_from_its_own_transcript_as_it_streamed`
 - **CV-28 A run waits; only a person answers** (M57.1). A run asks through
   its own loopback connection and can only wait: no MCP tool, hook or bearer
@@ -585,8 +632,12 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   enforced: `src-tauri/src/policy/tool_approval.rs::replays_the_tool_approval_goldens`, `src/lib/policy/toolApproval.test.ts::replays the tool-approval goldens`, `src-tauri/src/agent/mod.rs::an_init_offering_an_unknown_built_in_ends_the_run`, `src-tauri/src/agent/mod.rs::an_init_offering_an_unexpected_agent_type_ends_the_run`
 - **CV-30 A turn outlives its panel** (M57.6). Closing the assistant,
   switching threads or starting a new one detaches a running turn and never
-  stops it; only Stop, Steer, deleting its thread, a vault switch and quit
-  end a run. Every live event carries a run-local seq, and the panel
+  stops it; only Stop, Steer, deleting an old unbound browser-only thread,
+  a vault switch and quit end a run. The approved opt-in conversation archive
+  (M95) changes deletion for native-bound/archive-backed threads: Delete asks
+  the original native owner and refuses while a generation, child, effect or
+  approval remains active. It never implicitly calls Stop or cancels a card;
+  the person resolves that work explicitly before retrying deletion. Every live event carries a run-local seq, and the panel
   re-attaches through `agent_events_since`, so each event shows once.
   enforced: `src/agent/useAgentChat.test.tsx::closing the panel mid-turn detaches and never stops the run`, `e2e/agent-detach.spec.ts`
 - **CV-31 Comments live beside the page, never in it** (M70.2). A page's
@@ -915,13 +966,16 @@ disabled reuse there).
   references afterward. Image requests carry no referrer; Rust makes none.
   enforced: `scripts/lint-rails.test.ts::only the image components draw <img>`, `src/components/RemoteImage.test.tsx::draws no img until Load and sends no referrer`, `e2e/remote-images.spec.ts`
 
-- **CV-62 Drafts only, never send** (D15, M69.10). No cerebro tool sends
-  mail. Every run holding configured connectors denies each `never_call` tool
-  in `shared/policy/tools.v1.json` by its exact CLI name on every server it
-  holds; record and skill allows cannot remove one. Foreign calls show their
-  server and never claim a vault diff. SECURITY.md records the exact-name and
-  inherited-connector limits.
-  enforced: `src-tauri/src/agent/mod.rs::a_connector_run_is_denied_every_send_tool_by_name`, `src-tauri/src/policy/tools.rs::no_tool_reaches_outside_the_app`
+- **CV-62 Mail is drafts only, never send** (D15, M69.10; M96 managed actions).
+  No cerebro tool sends mail. Every run holding configured connectors denies
+  each `never_call` tool in `shared/policy/tools.v1.json` by its exact CLI
+  name on every server it holds; record and skill allows cannot remove one.
+  The sole app-owned external tool, `prepare_action`, uses the original
+  native run's account grants and holds each supported consequential change
+  for its own explicit person approval. It grants no mail send or publish
+  capability. Foreign calls show their server and never claim a vault diff.
+  SECURITY.md records the exact-name and inherited-connector limits.
+  enforced: `src-tauri/src/agent/mod.rs::a_connector_run_is_denied_every_send_tool_by_name`, `src-tauri/src/policy/tools.rs::only_the_held_managed_action_tool_reaches_outside_the_app`
 
 - **CV-63 No native selects** (owner, 2026-10-18). Every select is the design
   system's `Select` (`src/components/ui/Select.tsx`), or `Dropdown`, which
@@ -940,6 +994,24 @@ disabled reuse there).
   walks every module the layer names, aliased or relative, types included,
   and every app module it loads at run time, however indirectly.
   enforced: `src/components/ai/boundary.test.ts::the AI element layer is presentation only (CV-64)`
+
+- **CV-65 A seated run's stdin closes on every exit path, and carries only a
+  prompt or the context ask** (M92.13). A seated run, a conversation a person
+  watches, on a Claude Code new enough for its gate and with words to send,
+  takes its message on stdin (`--input-format stream-json`), so that its own
+  process can say how full its context is. Every other run, an answer's
+  resume included, keeps its message in argv, last, after `--`.
+  `src-tauri/src/agent/turn_input.rs` is the only caller of `take_stdin` for a
+  CLI run, and its closed `TurnMessage` enum writes three things: the prompt
+  as one user line, one `get_context_usage` ask after the run's first result,
+  and the close. No permission, interrupt, mode change or hook answer is ever
+  written (CV-28, CV-29, CV-32). Stdin closes on the ask's answer; on any
+  `control_request` from the CLI, which refuses that call; after
+  `CONTEXT_ASK_WAIT` with no answer; and whenever the reader lets go: at the
+  stream's end, a panic, an init refusal, Stop and quit. Once the ask is
+  written, a run still there `CONTEXT_ASK_WAIT` after the close is ended,
+  TERM then KILL.
+  enforced: `src-tauri/src/agent/turn_input.rs::the_turn_input_writes_only_a_prompt_or_the_context_ask`, `src-tauri/src/agent/turn_input.rs::only_the_turn_input_takes_a_runs_stdin`, `src-tauri/src/agent/mod.rs::only_a_seated_turn_with_words_takes_its_message_on_stdin`, `src-tauri/src/agent/mod.rs::a_request_from_the_cli_closes_stdin_unanswered`, `src-tauri/src/agent/mod.rs::a_dead_runs_stdin_closes_with_its_stream`, `src-tauri/src/agent/mod.rs::an_init_refusal_closes_the_runs_stdin`, `src-tauri/src/agent/mod.rs::a_stopped_seated_run_ends_within_its_grace`, `src-tauri/src/agent/mod.rs::a_run_that_holds_its_stdin_open_is_ended_after_the_readers_deadline`
 
 ## Dev skills
 

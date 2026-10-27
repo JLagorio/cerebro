@@ -7,6 +7,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { LastPlaceHost } from './LastPlaceHost';
 import { PANE_LAYOUT_KEY } from './paneLayoutPersistence';
 import { LAST_PLACE_KEY, readLastPlace, rememberLastPlace } from './lastPlace';
+import { reserveLeaveIntent, finishLeaveIntent, requestLeave } from './leaveGuard';
 const ready = (vault = '/a') =>
   useVaultStore.setState({
     vaultPath: vault,
@@ -26,6 +27,28 @@ beforeEach(() => {
   ready();
 });
 afterEach(cleanup);
+it('defers automatic restore to an explicit pending destination in this pane', () => {
+  rememberLastPlace('/a', { kind: 'settings' });
+  useVaultStore.setState({ status: 'scanning' });
+  render(<LastPlaceHost />);
+  const intent = reserveLeaveIntent(`pane:${useNavStore.getState().active}`);
+  act(() => ready());
+  expect(useNavStore.getState().selection).toEqual({ kind: 'home' });
+  expect(intent.isCurrent()).toBe(true);
+  act(() =>
+    requestLeave(intent, () => useNavStore.getState().navigate({ kind: 'doc', path: 'b.md' })),
+  );
+  expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'b.md' });
+});
+it('still restores after an explicit destination was canceled', () => {
+  rememberLastPlace('/a', { kind: 'settings' });
+  useVaultStore.setState({ status: 'scanning' });
+  render(<LastPlaceHost />);
+  const intent = reserveLeaveIntent(`pane:${useNavStore.getState().active}`);
+  finishLeaveIntent(intent);
+  act(() => ready());
+  expect(useNavStore.getState().selection).toEqual({ kind: 'settings' });
+});
 it('restores with replace after readiness and remembers later navigation', () => {
   rememberLastPlace('/a', { kind: 'doc', path: 'a.md' });
   useVaultStore.setState({ status: 'scanning' });

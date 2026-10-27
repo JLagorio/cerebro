@@ -7,7 +7,7 @@ import { readCanvas, writeCanvas } from '@/engine/scene/jsonCanvas';
 import { useUiStore } from '@/stores/uiStore';
 import { createBoardState } from './boardState';
 import { textEditing, type BoardEditing } from './gestures/text';
-import { settleBoardText } from './pendingText';
+import { pendingBoardDrafts, settleBoardText } from './pendingText';
 import { TextEditor } from './TextEditor';
 vi.mock('@/mermaid/CanvasViewport', () => ({
   useCanvasTransform: () => ({ scale: 2, offset: { x: 30, y: 50 } }),
@@ -150,14 +150,15 @@ it('IME composition never ends an edit', () => {
   fireEvent.keyDown(input, { key: 'Escape' });
   expect(execute).toHaveBeenCalledTimes(1);
 });
-it('an external removal closes the draft and never resurrects the card', () => {
+it('an external removal retains the exact draft and never resurrects the card', () => {
   const toast = vi.spyOn(useUiStore.getState(), 'toast');
   const { editor, input, state, execute } = setup();
   fireEvent.change(input, { target: { value: 'unsaved' } });
   act(() => editor.applyExternal(createBoard({ nodes: [], edges: [] }), 'Outside'));
   expect(state.getState().editing).toBeNull();
+  expect(pendingBoardDrafts(editor)).toEqual([{ id: expect.any(String), text: 'unsaved' }]);
   expect(toast).toHaveBeenCalledWith(
-    'This card was removed outside the whiteboard. Its text edit was closed.',
+    'This card was removed outside the whiteboard. Its text draft is still held and has not been saved.',
   );
   act(() => settleBoardText(editor));
   expect(execute).not.toHaveBeenCalled();

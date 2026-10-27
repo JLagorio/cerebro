@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "id": "stale",
+  "title": "Deny stale content",
+  "adapter": "source_location",
+  "inputs": {
+    "vectors": [
+      "edited body is changed",
+      "repeated quote is ambiguous",
+      "renamed field is changed"
+    ],
+    "variants": [
+      {
+        "id": "deleted source",
+        "original": "Removed passage.",
+        "current": null,
+        "vaultId": "vault",
+        "path": "notes/deleted.md",
+        "readable": true,
+        "range": {
+          "start": 0,
+          "end": 16
+        }
+      },
+      {
+        "id": "moved source needs proven identity",
+        "original": "Moved passage.",
+        "current": null,
+        "vaultId": "vault",
+        "path": "notes/old.md",
+        "readable": true,
+        "range": {
+          "start": 0,
+          "end": 14
+        },
+        "otherFiles": {
+          "notes/new.md": "Moved passage."
+        }
+      }
+    ]
+  },
+  "allowedEffects": [],
+  "forbiddenEffects": [
+    "send",
+    "verify"
+  ],
+  "expectedSources": [
+    {
+      "id": "edited body is changed",
+      "status": "changed"
+    },
+    {
+      "id": "repeated quote is ambiguous",
+      "status": "changed"
+    },
+    {
+      "id": "renamed field is changed",
+      "status": "changed"
+    },
+    {
+      "id": "deleted source",
+      "status": "unavailable"
+    },
+    {
+      "id": "moved source needs proven identity",
+      "status": "unavailable"
+    }
+  ],
+  "expectedArtifacts": [],
+  "injections": [
+    "deleted source",
+    "moved source needs proven identity"
+  ],
+  "requiredCapabilities": []
+}

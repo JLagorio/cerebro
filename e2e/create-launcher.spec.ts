@@ -96,3 +96,40 @@ test('New Whiteboard and its chord create deduped files and open them as pages',
     edges: [],
   });
 });
+
+test('session recovery keeps plain and sheet recipes separate and moves a page only by explicit choice', async ({
+  page,
+}) => {
+  await boot(page);
+  const launch = async (name: string) => {
+    await page.getByTestId('app-rail').getByRole('button', { name: 'New', exact: true }).click();
+    await page
+      .getByRole('dialog', { name: 'New', exact: true })
+      .getByRole('option', { name, exact: true })
+      .first()
+      .click();
+  };
+  await launch('Page');
+  await page.getByPlaceholder('Page title').fill('  Retained plain page  ');
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await launch('Sheet');
+  await expect(page.getByPlaceholder('Name the page')).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Resume', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await launch('Page');
+  await page.getByRole('button', { name: 'Resume', exact: true }).click();
+  await expect(page.getByPlaceholder('Page title')).toHaveValue('  Retained plain page  ');
+  await expect(page.getByTestId('creation-destination')).toContainText('vault root');
+  await page.getByRole('button', { name: 'Folder', exact: true }).click();
+  await page.getByRole('option', { name: 'strategy', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Change draft destination' })).toContainText(
+    'To: In strategy',
+  );
+  await page.getByRole('button', { name: 'Move draft here', exact: true }).click();
+  await expect(page.getByTestId('creation-destination')).toContainText('strategy');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await expect(page).toHaveTitle('Retained plain page — Cerebro');
+  const source = await readMockFile(page, 'strategy/retained-plain-page.md');
+  expect(source).toContain('# Retained plain page\n');
+  expect(source).not.toContain('cerebro-sheet');
+});

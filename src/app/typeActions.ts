@@ -1,3 +1,4 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 import { followTypeRename } from './pointers';
 /**
  * Type schema write-side (M3): every mutation of a Type doc's `fields:`
@@ -65,7 +66,7 @@ import type {
 } from '@/engine/types';
 import { slugify } from '@/lib/slug';
 import { listViews, readNoteSource, scanVault } from '@/lib/ipc';
-import { flushOpenPages, heldOpenPages } from '@/editor/openPages';
+import { heldOpenPages } from '@/editor/openPages';
 import { useUiStore } from '@/stores/uiStore';
 import { getSchema, refusedAcrossVaults, useVaultStore } from '@/stores/vaultStore';
 
@@ -153,7 +154,7 @@ export async function renameDatabase(listing: TypeListing, rawNext: string): Pro
   try {
     await ensureTypeDoc({ name: listing.name, docPath: listing.docPath ?? null });
     if (!sameVault()) return false;
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return false;
     if (!sameVault()) return false;
     if (heldOpenPages().length > 0) {
       toast('Some pages have changes waiting on you. Settle them before renaming the database.');

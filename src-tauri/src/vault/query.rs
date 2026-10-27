@@ -195,10 +195,12 @@ pub(crate) fn parse_request(args: &Value) -> Result<QueryRequest, Problem> {
     })
 }
 
-fn hidden_agent_key(entry: &Entry, key: &str) -> bool {
-    entry.entry_type.as_deref() == Some("Agent")
+pub(crate) fn hidden_agent_field(entry_type: Option<&str>, key: &str) -> bool {
+    entry_type == Some("Agent")
         && ["recent", "memory", "preferences"].contains(&key)
 }
+
+fn hidden_agent_key(entry: &Entry, key: &str) -> bool { hidden_agent_field(entry.entry_type.as_deref(), key) }
 
 /// The schema's precedence, with M59's private Agent state kept absent.
 pub(crate) fn field_value(schema: &VaultSchema, entry: &Entry, name: &str) -> Option<Value> {
@@ -355,6 +357,13 @@ pub(crate) struct FieldInfo {
     pub recorded: Vec<Value>,
 }
 
+impl FieldInfo {
+    /// Metadata facts for a held canonical field; this never grants access.
+    pub(crate) fn held(kind: FieldKind) -> Self { Self { kind, def: None, conflicting: false, options: Vec::new(), recorded: Vec::new() } }
+    pub(crate) fn declared(&self) -> Option<&FieldDef> { self.def.as_ref() }
+    pub(crate) fn is_conflicting(&self) -> bool { self.conflicting }
+}
+
 pub(crate) fn field_infos(
     source: &[&Entry],
     wanted: Option<&str>,
@@ -372,9 +381,7 @@ pub(crate) fn field_infos(
     for name in types {
         if let Some(own) = schema.type_named(name) {
             for def in &own.fields {
-                if name == "Agent"
-                    && ["recent", "memory", "preferences"].contains(&def.name.as_str())
-                {
+                if hidden_agent_field(Some(name), &def.name) {
                     continue;
                 }
                 let options: Vec<(String, String)> = if def.kind == FieldKind::Status {
@@ -1068,7 +1075,7 @@ fn sort_text(value: &Value) -> String {
         _ => scalar_text(value).unwrap_or_default(),
     }
 }
-fn text_order(a: &str, b: &str) -> Ordering {
+pub(crate) fn text_order(a: &str, b: &str) -> Ordering {
     a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| {
         // Equal letters put lowercase before uppercase, as the app's locale
         // ordering does for the pinned ASCII cases. Unicode quirks are named.
@@ -1201,9 +1208,7 @@ fn declared_names(source: &[&Entry], wanted: Option<&str>, schema: &VaultSchema)
     for name in types {
         if let Some(own) = schema.type_named(name) {
             for def in &own.fields {
-                if name == "Agent"
-                    && ["recent", "memory", "preferences"].contains(&def.name.as_str())
-                {
+                if hidden_agent_field(Some(name), &def.name) {
                     continue;
                 }
                 if !names.contains(&def.name) {

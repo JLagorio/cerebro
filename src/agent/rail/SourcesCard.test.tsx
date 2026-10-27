@@ -34,7 +34,8 @@ vi.mock('@/components/ai/Rail', async (importOriginal) => {
  * focus back. A line jumps to the Sources line of the reply that used it and
  * stays in the canvas; its way out is a link for a web page and, for a vault
  * page, an open in the app that floats the conversation first (CV-16). A
- * list that may be short says why (CV-05).
+ * list that may be short says why (CV-05), and with nothing listed it is not
+ * recorded or unavailable, never None.
  */
 
 const IDLE: TranscriptStatus = { state: 'idle' };
@@ -188,29 +189,36 @@ describe('SourcesCard', () => {
     const missing = within(card()).getByTestId('rail-sources-missing');
     expect(missing.textContent).toBe(RAIL_SOURCES_WORDS.missing.transcript);
     expect(cardLines().map((line) => line.dataset.turn)).toEqual(['a1']);
-    cleanup();
+    expect(screen.queryByTestId('section-unavailable')).toBeNull();
+  });
 
-    // With nothing it could list, it still says why, never "None".
+  it('is unavailable with nothing listed and the transcript unread, never None', () => {
     renderCard(railSources([asked('u1'), replied('a1', [])], UNREADABLE));
-    expect(card().dataset.state).toBe('partial');
-    expect(within(card()).getByTestId('rail-sources-missing').textContent).toBe(
-      RAIL_SOURCES_WORDS.missing.transcript,
+    expect(card().dataset.state).toBe('unavailable');
+    const unavailable = within(card()).getByTestId('section-unavailable');
+    expect(unavailable.textContent).toBe(
+      `${RAIL_SOURCES_WORDS.unavailable}${RAIL_SOURCES_WORDS.unavailableDetail}`,
     );
+    // Its heading line folds a body, as every card that has something to say.
+    expect(within(card()).getByRole('button', { name: 'Sources' }).tabIndex).toBe(0);
     expect(card().textContent).not.toContain('None');
     expect(cardLines()).toHaveLength(0);
   });
 
-  it('says a finished web call’s results were not kept', () => {
+  it('says not recorded, with why, where a reply lost its web results and nothing is listed', () => {
     const lost = call('f1', 'WebFetch', { input: '{"url":"https://example.com/a"}' });
     renderCard(railSources([asked('u1'), replied('a1', [lost])], IDLE));
-    expect(card().dataset.state).toBe('partial');
+    expect(card().dataset.state).toBe('not-recorded');
+    expect(card().textContent).toContain(RAIL_SOURCES_WORDS.notRecorded);
     expect(screen.getByTestId('rail-sources-missing').dataset.missing).toBe('results');
     expect(screen.getByTestId('rail-sources-missing').textContent).toBe(
       RAIL_SOURCES_WORDS.missing.results,
     );
+    expect(card().textContent).not.toContain('None');
+    expect(screen.queryByTestId('section-unavailable')).toBeNull();
   });
 
-  it('says a subagent’s steps were not kept', () => {
+  it('says not recorded, with why, where a subagent’s steps were not kept', () => {
     const agent = call('ag', 'Agent', {
       subagent: {
         type: 'cerebro-researcher',
@@ -222,11 +230,23 @@ describe('SourcesCard', () => {
       },
     });
     renderCard(railSources([asked('u1'), replied('a1', [agent])], IDLE));
-    expect(card().dataset.state).toBe('partial');
+    expect(card().dataset.state).toBe('not-recorded');
+    expect(card().textContent).toContain(RAIL_SOURCES_WORDS.notRecorded);
     expect(screen.getByTestId('rail-sources-missing').textContent).toBe(
       RAIL_SOURCES_WORDS.missing.steps,
     );
     expect(card().textContent).not.toContain('None');
+  });
+
+  it('is partial, not not recorded, where the lines it has may be short', () => {
+    const lost = call('f1', 'WebFetch', { input: '{"url":"https://example.com/a"}' });
+    renderCard(
+      railSources([asked('u1'), replied('a1', [read('r1', 'notes/plan.md'), lost])], IDLE),
+    );
+    expect(card().dataset.state).toBe('partial');
+    expect(card().textContent).not.toContain(RAIL_SOURCES_WORDS.notRecorded);
+    expect(screen.getByTestId('rail-sources-missing').dataset.missing).toBe('results');
+    expect(cardLines().map((line) => line.dataset.turn)).toEqual(['a1']);
   });
 
   it('lists nothing a streaming turn met, and what a subagent found', () => {

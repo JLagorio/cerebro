@@ -11,10 +11,12 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
+import { connectorOwnership } from '@/engine/connectorOwnership';
 import {
   approvalKey,
   CONNECTOR_PRESETS,
-  parseConnectors,
+  readConnectorList,
+  UNREADABLE_CONNECTOR_LIST,
   presetHolder,
   presetSpec,
   removalNote,
@@ -126,7 +128,9 @@ export function ConnectorSettings({ active = true }: { active?: boolean }) {
     void readConnectors(vaultPath)
       .then((raw) => {
         if (stale) return;
-        setSpecs(parseConnectors(raw));
+        const list = readConnectorList(raw);
+        if (list.kind === 'unreadable') throw new Error(UNREADABLE_CONNECTOR_LIST);
+        setSpecs(list.specs);
         setFilePresent(raw.trim() !== '');
       })
       .catch((e: unknown) => {
@@ -171,7 +175,9 @@ export function ConnectorSettings({ active = true }: { active?: boolean }) {
   const reload = () =>
     readConnectors(vaultPath)
       .then((raw) => {
-        setSpecs(parseConnectors(raw));
+        const list = readConnectorList(raw);
+        if (list.kind === 'unreadable') throw new Error(UNREADABLE_CONNECTOR_LIST);
+        setSpecs(list.specs);
         setFilePresent(raw.trim() !== '');
       })
       .catch((e: unknown) => {
@@ -258,6 +264,7 @@ export function ConnectorSettings({ active = true }: { active?: boolean }) {
         // used it saw, or that none has (M54.11). One derivation, which the
         // rail's Connectors card reads too (M92.9).
         const row = connectorRow(spec, approvals[vaultPath] ?? [], status);
+        const editable = connectorOwnership(spec.extra) === 'cli';
         // null = malformed (a non-string env value or header, or an oauth or
         // timeout Claude Code would refuse, M69.1), which can never be
         // approved. The ledger holds digests, never the fingerprint itself.
@@ -298,30 +305,34 @@ export function ConnectorSettings({ active = true }: { active?: boolean }) {
                   {shown}
                 </div>
               </div>
-              {row.unapproved && fp !== null && said.key !== 'refused' && (
+              {editable && row.unapproved && fp !== null && said.key !== 'refused' && (
                 <Button variant="secondary" size="sm" onClick={() => approve(vaultPath, fp)}>
                   Approve
                 </Button>
               )}
-              <Switch
-                ariaLabel={`Enable ${spec.name}`}
-                checked={spec.enabled}
-                onChange={(v) =>
-                  persist(specs.map((s) => (s.name === spec.name ? { ...s, enabled: v } : s)))
-                }
-              />
-              <IconButton
-                icon="trash-2"
-                label={`Remove ${spec.name}`}
-                size="sm"
-                onClick={() => {
-                  if (fp !== null) revoke(vaultPath, fp);
-                  persist(specs.filter((s) => s.name !== spec.name));
-                  // Removing the entry never signs out of Claude Code (M69.1).
-                  const note = removalNote(spec);
-                  if (note !== null) toast(note);
-                }}
-              />
+              {editable && (
+                <>
+                  <Switch
+                    ariaLabel={`Enable ${spec.name}`}
+                    checked={spec.enabled}
+                    onChange={(v) =>
+                      persist(specs.map((s) => (s.name === spec.name ? { ...s, enabled: v } : s)))
+                    }
+                  />
+                  <IconButton
+                    icon="trash-2"
+                    label={`Remove ${spec.name}`}
+                    size="sm"
+                    onClick={() => {
+                      if (fp !== null) revoke(vaultPath, fp);
+                      persist(specs.filter((s) => s.name !== spec.name));
+                      // Removing the entry never signs out of Claude Code (M69.1).
+                      const note = removalNote(spec);
+                      if (note !== null) toast(note);
+                    }}
+                  />
+                </>
+              )}
             </div>
             {(observedAt !== null || hint !== undefined) && (
               <p className="m-0 mt-0.5 text-2xs leading-[14px] text-(--text-meta)">
@@ -334,7 +345,7 @@ export function ConnectorSettings({ active = true }: { active?: boolean }) {
                 {hint !== undefined && <span data-testid="connector-hint">{hint}</span>}
               </p>
             )}
-            {signIn && (
+            {editable && signIn && (
               <div className="mt-1.5 flex flex-col gap-1" data-testid="connector-sign-in">
                 {command !== null ? (
                   <>
@@ -457,9 +468,10 @@ export function ConnectorSettings({ active = true }: { active?: boolean }) {
         </p>
       )}
       <p className="m-0 text-2xs leading-[14px] text-n-400" data-testid="connector-settings-note">
-        Stored in .cerebro/connectors.json — headers and env vars are edited there, kept out of git
-        checkpoints, and your credentials never leave this vault. Naming servers here pins the
-        assistant to exactly this list, and a run may call the tools of a server that is on,
+        Stored in .cerebro/connectors.json — CLI headers and env vars are edited there and kept out
+        of git checkpoints. Only CLI-owned entries can be approved here. Managed execution is
+        unavailable here; invalid ownership needs correction in the file. Naming servers here pins
+        the assistant to exactly this list, and a run may call the tools of a server that is on,
         approved here, and left in by its agent’s record. One the file names on its own stays out of
         runs until you approve it here — for stdio the exact command it runs, for http the exact
         URL, headers and oauth. Approval is per machine, and any edit to the entry asks again. With

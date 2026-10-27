@@ -54,6 +54,16 @@ pub fn item_key(entry: &Entry) -> Option<String> {
 
 impl<'a> TargetIndex<'a> {
     pub fn build(entries: &'a [Entry]) -> Self {
+        Self::build_from(entries.iter())
+    }
+
+    /// The same canonical precedence over only currently readable entries.
+    /// Borrowing avoids cloning all corpus metadata for an on-demand query.
+    pub fn build_readable(entries: &'a [Entry], admits: &dyn Fn(&str) -> bool) -> Self {
+        Self::build_from(entries.iter().filter(|entry| admits(&entry.path)))
+    }
+
+    fn build_from(entries: impl Iterator<Item = &'a Entry>) -> Self {
         let mut stems = HashMap::new();
         let mut folders = HashMap::new();
         let mut keys = HashMap::new();
@@ -89,10 +99,20 @@ impl<'a> TargetIndex<'a> {
     /// a title link). The section itself is only the editor's business, so
     /// nothing here returns it.
     pub fn resolve(&self, target: &str) -> Option<&'a Entry> {
-        self.resolve_name(target).or_else(|| {
-            let (page, _section) = target.split_once('#')?;
-            self.resolve_name(page)
-        })
+        self.resolve_with_fragment(target).map(|(entry, _)| entry)
+    }
+
+    /// Exact match evidence for the disposable metadata conversion pilot.
+    pub(crate) fn resolve_with_fragment<'b>(
+        &self,
+        target: &'b str,
+    ) -> Option<(&'a Entry, Option<&'b str>)> {
+        self.resolve_name(target)
+            .map(|entry| (entry, None))
+            .or_else(|| {
+                let (page, fragment) = target.split_once('#')?;
+                self.resolve_name(page).map(|entry| (entry, Some(fragment)))
+            })
     }
 
     /// One name: filename stem, then a project.md's folder, then an item key
@@ -122,6 +142,23 @@ pub fn resolve_target<'a>(target: &str, entries: &'a [Entry]) -> Option<&'a Entr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolver_fragment_evidence_preserves_whole_name_first() {
+        let entries = vec![
+            entry("whole.md", "C# notes"),
+            entry("C.md", "C"),
+            entry("target.md", "Target"),
+        ];
+        let index = TargetIndex::build(&entries);
+        let (whole, fragment) = index.resolve_with_fragment("C# notes").unwrap();
+        assert_eq!(whole.path, "whole.md");
+        assert_eq!(fragment, None);
+        let (target, fragment) = index.resolve_with_fragment("target#section").unwrap();
+        assert_eq!(target.path, "target.md");
+        assert_eq!(fragment, Some("section"));
+        assert!(index.resolve_with_fragment("missing#section").is_none());
+    }
 
     fn entry(path: &str, title: &str) -> Entry {
         let mut e = Entry::empty_for_test(path);

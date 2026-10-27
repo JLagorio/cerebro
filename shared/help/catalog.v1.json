@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "topics": [
+    {
+      "id": "knowledge",
+      "title": "Review knowledge",
+      "file": "knowledge.md",
+      "tools": ["write_concept", "recheck_concept"]
+    },
+    {
+      "id": "reviewed-work",
+      "title": "Work with an agent",
+      "file": "reviewed-work.md",
+      "tools": []
+    },
+    {
+      "id": "imports",
+      "title": "Bring in a source",
+      "file": "imports.md",
+      "tools": ["import_notion_page"]
+    },
+    { "id": "schedules", "title": "Schedule an agent", "file": "schedules.md", "tools": [] },
+    { "id": "recovery", "title": "Recover from a problem", "file": "recovery.md", "tools": [] }
+  ]
+}

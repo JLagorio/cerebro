@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "admission": {
+    "version": 1,
+    "defaultGrant": "deny",
+    "ownerRealm": "verified_single_local_app_owner",
+    "ownerStorageKey": "human:me",
+    "sourceKinds": ["attended_operation", "run", "client", "job"],
+    "grantInputScopes": ["all_valid_inputs", "exact_canonical_input"],
+    "parentGrantRule": "explicit_intersection_only",
+    "ordinaryHandoffChildJobId": "absent",
+    "childJobIdRule": "actual_m95_job_claim_proof_only",
+    "normalParentCompletion": "preserve_explicit_live_child_grants",
+    "parentStopOrRevocation": "deny_future_descendant_claims",
+    "historicalRead": "verified_native_owner_read_only",
+    "legacyAdmission": "deny_without_native_provenance",
+    "noStoreAdmission": "unavailable",
+    "limits": {
+      "identityBytes": 128,
+      "canonicalPathBytes": 4096,
+      "processSessionBytes": 1024,
+      "grantCapabilities": 256,
+      "grantBytes": 65536,
+      "grantsPerRun": 256,
+      "ancestryDepth": 8,
+      "catalogPageSize": 32,
+      "cursorBytes": 4096
+    }
+  },
+  "historyInspection": {"maxEffects":32,"maxStoredPayloadBytes":1048576,"maxStoredPayloadBytesTotal":4194304,"maxOutputBytes":262144,"maxEffectDetailsBytes":32768,"maxDepth":32,"maxNodes":32768,"maxObjectKeys":256,"maxArrayItems":1024,"maxStringBytes":262144,"maxAttempts":32,"maxRetryDecisions":32,"maxPreviewFields":32,"maxRedactedFields":32,"maxPreviewSummaryBytes":512,"maxPreviewLabelBytes":128,"maxPreviewValueBytes":8192,"maxTargetReferenceBytes":8192,"maxAttemptSummaryBytes":8192,"maxTimestampBytes":128,"maxIdBytes":128,"maxAccountLabelBytes":512,"maxMetadataBytes":32768,"outputMetadataReserveBytes":16384,"maxIssues":32},
+  "registration": "retained_native_origins_only",
+  "effectClasses": ["read", "local_write", "external_draft", "external_mutation", "external_send", "external_publish", "external_delete"],
+  "classification": "trusted_local_definition_only",
+  "providerAnnotations": "never_authority",
+  "reservedTools": ["list_actions", "get_action_definition", "prepare_action", "get_action_effect", "get_action_effect_details"],
+  "reservedErrors": ["invalid_input", "unsupported_schema", "limit_exceeded", "definition_mismatch", "not_found", "request_key_conflict", "revision_conflict", "denied", "unavailable"],
+  "runtimeDestiny": "operational_at_registration",
+  "limits": {"inputBytes":65536,"schemaBytes":32768,"definitionBytes":262144,"depth":32,"nodes":4096,"keys":256,"arrayItems":1024,"stringBytes":8192,"numberBytes":128,"exponent":1000,"catalogDefinitions":1024},
+  "schemaKeywords": ["$schema", "type", "properties", "required", "additionalProperties", "items", "enum", "const", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "minLength", "maxLength", "minItems", "maxItems", "description", "title"],
+  "schemaTypes": ["object", "array", "string", "number", "integer", "boolean", "null"]
+}

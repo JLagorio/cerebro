@@ -32,6 +32,11 @@ use super::write_log::{run_writes, writers_since, RunWrites};
 use super::ReadOnly;
 use crate::vault::receipt::HUMAN_ACTOR;
 
+mod history;
+pub use history::{
+    run_lineage, run_origin, runs_page, RunCursor, RunHistoryScope, RunLineage, RunOrigin, RunsPage,
+};
+
 /// The most rows one page will ever return, however large a limit is asked
 /// for. A UI that wants more asks for another page; a UI that asks for
 /// 10_000_000 gets 200 rather than an unbounded read on the main thread.

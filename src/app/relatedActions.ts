@@ -1,5 +1,6 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 import { withInheritedAgents } from '@/engine/assignment';
-import { flushOpenPages, heldOpenPages } from '@/editor/openPages';
+import { heldOpenPages } from '@/editor/openPages';
 import { MAX_BATCH_OPS, type BatchOp } from '@/engine/batch';
 import {
   BULK_CHANGED,
@@ -52,7 +53,7 @@ export async function addExistingToHost(
   const vault = state.vaultPath;
   if (vault === null || refusedAcrossVaults(state)) return failAll();
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return failAll();
     if (useVaultStore.getState().vaultPath !== vault) return failAll();
     const reads = await readRows(vault, rows);
     const current = useVaultStore.getState();
@@ -135,7 +136,7 @@ export async function writeReciprocal(
     }
     if (changes.length === 0) return true;
     if (changes.length > MAX_BATCH_OPS) return fail();
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return false;
     if (useVaultStore.getState().vaultPath !== vault) return false;
     const reads = await readRows(
       vault,

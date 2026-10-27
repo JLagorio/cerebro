@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "artifact_version": 33,
-  "rule_version": "tools/2026-10-22",
+  "artifact_version": 36,
+  "rule_version": "tools/2026-10-26",
   "server": "cerebro",
   "tokens": {
     "concept_types": {
@@ -114,6 +114,17 @@
       "axes": [
         "read"
       ]
+    },
+    {
+      "id": "managed",
+      "writes": false,
+      "kinds": [
+        "read_only",
+        "additive"
+      ],
+      "axes": [
+        "none"
+      ]
     }
   ],
   "toolsets": [
@@ -161,6 +172,11 @@
       "id": "proposals",
       "label": "Propose changes to Knowledge",
       "hint": "Suggests changes through the policy layer. Low- and medium-risk ones apply automatically once committed; high-risk ones wait for you on a card. Off unless the proposal surface is switched on."
+    },
+    {
+      "id": "managed",
+      "label": "Managed actions",
+      "hint": "Ask for account access for this run. Each external change still asks for review."
     }
   ],
   "clients": {
@@ -2531,6 +2547,237 @@
         "required": [
           "proposal_ids"
         ]
+      }
+    },
+    {
+      "name": "list_actions",
+      "surface": "base",
+      "title": "Find actions for this run",
+      "summary": "Find the actions and account bindings available to this run",
+      "toolset": "managed",
+      "kind": "read_only",
+      "idempotent": true,
+      "open_world": false,
+      "door": "managed",
+      "axis": "none",
+      "target": null,
+      "exempt": "account access and effect approval are checked against the actual retained native origin; vault folder scope cannot grant an external account action",
+      "renderer": "step",
+      "fold": {
+        "one": "listed actions",
+        "many": "listed actions {n} times",
+        "running": {
+          "one": "listing actions",
+          "many": "listing actions {n} times"
+        }
+      },
+      "icon": "plug",
+      "always_load": false,
+      "confirmable": false,
+      "search_hint": "managed accounts GitHub issue access approval action receipt",
+      "description": "Read this original attended run’s current managed action catalog. When the run has no available actions, or requestAccess is true, this call waits while the person chooses access in Cerebro’s This run sheet. Choosing nothing is valid and returns an empty current catalog; it grants no effect approval. The result is {catalog, bindings}: catalog is the scoped ActionCatalogPage with descriptors, snapshotDigest and nullable nextCursor; each binding pairs its actionId and definitionDigest with one eligible connectionId, accountId and label. Never infer cross-products between actions and accounts or authority from selectors. Every input is checked against the run’s actual current grants at prepare. Cursors belong only to this exact current catalog snapshot. No account credential or hidden exact-input body is returned.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "description": "The cursor from this run catalog; omit to start at the current snapshot."
+          },
+          "requestAccess": {
+            "type": "boolean",
+            "description": "Ask the person to review access for this run before returning the current catalog."
+          }
+        },
+        "additionalProperties": false,
+        "required": []
+      }
+    },
+    {
+      "name": "get_action_definition",
+      "surface": "base",
+      "title": "Read an action definition",
+      "summary": "Read one current granted action’s exact input and output contract",
+      "toolset": "managed",
+      "kind": "read_only",
+      "idempotent": true,
+      "open_world": false,
+      "door": "managed",
+      "axis": "none",
+      "target": null,
+      "exempt": "account access and effect approval are checked against the actual retained native origin; vault folder scope cannot grant an external account action",
+      "renderer": "step",
+      "fold": {
+        "one": "read an action definition",
+        "many": "read an action definition {n} times",
+        "running": {
+          "one": "reading an action definition",
+          "many": "reading an action definition {n} times"
+        }
+      },
+      "icon": "plug",
+      "always_load": false,
+      "confirmable": false,
+      "search_hint": "managed accounts GitHub issue access approval action receipt",
+      "description": "Read the exact compiled definition named by actionId and definitionDigest from this original attended run’s current eligible catalog. The definition supplies inputSchema and outputSchema as JSON text, requiredCapabilities, effectClass and retry/cancel/reconcile contracts. This reads metadata only: it creates no access grant or effect approval. Use only a current action/account binding and snapshot returned by list_actions when preparing a request. Unknown, changed or ungranted definitions are refused.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "actionId": {
+            "type": "string"
+          },
+          "definitionDigest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actionId",
+          "definitionDigest"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "prepare_action",
+      "surface": "base",
+      "title": "Review a managed action",
+      "summary": "Prepare one original action and wait for any required person review",
+      "toolset": "managed",
+      "kind": "additive",
+      "idempotent": false,
+      "open_world": true,
+      "door": "managed",
+      "axis": "none",
+      "target": null,
+      "exempt": "account access and effect approval are checked against the actual retained native origin; vault folder scope cannot grant an external account action",
+      "renderer": "step",
+      "fold": null,
+      "phrases": {
+        "running": "reviewing a managed action",
+        "done": "reviewed a managed action",
+        "failed": "managed action unavailable"
+      },
+      "icon": "plug",
+      "always_load": false,
+      "confirmable": false,
+      "search_hint": "managed accounts GitHub issue access approval action receipt",
+      "description": "Prepare one logical managed action using a current list_actions binding and snapshot. input is raw JSON text validated by the exact compiled schema; requestKey and every original selector/input must remain stable for redelivery. This call is held in the original live attended run. A read may execute under its explicit this-run account grant. A supported external change displays its complete native preview and waits for the person’s Allow once or Deny in Cerebro; the model cannot answer it. An edited input retires the old approval and shows a new complete preview requiring another explicit Allow. Only a known-committed claim reaches the one fixed provider worker. The result includes the recorded effect and output availability; available output carries exact canonical JSON text in output.json. Unavailable output is explicit, never fabricated null. Cancellation, lost acknowledgement, unavailable source or an unknown effect never authorize a retry. Inspect the recorded effect before choosing any next step; never replace a requestKey to bypass an unresolved effect.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "actionId": {
+            "type": "string"
+          },
+          "definitionDigest": {
+            "type": "string"
+          },
+          "connectionId": {
+            "type": "string"
+          },
+          "accountId": {
+            "type": "string"
+          },
+          "snapshotDigest": {
+            "type": "string"
+          },
+          "input": {
+            "type": "string",
+            "description": "The complete input as raw JSON text. Keep exact numbers and duplicate-key validation at the native boundary."
+          },
+          "requestKey": {
+            "type": "string",
+            "description": "One stable key for this logical action request; retain the exact original input and selectors on redelivery."
+          }
+        },
+        "required": [
+          "actionId",
+          "definitionDigest",
+          "connectionId",
+          "accountId",
+          "snapshotDigest",
+          "input",
+          "requestKey"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_action_effect",
+      "surface": "base",
+      "title": "Read an action’s status",
+      "summary": "Read one recorded action’s finite current effect status",
+      "toolset": "managed",
+      "kind": "read_only",
+      "idempotent": true,
+      "open_world": false,
+      "door": "managed",
+      "axis": "none",
+      "target": null,
+      "exempt": "account access and effect approval are checked against the actual retained native origin; vault folder scope cannot grant an external account action",
+      "renderer": "step",
+      "fold": {
+        "one": "read action status",
+        "many": "read action status {n} times",
+        "running": {
+          "one": "reading action status",
+          "many": "reading action status {n} times"
+        }
+      },
+      "icon": "plug",
+      "always_load": false,
+      "confirmable": false,
+      "search_hint": "managed accounts GitHub issue access approval action receipt",
+      "description": "Read the finite ActionEffectRef for an invocation belonging to this original attended run. This does not dispatch, retry, reconcile or cancel the action, and it returns no retained provider response body. Unknown effects stay unknown; a missing or unavailable read is not evidence that no effect happened. The selectors and flags are metadata, not permission to execute.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "invocationId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "invocationId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_action_effect_details",
+      "surface": "base",
+      "title": "Read an action’s receipt",
+      "summary": "Read an action’s recorded approval, preview and attempt metadata",
+      "toolset": "managed",
+      "kind": "read_only",
+      "idempotent": true,
+      "open_world": false,
+      "door": "managed",
+      "axis": "none",
+      "target": null,
+      "exempt": "account access and effect approval are checked against the actual retained native origin; vault folder scope cannot grant an external account action",
+      "renderer": "step",
+      "fold": {
+        "one": "read action receipt",
+        "many": "read action receipt {n} times",
+        "running": {
+          "one": "reading action receipt",
+          "many": "reading action receipt {n} times"
+        }
+      },
+      "icon": "plug",
+      "always_load": false,
+      "confirmable": false,
+      "search_hint": "managed accounts GitHub issue access approval action receipt",
+      "description": "Read the ActionEffectDetails for an invocation belonging to this original attended run: its exact recorded preview, definition/input digests, approval identity/revision and finite attempt/receipt summaries. This returns no credential or stored provider response body and performs no dispatch, retry, reconcile or cancellation. Missing or unavailable details do not prove an effect was absent. Preserve original identities when inspecting uncertainty.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "invocationId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "invocationId"
+        ],
+        "additionalProperties": false
       }
     }
   ],

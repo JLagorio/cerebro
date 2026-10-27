@@ -3,7 +3,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { useVaultStore } from '@/stores/vaultStore';
 import { waitingFollowup, type Followup } from '@/engine/followups';
 import { RecipesOffer } from './RecipesOffer';
-import { useMemo } from 'react';
+import { useMemo, type Ref } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -26,7 +26,7 @@ import {
 import { parseTriggers } from '@/engine/triggers';
 import { listTemplates, templateFill } from '@/lib/templates';
 import { nameMatches } from '@/lib/nameRank';
-import type { Entry } from '@/engine/types';
+import type { Entry, LibraryTab } from '@/engine/types';
 import '@/pages/workspacePages.css';
 
 /**
@@ -191,6 +191,7 @@ export function libraryCards(
 export function LibraryIndex({
   tab,
   onTab,
+  tabStripRef,
   query,
   onQuery,
   entries,
@@ -199,7 +200,8 @@ export function LibraryIndex({
   onDuty,
 }: {
   tab: LibraryKind;
-  onTab: (tab: LibraryKind) => void;
+  onTab: (tab: LibraryTab) => void;
+  tabStripRef?: Ref<HTMLDivElement>;
   query: string;
   onQuery: (query: string) => void;
   entries: Entry[];
@@ -233,30 +235,31 @@ export function LibraryIndex({
 
   return (
     <div
-      className="cb-library-page flex min-h-0 min-w-0 flex-1 flex-col"
+      className="cb-library-page cb-composition flex min-h-0 min-w-0 flex-1 flex-col"
       data-testid="library-page"
     >
       <PageHeader
+        composition="collection"
         title="Library"
         description="Skills to call on, agents to work with, and templates to make your own."
         actions={
-          <Button variant="primary" size="sm" icon="plus" onClick={onCreate}>
+          <Button variant="primary" size="sm" icon="plus" tabIndex={0} onClick={onCreate}>
             {`New ${tab}`}
           </Button>
         }
       />
-      <div className="cb-library-controls">
+      <div ref={tabStripRef} className="cb-library-controls cb-composition-content">
         <SegmentedControl
           size="md"
           ariaLabel="Library section"
           value={tab}
-          onChange={(v) => onTab(v as LibraryKind)}
-          options={LIBRARY_KINDS.map((k) => ({
+          onChange={(v) => onTab(v as LibraryTab)}
+          options={[...LIBRARY_KINDS.map((k) => ({
             value: k,
             label: `${libraryLabelPlural(k)}${counts[k] === 0 ? '' : ` ${counts[k]}`}`,
             icon: libraryIcon(k),
             testId: `library-tab-${k}`,
-          }))}
+          })), { value: 'workflow', label: 'Workflows', icon: 'workflow', testId: 'library-tab-workflow' }]}
         />
         <span className="flex-1" />
         <Input
@@ -270,7 +273,7 @@ export function LibraryIndex({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="cb-library-content">
+        <div className="cb-library-content cb-composition-content">
           {tab === 'skill' && <RecipesOffer />}
           {shown.length === 0 ? (
             <EmptyState

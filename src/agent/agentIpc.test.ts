@@ -49,7 +49,7 @@ async function start(message: string): Promise<RunHandle> {
     connectors: false,
     attended: true,
   });
-  if ('deferred' in handle || 'settled' in handle) {
+  if ('deferred' in handle || 'settled' in handle || 'observed_generation' in handle) {
     throw new Error('an attended run is never deferred or settled');
   }
   return handle;
@@ -595,7 +595,7 @@ describe('a mock run says what it reaches (M92.8)', () => {
       attended: true,
       allowedTools,
     });
-    if ('deferred' in handle || 'settled' in handle) {
+    if ('deferred' in handle || 'settled' in handle || 'observed_generation' in handle) {
       throw new Error('an attended run is never deferred or settled');
     }
     let reach: RunReach | null = null;
@@ -620,5 +620,48 @@ describe('a mock run says what it reaches (M92.8)', () => {
     expect((await reachOf(['get_note']))?.cerebro).toBe(true);
     expect((await reachOf(['Read']))?.cerebro).toBe(false);
     expect((await reachOf([]))?.cerebro).toBe(false);
+  });
+});
+
+
+describe('native held managed-action acknowledgement (M96)', () => {
+  const id = 'c'.repeat(32);
+  beforeEach(() => {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    invokeSpy.mockReset();
+  });
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    invokeSpy.mockReset();
+  });
+  it('maps the exact original interaction acknowledgement without announcing a run', async () => {
+    const starts: unknown[] = [];
+    const off = onRunStarted((start) => starts.push(start));
+    try {
+      invokeSpy.mockResolvedValueOnce({ answered: { interaction_id: id } });
+      await expect(answerInteraction(VAULT, id, { kind: 'allow' })).resolves.toEqual({
+        answered: { interactionId: id },
+      });
+      expect(starts).toEqual([]);
+      expect(invokeSpy).toHaveBeenCalledWith('answer_interaction', {
+        vault: VAULT, id, answer: { kind: 'allow', remember: undefined }, updatedInput: null,
+      });
+    } finally { off(); }
+  });
+  it.each([
+    { answered: null },
+    { answered: {} },
+    { answered: { interaction_id: '' } },
+    { answered: { interaction_id: 'd'.repeat(32) } },
+    { answered: { interaction_id: id, run: 99 } },
+    { answered: { interaction_id: id }, run: 99, run_id: 'other', session_id: 'other' },
+  ])('refuses malformed, mismatched or contradictory held acknowledgement %#', async (wire) => {
+    const starts: unknown[] = [];
+    const off = onRunStarted((start) => starts.push(start));
+    try {
+      invokeSpy.mockResolvedValueOnce(wire);
+      await expect(answerInteraction(VAULT, id, { kind: 'deny' })).rejects.toThrow();
+      expect(starts).toEqual([]);
+    } finally { off(); }
   });
 });

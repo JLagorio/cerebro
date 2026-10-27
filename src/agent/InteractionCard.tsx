@@ -4,6 +4,8 @@ import { Icon } from '@/components/ui/Icon';
 import { toolIcon, toolLabel } from '@/agent/AiActionCard';
 import { cardStatus, denyAnswer } from '@/agent/elements/cards';
 import { QuestionCard } from '@/agent/QuestionCard';
+import { ManagedActionCard } from '@/agent/ManagedActionCard';
+import { ManagedAccessCard } from '@/agent/ManagedAccessCard';
 import { UnfoldDetails } from '@/agent/Unfold';
 import type { WaitingCard } from '@/agent/useAgentChat';
 import type { PersonAnswer } from '@/agent/types';
@@ -30,6 +32,7 @@ export const CARD_COPY = {
 } as const;
 
 interface CardProps {
+  onChooseAccess?: (run: number, requestId: string) => void;
   interaction: WaitingCard;
   onAnswer: (answer: PersonAnswer) => void;
 }
@@ -95,6 +98,8 @@ function PermissionCard({ interaction, onAnswer }: CardProps) {
 export const CARD_RENDERERS: Record<string, (props: CardProps) => ReactElement> = {
   permission: PermissionCard,
   question: QuestionCard,
+  managed_action: ManagedActionCard,
+  managed_access: ManagedAccessCard,
 };
 
 /** A waiting call's card, by its kind; a kind this build does not know is

@@ -5,6 +5,8 @@ import { useUiStore } from '@/stores/uiStore';
 import { refusedAcrossVaults, useVaultStore } from '@/stores/vaultStore';
 import { isKnowledgePath } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
+import { saveBeforeAction } from './leaveGuard';
+import { heldOpenPages } from '@/editor/openPages';
 
 /**
  * Record-level actions that more than one surface offers (M20.5).
@@ -29,6 +31,9 @@ export async function duplicateRecordQuietly(entry: Entry): Promise<string | nul
     return null;
   const title = `${entry.title} copy`;
   try {
+    if (!(await saveBeforeAction('all', 'caller'))) return null;
+    if (useVaultStore.getState().vaultPath !== vaultPath || heldOpenPages().includes(entry.path))
+      return null;
     const body = await readNote(vaultPath, entry.path);
     if (useVaultStore.getState().vaultPath !== vaultPath) return null;
     // `key` is not copied: it identifies the record (LNC-4), and two records

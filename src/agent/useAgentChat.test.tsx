@@ -110,14 +110,29 @@ import * as agentIpc from './agentIpc';
 import { loadConversations, newConversation, saveConversations } from './conversations';
 import { applyEvent, findCall, replayTranscript } from './transcript';
 import { STOP_CONFIRM_MS, useAgentChat, type TurnContext } from './useAgentChat';
-import type { AgentStreamEvent, ChatMessage, LiveTurn, PendingInteraction } from './types';
-import { registerFlush } from '@/editor/openPages';
+import type {
+  AgentStreamEvent,
+  ChatMessage,
+  LiveTurn,
+  PendingInteraction,
+  RunReach,
+} from './types';
+import {
+  __resetOpenPages,
+  registerFlush,
+  registerSaveParticipant,
+  unresolvedOpenPages,
+} from '@/editor/openPages';
+import { FieldSaveParticipant } from '@/editor/fieldSaveParticipant';
+import { DocumentOwner } from '@/editor/documentOwner';
+import { useUpNext } from './useUpNext';
+import { useUpNextStore } from '@/stores/upNextStore';
 import { makeEntry } from '@/engine/testHelpers';
 import { mentionedTools, type PromptGrant } from '@/engine/toolGrant';
 import * as ipc from '@/lib/ipc';
 import type { ShellCeiling } from '@/lib/policy/toolApproval';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { getVaultOpening, useVaultStore } from '@/stores/vaultStore';
 
 afterEach(cleanup);
 
@@ -239,9 +254,8 @@ describe('useAgentChat send expansion', () => {
   });
 
   // M52.4 — a surface's labelled ask shows its label and sends its prompt.
-  // Retrying a failed one sent the label: the agent was asked "Ask to revise ·
-  // Sync error rate" with none of the instructions behind it.
-  it('keeps a labelled ask’s prompt on its bubble, and a retry sends the prompt again', async () => {
+  // A later explicit send still needs the prompt rather than the display label.
+  it('keeps a labelled ask’s prompt on its bubble for another explicit send', async () => {
     const label = 'Ask to revise · Sync error rate';
     const prompt = 'Revise the knowledge concept at knowledge/metrics/sync-error-rate.md.';
     vi.mocked(agentIpc.runAgent).mockRejectedValueOnce(new Error('spawn failed'));
@@ -251,7 +265,7 @@ describe('useAgentChat send expansion', () => {
     expect(question).toMatchObject({ role: 'user', text: label, prompt });
     await vi.waitFor(() => expect(result.current.messages[1].error).toBe('spawn failed'));
 
-    // What the panel's Retry does with the failed turn's question.
+    // Explicit send remains a prompt-preserving API, not recovery authority.
     act(() => result.current.send(question.text, question.prompt));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2));
     expect(vi.mocked(agentIpc.runAgent).mock.calls[1][1].message).toBe(prompt);
@@ -1765,6 +1779,8 @@ describe('useAgentChat waits on a card (M57.1)', () => {
   it('attaches the resume to the same bubble and task', async () => {
     const { result } = await held();
     const bubble = result.current.messages[1].id;
+    const generationKey = Reflect.get(result.current.messages[1], 'generationRequestKey');
+    expect(generationKey).toMatch(/^[a-f0-9]{32}$/);
     act(() => result.current.answer({ kind: 'allow' }));
     await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
     expect(vi.mocked(agentIpc.answerInteraction)).toHaveBeenCalledWith('/vault', card.id, {
@@ -1780,6 +1796,8 @@ describe('useAgentChat waits on a card (M57.1)', () => {
     expect(result.current.messages[1].id).toBe(bubble);
     expect(result.current.messages[1].tools[0]).toMatchObject({ done: true });
     expect(result.current.messages[1].text).toBe('Done.');
+    expect(Reflect.get(result.current.messages[1], 'generationRequestKey')).toBe(generationKey);
+    expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
     expect(result.current.streaming).toBe(false);
     // M57.6: the resume's record is ChatTurnsHost's to end at its Done.
     expect(useUiStore.getState().runs).toEqual([
@@ -2367,6 +2385,49 @@ describe('useAgentChat detaches and re-attaches (M57.6)', () => {
     expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
   });
 
+  it('reattach_keeps_each_text_block_once_before_done', async () => {
+    const { saveConversations, loadConversations, newConversation } =
+      await import('./conversations');
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    await act(async () => result.current.send('question'));
+    await vi.waitFor(() => expect(result.current.live).not.toBeNull());
+    journalEmit(8, { kind: 'TextDelta', text: 'First block.' });
+    journalEmit(8, { kind: 'Text', message_id: 'whole-1', text: 'First block.' });
+    journalEmit(8, { kind: 'ToolStart', tool_id: 'read-1', tool_name: 'Read', input: '{}' });
+    journalEmit(8, { kind: 'ToolDone', tool_id: 'read-1', output: 'Read source' });
+    saveConversations([
+      {
+        ...newConversation(),
+        sessionId: SESSION,
+        messages: result.current.messages,
+        live: result.current.live,
+      },
+    ]);
+    const [cached] = loadConversations();
+    await act(async () => result.current.restore([], null));
+    journalEmit(8, { kind: 'TextDelta', text: 'Second block.' });
+    journalEmit(8, { kind: 'Text', message_id: 'whole-2', text: 'Second block.' });
+    await act(async () =>
+      result.current.restore(cached.messages, cached.sessionId, undefined, cached.live),
+    );
+    await vi.waitFor(() => expect(result.current.messages[1].seq).toBe(6));
+    const words = () =>
+      result.current.messages[1].parts
+        ?.filter((part) => part.kind === 'text')
+        .map((part) => part.text);
+    expect(result.current.streaming).toBe(true);
+    expect(words()).toEqual(['First block.', 'Second block.']);
+    expect(result.current.messages[1].tools.map((tool) => tool.id)).toEqual(['read-1']);
+    // Hold the stream here: eventual Done healing cannot hide an intermediate duplicate.
+    journalEmit(8, { kind: 'TextDelta', text: 'Third block.' });
+    journalEmit(8, { kind: 'Text', message_id: 'whole-3', text: 'Third block.' });
+    expect(words()).toEqual(['First block.', 'Second block.', 'Third block.']);
+    await act(async () => journalEmit(8, { kind: 'Done' }));
+    await vi.waitFor(() => expect(result.current.streaming).toBe(false));
+    expect(words()).toEqual(['First block.', 'Second block.', 'Third block.']);
+    expect(agentIpc.readCliTranscript).toHaveBeenCalled();
+  });
+
   it('New conversation detaches and never stops the run', async () => {
     const { result } = await sent();
     act(() => result.current.reset());
@@ -2477,8 +2538,8 @@ describe('useAgentChat detaches and re-attaches (M57.6)', () => {
     const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
     act(() => result.current.restore(thread({ text: 'Every', seq: 2 }), SESSION, undefined, LIVE));
     await vi.waitFor(() => expect(result.current.messages[1].gap).toBe(true));
-    // Only Cancelled, Error, Changeset and Done change a gap reply; the
-    // cursor moves.
+    // Only Cancelled, Error, Changeset, Reach and Done change a gap reply;
+    // the cursor moves.
     expect(result.current.messages[1].text).toBe('Every');
     expect(result.current.messages[1].seq).toBe(5);
     // M58.3: the session file never holds a Changeset, so it lands now and
@@ -2492,6 +2553,49 @@ describe('useAgentChat detaches and re-attaches (M57.6)', () => {
     );
     expect(result.current.messages[1].gap).toBeUndefined();
     expect(result.current.messages[1].changesets).toEqual([changeset]);
+    expect(result.current.streaming).toBe(false);
+  });
+
+  it('a Reach after a gap lands, and outlives the rebuild', async () => {
+    journals.set(8, {
+      events: [{ run: 8, seq: 5, kind: 'TextDelta', text: ' lost' }],
+      first: 5,
+      done: false,
+    });
+    vi.mocked(agentIpc.readCliTranscript).mockResolvedValueOnce({
+      state: 'read',
+      lines: 2,
+      unclassified: [],
+      events: [
+        { kind: 'UserPrompt', text: 'question' },
+        { kind: 'Text', message_id: 'm-1', text: 'Every word, from the file.' },
+      ],
+    });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.restore(thread({ text: 'Every', seq: 2 }), SESSION, undefined, LIVE));
+    await vi.waitFor(() => expect(result.current.messages[1].gap).toBe(true));
+    // M92.8: what the run reaches is Rust's to say and the session file
+    // never holds it, so it lands now, as a Changeset does, and the rail's
+    // Connectors and Environment read it rather than not recorded.
+    const reach: RunReach = {
+      connectors: [{ name: 'gmail', status: 'connected' }],
+      missing: [],
+      missing_more: 0,
+      inherits: false,
+      permission_mode: 'default',
+      cerebro: true,
+      families: { shell: ['deny'] },
+    };
+    journalEmit(8, { kind: 'Reach', reach });
+    await vi.waitFor(() => expect(result.current.messages[1].reach).toEqual(reach));
+    // Still the gap's reply: nothing else of what the journal sends lands.
+    expect(result.current.messages[1].text).toBe('Every');
+    journalEmit(8, { kind: 'Done' });
+    await vi.waitFor(() =>
+      expect(result.current.messages[1].text).toBe('Every word, from the file.'),
+    );
+    expect(result.current.messages[1].gap).toBeUndefined();
+    expect(result.current.messages[1].reach).toEqual(reach);
     expect(result.current.streaming).toBe(false);
   });
 
@@ -2843,4 +2947,805 @@ describe('useAgentChat sends a branch’s fork until its session is known (M91.6
     await vi.waitFor(() => expect(sent()).toHaveLength(2));
     expect(sent()[1]).toMatchObject({ sessionId: null, fork: null });
   });
+});
+
+describe('M93 chat save barrier', () => {
+  const opts = { shell: 'off' as const, connectors: false };
+  beforeEach(() => {
+    __resetOpenPages();
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault' });
+    useUiStore.setState({ runs: [], toasts: [] });
+    useUpNextStore.setState({ queues: {} });
+  });
+  afterEach(() => {
+    cleanup();
+    __resetOpenPages();
+    vi.useRealTimers();
+  });
+  const invalidField = () => {
+    const write = vi.fn(async () => true);
+    const field = new FieldSaveParticipant(
+      { vaultId: '/vault', path: 'notes/page.md', ownerId: 'field:effort' },
+      '1',
+      (text) =>
+        text === 'invalid'
+          ? { ok: false, error: 'Keep exact text' }
+          : { ok: true, value: Number(text) },
+      write,
+    );
+    registerSaveParticipant(field);
+    field.edit('invalid');
+    return { field, write };
+  };
+  it('keeps the question and invalid field, settles the task, and permits explicit retry after repair', async () => {
+    const { field, write } = invalidField();
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    await act(async () => result.current.send('Keep this exact question'));
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(result.current.messages[0].text).toBe('Keep this exact question');
+    expect(result.current.messages[1]).toMatchObject({
+      streaming: false,
+      error: expect.stringContaining('unsaved'),
+    });
+    expect(result.current.busy()).toBe(false);
+    expect(useUiStore.getState().runs).toEqual([]);
+    expect(field.snapshot().latestDraft).toBe('invalid');
+    expect(write).not.toHaveBeenCalled();
+    field.edit('2');
+    await act(async () => result.current.send(result.current.messages[0].text));
+    expect(agentIpc.runAgent).toHaveBeenCalledOnce();
+    expect(write).toHaveBeenCalledWith(2);
+  });
+  it('refuses a failed body writer without losing its source bytes', async () => {
+    const owner = new DocumentOwner(
+      { vaultId: '/vault', path: 'notes/page.md', ownerId: 'pane-1' },
+      '# Before',
+      async () => {
+        throw new Error('disk full');
+      },
+    );
+    owner.edit('Exact source\r\n', 'source');
+    registerSaveParticipant({
+      key: owner.key,
+      phase: 'body',
+      prepare: () => {},
+      snapshot: () => owner.snapshot(),
+      flush: () => owner.flush(),
+    });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    await act(async () => result.current.send('Read my edits'));
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(owner.snapshot()).toMatchObject({
+      latestDraft: 'Exact source\r\n',
+      bodyFormat: 'source',
+      acknowledgedGeneration: 0,
+    });
+    expect(result.current.messages[1].error).toContain('unsaved');
+  });
+  it('refuses an unresolved child buffer even when the body itself is clean', async () => {
+    const owner = new DocumentOwner(
+      { vaultId: '/vault', path: 'notes/page.md', ownerId: 'pane-1' },
+      '# Before',
+      async () => ({ kind: 'file', contentHash: 'a'.repeat(64) }),
+    );
+    owner.setChildDrafts('sheet', 'raw invalid formula');
+    registerSaveParticipant({
+      key: owner.key,
+      prepare: () => {},
+      snapshot: () => owner.snapshot(),
+      flush: () => owner.flush(),
+    });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    await act(async () => result.current.send('Use this sheet'));
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(owner.snapshot().childDrafts).toEqual({ sheet: 'raw invalid formula' });
+    expect(result.current.busy()).toBe(false);
+  });
+  it('refuses a save deadline and retains the unresolved participant', async () => {
+    vi.useFakeTimers();
+    const owner = new DocumentOwner(
+      { vaultId: '/vault', path: 'notes/slow.md', ownerId: 'slow-body' },
+      '# Before',
+      () => new Promise(() => {}),
+    );
+    owner.edit('Still saving');
+    registerSaveParticipant({
+      key: owner.key,
+      prepare: () => {},
+      snapshot: () => owner.snapshot(),
+      flush: () => owner.flush(),
+    });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.send('Wait for the save'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5001);
+    });
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(result.current.messages[1].error).toContain('unsaved');
+    expect(result.current.busy()).toBe(false);
+    expect(unresolvedOpenPages()).toHaveLength(1);
+  });
+  it('rechecks drafts that appeared while skill expansion was pending', async () => {
+    let release!: (text: string) => void;
+    const expand = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    await act(async () => result.current.send('/slow', expand));
+    expect(expand).toHaveBeenCalledOnce();
+    const { field } = invalidField();
+    await act(async () => release('expanded question'));
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(field.snapshot().latestDraft).toBe('invalid');
+    expect(result.current.messages[1].error).toContain('unsaved');
+  });
+  it('keeps Up next held after a blocked launch instead of draining another question', async () => {
+    invalidField();
+    const { result } = renderHook(() => {
+      const chat = useAgentChat(turn('sys'), opts);
+      const next = useUpNext({
+        chat,
+        conversationId: 'barrier-thread',
+        vault: '/vault',
+        getTurn: turn('sys'),
+        resolve: (text) => ({ text, skill: null, expand: null, narrowing: {} }),
+        sendNow: chat.send,
+      });
+      return { chat, next };
+    });
+    await act(async () => {
+      expect(result.current.next.submit({ text: 'First question' })).toBe('sent');
+      expect(result.current.next.submit({ text: 'Second question' })).toBe('queued');
+    });
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(result.current.next.held).toBe(true);
+    expect(result.current.next.entries.map((entry) => entry.text)).toEqual(['Second question']);
+    expect(
+      result.current.chat.messages
+        .filter((message) => message.role === 'user')
+        .map((message) => message.text),
+    ).toEqual(['First question']);
+  });
+  it('Stop during the barrier settles without turning the save result into a new error', async () => {
+    let land!: () => void;
+    registerFlush(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.send('Cancelled question'));
+    await vi.waitFor(() => expect(land).toBeTypeOf('function'));
+    act(() => result.current.stop());
+    await act(async () => land());
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(result.current.busy()).toBe(false);
+    expect(result.current.messages[1].error).toBeUndefined();
+    expect(useUiStore.getState().runs).toEqual([]);
+  });
+  it('retires a pending launch across a vault A→B→A change in the same render tick', async () => {
+    let release!: (text: string) => void;
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    await act(async () =>
+      result.current.send(
+        '/slow',
+        () =>
+          new Promise<string>((resolve) => {
+            release = resolve;
+          }),
+      ),
+    );
+    act(() => {
+      useVaultStore.setState({ vaultPath: '/other' });
+      useVaultStore.setState({ vaultPath: '/vault' });
+    });
+    await act(async () => release('old expansion'));
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(result.current.busy()).toBe(false);
+    expect(useUiStore.getState().runs).toEqual([]);
+  });
+});
+
+describe('M95 logical generation start ownership', () => {
+  const opts = { shell: 'off' as const, connectors: false };
+  const observed = {
+    generationId: '11111111111111111111111111111111',
+    firstRunId: '22222222222222222222222222222222',
+    currentRunId: '33333333333333333333333333333333',
+    state: 'running',
+  };
+
+  beforeEach(() => {
+    handlers.length = 0;
+    journals.clear();
+    unknownRuns.clear();
+    __resetOpenPages();
+    vi.mocked(agentIpc.runAgent).mockReset();
+    vi.mocked(agentIpc.runAgent).mockResolvedValue({
+      run: 8,
+      durableId: 'durable-chat-8',
+      attach: 'durable-chat-8',
+    });
+    vi.mocked(agentIpc.attachRun).mockClear();
+    vi.mocked(agentIpc.stopAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault', entries: [] });
+    useUiStore.setState({ runs: [], toasts: [] });
+  });
+
+  it('allocates one request key before expansion and retains it through the same-tick send guard', async () => {
+    let release = (_: string) => {};
+    const expansion = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => {
+      result.current.send('/held', () => expansion);
+      result.current.send('/held', () => expansion);
+    });
+    expect(result.current.messages).toHaveLength(2);
+    const key = Reflect.get(result.current.messages[1], 'generationRequestKey');
+    expect(key).toMatch(/^[a-f0-9]{32}$/);
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    await act(async () => {
+      release('Expanded immutable input');
+      await expansion;
+    });
+    await vi.waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalledTimes(1));
+    const [, request] = vi.mocked(agentIpc.runAgent).mock.calls[0];
+    expect(Reflect.get(request, 'generationRequestKey')).toBe(key);
+    expect(Reflect.get(result.current.messages[1], 'generationRequestKey')).toBe(key);
+  });
+
+  it('allocates distinct keys for distinct logical questions even when their visible text is equal', async () => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.send('Same visible question'));
+    await vi.waitFor(() => expect(agentIpc.attachRun).toHaveBeenCalledTimes(1));
+    const first = Reflect.get(result.current.messages[1], 'generationRequestKey');
+    act(() => [...handlers].forEach((handler) => handler({ run: 8, kind: 'Done' })));
+    await vi.waitFor(() => expect(result.current.streaming).toBe(false));
+    act(() => result.current.send('Same visible question'));
+    await vi.waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalledTimes(2));
+    const second = Reflect.get(result.current.messages[3], 'generationRequestKey');
+    expect(first).toMatch(/^[a-f0-9]{32}$/);
+    expect(second).toMatch(/^[a-f0-9]{32}$/);
+    expect(second).not.toBe(first);
+  });
+
+  it('retains a failed start’s original key without automatically resending or rebuilding a handle', async () => {
+    vi.mocked(agentIpc.runAgent).mockRejectedValueOnce(
+      new Error('Start acknowledgement unavailable'),
+    );
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.send('Preserve this logical send'));
+    await vi.waitFor(() =>
+      expect(result.current.messages[1].error).toBe('Start acknowledgement unavailable'),
+    );
+    const key = Reflect.get(result.current.messages[1], 'generationRequestKey');
+    expect(key).toMatch(/^[a-f0-9]{32}$/);
+    expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+    expect(agentIpc.attachRun).not.toHaveBeenCalled();
+    expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+    const messages = result.current.messages;
+    act(() => result.current.restore(messages, null));
+    expect(Reflect.get(result.current.messages[1], 'generationRequestKey')).toBe(key);
+    expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains an observed running generation as neutral metadata without touching its existing genuine task', async () => {
+    const genuine = {
+      id: 'existing-real-task',
+      owner: 'chat' as const,
+      label: 'Already owned running generation',
+      place: null,
+      path: null,
+      conversationId: 'c-1',
+      run: 99,
+      attach: observed.currentRunId,
+      startedAt: 1,
+    };
+    useUiStore.setState({ runs: [genuine] });
+    vi.mocked(agentIpc.runAgent).mockResolvedValueOnce({
+      observed_generation: observed,
+    } as unknown as Awaited<ReturnType<typeof agentIpc.runAgent>>);
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.send('Observe the original generation'));
+    await vi.waitFor(() =>
+      expect(Reflect.get(result.current.messages[1], 'generationObservation')).toEqual(observed),
+    );
+    const reply = result.current.messages[1];
+    expect(reply.error).toBeUndefined();
+    expect(reply.notice).toBeUndefined();
+    expect(reply.cancelled).toBeUndefined();
+    expect(reply.interrupted).toBeUndefined();
+    expect(result.current.live).toBeNull();
+    expect(result.current.sessionId).toBeNull();
+    expect(agentIpc.attachRun).not.toHaveBeenCalled();
+    expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+    expect(useUiStore.getState().runs).toEqual([genuine]);
+  });
+
+  it('does not stop or replace a genuine live owner restored while the original start acknowledgement is pending', async () => {
+    let settle = (_: Awaited<ReturnType<typeof agentIpc.runAgent>>) => {};
+    vi.mocked(agentIpc.runAgent).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.send('Keep this already linked logical send'));
+    await vi.waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalledTimes(1));
+    const messages = result.current.messages;
+    const assistantId = messages[1].id;
+    const key = Reflect.get(messages[1], 'generationRequestKey');
+    expect(key).toMatch(/^[a-f0-9]{32}$/);
+    const genuine = { run: 99, attach: observed.currentRunId, assistantId };
+    act(() => result.current.restore(messages, 'session-1', undefined, genuine));
+    await vi.waitFor(() => expect(agentIpc.attachRun).toHaveBeenCalledTimes(1));
+    expect(result.current.live).toEqual(genuine);
+    await act(async () => {
+      settle({ observed_generation: observed } as unknown as Awaited<
+        ReturnType<typeof agentIpc.runAgent>
+      >);
+    });
+    expect(result.current.live).toEqual(genuine);
+    expect(result.current.streaming).toBe(true);
+    expect(result.current.messages[1].id).toBe(assistantId);
+    expect(Reflect.get(result.current.messages[1], 'generationRequestKey')).toBe(key);
+    expect(agentIpc.attachRun).toHaveBeenCalledTimes(1);
+    expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+  });
+
+  it('releases its unspawned placeholder when an observed acknowledgement returns after same-tick vault retirement', async () => {
+    let settle = (_: Awaited<ReturnType<typeof agentIpc.runAgent>>) => {};
+    vi.mocked(agentIpc.runAgent).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
+    );
+    const otherOwner = {
+      id: 'other-genuine-owner',
+      owner: 'chat' as const,
+      label: 'Keep the other live turn',
+      place: null,
+      path: null,
+      conversationId: 'c-2',
+      run: 77,
+      attach: '77777777777777777777777777777777',
+      startedAt: 1,
+    };
+    useUiStore.setState({ runs: [otherOwner] });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.send('Release only this retired start'));
+    await vi.waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalledTimes(1));
+    const key = Reflect.get(result.current.messages[1], 'generationRequestKey');
+    expect(result.current.busy()).toBe(true);
+    expect(useUiStore.getState().runs).toHaveLength(2);
+    // The final selected vault is unchanged, so no intermediate render/reset
+    // supplies cleanup. The synchronous launch subscription still saw B.
+    act(() => {
+      useVaultStore.setState({ vaultPath: '/other-vault' });
+      useVaultStore.setState({ vaultPath: '/vault' });
+    });
+    await act(async () => {
+      settle({ observed_generation: observed } as unknown as Awaited<
+        ReturnType<typeof agentIpc.runAgent>
+      >);
+    });
+    expect(result.current.busy()).toBe(false);
+    expect(result.current.streaming).toBe(false);
+    expect(result.current.stopping).toBe(false);
+    expect(result.current.live).toBeNull();
+    expect(useUiStore.getState().runs).toEqual([otherOwner]);
+    const reply = result.current.messages[1];
+    expect(Reflect.get(reply, 'generationRequestKey')).toBe(key);
+    expect(Reflect.get(reply, 'generationObservation')).toBeUndefined();
+    expect(reply.error).toBeUndefined();
+    expect(reply.notice).toBeUndefined();
+    expect(reply.cancelled).toBeUndefined();
+    expect(reply.interrupted).toBeUndefined();
+    expect(agentIpc.attachRun).not.toHaveBeenCalled();
+    expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+  });
+
+  it.each(['rejected', 'started'] as const)(
+    'keeps B stopping until its own handle and Done after an abandoned A start is %s',
+    async (oldResult) => {
+      type Start = Awaited<ReturnType<typeof agentIpc.runAgent>>;
+      let resolveA = (_: Start) => {};
+      let rejectA = (_: Error) => {};
+      let resolveB = (_: Start) => {};
+      vi.mocked(agentIpc.runAgent)
+        .mockImplementationOnce(
+          () =>
+            new Promise<Start>((resolve, reject) => {
+              resolveA = resolve;
+              rejectA = reject;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise<Start>((resolve) => {
+              resolveB = resolve;
+            }),
+        );
+      let conversationId = 'conversation-A';
+      const { result } = renderHook(() =>
+        useAgentChat(() => ({ ...turnOf('sys'), conversationId }), opts),
+      );
+      act(() => result.current.send('A waits for its start acknowledgement'));
+      await vi.waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalledTimes(1));
+      act(() => {
+        result.current.reset();
+        conversationId = 'conversation-B';
+        result.current.send('B must keep its own Stop barrier');
+      });
+      await vi.waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalledTimes(2));
+      const replyB = result.current.messages[1].id;
+      const keyB = Reflect.get(result.current.messages[1], 'generationRequestKey');
+      await act(async () => {
+        if (oldResult === 'rejected') rejectA(new Error('Invalid native generation observation.'));
+        else resolveA({ run: 41, durableId: 'abandoned-A', attach: 'abandoned-A' });
+      });
+      expect(result.current.messages).toHaveLength(2);
+      expect(result.current.messages[1].id).toBe(replyB);
+      expect(result.current.messages[1].error).toBeUndefined();
+      if (oldResult === 'started') expect(agentIpc.stopAgent).toHaveBeenCalledWith(41);
+      else expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+
+      act(() => result.current.stop());
+      // A's late continuation cannot clear B's pending-spawn marker. Stop
+      // waits for the real B handle before any cancelled outcome is known.
+      expect(result.current.stopping).toBe(true);
+      expect(result.current.busy()).toBe(true);
+      expect(result.current.streaming).toBe(true);
+      expect(result.current.messages[1].cancelled).toBeUndefined();
+      expect(result.current.messages[1].interrupted).toBeUndefined();
+      expect(agentIpc.stopAgent).not.toHaveBeenCalledWith(42);
+      expect(useUiStore.getState().runs).toEqual([
+        expect.objectContaining({ conversationId: 'conversation-B', run: null }),
+      ]);
+      act(() => result.current.send('Cannot interleave before B ends'));
+      expect(result.current.messages).toHaveLength(2);
+      expect(agentIpc.runAgent).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        resolveB({ run: 42, durableId: 'genuine-B', attach: 'genuine-B' });
+      });
+      await vi.waitFor(() => expect(agentIpc.attachRun).toHaveBeenCalledTimes(1));
+      expect(agentIpc.stopAgent).toHaveBeenCalledWith(42);
+      expect(result.current.live).toEqual({ run: 42, attach: 'genuine-B', assistantId: replyB });
+      expect(result.current.stopping).toBe(true);
+      expect(result.current.busy()).toBe(true);
+      expect(Reflect.get(result.current.messages[1], 'generationRequestKey')).toBe(keyB);
+      act(() => [...handlers].forEach((handler) => handler({ run: 41, kind: 'Done' })));
+      expect(result.current.busy()).toBe(true);
+      act(() => {
+        [...handlers].forEach((handler) => handler({ run: 42, kind: 'Cancelled' }));
+        [...handlers].forEach((handler) => handler({ run: 42, kind: 'Done' }));
+      });
+      expect(result.current.busy()).toBe(false);
+      expect(result.current.stopping).toBe(false);
+      expect(result.current.streaming).toBe(false);
+      expect(result.current.live).toBeNull();
+      expect(result.current.messages[1].id).toBe(replyB);
+      expect(result.current.messages[1].cancelled).toBe(true);
+      expect(agentIpc.runAgent).toHaveBeenCalledTimes(2);
+    },
+  );
+});
+
+
+describe('useAgentChat genuinely held managed actions (M96)', () => {
+  const opts = { shell: 'off' as const, connectors: false };
+  const card: PendingInteraction = {
+    id: 'c'.repeat(32), kind: 'managed_action', run: 8, tool_name: 'mcp__cerebro__prepare_action',
+    tool_id: 'managed-tool-1', session_id: 'session-1', summary: 'Create issue · fixture/repo',
+    input: '{"Repository":"fixture/repo","Title":"Review deployment","Body":"Full reviewed body"}',
+    asked_at: '2026-10-26T00:00:00.000Z',
+  };
+  beforeEach(() => {
+    handlers.length = 0; journals.clear(); unknownRuns.clear();
+    vi.mocked(agentIpc.runAgent).mockReset();
+    vi.mocked(agentIpc.runAgent).mockResolvedValue({ run: 8, durableId: 'durable-chat-8', attach: 'durable-chat-8', sessionId: 'session-1' });
+    vi.mocked(agentIpc.stopAgent).mockReset(); vi.mocked(agentIpc.stopAgent).mockResolvedValue(true);
+    vi.mocked(agentIpc.answerInteraction).mockReset();
+    vi.mocked(agentIpc.cancelInteraction).mockClear(); vi.mocked(agentIpc.attachRun).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault' }); useUiStore.setState({ runs: [], toasts: [] });
+  });
+  const emit = (event: Record<string, unknown>) => act(() => [...handlers].forEach((h) => h(event)));
+  async function liveHeld() {
+    const hook = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => hook.result.current.send('create the reviewed issue'));
+    await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
+    emit({ run: 8, kind: 'ToolStart', tool_name: card.tool_name, tool_id: card.tool_id, input: '{}' });
+    emit({ run: 8, kind: 'Interaction', interaction: card });
+    // This call remains inside the original process: no ToolDeferred/Done.
+    return hook;
+  }
+  function pendingAnswer() {
+    let resolve!: (value: Awaited<ReturnType<typeof agentIpc.answerInteraction>>) => void;
+    vi.mocked(agentIpc.answerInteraction).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    return () => act(async () => resolve({ answered: { interactionId: card.id } }));
+  }
+  it('acknowledges the card while retaining the original stream, task, turn and send key', async () => {
+    vi.mocked(agentIpc.answerInteraction).mockResolvedValueOnce({ answered: { interactionId: card.id } });
+    const { result } = await liveHeld(); const bubble = result.current.messages[1].id;
+    const key = Reflect.get(result.current.messages[1], 'generationRequestKey');
+    const live = result.current.live; const task = useUiStore.getState().runs[0]; const session = result.current.sessionId;
+    expect(key).toMatch(/^[a-f0-9]{32}$/);
+    act(() => result.current.answer({ kind: 'allow' }));
+    await vi.waitFor(() => expect(result.current.interaction).toBeNull());
+    expect(result.current.live).toEqual(live); expect(result.current.sessionId).toBe(session);
+    expect(useUiStore.getState().runs).toEqual([task]); expect(result.current.streaming).toBe(true); expect(result.current.busy()).toBe(true);
+    expect(agentIpc.attachRun).toHaveBeenCalledTimes(1); expect(agentIpc.runAgent).toHaveBeenCalledTimes(1); expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+    emit({ run: 8, kind: 'ToolDone', tool_id: card.tool_id, output: 'Effect recorded.' });
+    emit({ run: 8, kind: 'TextDelta', text: 'Created the reviewed issue.' });
+    emit({ run: 8, kind: 'Done' });
+    expect(result.current.messages[1].id).toBe(bubble); expect(result.current.messages[1].text).toBe('Created the reviewed issue.');
+    expect(Reflect.get(result.current.messages[1], 'generationRequestKey')).toBe(key); expect(result.current.busy()).toBe(false);
+  });
+  it('Stop during the answer stops the original process immediately and awaits its actual Done', async () => {
+    const acknowledge = pendingAnswer(); const { result } = await liveHeld();
+    act(() => result.current.answer({ kind: 'allow' })); act(() => result.current.stop());
+    await vi.waitFor(() => expect(agentIpc.stopAgent).toHaveBeenCalledWith(8));
+    expect(result.current.stopping).toBe(true); expect(result.current.streaming).toBe(true);
+    await acknowledge(); expect(result.current.stopping).toBe(true); expect(agentIpc.attachRun).toHaveBeenCalledTimes(1);
+    emit({ run: 8, kind: 'Cancelled' }); emit({ run: 8, kind: 'Done' });
+    expect(result.current.stopping).toBe(false); expect(result.current.busy()).toBe(false); expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+  });
+  it('keeps an invalid managed edit actionable without ending the original turn', async () => {
+    vi.mocked(agentIpc.answerInteraction).mockResolvedValueOnce({ refused: { code: 'invalid_input', message: 'The title is required.' } });
+    const { result } = await liveHeld(); const live = result.current.live;
+    act(() => result.current.answer({ kind: 'allow', updatedInput: { title: '' } }));
+    await vi.waitFor(() => expect(result.current.interaction?.refused).toBe('The title is required.'));
+    expect(result.current.interaction?.stale).toBeNull(); expect(result.current.interaction?.answering).toBe(false);
+    expect(result.current.streaming).toBe(true); expect(result.current.live).toEqual(live); expect(useUiStore.getState().toasts).toEqual([]);
+    expect(agentIpc.attachRun).toHaveBeenCalledTimes(1); expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+  });
+  it('clears a timed-out held card only when its original tool completes and keeps following the original turn', async () => {
+    const { result } = await liveHeld();
+    emit({ run: 8, kind: 'ToolDone', tool_id: 'unrelated', output: 'Other call.' });
+    expect(result.current.interaction?.card.id).toBe(card.id);
+    emit({ run: 8, kind: 'ToolDone', tool_id: card.tool_id, output: 'The approval wait expired. No effect was applied.' });
+    expect(result.current.interaction).toBeNull(); expect(result.current.streaming).toBe(true);
+    emit({ run: 8, kind: 'Done' }); expect(result.current.busy()).toBe(false);
+    expect(result.current.messages[1].tools.find((tool) => tool.id === card.tool_id)?.cancelled).toBeUndefined();
+    expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+  });
+  it('an ended original process cannot leave its managed card and turn wedged as waiting', async () => {
+    const { result } = await liveHeld(); emit({ run: 8, kind: 'Done' });
+    expect(result.current.busy()).toBe(false); expect(result.current.streaming).toBe(false); expect(result.current.waiting).toBe(false);
+    expect(result.current.messages[1].cancelled).toBeUndefined(); expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+  });
+  it('a late acknowledgement cannot clear or attach over a new turn owner', async () => {
+    const acknowledge = pendingAnswer(); const { result } = await liveHeld();
+    act(() => result.current.answer({ kind: 'allow' })); act(() => result.current.reset());
+    vi.mocked(agentIpc.runAgent).mockResolvedValueOnce({ run: 10, durableId: 'durable-chat-10', attach: 'durable-chat-10' });
+    act(() => result.current.send('new owner')); await vi.waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalledTimes(2));
+    const bubble = result.current.messages[1].id; const task = useUiStore.getState().runs.find((run) => run.run === 10);
+    await acknowledge(); expect(result.current.messages[1].id).toBe(bubble); expect(result.current.live?.run).toBe(10);
+    expect(useUiStore.getState().runs.find((run) => run.run === 10)).toEqual(task); expect(result.current.streaming).toBe(true);
+    expect(agentIpc.attachRun).toHaveBeenCalledTimes(2); expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+  });
+  it('keeps absent managed tool correlation explicit and never matches an empty ToolDone', async () => {
+    const uncorrelated = { ...card, tool_id: null } as unknown as PendingInteraction;
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.send('create the reviewed issue')); await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
+    emit({ run: 8, kind: 'Interaction', interaction: uncorrelated });
+    expect(result.current.messages[1].tools).toEqual([]);
+    emit({ run: 8, kind: 'ToolDone', tool_id: '', output: 'Uncorrelated other event.' });
+    expect(result.current.interaction?.card.id).toBe(card.id);
+    vi.mocked(agentIpc.answerInteraction).mockResolvedValueOnce({ answered: { interactionId: card.id } });
+    act(() => result.current.answer({ kind: 'deny' })); await vi.waitFor(() => expect(result.current.interaction).toBeNull());
+    expect(result.current.messages[1].tools).toEqual([]); expect(agentIpc.attachRun).toHaveBeenCalledTimes(1);
+    emit({ run: 8, kind: 'Done' }); expect(result.current.busy()).toBe(false);
+  });
+  it('restores a null-correlated managed wait onto its still-running original stream without a deferred marker', async () => {
+    const uncorrelated = { ...card, tool_id: null } as unknown as PendingInteraction;
+    vi.mocked(agentIpc.listInteractions).mockResolvedValue([uncorrelated]);
+    journals.set(8, { events: [], first: 1, done: false });
+    const restored: ChatMessage[] = [
+      { id: 'u-original', role: 'user', text: 'create the reviewed issue', tools: [] },
+      { id: 'a-original', role: 'assistant', text: '', tools: [], seq: 4, streaming: true },
+    ];
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.restore(restored, 'session-1', undefined, { run: 8, attach: 'durable-chat-8', assistantId: 'a-original' }));
+    await vi.waitFor(() => expect(result.current.interaction?.card.id).toBe(card.id));
+    expect(result.current.messages[1].tools).toEqual([]); expect(result.current.messages[1].streaming).toBe(true);
+    expect(result.current.live).toEqual({ run: 8, attach: 'durable-chat-8', assistantId: 'a-original' });
+    expect(agentIpc.runAgent).not.toHaveBeenCalled(); expect(agentIpc.attachRun).toHaveBeenCalledTimes(1);
+    expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { run: 9, durableId: 'durable-unexpected-9', attach: 'durable-unexpected-9', stop: 9 },
+    { run: 8, durableId: 'durable-chat-8', attach: 'durable-chat-8', stop: null },
+  ])('an unexpected resumed result for a managed wait never replaces or reattaches the original owner ($run)', async (unexpected) => {
+    vi.mocked(agentIpc.answerInteraction).mockResolvedValueOnce({ resumed: { run: unexpected.run, durableId: unexpected.durableId, attach: unexpected.attach, sessionId: 'unexpected-session' } });
+    const { result } = await liveHeld(); const original = result.current.live;
+    const task = useUiStore.getState().runs[0]; const session = result.current.sessionId;
+    const bubble = result.current.messages[1].id; const key = Reflect.get(result.current.messages[1], 'generationRequestKey');
+    act(() => result.current.answer({ kind: 'allow' }));
+    await vi.waitFor(() => expect(agentIpc.answerInteraction).toHaveBeenCalledTimes(1));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.live).toEqual(original);
+    expect(useUiStore.getState().runs).toEqual([task]); expect(result.current.sessionId).toBe(session);
+    expect(result.current.messages[1].id).toBe(bubble); expect(Reflect.get(result.current.messages[1], 'generationRequestKey')).toBe(key);
+    expect(agentIpc.attachRun).toHaveBeenCalledTimes(1); expect(result.current.streaming).toBe(true);
+    expect(result.current.interaction?.card.id).toBe(card.id); expect(result.current.interaction?.answering).toBe(false);
+    expect(result.current.interaction?.refused).toBe('This response did not match the waiting call.');
+    if (unexpected.stop === null) expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+    else expect(agentIpc.stopAgent).toHaveBeenCalledWith(unexpected.stop);
+    emit({ run: 8, kind: 'TextDelta', text: 'Still the original response.' });
+    expect(result.current.messages[1].text).toBe('Still the original response.');
+  });
+
+  it('restores the native in-flight managed answer visibly and cannot send a second person decision', async () => {
+    const nativeCard = { ...card, tool_id: null, answering: true };
+    vi.mocked(agentIpc.listInteractions).mockResolvedValue([nativeCard]);
+    journals.set(8, { events: [], first: 1, done: false });
+    const restored: ChatMessage[] = [
+      { id: 'u-answering', role: 'user', text: 'review issue', tools: [] },
+      { id: 'a-answering', role: 'assistant', text: '', tools: [], seq: 4, streaming: true },
+    ];
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.restore(restored, 'session-1', undefined, { run: 8, attach: 'durable-chat-8', assistantId: 'a-answering' }));
+    await vi.waitFor(() => expect(result.current.interaction?.card.id).toBe(card.id));
+    expect(result.current.interaction?.answering).toBe(true);
+    act(() => result.current.answer({ kind: 'allow' }));
+    expect(agentIpc.answerInteraction).not.toHaveBeenCalled(); expect(result.current.live?.run).toBe(8);
+    expect(result.current.messages[1].tools).toEqual([]); expect(agentIpc.attachRun).toHaveBeenCalledTimes(1);
+  });
+
+  async function liveAccessCard() {
+    const hook = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => hook.result.current.send('choose managed access'));
+    await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
+    const access = { ...card, kind: 'managed_access', tool_name: 'mcp__cerebro__list_actions', tool_id: null, run: 8 };
+    emit({ run: 8, kind: 'Interaction', interaction: access }); return { ...hook, access };
+  }
+  it('a natural original Done closes an access-choice wait without a fake effect or stuck turn', async () => {
+    const { result } = await liveAccessCard(); emit({ run: 8, kind: 'Done' });
+    expect(result.current.busy()).toBe(false); expect(result.current.waiting).toBe(false);
+    expect(result.current.streaming).toBe(false); expect(result.current.messages[1].cancelled).toBeUndefined();
+    expect(result.current.messages[1].tools).toEqual([]); expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+  });
+  it('restores a still-held access-choice card on the original live cursor', async () => {
+    const access = { ...card, kind: 'managed_access', tool_name: 'mcp__cerebro__list_actions', tool_id: null, run: 8 };
+    vi.mocked(agentIpc.listInteractions).mockResolvedValue([access]); journals.set(8, { events: [], first: 1, done: false });
+    const restored: ChatMessage[] = [{ id: 'u-access', role: 'user', text: 'choose access', tools: [] }, { id: 'a-access', role: 'assistant', text: '', tools: [], seq: 4, streaming: true }];
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.restore(restored, 'session-1', undefined, { run: 8, attach: 'durable-chat-8', assistantId: 'a-access' }));
+    await vi.waitFor(() => expect(result.current.interaction?.card.kind).toBe('managed_access'));
+    expect(result.current.live?.run).toBe(8); expect(result.current.messages[1].tools).toEqual([]);
+    expect(result.current.messages[1].streaming).toBe(true); expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(agentIpc.attachRun).toHaveBeenCalledTimes(1);
+  });
+  it('only the exact original access card closure clears it while the original run continues', async () => {
+    const { result, access } = await liveAccessCard();
+    emit({ run: 9, kind: 'InteractionClosed', interaction_id: access.id });
+    emit({ run: 8, kind: 'InteractionClosed', interaction_id: 'other-card' });
+    expect(result.current.interaction?.card.id).toBe(access.id);
+    emit({ run: 8, kind: 'InteractionClosed', interaction_id: access.id });
+    expect(result.current.interaction).toBeNull(); expect(result.current.streaming).toBe(true); expect(result.current.busy()).toBe(true);
+    emit({ run: 8, kind: 'Done' }); expect(result.current.busy()).toBe(false); expect(agentIpc.attachRun).toHaveBeenCalledTimes(1);
+  });
+  it('an access-choice card cannot invoke the generic person-answer resume seam', async () => {
+    vi.mocked(agentIpc.answerInteraction).mockResolvedValueOnce({ resumed: { run: 9, durableId: 'wrong-9', attach: 'wrong-9', sessionId: 'wrong-session' } });
+    const { result, access } = await liveAccessCard(); act(() => result.current.answer({ kind: 'allow' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(agentIpc.answerInteraction).not.toHaveBeenCalled(); expect(result.current.interaction?.card.id).toBe(access.id);
+    expect(result.current.live?.run).toBe(8); expect(agentIpc.attachRun).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['managed_action','managed_access'] as const)('restores only the exact original run among same-session %s cards',async(kind)=>{
+    const wrong={...card,id:'d'.repeat(32),kind,run:9,tool_id:null};const original={...card,id:'e'.repeat(32),kind,run:8,tool_id:null};
+    vi.mocked(agentIpc.listInteractions).mockResolvedValue([wrong,original]);journals.set(8,{events:[],first:1,done:false});
+    const restored:ChatMessage[]=[{id:'u-run-bound',role:'user',text:'original run',tools:[]},{id:'a-run-bound',role:'assistant',text:'',tools:[],seq:4,streaming:true}];
+    const{result}=renderHook(()=>useAgentChat(turn('sys'),opts));act(()=>result.current.restore(restored,'session-1',undefined,{run:8,attach:'durable-chat-8',assistantId:'a-run-bound'}));
+    await vi.waitFor(()=>expect(result.current.interaction?.card.id).toBe(original.id));expect(result.current.live?.run).toBe(8);expect(agentIpc.attachRun).toHaveBeenCalledTimes(1);expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+  });
+  it.each(['managed_action','managed_access'] as const)('does not invent an original run for unknown or null %s card selectors',async(kind)=>{
+    const missing={...card,id:'d'.repeat(32),kind,run:undefined,tool_id:null};const unknown={...card,id:'e'.repeat(32),kind,run:null,tool_id:null};
+    vi.mocked(agentIpc.listInteractions).mockResolvedValue([missing,unknown]);journals.set(8,{events:[],first:1,done:false});
+    const restored:ChatMessage[]=[{id:'u-run-unknown',role:'user',text:'original run',tools:[]},{id:'a-run-unknown',role:'assistant',text:'',tools:[],seq:4,streaming:true}];
+    const{result}=renderHook(()=>useAgentChat(turn('sys'),opts));act(()=>result.current.restore(restored,'session-1',undefined,{run:8,attach:'durable-chat-8',assistantId:'a-run-unknown'}));
+    await vi.waitFor(()=>expect(agentIpc.listInteractions).toHaveBeenCalled());await act(async()=>{await Promise.resolve();});
+    expect(result.current.interaction).toBeNull();expect(result.current.live?.run).toBe(8);expect(result.current.streaming).toBe(true);expect(agentIpc.runAgent).not.toHaveBeenCalled();expect(agentIpc.attachRun).toHaveBeenCalledTimes(1);
+  });
+
+});
+
+
+describe('M95 original native reply selector is memory-only provenance', () => {
+  const opts = { shell: 'off' as const, connectors: false };
+  beforeEach(() => {
+    handlers.length = 0; journals.clear(); unknownRuns.clear(); __resetOpenPages();
+    vi.mocked(agentIpc.runAgent).mockReset(); vi.mocked(agentIpc.runAgent).mockResolvedValue({ run: 8, durableId: 'durable-chat-8', attach: 'durable-chat-8' });
+    useVaultStore.setState({ vaultPath: '/vault', entries: [] }); useUiStore.setState({ runs: [], toasts: [] });
+  });
+  it('captures the actual started durable root and original opening on the reply', async () => {
+    const opening = getVaultOpening(); const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.send('Original question'));
+    await vi.waitFor(() => expect(Reflect.get(result.current.messages[1], 'nativeRecoveryRoot')).toEqual({ runId: 'durable-chat-8', vaultPath: '/vault', opening }));
+    act(() => { for (const receive of handlers) receive({ kind: 'Error', run: 8, message: 'Interrupted' }); });
+    expect(Reflect.get(result.current.messages[1], 'nativeRecoveryRoot')).toEqual({ runId: 'durable-chat-8', vaultPath: '/vault', opening });
+  });
+  it('does not turn observed-generation metadata into an original captured root', async () => {
+    vi.mocked(agentIpc.runAgent).mockResolvedValue({ observed_generation: { generationId: '1'.repeat(32), firstRunId: '2'.repeat(32), currentRunId: '3'.repeat(32), state: 'running' } });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts)); act(() => result.current.send('Original question'));
+    await vi.waitFor(() => expect(result.current.busy()).toBe(false)); expect(Reflect.get(result.current.messages[1], 'nativeRecoveryRoot')).toBeUndefined();
+  });
+  it('cannot capture a late native start after an actual same-path reopen', async () => {
+    let finish!: (value: { run: number; durableId: string; attach: string }) => void;
+    vi.mocked(agentIpc.runAgent).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const opening = getVaultOpening(); const { result } = renderHook(() => useAgentChat(turn('sys'), opts));
+    act(() => result.current.send('Original question')); await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    await act(async () => useVaultStore.getState().openVault('/vault')); expect(getVaultOpening()).toBeGreaterThan(opening);
+    await act(async () => finish({ run: 8, durableId: 'old-root', attach: 'old-root' }));
+    expect(Reflect.get(result.current.messages[1], 'nativeRecoveryRoot')).toBeUndefined();
+  });
+  it('cannot capture a stale actual start after a batched A to B to A departure', async () => {
+    let finish!: (value: { run: number; durableId: string; attach: string }) => void;
+    vi.mocked(agentIpc.runAgent).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts)); act(() => result.current.send('Original question'));
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    act(() => { useVaultStore.setState({ vaultPath: '/other' }); useVaultStore.setState({ vaultPath: '/vault' }); });
+    await act(async () => finish({ run: 8, durableId: 'old-root', attach: 'old-root' }));
+    expect(Reflect.get(result.current.messages[1], 'nativeRecoveryRoot')).toBeUndefined();
+  });
+});
+
+
+describe('M95 frozen archive display producer', () => {
+  const opts = { shell: 'off' as const, connectors: false };
+  beforeEach(() => {
+    handlers.length = 0; journals.clear(); unknownRuns.clear(); __resetOpenPages();
+    vi.mocked(agentIpc.runAgent).mockReset();
+    vi.mocked(agentIpc.runAgent).mockResolvedValue({ run: 8, durableId: 'durable-chat-8', attach: 'durable-chat-8' });
+    vi.mocked(agentIpc.attachRun).mockClear(); vi.mocked(agentIpc.stopAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault', entries: [] });
+    useUiStore.setState({ runs: [], toasts: [] });
+  });
+
+  it('binds the rendered user and assistant identities before prompt expansion yields', async () => {
+    let release: ((value: string) => void) | undefined;
+    const context = { ...turnOf('PRIVATE_SYSTEM'), archiveAttachmentRefs: ['files/original.pdf'] };
+    const hook = renderHook(() => useAgentChat(() => context, opts));
+    act(() => hook.result.current.send('Human visible question', () => new Promise<string>((resolve) => { release = resolve; })));
+    const [user, answer] = hook.result.current.messages;
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    context.conversationId = 'different-thread';
+    context.archiveAttachmentRefs.splice(0, 1, 'files/later.pdf');
+    release?.('PRIVATE_EXPANDED_PROMPT');
+    await vi.waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalled());
+    const sent = vi.mocked(agentIpc.runAgent).mock.calls.at(-1)?.[1];
+    expect(Reflect.get(sent ?? {}, 'archiveBinding')).toEqual({
+      threadId: 'c-1', userMessageId: user.id, assistantMessageId: answer.id,
+      parentThreadId: null, branchMessageId: null,
+      displayMessage: { text: 'Human visible question', addressedLabel: null, attachmentRefs: ['files/original.pdf'] },
+    });
+    expect(sent?.message).toContain('PRIVATE_EXPANDED_PROMPT');
+    expect(Reflect.get(sent ?? {}, 'archiveBinding')).not.toEqual(expect.objectContaining({ displayMessage: expect.objectContaining({ text: 'PRIVATE_EXPANDED_PROMPT' }) }));
+  });
+});
+
+
+describe('verified archive cache metadata',()=>{
+ it('marks only original message IDs while a new send remains in flight without detaching its work',()=>{
+  __resetOpenPages();handlers.length=0;journals.clear();unknownRuns.clear();useUiStore.setState({runs:[],toasts:[]});useVaultStore.setState({vaultPath:'/vault',entries:[]});vi.mocked(agentIpc.stopAgent).mockClear();
+  const {result}=renderHook(()=>useAgentChat(turn('sys'),{shell:'off',connectors:false}));
+  act(()=>result.current.restore([{id:'old-u',role:'user',text:'Old question',tools:[]},{id:'old-a',role:'assistant',text:'Old answer',tools:[]}],null));
+  act(()=>result.current.send('New question',()=>new Promise<string>(()=>{})));
+  const active=result.current.messages.at(-1);expect(result.current.busy()).toBe(true);
+  act(()=>result.current.applyArchiveReadback!([{messageId:'old-a',record:{attemptId:'imported',expiresAt:null,persistence:'retained',origin:'browser_cache',importedAt:'2026-10-27T12:00:00Z',completedAt:null}}]));
+  expect(result.current.messages.find((message)=>message.id==='old-a')?.archiveRecord?.attemptId).toBe('imported');expect(result.current.messages.at(-1)).toBe(active);expect(result.current.busy()).toBe(true);expect(result.current.streaming).toBe(true);expect(agentIpc.stopAgent).not.toHaveBeenCalled();
+ });
 });

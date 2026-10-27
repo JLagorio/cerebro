@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "producer": "mcp::search_notes_in",
+  "scenario": "retrieval",
+  "clock": "native_monotonic_per_query",
+  "surface": "assistant_scoped_search_notes",
+  "defaultCutoff": 20,
+  "maximumCutoff": 100,
+  "limits": {
+    "queries": 32,
+    "documents": 128,
+    "documentBytes": 163840,
+    "corpusBytes": 1048576,
+    "queryBytes": 1024,
+    "passages": 256,
+    "judgments": 256,
+    "quoteScalars": 240,
+    "pathBytes": 256,
+    "pathDepth": 8,
+    "toolResultBytes": 65536,
+    "captureBytes": 524288,
+    "fixtureJsonBytes": 2097152,
+    "treeEntries": 512
+  },
+  "queryKinds": [
+    "exact",
+    "paraphrase",
+    "alias",
+    "accent",
+    "multilingual",
+    "long",
+    "imported",
+    "mixed",
+    "counterevidence",
+    "unanswerable",
+    "scope",
+    "cutoff"
+  ],
+  "blankQueryScalars": [
+    9, 10, 11, 12, 13, 32, 133, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200,
+    8201, 8202, 8232, 8233, 8239, 8287, 12288
+  ]
+}

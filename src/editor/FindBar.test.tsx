@@ -392,11 +392,17 @@ describe('escape and focus', () => {
   });
 
   it('⌘K with the query selected opens no Ask AI', async () => {
-    const { host } = await mount(PAGE);
+    const { editor, host } = await mount(PAGE);
     openFind();
     await search('sync');
     const input = screen.getByTestId<HTMLInputElement>('find-input');
+    const page = host.querySelector<HTMLElement>('.ProseMirror')!;
+    const selectionEnd = after(editor, 'sync', 1);
+    act(() => select(editor, selectionEnd, selectionEnd));
+    input.focus();
     input.select();
+    expect(document.activeElement).toBe(input);
+    expect(editor.prosemirrorState.selection.empty).toBe(true);
     // Chromium reports text selected inside an <input> through
     // window.getSelection(), with a range collapsed in the bar; jsdom does
     // not, so stand that in.
@@ -408,13 +414,24 @@ describe('escape and focus', () => {
       isCollapsed: true,
       getRangeAt: () => range,
     } as unknown as Selection);
-    expect(fireEvent.keyDown(input, { key: 'k', metaKey: true })).toBe(true);
-    expect(screen.queryByTestId('ask-ai')).toBeNull();
-    // The same selection, keyed from the page, does open it: the bar is what
-    // keeps it shut.
-    fireEvent.keyDown(host.querySelector('.ProseMirror')!, { key: 'k', metaKey: true });
-    await waitFor(() => expect(screen.queryByTestId('ask-ai')).not.toBeNull());
-    getSelection.mockRestore();
+    try {
+      expect(fireEvent.keyDown(input, { key: 'k', metaKey: true })).toBe(true);
+      expect(screen.queryByTestId('ask-ai')).toBeNull();
+      // Merely retargeting the key cannot turn query text into a page selection.
+      expect(fireEvent.keyDown(page, { key: 'k', metaKey: true })).toBe(true);
+      expect(screen.queryByTestId('ask-ai')).toBeNull();
+    } finally {
+      getSelection.mockRestore();
+    }
+    // A genuine selected page passage opens Ask AI through its model owner.
+    act(() => {
+      editor.focus();
+      select(editor, selectionEnd - 4, selectionEnd);
+    });
+    expect(editor.prosemirrorState.selection.empty).toBe(false);
+    expect(editor.getSelectedText()).toBe('sync');
+    expect(fireEvent.keyDown(page, { key: 'k', metaKey: true })).toBe(false);
+    await screen.findByTestId('ask-ai');
   });
 });
 

@@ -6,9 +6,11 @@
 //! ended, so it is where usage is recorded. Nothing about spend travels on
 //! the UI event channel (see [`super::usage`]). A panel sees two of a run's
 //! numbers: how full a conversation's context is, which the reader files in
-//! a memory-only [`ContextBook`] for the panel to pull (M91.5), and how long
-//! each turn worked, the result's `duration_ms`, which the fold carries on
-//! the turn's own event (M92.2) as the meter books it on the run's row.
+//! a memory-only [`ContextBook`] for the panel to pull (M91.5), with Claude
+//! Code's own breakdown of it when a seated run answered its context ask
+//! (M92.13, [`ContextBreakdown`]), and how long each turn worked, the
+//! result's `duration_ms`, which the fold carries on the turn's own event
+//! (M92.2) as the meter books it on the run's row.
 //!
 //! **A meter is optional.** A run started before a vault is registered, or in
 //! a build with no runtime DB, streams exactly as it always did — metering is
@@ -198,6 +200,10 @@ pub struct Tally {
     /// into a resumed session's result never reach a line. Never booked:
     /// the reader files it in the [`ContextBook`] once the stream ends.
     context: Option<ContextUse>,
+    /// The context ask a seated run's reader sent (M92.13), by its request
+    /// id, until the run answers it: the one `control_response` the tally
+    /// reads, into `context`'s breakdown.
+    context_ask: Option<String>,
 }
 
 impl Tally {
@@ -246,8 +252,10 @@ impl Tally {
                 window: None,
                 model: turn.as_ref().and_then(|turn| turn.model_id.clone()),
                 at: reading_time(event),
+                breakdown: None,
             });
         }
+        self.read_context_answer(event);
         if let Some(turn) = turn {
             self.facts.merge(turn);
         }
@@ -290,6 +298,49 @@ impl Tally {
     /// whole reading ([`usage::context_used`]).
     pub(crate) fn context(&self) -> Option<&ContextUse> {
         self.context.as_ref()
+    }
+
+    /// The reader asked its run how full its context is, under `request_id`
+    /// (M92.13, `turn_input`): the run's answer to that id, and nothing
+    /// else, is read into its reading's breakdown.
+    pub(crate) fn asked_context(&mut self, request_id: &str) {
+        self.context_ask = Some(request_id.to_string());
+    }
+
+    /// Is the run's answer to the context ask still to come?
+    pub(crate) fn awaits_context(&self) -> bool {
+        self.context_ask.is_some()
+    }
+
+    /// Read `event` when it is the run's answer to the context ask (M92.13):
+    /// a `control_response` whose request id is the ask's, which ends the
+    /// wait. A success's answer becomes the reading's breakdown, when it is
+    /// one ([`breakdown_of`]); an error, or an answer that is not one, leaves
+    /// none. A response to any other request, or one before the ask, is not
+    /// read. With no reading of the run's own there is nothing to break
+    /// down, so the answer is let go.
+    fn read_context_answer(&mut self, event: &Value) {
+        let Some(asked) = self.context_ask.as_deref() else {
+            return;
+        };
+        if event.get("type").and_then(Value::as_str) != Some("control_response") {
+            return;
+        }
+        let Some(response) = event
+            .get("response")
+            .filter(|response| response.get("request_id").and_then(Value::as_str) == Some(asked))
+        else {
+            return;
+        };
+        let breakdown = response
+            .get("response")
+            .filter(|_| response.get("subtype").and_then(Value::as_str) == Some("success"))
+            .and_then(breakdown_of)
+            .map(Box::new);
+        self.context_ask = None;
+        if let Some(reading) = self.context.as_mut() {
+            reading.breakdown = breakdown;
+        }
     }
 
     /// Record whether the run's failure was a quota one: the usage limit, a
@@ -431,6 +482,12 @@ pub struct ContextUse {
     pub model: Option<String>,
     /// When the reading was taken (`reading_time`), RFC 3339 UTC.
     pub at: String,
+    /// Claude Code's own account of the context at the turn's end, when the
+    /// run was asked for it and answered (M92.13): a seated run's alone. A
+    /// reading without one replaces one with it, so a breakdown never
+    /// outlives its turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub breakdown: Option<Box<ContextBreakdown>>,
 }
 
 /// What `agent_context_usage` answers for a session (M91.5): its latest
@@ -441,6 +498,272 @@ pub struct ContextUse {
 pub enum ContextUsage {
     Recorded(ContextUse),
     NotRecorded,
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code's own account of the context (M92.13)
+// ---------------------------------------------------------------------------
+
+/// The most rows of the account a breakdown keeps; past it, the rest are
+/// counted in `categoriesMore`.
+pub const CONTEXT_CATEGORIES: usize = 64;
+/// The most MCP servers a breakdown keeps; past it, the rest are counted in
+/// `mcpServersMore`.
+pub const CONTEXT_MCP_SERVERS: usize = 256;
+/// The most characters (code points) a name keeps: past it, its first 127
+/// and an ellipsis.
+pub const CONTEXT_NAME_CHARS: usize = 128;
+/// The largest count a breakdown carries, 2^53 − 1, so it reads the same as
+/// a JavaScript number.
+pub const CONTEXT_COUNT_MAX: u64 = (1 << 53) - 1;
+
+/// Claude Code's own account of a session's context (M92.13), as the meter
+/// keeps a seated run's answer to the context ask (`get_context_usage`) and
+/// `agent_context_usage` carries it beside the reading:
+/// `src-tauri/fixtures/context-breakdown.json` writes the contract, its
+/// `wire` beside each `response`, and `src/engine/ai/contextBreakdown.ts`
+/// reads it back. Kept: the account's rows with their tokens and kind, its
+/// total and window, its model, autocompact, each MCP server's tools and
+/// what the loaded ones take, and how many memory files it read. Dropped:
+/// everything else, the memory files' paths and the tools' names among it
+/// (Q12, O2), colours, the grid and the API usage.
+///
+/// Memory only, as the reading is (Q7): never emitted, journaled, logged or
+/// stored. Its `Debug` is written by hand, so a log line or a panic that
+/// formats a reading prints how many rows it held and no name.
+#[derive(Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextBreakdown {
+    /// The account's rows, in its order.
+    pub categories: Vec<ContextCategory>,
+    /// Rows past [`CONTEXT_CATEGORIES`], counted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub categories_more: Option<u64>,
+    /// The tokens in the context, as Claude Code counts them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    /// The window `total` is measured against: its `rawMaxTokens`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autocompact: Option<ContextAutocompact>,
+    /// Each server the session's MCP tools came from, in the order Claude
+    /// Code first listed it. None when the answer held no tool list: not
+    /// recorded, never none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_servers: Option<Vec<ContextMcpServer>>,
+    /// Servers past [`CONTEXT_MCP_SERVERS`], counted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_servers_more: Option<u64>,
+    /// How many memory files the context holds; their paths never cross.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_files: Option<u64>,
+}
+
+impl std::fmt::Debug for ContextBreakdown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContextBreakdown")
+            .field("categories", &self.categories.len())
+            .field("mcp_servers", &self.mcp_servers.as_ref().map(Vec::len))
+            .finish_non_exhaustive()
+    }
+}
+
+/// One row of the account.
+#[derive(Clone, PartialEq, Eq, Serialize)]
+pub struct ContextCategory {
+    pub name: String,
+    /// None when Claude Code's count was not a count, never 0 (CV-05).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<u64>,
+    pub kind: ContextKind,
+}
+
+/// What a row is, by Claude Code's own rule: content in the window, the room
+/// left, the reserve compaction keeps, or tool schemas held outside the
+/// window until a search loads them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextKind {
+    Used,
+    Free,
+    Buffer,
+    Deferred,
+}
+
+/// One MCP server's part: the tools it offers the session, how many of them
+/// are loaded, and what the loaded ones take.
+#[derive(Clone, PartialEq, Eq, Serialize)]
+pub struct ContextMcpServer {
+    pub name: String,
+    pub tools: u64,
+    pub loaded: u64,
+    /// None when one loaded tool's count was not a count.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ContextAutocompact {
+    pub enabled: bool,
+    /// The total at which it compacts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<u64>,
+}
+
+/// A count as a breakdown carries one: a whole number from 0 to
+/// [`CONTEXT_COUNT_MAX`], however the JSON spells it (`12.0` and `1e3` are
+/// whole, as the TypeScript reader's `Number.isSafeInteger` takes them),
+/// else None.
+fn count_of(value: Option<&Value>) -> Option<u64> {
+    let number = value?.as_number()?;
+    let count = match number.as_u64() {
+        Some(count) => count,
+        None => {
+            let float = number.as_f64()?;
+            if float.fract() != 0.0 || !(0.0..=CONTEXT_COUNT_MAX as f64).contains(&float) {
+                return None;
+            }
+            float as u64
+        }
+    };
+    (count <= CONTEXT_COUNT_MAX).then_some(count)
+}
+
+/// `name` as a breakdown carries it: cut past [`CONTEXT_NAME_CHARS`] code
+/// points to its first 127 and an ellipsis.
+fn cut_name(name: &str) -> String {
+    if name.chars().count() <= CONTEXT_NAME_CHARS {
+        return name.to_string();
+    }
+    let mut cut: String = name.chars().take(CONTEXT_NAME_CHARS - 1).collect();
+    cut.push('…');
+    cut
+}
+
+/// A name: a string of one character or more, cut ([`cut_name`]).
+fn name_of(value: Option<&Value>) -> Option<String> {
+    value?
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .map(cut_name)
+}
+
+/// A row's kind, its name first: Free space is free, the two compaction
+/// reserves are buffer, and only `isDeferred: true` defers a row.
+fn kind_of(row: &serde_json::Map<String, Value>) -> ContextKind {
+    match row.get("name").and_then(Value::as_str) {
+        Some("Free space") => ContextKind::Free,
+        Some("Autocompact buffer" | "Compact buffer") => ContextKind::Buffer,
+        _ if row.get("isDeferred").and_then(Value::as_bool) == Some(true) => ContextKind::Deferred,
+        _ => ContextKind::Used,
+    }
+}
+
+/// The servers the session's MCP tools came from, by each tool's whole
+/// `serverName`, in the order each first appears, the first
+/// [`CONTEXT_MCP_SERVERS`] of them, and how many more there were. A tool
+/// counts as loaded unless `isLoaded` is false; a server's tokens sum its
+/// loaded tools' and are None once one of them has no count, or once the sum
+/// passes [`CONTEXT_COUNT_MAX`]. The tools' own names are never read.
+fn servers_of(tools: &[Value]) -> (Vec<ContextMcpServer>, Option<u64>) {
+    let mut servers: Vec<(&str, ContextMcpServer)> = Vec::new();
+    for tool in tools.iter().filter_map(Value::as_object) {
+        let Some(server) = tool
+            .get("serverName")
+            .and_then(Value::as_str)
+            .filter(|server| !server.is_empty())
+        else {
+            continue;
+        };
+        let at = match servers.iter().position(|(name, _)| *name == server) {
+            Some(at) => at,
+            None => {
+                servers.push((
+                    server,
+                    ContextMcpServer {
+                        name: cut_name(server),
+                        tools: 0,
+                        loaded: 0,
+                        tokens: Some(0),
+                    },
+                ));
+                servers.len() - 1
+            }
+        };
+        let row = &mut servers[at].1;
+        row.tools += 1;
+        if tool.get("isLoaded").and_then(Value::as_bool) != Some(false) {
+            row.loaded += 1;
+            row.tokens = row
+                .tokens
+                .zip(count_of(tool.get("tokens")))
+                .map(|(sum, tokens)| sum.saturating_add(tokens))
+                .filter(|sum| *sum <= CONTEXT_COUNT_MAX);
+        }
+    }
+    let more = servers.len().saturating_sub(CONTEXT_MCP_SERVERS) as u64;
+    let rows = servers
+        .into_iter()
+        .take(CONTEXT_MCP_SERVERS)
+        .map(|(_, row)| row)
+        .collect();
+    (rows, (more > 0).then_some(more))
+}
+
+/// What the meter keeps of a run's answer to the context ask (M92.13), the
+/// body of its `control_response`: None unless it is an object holding a
+/// list of rows. Each value is read on its own, and one that does not read
+/// is left out, never 0 (CV-05). `context-breakdown.json`'s cases hold this
+/// to the TypeScript reader.
+pub(crate) fn breakdown_of(answer: &Value) -> Option<ContextBreakdown> {
+    let answer = answer.as_object()?;
+    let rows = answer.get("categories")?.as_array()?;
+    let mut categories = Vec::new();
+    let mut categories_more = 0u64;
+    for row in rows.iter().filter_map(Value::as_object) {
+        let Some(name) = name_of(row.get("name")) else {
+            continue;
+        };
+        if categories.len() == CONTEXT_CATEGORIES {
+            categories_more += 1;
+            continue;
+        }
+        categories.push(ContextCategory {
+            name,
+            tokens: count_of(row.get("tokens")),
+            kind: kind_of(row),
+        });
+    }
+    let (mcp_servers, mcp_servers_more) = match answer.get("mcpTools").and_then(Value::as_array) {
+        Some(tools) => {
+            let (rows, more) = servers_of(tools);
+            (Some(rows), more)
+        }
+        None => (None, None),
+    };
+    Some(ContextBreakdown {
+        categories,
+        categories_more: (categories_more > 0).then_some(categories_more),
+        total: count_of(answer.get("totalTokens")),
+        max: count_of(answer.get("rawMaxTokens")).filter(|max| *max > 0),
+        model: name_of(answer.get("model")),
+        autocompact: answer
+            .get("isAutoCompactEnabled")
+            .and_then(Value::as_bool)
+            .map(|enabled| ContextAutocompact {
+                enabled,
+                threshold: count_of(answer.get("autoCompactThreshold")),
+            }),
+        mcp_servers,
+        mcp_servers_more,
+        memory_files: answer
+            .get("memoryFiles")
+            .and_then(Value::as_array)
+            .map(|files| files.len() as u64),
+    })
 }
 
 /// The most sessions the [`ContextBook`] holds; past it, the one recorded
@@ -505,16 +828,25 @@ fn reading_time(event: &Value) -> String {
 
 /// Open an attended run's row before its child spawns (M49.9). The other
 /// two modes run on a row the claim already opened, so this is a no-op for
-/// them. Never fails a run: a row that could not open leaves the finish to
-/// insert one, stamped not-booked (see `dispatch::meter_attended`).
-pub fn begin(meter: &Meter) {
-    if meter.mode != Mode::Attended {
-        return;
-    }
-    let Ok(conn) = runtime::open_existing(&meter.data_dir) else {
-        return;
+/// them. Supported scoped CLI capture requires the real row before launch.
+/// Legacy/no-store metering keeps its existing best-effort finish behavior.
+/// Ambient obligations begin only here, after deterministic claim work.
+pub fn begin(meter: &Meter) -> Result<(), crate::runtime::run_configuration::ManifestWriteError> {
+    use crate::runtime::run_configuration::{self, ManifestWriteError};
+    let supported = meter.vault_id.is_some() && meter.store_uuid.is_some();
+    let conn = match runtime::open_existing(&meter.data_dir) {
+        Ok(conn) => conn,
+        Err(_) if !supported => return Ok(()),
+        Err(_) => return Err(ManifestWriteError::Unavailable),
     };
-    if let Err(detail) = dispatch::begin_attended(
+    if meter.mode != Mode::Attended {
+        return if supported {
+            run_configuration::require_claim_capture(&conn, meter)
+        } else {
+            Ok(())
+        };
+    }
+    let opened = dispatch::begin_attended(
         &conn,
         &meter.run_id,
         meter.vault_id.as_deref(),
@@ -523,11 +855,17 @@ pub fn begin(meter: &Meter) {
         meter.parent_run_id.as_deref(),
         meter.cause.as_ref(),
         meter.started_at,
-    ) {
-        log::warn!(
-            "runtime meter: run {} could not be opened: {detail}",
-            meter.run_id
-        );
+    );
+    match opened {
+        Ok(()) => Ok(()),
+        Err(_) if supported => Err(ManifestWriteError::Unavailable),
+        Err(detail) => {
+            log::warn!(
+                "runtime meter: run {} could not be opened: {detail}",
+                meter.run_id
+            );
+            Ok(())
+        }
     }
 }
 
@@ -548,13 +886,26 @@ pub fn record_spawned_session(meter: &Meter, session: &str) {
     }
 }
 
-/// Take back what [`begin`] opened for a child that never spawned.
-pub fn discard(meter: &Meter) {
-    if meter.mode != Mode::Attended {
+// Preserve immutable captured facts when the actual publication fails. Ambient
+// lease/outcome finalization remains with its existing dispatcher owner.
+pub(super) fn publication_failed(
+    meter: &Meter,
+    stage: crate::runtime::run_configuration::PublicationFailureStage,
+    capture: Option<crate::runtime::run_configuration::ManifestWriteError>,
+) {
+    let Ok(conn) = runtime::open_existing(&meter.data_dir) else {
         return;
-    }
-    if let Ok(conn) = runtime::open_existing(&meter.data_dir) {
-        let _ = dispatch::discard_unstarted_attended(&conn, &meter.run_id);
+    };
+    if crate::runtime::run_configuration::publication_failed(
+        &conn,
+        meter,
+        stage,
+        capture,
+        Utc::now(),
+    )
+    .is_err()
+    {
+        log::warn!("run_configuration_publication_failure_unavailable");
     }
 }
 
@@ -564,9 +915,23 @@ pub fn discard(meter: &Meter) {
 /// touched. Never fatal, and never silent.
 pub fn recover_orphaned(data_dir: &std::path::Path, started_before: DateTime<Utc>) {
     let Ok(conn) = runtime::open_existing(data_dir) else {
+        #[cfg(feature = "native-read-smoke")]
+        crate::native_read_smoke::child_claim_profile::restart_profile::note(
+            "generic",
+            Some(false),
+            None,
+        );
         return;
     };
-    match dispatch::recover_orphaned_attended(&conn, started_before, Utc::now()) {
+    let recovered = dispatch::recover_orphaned_attended(&conn, started_before, Utc::now());
+    drop(conn);
+    #[cfg(feature = "native-read-smoke")]
+    crate::native_read_smoke::child_claim_profile::restart_profile::note(
+        "generic",
+        Some(recovered.is_ok()),
+        recovered.as_ref().ok().copied(),
+    );
+    match recovered {
         Ok(0) => {}
         Ok(closed) => log::warn!(
             "runtime meter: closed {closed} attended run(s) a previous process left running — \
@@ -1514,7 +1879,7 @@ mod tests {
 
         // Killed before its stream said a word: the minted id stays.
         let quiet = meter("quiet-run");
-        begin(&quiet);
+        begin(&quiet).unwrap();
         record_spawned_session(&quiet, minted);
         assert_eq!(read("quiet-run").as_deref(), Some(minted), "named at spawn");
         finish(&quiet, &Tally::default(), false, true, Utc::now());
@@ -1522,7 +1887,7 @@ mod tests {
 
         // A stream that names its session wins at finish.
         let talking = meter("talking-run");
-        begin(&talking);
+        begin(&talking).unwrap();
         record_spawned_session(&talking, minted);
         let mut tally = Tally::default();
         tally.observe(&json!({
@@ -2631,6 +2996,7 @@ mod tests {
             window,
             model: Some(model.into()),
             at: at.into(),
+            breakdown: None,
         }
     }
 
@@ -2870,5 +3236,307 @@ mod tests {
             book.usage(&session(CONTEXT_SESSIONS)),
             ContextUsage::Recorded(_)
         ));
+    }
+
+    // --- M92.13: Claude Code's own account of the context --------------------
+
+    /// The shared contract `src/engine/ai/contextBreakdown.test.ts` reads
+    /// back.
+    fn breakdown_cases() -> Value {
+        serde_json::from_str(include_str!("../../fixtures/context-breakdown.json")).unwrap()
+    }
+
+    /// The case named `name`'s answer.
+    fn answer_named(name: &str) -> Value {
+        breakdown_cases()["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["name"].as_str().is_some_and(|n| n.starts_with(name)))
+            .map(|case| case["response"].clone())
+            .unwrap_or_else(|| panic!("no case {name}"))
+    }
+
+    /// The wire `answer` gives, or null for no breakdown.
+    fn wire_of(answer: &Value) -> Value {
+        breakdown_of(answer).map_or(Value::Null, |kept| serde_json::to_value(kept).unwrap())
+    }
+
+    #[test]
+    fn the_breakdown_replays_the_shared_cases() {
+        let cases = breakdown_cases();
+        assert_eq!(
+            cases["limits"],
+            json!({ "categories": CONTEXT_CATEGORIES, "mcp_servers": CONTEXT_MCP_SERVERS,
+                "name_chars": CONTEXT_NAME_CHARS, "count_max": CONTEXT_COUNT_MAX }),
+            "the bounds both readers hold"
+        );
+        let cases = cases["cases"].as_array().unwrap();
+        assert!(cases.len() >= 10);
+        for case in cases {
+            assert_eq!(wire_of(&case["response"]), case["wire"], "{}", case["name"]);
+        }
+    }
+
+    #[test]
+    fn the_breakdown_keeps_no_path_tool_name_colour_or_grid() {
+        let answer = answer_named("a seated run's whole setup");
+        let raw = answer.to_string();
+        for there in [
+            "/vault/CLAUDE.md",
+            "mcp__cerebro__get_note",
+            "promptBorder",
+            "gridRows",
+        ] {
+            assert!(raw.contains(there), "the answer holds {there}");
+        }
+        let kept = serde_json::to_string(&breakdown_of(&answer).unwrap()).unwrap();
+        for gone in [
+            "CLAUDE.md",
+            "mcp__",
+            "color",
+            "promptBorder",
+            "gridRows",
+            "apiUsage",
+            "messageBreakdown",
+            "toolCallsByType",
+            "percentage",
+            "maxTokens",
+            "autocompactSource",
+            "cerebro-researcher",
+            "path",
+        ] {
+            assert!(!kept.contains(gone), "{gone} in {kept}");
+        }
+    }
+
+    #[test]
+    fn the_breakdown_holds_its_caps() {
+        let long = "n".repeat(CONTEXT_NAME_CHARS + 40);
+        let rows: Vec<Value> = (0..CONTEXT_CATEGORIES + 6)
+            .map(|at| json!({ "name": format!("{long}{at}"), "tokens": at }))
+            .collect();
+        let tools: Vec<Value> = (0..CONTEXT_MCP_SERVERS + 9)
+            .map(|at| json!({ "name": "mcp__s__t", "serverName": format!("{long}{at}"), "tokens": 1 }))
+            .collect();
+        let kept = breakdown_of(&json!({ "categories": rows, "mcpTools": tools,
+            "model": long, "totalTokens": CONTEXT_COUNT_MAX + 1 }))
+        .unwrap();
+        assert_eq!(kept.categories.len(), CONTEXT_CATEGORIES);
+        assert_eq!(kept.categories_more, Some(6));
+        let servers = kept.mcp_servers.as_ref().unwrap();
+        assert_eq!(servers.len(), CONTEXT_MCP_SERVERS);
+        assert_eq!(kept.mcp_servers_more, Some(9));
+        for name in kept
+            .categories
+            .iter()
+            .map(|row| &row.name)
+            .chain(servers.iter().map(|row| &row.name))
+            .chain(kept.model.iter())
+        {
+            assert_eq!(name.chars().count(), CONTEXT_NAME_CHARS, "{name}");
+            assert!(name.ends_with('…'), "{name}");
+        }
+        assert_eq!(
+            kept.total, None,
+            "past 2^53 − 1 is no count, never a rounded one"
+        );
+    }
+
+    #[test]
+    fn a_count_is_whole_however_it_is_spelled() {
+        // JSON writes a number one way or another; the TypeScript reader
+        // takes any whole one, so the meter does too. Claude Code spells its
+        // counts as integers, so the cap is pinned in that spelling: serde's
+        // float reading is not correctly rounded as near 2^53 as the cap.
+        for (spelled, count) in [
+            ("12", Some(12)),
+            ("12.0", Some(12)),
+            ("1e3", Some(1_000)),
+            ("167000.0", Some(167_000)),
+            ("-0", Some(0)),
+            ("9007199254740991", Some(CONTEXT_COUNT_MAX)),
+            ("9007199254740992", None),
+            ("1e300", None),
+            ("12.5", None),
+            ("-5", None),
+            ("\"12\"", None),
+            ("null", None),
+            ("true", None),
+        ] {
+            let value: Value = serde_json::from_str(spelled).unwrap();
+            assert_eq!(count_of(Some(&value)), count, "{spelled}");
+        }
+        assert_eq!(count_of(None), None);
+    }
+
+    #[test]
+    fn a_breakdowns_debug_prints_no_name() {
+        let kept = breakdown_of(&answer_named("a seated run's whole setup")).unwrap();
+        let printed = format!("{kept:?}");
+        assert_eq!(
+            printed,
+            "ContextBreakdown { categories: 10, mcp_servers: Some(2), .. }"
+        );
+        let reading = ContextUse {
+            breakdown: Some(Box::new(kept)),
+            ..reading_of(15_247, Some(200_000), "claude-haiku-4-5-20251001", FIRST)
+        };
+        for name in ["System prompt", "cerebro", "toy", "Free space"] {
+            assert!(!format!("{reading:?}").contains(name), "{name}");
+        }
+    }
+
+    /// A tally whose run's own turn read 6,108 tokens and ended, asked under
+    /// `ctx-7`.
+    fn asked_tally() -> Tally {
+        let mut tally = tally_of(&[
+            init_on("2.1.250"),
+            turn_on("claude-sonnet-5", 8, 6_100, Some(FIRST)),
+            result_with(None),
+        ]);
+        tally.asked_context("ctx-7");
+        tally
+    }
+
+    /// A `control_response` to `request_id`.
+    fn answer_to(request_id: &str, subtype: &str, answer: Value) -> Value {
+        json!({ "type": "control_response",
+            "response": { "subtype": subtype, "request_id": request_id, "response": answer } })
+    }
+
+    #[test]
+    fn only_the_answer_to_the_ask_is_read() {
+        let answer = answer_named("a seated run's whole setup");
+        // An answer before any ask, and the answer to another request, are
+        // not read, and the ask still waits.
+        let mut early = tally_of(&[turn_on("claude-sonnet-5", 8, 6_100, Some(FIRST))]);
+        early.observe(&answer_to("ctx-7", "success", answer.clone()));
+        assert!(!early.awaits_context());
+        assert_eq!(early.context().unwrap().breakdown, None);
+        let mut tally = asked_tally();
+        assert!(tally.awaits_context());
+        for foreign in [
+            answer_to("ctx-8", "success", answer.clone()),
+            answer_to("req_000000000000000000000001", "success", answer.clone()),
+            json!({ "type": "control_response", "response": "ctx-7" }),
+            json!({ "type": "control_response", "request_id": "ctx-7", "response": answer.clone() }),
+            json!({ "type": "control_request", "request_id": "ctx-7",
+                "request": { "subtype": "get_context_usage" } }),
+            json!({ "type": "result", "subtype": "success", "response": answer.clone() }),
+        ] {
+            tally.observe(&foreign);
+            assert!(tally.awaits_context(), "{foreign}");
+            assert_eq!(tally.context().unwrap().breakdown, None, "{foreign}");
+        }
+        // The matching answer ends the wait and is the reading's breakdown.
+        tally.observe(&answer_to("ctx-7", "success", answer.clone()));
+        assert!(!tally.awaits_context());
+        let kept = tally
+            .context()
+            .unwrap()
+            .breakdown
+            .clone()
+            .expect("a breakdown");
+        assert_eq!(kept.total, Some(15_247));
+        assert_eq!(
+            tally.context().unwrap().used,
+            6_108,
+            "the reading is its own"
+        );
+        // A second answer to the same id is not read again.
+        tally.observe(&answer_to("ctx-7", "success", json!({ "categories": [] })));
+        assert_eq!(tally.context().unwrap().breakdown.as_ref(), Some(&kept));
+    }
+
+    #[test]
+    fn an_error_or_an_answer_that_is_none_ends_the_wait_with_no_breakdown() {
+        for (subtype, body) in [
+            // P11: what an unknown request is answered with.
+            ("error", json!(null)),
+            ("success", json!([])),
+            ("success", json!({ "totalTokens": 8_106 })),
+            ("success", json!({ "categories": "System prompt" })),
+        ] {
+            let mut tally = asked_tally();
+            let mut line = answer_to("ctx-7", subtype, body.clone());
+            if subtype == "error" {
+                line["response"] = json!({ "subtype": "error", "request_id": "ctx-7",
+                    "error": "Unsupported control request subtype: get_context_usage" });
+            }
+            tally.observe(&line);
+            assert!(!tally.awaits_context(), "{line}");
+            assert_eq!(tally.context().unwrap().breakdown, None, "{line}");
+        }
+        // An error's own `response`, should one ever carry one, is not read.
+        let mut tally = asked_tally();
+        tally.observe(&answer_to(
+            "ctx-7",
+            "error",
+            answer_named("a seated run's whole setup"),
+        ));
+        assert_eq!(tally.context().unwrap().breakdown, None);
+        // With no reading of the run's own, the answer has nothing to
+        // break down.
+        let mut bare = Tally::default();
+        bare.asked_context("ctx-7");
+        bare.observe(&answer_to(
+            "ctx-7",
+            "success",
+            answer_named("a seated run's whole setup"),
+        ));
+        assert!(!bare.awaits_context());
+        assert_eq!(bare.context(), None);
+    }
+
+    #[test]
+    fn a_newer_reading_without_a_breakdown_replaces_one_with_it() {
+        let book = ContextBook::default();
+        let session = "00000000-0000-4000-8000-000000000501";
+        let mut asked = asked_tally();
+        asked.observe(&answer_to(
+            "ctx-7",
+            "success",
+            answer_named("a seated run's whole setup"),
+        ));
+        book.record(session, asked.context().unwrap().clone());
+        let ContextUsage::Recorded(first) = book.usage(session) else {
+            panic!("recorded");
+        };
+        assert!(first.breakdown.is_some());
+        // An answer's resume takes its prompt on argv and is never asked
+        // (M92.13): its reading says nothing of the breakdown, so none is
+        // shown for its turn.
+        let later = reading_of(9_412, Some(200_000), "claude-sonnet-5", LATER);
+        book.record(session, later.clone());
+        assert_eq!(book.usage(session), ContextUsage::Recorded(later));
+        assert_eq!(
+            serde_json::to_value(book.usage(session)).unwrap(),
+            json!({ "state": "recorded", "used": 9_412, "window": 200_000,
+                "model": "claude-sonnet-5", "at": LATER }),
+            "no breakdown key at all, never an empty one"
+        );
+    }
+
+    #[test]
+    fn the_answer_never_becomes_an_event() {
+        // The fold folds the answer to nothing, so no event, and so no
+        // journal or run log, ever holds it; only the tally reads it.
+        let line = answer_to(
+            "ctx-7",
+            "success",
+            answer_named("a seated run's whole setup"),
+        );
+        let (class, events) = super::super::fold::TranscriptFold::default().entry(&line);
+        assert!(
+            matches!(class, super::super::fold::LineClass::Ignored(_)),
+            "{class:?}"
+        );
+        assert!(events.is_empty(), "{events:?}");
+        assert!(super::super::kinds::unclassified(&line).is_empty());
+        assert!(
+            usage::unknown_fields(&line).is_empty(),
+            "nothing of it reaches the operational log"
+        );
     }
 }

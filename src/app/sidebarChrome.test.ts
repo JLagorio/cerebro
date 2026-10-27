@@ -27,10 +27,10 @@ describe('rowClass', () => {
   });
 
   it('declares it on the SELECTED row too, so the wash is timed either way', () => {
-    // A selected row still changes colour — it just changes to the cortex
-    // wash rather than the gray one, and the timing belongs to the row.
+    // Selected rows retain their neutral fill on hover; their timing class
+    // stays explicit alongside the selected styling.
     expect(rowClass(true)).toContain('motion-hover');
-    expect(rowClass(true)).toContain('bg-surface-selected');
+    expect(rowClass(true)).toContain('cb-nav-row--selected');
   });
 
   it('never animates position or size — a nav row must not move', () => {

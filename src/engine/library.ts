@@ -39,9 +39,8 @@ import type { Entry, LibraryTab } from './types';
 export const SKILL_TYPE = 'Skill';
 export const AGENT_TYPE = 'Agent';
 
-/** The same three names the Selection's `tab` carries — one union, so a tab
- * and the kind it lists can never drift apart. */
-export type LibraryKind = LibraryTab;
+/** Markdown-backed kinds; workflows use their own native file service. */
+export type LibraryKind = Exclude<LibraryTab, 'workflow'>;
 
 /** Tab order in the library, and the order these are described anywhere. */
 export const LIBRARY_KINDS: LibraryKind[] = ['skill', 'agent', 'template'];

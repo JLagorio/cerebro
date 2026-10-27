@@ -126,7 +126,19 @@ it('creates a sub-page on the current page and a capture on the Inbox', async ()
   expect(useUiStore.getState().inboxSelectedPath).toBe('inbox/new.md');
 });
 it('closes a creation flow when switching vaults', () => {
-  useLauncherStore.setState({ open: false, flow: { id: 'page', vault: '/other', page: null } });
+  useLauncherStore.setState({
+    open: false,
+    flow: {
+      id: 'page',
+      vault: '/other',
+      page: null,
+      context: {
+        vault: '/other',
+        pane: 'p1',
+        destination: { kind: 'page', folder: '', recipe: { kind: 'blank' } },
+      },
+    },
+  });
   render(<CreateLauncher />);
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(useLauncherStore.getState().flow).toBeNull();

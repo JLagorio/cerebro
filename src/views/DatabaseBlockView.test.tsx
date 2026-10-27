@@ -300,6 +300,42 @@ describe('DatabaseBlockView pickers', () => {
     expect(screen.queryByTestId('database-block-view-pick')).toBeNull();
   });
 
+
+  it('opens and cancels a missing-source repair without changing its pointer', () => {
+    const onChange = editable('Wine cellar', 'stack');
+    const missing = screen.getByTestId('database-block-missing');
+    expect(missing.textContent).toContain('Wine cellar');
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Choose another database' }));
+    expect(screen.getByRole('menu', { name: 'Databases' })).toBeTruthy();
+    expect(missing.textContent).toContain('Wine cellar');
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: /Reading list/ }), {
+      key: 'Escape',
+    });
+    expect(screen.queryByRole('menu', { name: 'Databases' })).toBeNull();
+    expect(screen.getByTestId('database-block-missing').textContent).toContain('Wine cellar');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(created).toHaveLength(0);
+  });
+
+  it('repairs only after an explicit choice and clears the missing source’s view', () => {
+    const onChange = editable('Wine cellar', 'stack');
+    fireEvent.click(screen.getByRole('button', { name: 'Choose another database' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Reading list/ }));
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ database: 'Reading list', view: '' });
+    expect(created).toHaveLength(0);
+  });
+
+  it('keeps a missing source read-only when no pointer writer exists', () => {
+    show('Wine cellar', 'stack');
+    expect(screen.getByTestId('database-block-missing').textContent).toContain('Wine cellar');
+    expect(screen.queryByRole('button', { name: 'Choose another database' })).toBeNull();
+    expect(screen.queryByTestId('database-block-pick')).toBeNull();
+    expect(screen.queryByTestId('database-block-open')).toBeNull();
+    expect(screen.queryByTestId('table-view')).toBeNull();
+  });
+
   it('an unset block picks a database in place and writes the pointer', () => {
     const onChange = editable('');
     fireEvent.click(screen.getByTestId('database-block-pick'));

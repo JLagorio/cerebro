@@ -1068,7 +1068,8 @@ describe('what a mock run reaches (M92.8)', () => {
       connectors: false,
       attended: true,
     });
-    if ('deferred' in start || 'settled' in start) throw new Error('an attended run starts');
+    if ('deferred' in start || 'settled' in start || 'observed_generation' in start)
+      throw new Error('an attended run starts');
     const live: AgentEvent[] = [];
     await new Promise<void>((resolve) => {
       const stop = onAgentEvent((event) => {
@@ -2238,7 +2239,8 @@ describe('the M91 scripts (M91.4)', () => {
       connectors: false,
       attended: true,
     });
-    if ('deferred' in start || 'settled' in start) throw new Error('an attended run starts');
+    if ('deferred' in start || 'settled' in start || 'observed_generation' in start)
+      throw new Error('an attended run starts');
     const stop = onAgentEvent((event) => {
       live.push(event);
       if (event.kind === 'Done') done();

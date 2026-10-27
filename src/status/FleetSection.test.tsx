@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeEntry } from '@/engine/testHelpers';
 import { localStamp } from '@/engine/whenText';
 import type { FleetRun, FleetRunDetail } from '@/lib/ipc';
+import { __seedRunHistoryRegistry } from '@/lib/mockIpc';
 import { chooseOption } from '@/test/chooseOption';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -360,17 +361,25 @@ describe('FleetSection', () => {
   });
 
   it("opens a run under its agent's name, which opens the agent", async () => {
-    useVaultStore.setState({ entries: [digestAgent] });
+    __seedRunHistoryRegistry({ '/fixture-vault': 'v1' });
+    useVaultStore.setState({
+      vaultPath: '/fixture-vault',
+      entriesVault: '/fixture-vault',
+      status: 'ready',
+      entries: [digestAgent],
+    });
     render(<FleetSection />);
     fireEvent.click(await screen.findByTestId('fleet-row'));
 
     const agent = await screen.findByTestId('run-detail-agent');
     expect(agent.textContent).toBe('Weekly digest');
     fireEvent.click(agent);
-    expect(useNavStore.getState().selection).toEqual({
-      kind: 'agents',
-      actor: 'process:weekly-digest',
-    });
+    await waitFor(() =>
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'agents',
+        actor: 'process:weekly-digest',
+      }),
+    );
   });
 
   it('an opened run lists what it was refused, each code in words', async () => {

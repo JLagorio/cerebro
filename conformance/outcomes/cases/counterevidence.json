@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "id": "counterevidence",
+  "title": "Answer with counterevidence",
+  "adapter": "ledger_conformance",
+  "inputs": {
+    "vector": "contradiction"
+  },
+  "allowedEffects": [],
+  "forbiddenEffects": [
+    "send",
+    "verify"
+  ],
+  "expectedSources": [],
+  "expectedArtifacts": [
+    {
+      "id": "contradiction:f658658f3698ca746745ece26f381a11",
+      "state": "open"
+    }
+  ],
+  "injections": [],
+  "requiredCapabilities": [
+    "answer_quality"
+  ]
+}

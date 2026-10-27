@@ -1,4 +1,6 @@
+import { sha256Hex } from '@/lib/sha256';
 import { isPlace, placeKey, placeLabel, type Place } from '@/engine/place';
+import { isGenerationRequestKey } from '@/agent/generationObservation';
 import type {
   ChatMessage,
   Conversation,
@@ -334,11 +336,13 @@ function healLive(conversation: Conversation): Conversation {
     const raw = m as unknown as Record<string, unknown>;
     const badSeq = 'seq' in raw && !(Number.isSafeInteger(raw.seq) && (raw.seq as number) >= 0);
     const badGap = 'gap' in raw && raw.gap !== true;
-    if (!badSeq && !badGap) return m;
+    const badChildTrace = 'childTraceUnavailable' in raw && raw.childTraceUnavailable !== true;
+    if (!badSeq && !badGap && !badChildTrace) return m;
     changed = true;
     const kept = { ...raw };
     if (badSeq) delete kept.seq;
     if (badGap) delete kept.gap;
+    if (badChildTrace) delete kept.childTraceUnavailable;
     return kept as unknown as ChatMessage;
   });
   const live = conversation.live as unknown;
@@ -634,6 +638,33 @@ function healSteps(conversation: Conversation): Conversation {
   return changed ? { ...conversation, messages } : conversation;
 }
 
+/** An omission marker is a fact only while exactly true. */
+function healCache(conversation: Conversation): Conversation {
+  if (!('cacheTrimmed' in conversation) || conversation.cacheTrimmed === true) return conversation;
+  const { cacheTrimmed: _invalid, ...rest } = conversation;
+  return rest;
+}
+
+/** Cached observations are not fresh native facts. Retain only a valid
+ * logical-send key; neither that key nor cached metadata can reattach work. */
+function healGenerationMetadata(conversation: Conversation): Conversation {
+  let changed = false;
+  const messages = conversation.messages.map((message) => {
+    const { generationObservation, generationRequestKey, nativeRecoveryRoot, ...rest } = message;
+    const keepKey = message.role === 'assistant' && isGenerationRequestKey(generationRequestKey);
+    if (
+      nativeRecoveryRoot === undefined &&
+      generationObservation === undefined &&
+      (generationRequestKey === undefined || keepKey)
+    ) {
+      return message;
+    }
+    changed = true;
+    return { ...rest, ...(keepKey ? { generationRequestKey } : {}) };
+  });
+  return changed ? { ...conversation, messages } : conversation;
+}
+
 export function loadConversations(): Conversation[] {
   try {
     const raw = window.localStorage.getItem(KEY);
@@ -643,6 +674,8 @@ export function loadConversations(): Conversation[] {
     // take the whole history with it.
     return parsed
       .filter(isConversation)
+      .map(healCache)
+      .map(healGenerationMetadata)
       .map(healToolIds)
       .map(healPlace)
       .map(healSessionId)
@@ -717,11 +750,28 @@ function savedMessage({
   streaming: _streaming,
   live: _live,
   reach: _reach,
+  generationObservation: _generationObservation,
+  nativeRecoveryRoot: _nativeRecoveryRoot,
+  generationRequestKey,
   parts,
   ...m
 }: ChatMessage) {
+  // This content was read back from the native archive. Keep only its selector;
+  // a browser copy must not outlive that message's recorded expiry.
+  if (m.archiveRecord !== undefined && ['retained', 'expired'].includes(m.archiveRecord.persistence)) {
+    return { id: m.id, role: m.role, text: '', tools: [], archiveRecord: m.archiveRecord,
+      ...(m.anchor === undefined ? {} : { anchor: m.anchor }),
+      ...(m.role === 'assistant' && isGenerationRequestKey(generationRequestKey) ? { generationRequestKey } : {}) };
+  }
   const saved = savedParts(parts, m.text);
-  return { ...m, tools: m.tools.map(savedCall), ...(saved === undefined ? {} : { parts: saved }) };
+  return {
+    ...m,
+    ...(m.role === 'assistant' && isGenerationRequestKey(generationRequestKey)
+      ? { generationRequestKey }
+      : {}),
+    tools: m.tools.map(savedCall),
+    ...(saved === undefined ? {} : { parts: saved }),
+  };
 }
 
 type SavedThread = Omit<Conversation, 'messages'> & { messages: ReturnType<typeof savedMessage>[] };
@@ -734,6 +784,7 @@ function savedThread(conversation: Conversation): SavedThread {
   const { reach: _held, ...rest } = conversation;
   return {
     ...rest,
+    ...(conversation.archiveTitle === true ? { title: DEFAULT_TITLE } : {}),
     ...(reach === null ? {} : { reach }),
     messages: conversation.messages.map(savedMessage),
   };
@@ -771,7 +822,9 @@ function trimmed(threads: SavedThread[]): SavedThread[] | null {
   // A thread with no session has no file to rebuild it from: it goes after
   // every thread that has one.
   const idle = oldest(bodies.filter((t) => t.sessionId != null)) ?? oldest(bodies);
-  if (idle !== null) return threads.map((t) => (t === idle ? { ...t, messages: [] } : t));
+  if (idle !== null) {
+    return threads.map((t) => (t === idle ? { ...t, messages: [], cacheTrimmed: true } : t));
+  }
   const core = (thread: SavedThread) => {
     const at = thread.messages.findIndex((m) => m.id === thread.live?.assistantId);
     let asked = at - 1;
@@ -779,9 +832,27 @@ function trimmed(threads: SavedThread[]): SavedThread[] | null {
     return thread.messages.filter((_, i) => i === at || (i === asked && at !== -1));
   };
   const busy = oldest(threads.filter((t) => t.live != null && core(t).length < t.messages.length));
-  if (busy !== null) return threads.map((t) => (t === busy ? { ...t, messages: core(t) } : t));
+  if (busy !== null) {
+    return threads.map((t) => (t === busy ? { ...t, messages: core(t), cacheTrimmed: true } : t));
+  }
   return null;
 }
+
+/** A successful quota decision, with no copied bodies or growing ID list.
+ * At most MAX_KEPT source-array references and two retained IDs per entry.
+ * Those arrays stay alive until the next successful save or invalidation. */
+interface CacheAdmission {
+  source: ChatMessage[];
+  before: number;
+  retained: string[];
+  sessionId: string | null;
+  vault: string | undefined;
+  createdAt: string;
+  assistantId: string | undefined;
+}
+let admissions = new Map<string, CacheAdmission>();
+let admittedStorage: string | null | undefined;
+let admittedOrder: string[] = [];
 
 export function saveConversations(conversations: Conversation[]): void {
   // Streaming flags are per-session; persisting one leaves a conversation
@@ -799,10 +870,70 @@ export function saveConversations(conversations: Conversation[]): void {
   // What a run reached (M92.8) is live only and no file heals it, so the
   // thread keeps the latest as its own fact rather than on each reply.
   try {
-    let threads: SavedThread[] = conversations.slice(0, MAX_KEPT).map(savedThread);
+    const sources = conversations.slice(0, MAX_KEPT);
+    const order = sources.map((c) => c.id);
+    // An external overwrite/clear, or a changed list, is a new admission.
+    if (
+      window.localStorage.getItem(KEY) !== admittedStorage ||
+      order.length !== admittedOrder.length ||
+      order.some((id, at) => id !== admittedOrder[at])
+    ) {
+      admissions.clear();
+    }
+    let threads: SavedThread[] = sources.map((c) => {
+      const prior = admissions.get(c.id);
+      if (
+        prior === undefined ||
+        prior.sessionId !== c.sessionId ||
+        prior.vault !== c.vault ||
+        prior.createdAt !== c.createdAt ||
+        (c.live != null && c.live.assistantId !== prior.assistantId) ||
+        c.messages.length < prior.before ||
+        prior.source.slice(0, prior.before).some((m, at) => c.messages[at] !== m)
+      ) {
+        return savedThread(c);
+      }
+      // Compare object identity before reading body fields: a real heal or
+      // replacement, even with the same IDs, must try admission afresh.
+      return savedThread({
+        ...c,
+        reach: threadReach(c),
+        cacheTrimmed: true,
+        messages: c.messages.filter((m, at) => at >= prior.before || prior.retained.includes(m.id)),
+      });
+    });
     for (;;) {
       try {
-        window.localStorage.setItem(KEY, JSON.stringify(threads));
+        const raw = JSON.stringify(threads);
+        window.localStorage.setItem(KEY, raw);
+        // Only successful writes make a decision reusable. Trimming removes
+        // a prefix except for at most the live question and reply.
+        const next = new Map<string, CacheAdmission>();
+        sources.forEach((c, at) => {
+          const kept = new Set(threads[at].messages.map((m) => m.id));
+          let before = 0;
+          c.messages.forEach((m, index) => {
+            if (!kept.has(m.id)) before = index + 1;
+          });
+          if (before === 0) return;
+          const retained = c.messages
+            .slice(0, before)
+            .filter((m) => kept.has(m.id))
+            .map((m) => m.id);
+          if (retained.length > 2) return;
+          next.set(c.id, {
+            source: c.messages,
+            before,
+            retained,
+            sessionId: c.sessionId,
+            vault: c.vault,
+            createdAt: c.createdAt,
+            assistantId: c.live?.assistantId,
+          });
+        });
+        admissions = next;
+        admittedStorage = raw;
+        admittedOrder = order;
         return;
       } catch (err) {
         // Full (M91.4): the oldest threads' bodies go until the rest fits,
@@ -840,4 +971,66 @@ export function ordered(conversations: Conversation[]): Conversation[] {
     if (a.archived !== b.archived) return a.archived ? 1 : -1;
     return b.createdAt.localeCompare(a.createdAt);
   });
+}
+
+
+/** A committed native deletion removes only this known vault's cached copy.
+ * Unknown-vault and other-vault legacy records cannot be silently claimed. */
+const archiveDeletionListeners = new Set<(vault: string, thread: string) => void>();
+export function onArchivedConversationDeleted(listener: (vault: string, thread: string) => void): () => void {
+  archiveDeletionListeners.add(listener);
+  return () => { archiveDeletionListeners.delete(listener); };
+}
+export function forgetArchivedConversation(vault: string, thread: string): void {
+  saveConversations(loadConversations().filter((item) => item.id !== thread || item.vault !== vault));
+  for (const listener of [...archiveDeletionListeners]) listener(vault, thread);
+}
+
+
+/** The existing cache reader, applied to one record so a malformed neighbor stays opaque. */
+export function readCachedConversation(raw:unknown):Conversation|null {
+ if(!isConversation(raw))return null;
+ try {const messages=raw.messages.filter((message)=>!('parent' in message)||message.parent==null).map((message)=>{
+   const excluded=new Set(message.tools.filter((tool)=>tool.parent!=null).map((tool)=>tool.id));
+   return {...message,tools:message.tools.filter((tool)=>tool.parent==null),...(message.parts===undefined?{}:{parts:message.parts.filter((part)=>(!('parent' in part)||part.parent==null)&&(part.kind!=='tool'||!excluded.has(part.toolId)))})};
+  });let value={...raw,messages};for(const heal of [healCache,healGenerationMetadata,healToolIds,healPlace,healSessionId,healFork,healNotices,healRunOptions,healDeferred,healLive,healWorked,healChangesets,healSteps,healReach])value=heal(value);return value;}catch{return null;}
+}
+function rawPairFingerprint(raw:unknown,vault:string,thread:string,user:string,assistant:string):string|null {
+ if(!isConversation(raw)||raw.vault!==vault||raw.id!==thread)return null;
+ try {const questions=raw.messages.filter((message)=>message.id===user);const answers=raw.messages.filter((message)=>message.id===assistant);if(questions.length!==1||answers.length!==1||questions[0].role!=='user'||answers[0].role!=='assistant')return null;return sha256Hex(JSON.stringify([questions[0],answers[0]]));}catch{return null;}
+}
+export interface CacheImportRead {records:Conversation[];unreadable:number;fingerprint(vault:string,thread:string,user:string,assistant:string):string|null}
+export function readCacheForImport():CacheImportRead {
+ try {const raw:unknown=JSON.parse(window.localStorage.getItem(KEY)??'[]');if(!Array.isArray(raw))return {records:[],unreadable:1,fingerprint:()=>null};let unreadable=0;const records=raw.flatMap((item)=>{const decoded=readCachedConversation(item);if(decoded===null){unreadable+=1;return [];}return [decoded];});return {records,unreadable,fingerprint:(vault,thread,user,assistant)=>{const candidates=raw.filter((item)=>isConversation(item)&&item.id===thread&&item.vault===vault);return candidates.length===1?rawPairFingerprint(candidates[0],vault,thread,user,assistant):null;}};}catch{return {records:[],unreadable:1,fingerprint:()=>null};}
+}
+
+export interface ArchiveReadbackMark {messageId:string;record:NonNullable<ChatMessage['archiveRecord']>}
+type ImportedListener=(vault:string,thread:string,marks:readonly ArchiveReadbackMark[])=>void;
+const importedListeners=new Set<ImportedListener>();
+export function onImportedCacheReadback(listener:ImportedListener):()=>void {importedListeners.add(listener);return()=>{importedListeners.delete(listener);};}
+/** Preserve opaque/unknown neighbors byte-for-value; change only snapshot-matching pairs.
+ * Does not trim the cache or claim success when storage/readback failed. */
+export function clearImportedCacheBodies(vault:string,confirmed:readonly import('@/lib/generated/conversations').ImportedIdentity[],matches:(thread:Conversation,user:string,assistant:string,rawFingerprint:string|null)=>boolean):number {
+ try {
+  const original=window.localStorage.getItem(KEY);const parsed:unknown=JSON.parse(original??'[]');if(!Array.isArray(parsed))return 0;
+  const notifications:{thread:string;marks:ArchiveReadbackMark[]}[]=[];let cleared=0;
+  const next=parsed.map((raw)=>{
+   if(!isConversation(raw))return raw;
+   const thread=readCachedConversation(raw);if(thread===null||thread.vault!==vault)return raw;
+   const pairs=confirmed.filter((item)=>item.threadId===thread.id&&matches(thread,item.userMessageId,item.assistantMessageId,rawPairFingerprint(raw,vault,thread.id,item.userMessageId,item.assistantMessageId)));if(pairs.length===0)return raw;
+   const marks=pairs.flatMap((item)=>{const completedAt='completedAt' in item&&(typeof item.completedAt==='string'||item.completedAt===null)?item.completedAt:undefined;const record={attemptId:item.attemptId,expiresAt:item.expiresAt,persistence:'retained' as const,origin:'browser_cache' as const,importedAt:item.importedAt,...(completedAt===undefined?{}:{completedAt})};return [{messageId:item.userMessageId,record},{messageId:item.assistantMessageId,record}];});const byId=new Map(marks.map((mark)=>[mark.messageId,mark.record]));
+   notifications.push({thread:thread.id,marks});cleared+=pairs.length;
+   // The decoder is only a validation view. Keep the current raw carrier and
+   // every unconfirmed message unchanged, including fields the decoder cannot
+   // understand. Only a confirmed exact original pair becomes minimal markers.
+   const decodedById=new Map(thread.messages.map((message)=>[message.id,message]));
+   return {...raw,archiveBacked:true,messages:raw.messages.map((message)=>{
+    const record=byId.get(message.id);if(record===undefined)return message;
+    const decoded=decodedById.get(message.id);if(decoded===undefined)throw new Error('Confirmed cache message unavailable');
+    return savedMessage({...decoded,archiveRecord:record});
+   })};
+  });
+  if(cleared===0||window.localStorage.getItem(KEY)!==original)return 0;const encoded=JSON.stringify(next);window.localStorage.setItem(KEY,encoded);if(window.localStorage.getItem(KEY)!==encoded)return 0;
+  for(const item of notifications)for(const listener of [...importedListeners])listener(vault,item.thread,item.marks);return cleared;
+ }catch{return 0;}
 }

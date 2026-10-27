@@ -21,6 +21,8 @@ vi.mock('@/agent/agentIpc', () => ({
 }));
 
 import * as agentIpc from '@/agent/agentIpc';
+import * as ipc from '@/lib/ipc';
+import { makeEntry } from '@/engine/testHelpers';
 import { AskAiPopover } from './AskAiPopover';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -49,7 +51,7 @@ describe('AskAiPopover', () => {
     handlers.length = 0;
     vi.mocked(agentIpc.runAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault', entries: [] });
-    onReplace = vi.fn();
+    onReplace = vi.fn(() => ({ kind: 'applied' as const }));
   });
 
   const open = () =>
@@ -103,6 +105,25 @@ describe('AskAiPopover', () => {
     for (const hunk of hunks) fireEvent.click(hunk);
     // The button says what it will do — "Apply" over an unchanged passage
     // would be a lie about what the click does.
+    fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }));
+    expect(onReplace).toHaveBeenCalledWith(PASSAGE);
+  });
+
+  it('Keep mine preserves original whitespace when the reply only changes spacing', async () => {
+    open();
+    await ask();
+    reply(PASSAGE.replace('pricing is', 'pricing   is'));
+    await screen.findByText(/left the passage as it was/);
+    fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }));
+    expect(onReplace).toHaveBeenCalledWith(PASSAGE);
+  });
+
+  it('Keep mine preserves original whitespace after every proposed hunk is rejected', async () => {
+    open();
+    await ask();
+    reply(REWRITE.replace('pricing is', 'pricing   is'));
+    const hunks = await screen.findAllByTestId('ask-ai-hunk');
+    for (const hunk of hunks) fireEvent.click(hunk);
     fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }));
     expect(onReplace).toHaveBeenCalledWith(PASSAGE);
   });
@@ -187,7 +208,11 @@ describe('AskAiPopover elements', () => {
 
   const open = () =>
     render(
-      <AskAiPopover selection={PASSAGE} onReplace={() => undefined} onClose={() => undefined} />,
+      <AskAiPopover
+        selection={PASSAGE}
+        onReplace={() => ({ kind: 'applied' })}
+        onClose={() => undefined}
+      />,
     );
   const field = () =>
     screen.getByLabelText('What should the assistant do with this passage?') as HTMLTextAreaElement;
@@ -277,7 +302,7 @@ describe('AskAiPopover elements', () => {
         <AskAiPopover
           selection={PASSAGE}
           preset="Make it monthly"
-          onReplace={() => undefined}
+          onReplace={() => ({ kind: 'applied' })}
           onClose={() => undefined}
         />
       </StrictMode>,
@@ -302,4 +327,119 @@ describe('AskAiPopover elements', () => {
     expect(listen.mock.calls.filter(([kind]) => kind === 'keydown')).toEqual([]);
     listen.mockRestore();
   });
+});
+
+describe('AskAiPopover selected passage conflicts', () => {
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault', entries: [] });
+  });
+
+  it('keeps the proposed hunks when Apply conflicts and offers reselect', async () => {
+    const close = vi.fn();
+    render(
+      <AskAiPopover
+        selection={PASSAGE}
+        preset="Make it monthly"
+        onReplace={() => ({ kind: 'conflict' })}
+        onClose={close}
+      />,
+    );
+    await waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalled());
+    reply(REWRITE);
+    await screen.findByTestId('ask-ai-hunks');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toMatch(/reselect|select.*again/i);
+    expect(screen.getByTestId('ask-ai-hunks').textContent).toContain('monthly');
+    expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Reselect passage' }));
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('does not launch a stale first Ask', async () => {
+    render(
+      <AskAiPopover
+        selection={PASSAGE}
+        isCurrent={() => false}
+        onReplace={() => ({ kind: 'conflict' })}
+        onClose={() => undefined}
+      />,
+    );
+    const input = screen.getByLabelText(/What should the assistant do/);
+    fireEvent.change(input, { target: { value: 'make it monthly' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toMatch(/reselect|select.*again/i);
+  });
+});
+
+it('does not launch from a skill read whose captured passage became stale', async () => {
+  handlers.length = 0;
+  vi.mocked(agentIpc.runAgent).mockClear();
+  useVaultStore.setState({
+    vaultPath: '/vault',
+    entries: [
+      makeEntry({
+        path: 'skills/review.md',
+        title: 'Review',
+        type: 'Skill',
+        properties: {},
+      }),
+    ],
+  });
+  let resolve!: (text: string) => void;
+  const read = vi.spyOn(ipc, 'readNote').mockReturnValue(
+    new Promise<string>((done) => {
+      resolve = done;
+    }),
+  );
+  let current = true;
+  try {
+    render(
+      <AskAiPopover
+        selection={PASSAGE}
+        isCurrent={() => current}
+        onReplace={() => ({ kind: 'conflict' })}
+        onClose={() => undefined}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('ask-ai-skill'));
+    expect(read).toHaveBeenCalledWith('/vault', 'skills/review.md');
+    current = false;
+    await act(async () => {
+      resolve('Review this passage.');
+    });
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toMatch(/reselect|select.*again/i);
+  } finally {
+    read.mockRestore();
+  }
+});
+
+it('keeps the completed proposal when Retry finds a stale passage', async () => {
+  handlers.length = 0;
+  vi.mocked(agentIpc.runAgent).mockClear();
+  useVaultStore.setState({ vaultPath: '/vault', entries: [] });
+  let current = true;
+  render(
+    <AskAiPopover
+      selection={PASSAGE}
+      preset="Make it monthly"
+      isCurrent={() => current}
+      onReplace={() => ({ kind: 'conflict' })}
+      onClose={() => undefined}
+    />,
+  );
+  await waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalled());
+  reply(REWRITE);
+  await screen.findByTestId('ask-ai-hunks');
+  current = false;
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(screen.getByTestId('ask-ai-hunks').textContent).toContain('monthly');
+  expect(screen.getByRole('alert').textContent).toMatch(/reselect|select.*again/i);
+  expect(agentIpc.runAgent).toHaveBeenCalledOnce();
 });

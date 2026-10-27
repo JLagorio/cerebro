@@ -170,6 +170,7 @@ it('every available catalog command reaches its matching creation flow', () => {
   renderHook(() => useAppCommands());
   for (const row of CREATE_ROWS) {
     act(() => {
+      useLauncherStore.getState().endFlow();
       expect(runCommand(`create.${row.id}`, APP)).toBe(true);
     });
     expect(useLauncherStore.getState().flow?.id).toBe(row.id);

@@ -14,7 +14,7 @@
 
 **Spec:** [Knowledge, evidence and evaluation](../specs/2026-10-23-m97-knowledge-evidence-and-evaluation-design.md).
 
-**Status:** Draft for review. All commands below describe future verification.
+**Status:** Implementation authorized by the owner on 2026-10-23, on the existing branch alongside Claude's M92 work. See the [implementation record](2026-10-23-m93-m99-implementation-record.md) for actual evidence and remaining work. Commands below remain verification requirements; M97 is not complete.
 
 ## Global Constraints
 
@@ -88,8 +88,10 @@ anchor for property locations. Navigation stores a
 one-shot request per destination visit, not a global selection singleton.
 
 Consume spec's exact `QuickOpenSnapshot`, `SourceReturnOrigin`,
-`SourceOpenRequest`, `openSource(request): NavOutcome` and
-`returnToSourceOrigin(requestId): 'restored'|'origin_unavailable'`.
+`SourceOpenRequest`, `openSource(request): Promise<NavOutcome>` and
+`returnToSourceOrigin(requestId): Promise<'restored'|'origin_unavailable'>`.
+M97.2 implementation ruling (2026-10-23): source opening awaits the existing scoped resolver before navigation. The UI has a vault path, while locators carry registered vault IDs; treating those as equal would permit a foreign locator to open an unrelated same-relative path. Async preflight retains the originating pane/visit and cancels on superseding requests, input, navigation or any vault transition, including A → B → A. Editor readiness still revalidates source/version before reveal.
+
 The coordinator exports `useSourceNavigation()` returning these two functions,
 binding `useOpenPath` at render time rather than invoking a hook during dispatch.
 Bind one pending
@@ -235,3 +237,5 @@ KNOW-01/02 map to M97.1; KNOW-03 to M97.2; KNOW-04 to M97.3; KNOW-05/06 to
 M97.4; KNOW-07 to M97.5; KNOW-08 to M97.6; KNOW-09 to M97.7; KNOW-10 to M97.8;
 KNOW-11 is exercised in M97.1/M97.3/M97.4/M97.6. Shared signatures and cap values match
 the spec. This plan proposes future work and reports no passing application tests.
+
+M97.2 repair contract amendment: Return awaits the existing save decision and revalidates the live visit/layout before reporting its outcome or reopening results. If the origin file is now held in another pane, reuse that holder instead of creating a second editor. A superseding navigation/return cancels the older result. This async return signature is required because dirty save acknowledgement can arrive later.

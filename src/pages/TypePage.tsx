@@ -1,3 +1,4 @@
+import { selectedViewIssue } from '@/engine/selectedEntryProjection';
 import { DatabaseActions } from '@/views/DatabaseActions';
 import { PageHeader } from '@/components/PageHeader';
 import { UnfiledCorrespondents } from '@/views/UnfiledCorrespondents';
@@ -229,9 +230,10 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
     })();
   };
 
+  const selectedUnavailable = collection.unavailable ?? selectedViewIssue(collection.entries, schema, presentation, activeView?.filters, listing.name, search);
   const sortedEntries = useMemo(
-    () => searchEntries(sortEntries(collection.entries, presentation.sort, schema), search),
-    [collection.entries, presentation.sort, schema, search],
+    () => selectedUnavailable ? [] : searchEntries(sortEntries(collection.entries, presentation.sort, schema), search),
+    [collection.entries, presentation.sort, schema, search, selectedUnavailable],
   );
   // After the sort: "the first 25" has to mean the first 25 of the order on
   // screen, not 25 arbitrary records that are then sorted among themselves.
@@ -278,7 +280,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               {listing.name}
             </button>
           }
-          metadata={<span data-testid="view-count">{sortedEntries.length}</span>}
+          metadata={<span data-testid="view-count">{selectedUnavailable ? 'Unavailable' : sortedEntries.length}</span>}
           actions={
             <>
               <DatabaseActions
@@ -412,6 +414,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
         )}
         <ViewProblems problems={problems} source={listing.name} />
         <ViewCanvas
+          unavailable={selectedUnavailable}
           entryScrollKey="canvas.scroll"
           entries={shownEntries}
           allEntries={entries}
@@ -479,11 +482,11 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
             })
           }
         />
-        <ViewLimitNotice
+        {!selectedUnavailable && <ViewLimitNotice
           shown={shownEntries.length}
           total={sortedEntries.length}
           onShowAll={() => changePresentation({ ...presentation, limit: undefined })}
-        />
+        />}
       </div>
       {dialog === 'calendar' && (
         <IcsImportDialog initialType={listing.name} onClose={() => setDialog(null)} />

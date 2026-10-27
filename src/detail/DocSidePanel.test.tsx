@@ -9,6 +9,7 @@ import type { Entry } from '@/engine/types';
 import { resetMockFs } from '@/lib/mockIpc';
 import type { CommentsSlot } from '@/stores/commentsStore';
 import { useUiStore } from '@/stores/uiStore';
+import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { commentSections } from './commentSections';
 import { DocSidePanel, PageDates } from './DocSidePanel';
@@ -95,6 +96,7 @@ const before = (a: HTMLElement, b: HTMLElement) =>
   Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
 beforeEach(async () => {
+  useNavStore.getState().reset();
   resetMockFs();
   await useVaultStore.getState().openVault('/demo-vault');
   entry = found(PAGE);
@@ -210,6 +212,7 @@ describe('DocSidePanel details', () => {
       'properties',
       'links',
       'backlinks',
+      'mentions',
       'knowledge',
       'access',
       'info',
@@ -238,10 +241,10 @@ describe('DocSidePanel details', () => {
     expect(screen.getByTestId('page-access-summary').textContent).toBe('No agent can change it');
   });
 
-  it('counts the links each way, in sections inside one wrapper', () => {
+  it('names backlink pages separately from exact occurrence rows', async () => {
     const entries = useVaultStore.getState().entries;
     const outgoing = outgoingFor(entry, entries).length;
-    const backlinks = backlinksFor(entry, entries).length;
+    const backlinks = new Set(backlinksFor(entry, entries).map((link) => link.entry.path)).size;
     // The corpus decision is linked both ways, so both sections show.
     expect(outgoing).toBeGreaterThan(0);
     expect(backlinks).toBeGreaterThan(0);
@@ -250,8 +253,14 @@ describe('DocSidePanel details', () => {
     const count = (id: string) =>
       wrapper.querySelector(`[data-section="${id}"] .cb-inspector-section-count`)?.textContent;
     expect(count('links')).toBe(String(outgoing));
-    expect(count('backlinks')).toBe(String(backlinks));
-    expect(within(wrapper).getAllByTestId('doc-link-row')).toHaveLength(outgoing + backlinks);
+    expect(
+      wrapper.querySelector('[data-section="backlinks"] .cb-inspector-section-summary')
+        ?.textContent,
+    ).toBe(`${backlinks} pages`);
+    expect(within(wrapper).getAllByTestId('doc-link-row')).toHaveLength(outgoing);
+    expect(
+      (await within(wrapper).findAllByTestId('source-occurrence-row')).length,
+    ).toBeGreaterThanOrEqual(backlinks);
   });
 
   it('says the property a link rides as plain words at the end of its row', () => {
@@ -279,15 +288,18 @@ describe('DocSidePanel details', () => {
     entry = found('notes/alone.md');
     render(panel(null));
     const links = screen.getByTestId('doc-links');
-    // Nothing to fold: a heading, not a toggle.
-    expect(within(links).queryAllByRole('button')).toHaveLength(0);
+    // The outgoing Links header stays static; contextual reads and explicit
+    // mention discovery have their own sections.
+    const outgoing = links.querySelector('[data-section="links"]') as HTMLElement;
+    expect(within(outgoing).queryAllByRole('button')).toHaveLength(0);
+    expect(within(links).getByRole('button', { name: 'Search mentions' })).toBeTruthy();
     expect(within(links).getByRole('heading', { name: /^Links/ })).toBeTruthy();
     const none = within(links).getByText('None');
     expect(none.title).toBe('Type [[ in the page to link another');
     expect(within(links).queryByTestId('doc-link-row')).toBeNull();
   });
 
-  it('shows six links, and folds the rest behind one row', async () => {
+  it('shows bounded contextual backlinks with separate occurrence and page counts', async () => {
     entry = found('people/marcus-webb.md');
     const many = backlinksFor(entry, useVaultStore.getState().entries).length;
     expect(many).toBeGreaterThan(6);
@@ -295,12 +307,13 @@ describe('DocSidePanel details', () => {
     const backlinks = screen
       .getByTestId('doc-links')
       .querySelector('[data-section="backlinks"]') as HTMLElement;
-    expect(within(backlinks).getAllByTestId('doc-link-row')).toHaveLength(6);
-    const more = within(backlinks).getByTestId('doc-links-more');
-    expect(more.textContent).toBe(`Show ${many - 6} more`);
-    fireEvent.click(more);
-    expect(within(backlinks).getAllByTestId('doc-link-row')).toHaveLength(many);
-    expect(more.textContent).toBe('Show fewer');
+    const rows = await within(backlinks).findAllByTestId('source-occurrence-row');
+    expect(rows.length).toBeGreaterThan(6);
+    expect(rows.length).toBeLessThanOrEqual(50);
+    expect(within(backlinks).getByTestId('source-occurrences-count').textContent).toMatch(
+      /occurrences on \d+ pages/,
+    );
+    for (const row of rows) expect(row.textContent?.trim().length).toBeGreaterThan(0);
   });
 
   it('folds a section, keeps the fold across pages, and opens it again', () => {
@@ -349,7 +362,15 @@ describe('DocSidePanel details', () => {
       }),
     );
     // Then what Knowledge holds, the links, Access and Info.
-    expect(sectionIds()).toEqual(['organize', 'knowledge', 'links', 'backlinks', 'access', 'info']);
+    expect(sectionIds()).toEqual([
+      'organize',
+      'knowledge',
+      'links',
+      'backlinks',
+      'mentions',
+      'access',
+      'info',
+    ]);
     expect(screen.queryByTestId('doc-properties')).toBeNull();
     expect(before(screen.getByText('Type and fields'), screen.getByTestId('last-change'))).toBe(
       true,
@@ -372,7 +393,7 @@ describe('DocSidePanel details', () => {
     expect(
       sectionIds()
         .slice(1, -1)
-        .every((id) => id === 'links' || id === 'backlinks'),
+        .every((id) => id === 'links' || id === 'backlinks' || id === 'mentions'),
     ).toBe(true);
     expect(screen.queryByTestId('doc-properties')).toBeNull();
     expect(screen.queryByTestId('page-knowledge')).toBeNull();

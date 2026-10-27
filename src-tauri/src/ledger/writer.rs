@@ -46,7 +46,7 @@ use super::{ledger_dir, members_digest, new_id128, schema, sha256_hex, store};
 const SEGMENT_MAX_RECORDS: u64 = 1024;
 
 /// Name of the advisory lock file inside the ledger directory.
-const LOCK_FILE: &str = "lock";
+pub(crate) const LOCK_FILE: &str = "lock";
 
 /// App-data file holding this installation's writer identity.
 const WRITER_ID_FILE: &str = "ledger-writer-id";

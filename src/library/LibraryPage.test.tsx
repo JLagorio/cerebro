@@ -1,3 +1,4 @@
+import { __resetOpenPages } from '@/editor/openPages';
 import { libraryCards } from './LibraryIndex';
 import { stampActivation } from '@/agent/activation';
 vi.mock('@/agent/activation', async (original) => ({
@@ -6,7 +7,7 @@ vi.mock('@/agent/activation', async (original) => ({
 }));
 import { navSeed } from '@/test/navSeed';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 vi.mock('@/lib/ipc', async () => {
   const actual = await vi.importActual<typeof import('@/lib/ipc')>('@/lib/ipc');
@@ -16,6 +17,7 @@ vi.mock('@/lib/ipc', async () => {
       content: '---\ntype: Skill\n---\n\n# Risk sweep\n\nWatch the risks.\n',
       hash: 'loaded-hash',
     })),
+    applyBatch: vi.fn(),
     saveNote: vi.fn(async () => 'body-hash'),
     setNoteTitle: vi.fn(async () => undefined),
     updateFrontmatter: vi.fn(async () => 'final-hash'),
@@ -41,6 +43,7 @@ const SKILL = makeEntry({
   path: 'records/skills/risk-sweep.md',
   folder: 'records/skills',
   title: 'Risk sweep',
+  hash: 'loaded-hash',
   type: 'Skill',
   properties: { slug: 'risk-sweep', description: 'Find unwritten risks' } as never,
 });
@@ -67,12 +70,14 @@ const TEMPLATE = makeEntry({
   path: 'templates/prd.md',
   folder: 'templates',
   title: 'PRD',
+  hash: 'loaded-hash',
   type: 'Spec',
   properties: { fill: 'Draft it.' } as never,
 });
 
 describe('LibraryPage', () => {
   beforeEach(() => {
+    __resetOpenPages();
     vi.clearAllMocks();
     vi.mocked(stampActivation).mockResolvedValue(true);
     vi.mocked(ipc.readNoteSource).mockResolvedValue({
@@ -80,8 +85,29 @@ describe('LibraryPage', () => {
       hash: 'loaded-hash',
     });
     vi.mocked(ipc.updateFrontmatter).mockResolvedValue('final-hash');
+    vi.mocked(ipc.applyBatch).mockImplementation(async (_vault, ops) => {
+      const body = ops.find((op) => op.op === 'body');
+      if (body?.op !== 'body') throw new Error('Expected body');
+      vi.mocked(ipc.readNoteSource).mockResolvedValue({ content: body.body, hash: 'final-hash' });
+      return {
+        batchId: 'batch',
+        files: [
+          {
+            path: body.path,
+            beforeHash: body.expectHash ?? null,
+            afterHash: 'final-hash',
+            before: 'before',
+            keys: [],
+            trashed: null,
+            restored: null,
+            skipped: null,
+          },
+        ],
+      };
+    });
     useVaultStore.setState({
       vaultPath: '/vault',
+      entriesVault: '/vault',
       entries: [SKILL, AGENT, RISK, TEMPLATE],
       rescan: vi.fn(async () => undefined) as never,
     });
@@ -200,7 +226,7 @@ describe('LibraryPage', () => {
     await screen.findByLabelText('Instructions');
     chooseOption(screen.getByLabelText('Repeat'), 'Every day');
     vi.mocked(stampActivation).mockImplementationOnce(async () => {
-      expect(ipc.updateFrontmatter).toHaveBeenCalled();
+      expect(ipc.applyBatch).toHaveBeenCalled();
       return true;
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -212,14 +238,16 @@ describe('LibraryPage', () => {
       expect.any(Date),
     );
     vi.mocked(stampActivation).mockClear();
-    useVaultStore.setState({
-      entries: [{ ...SKILL, properties: { ...SKILL.properties, schedule: 'daily 09:00' } }],
-    });
+    act(() =>
+      useVaultStore.setState({
+        entries: [{ ...SKILL, properties: { ...SKILL.properties, schedule: 'daily 09:00' } }],
+      }),
+    );
     fireEvent.change(screen.getByLabelText('Instructions'), { target: { value: 'changed body' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByRole('button', { name: 'Saved' });
     expect(stampActivation).not.toHaveBeenCalled();
-    vi.mocked(ipc.updateFrontmatter).mockRejectedValueOnce(new Error('disk'));
+    vi.mocked(ipc.applyBatch).mockRejectedValueOnce(new Error('disk'));
     fireEvent.change(screen.getByLabelText('Time'), { target: { value: '10:00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
@@ -235,25 +263,21 @@ describe('LibraryPage', () => {
     fireEvent.change(instructions, { target: { value: 'First draft' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByRole('button', { name: 'Saved' });
-    expect(ipc.saveNote).toHaveBeenLastCalledWith(
-      '/vault',
-      SKILL.path,
-      'First draft\n',
-      'loaded-hash',
-    );
+    expect(ipc.applyBatch).toHaveBeenLastCalledWith('/vault', [
+      { op: 'body', path: SKILL.path, body: 'First draft\n', expectHash: 'loaded-hash' },
+      { op: 'patch', path: SKILL.path, set: expect.objectContaining({ slug: 'risk-sweep' }) },
+    ]);
     fireEvent.change(instructions, { target: { value: 'Second draft' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByRole('button', { name: 'Saved' });
-    expect(ipc.saveNote).toHaveBeenLastCalledWith(
-      '/vault',
-      SKILL.path,
-      'Second draft\n',
-      'final-hash',
-    );
+    expect(ipc.applyBatch).toHaveBeenLastCalledWith('/vault', [
+      { op: 'body', path: SKILL.path, body: 'Second draft\n', expectHash: 'final-hash' },
+      { op: 'patch', path: SKILL.path, set: expect.any(Object) },
+    ]);
   });
 
   it('keeps a stale draft dirty and only overwrites after Save mine anyway', async () => {
-    vi.mocked(ipc.saveNote).mockRejectedValueOnce('stale_content: changed');
+    vi.mocked(ipc.applyBatch).mockRejectedValueOnce('stale_content: changed');
     useNavStore.setState({ selection: { kind: 'library', tab: 'skill', path: SKILL.path } });
     render(<LibraryPage />);
     const instructions = await screen.findByLabelText('Instructions');
@@ -267,36 +291,15 @@ describe('LibraryPage', () => {
     expect(ipc.updateFrontmatter).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Save mine anyway' }));
     await screen.findByRole('button', { name: 'Saved' });
-    expect(ipc.saveNote).toHaveBeenLastCalledWith('/vault', SKILL.path, 'My draft\n', undefined);
+    expect(ipc.applyBatch).toHaveBeenLastCalledWith('/vault', [
+      { op: 'body', path: SKILL.path, body: 'My draft\n', expectHash: 'loaded-hash' },
+      { op: 'patch', path: SKILL.path, set: expect.any(Object) },
+    ]);
     expect(screen.queryByTestId('library-stale')).toBeNull();
   });
 
-  it('re-reads the version when the final metadata write returns no hash', async () => {
-    vi.mocked(ipc.updateFrontmatter).mockResolvedValueOnce(null);
-    useNavStore.setState({ selection: { kind: 'library', tab: 'skill', path: SKILL.path } });
-    render(<LibraryPage />);
-    const instructions = await screen.findByLabelText('Instructions');
-    fireEvent.change(instructions, { target: { value: 'First draft' } });
-    vi.mocked(ipc.readNoteSource).mockResolvedValue({
-      content: 'First draft',
-      hash: 'reread-hash',
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await screen.findByRole('button', { name: 'Saved' });
-    fireEvent.change(instructions, { target: { value: 'Second draft' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() =>
-      expect(ipc.saveNote).toHaveBeenLastCalledWith(
-        '/vault',
-        SKILL.path,
-        'Second draft\n',
-        'reread-hash',
-      ),
-    );
-  });
-
   it('loads the new version only on request, discarding the stale draft', async () => {
-    vi.mocked(ipc.saveNote).mockRejectedValueOnce(new Error('stale_content: changed'));
+    vi.mocked(ipc.applyBatch).mockRejectedValueOnce(new Error('stale_content: changed'));
     useNavStore.setState({ selection: { kind: 'library', tab: 'skill', path: SKILL.path } });
     render(<LibraryPage />);
     const instructions = await screen.findByLabelText('Instructions');
@@ -307,22 +310,21 @@ describe('LibraryPage', () => {
       content: '# Risk sweep\n\nOutside edit\n',
       hash: 'outside-hash',
     });
+    act(() => useVaultStore.setState({ entries: [{ ...SKILL, hash: 'outside-hash' }] }));
     fireEvent.click(screen.getByRole('button', { name: 'Load the new version' }));
     await waitFor(() =>
       expect(instructions).toHaveProperty('value', '# Risk sweep\n\nOutside edit\n'),
     );
     expect(screen.queryByTestId('library-stale')).toBeNull();
-    expect(ipc.saveNote).toHaveBeenCalledOnce();
+    expect(ipc.applyBatch).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: 'Saved' })).toHaveProperty('disabled', true);
     fireEvent.change(instructions, { target: { value: 'Third draft' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
-      expect(ipc.saveNote).toHaveBeenLastCalledWith(
-        '/vault',
-        SKILL.path,
-        'Third draft\n',
-        'outside-hash',
-      ),
+      expect(ipc.applyBatch).toHaveBeenLastCalledWith('/vault', [
+        { op: 'body', path: SKILL.path, body: 'Third draft\n', expectHash: 'outside-hash' },
+        { op: 'patch', path: SKILL.path, set: expect.any(Object) },
+      ]),
     );
   });
 

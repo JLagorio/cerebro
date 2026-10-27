@@ -633,6 +633,9 @@ fn probe_entry(record: &str, type_name: &str, project: Option<&str>) -> Entry {
         modified_at: String::new(),
         parse_error: None,
         hash: None,
+        authority: None,
+        canonical_properties: None,
+        body_observation: None,
     }
 }
 

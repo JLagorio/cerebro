@@ -195,6 +195,8 @@ export type MessageToolbarProps = Omit<ComponentProps<'div'>, 'children'> & {
   onRetry?: () => void;
   /** Puts the person's text back in the field. */
   onEdit?: () => void;
+  /** Save the selected completed answer through the caller's human writer. */
+  onSave?: () => void;
   /** Starts a new conversation from this turn. */
   onBranch?: () => void;
   /** Branch's name, when "Branch from here" needs its turn: "Branch the
@@ -212,6 +214,7 @@ export function MessageToolbar({
   copy,
   onRetry,
   onEdit,
+  onSave,
   onBranch,
   branchLabel = MESSAGE_ACTION_WORDS.branch,
   disabled,
@@ -221,6 +224,7 @@ export function MessageToolbar({
     copy === undefined &&
     onRetry === undefined &&
     onEdit === undefined &&
+    onSave === undefined &&
     onBranch === undefined
   ) {
     return null;
@@ -245,6 +249,9 @@ export function MessageToolbar({
           onClick={onEdit}
           disabled={disabled}
         />
+      )}
+      {onSave !== undefined && (
+        <MessageAction icon="file-plus" label="Save answer" onClick={onSave} disabled={disabled} />
       )}
       {onBranch !== undefined && (
         <MessageAction

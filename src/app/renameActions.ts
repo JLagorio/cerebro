@@ -1,3 +1,4 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 import { parse } from 'yaml';
 import type { BatchOp } from '@/engine/batch';
 import { replaceH1, splitFrontmatter } from '@/engine/frontmatter';
@@ -11,7 +12,7 @@ import {
   type RenameRetitle,
   type RenameStep,
 } from '@/engine/linkRewrite';
-import { announceExternalWrites, flushOpenPages, heldOpenPages } from '@/editor/openPages';
+import { announceExternalWrites, heldOpenPages, beginDocumentRename } from '@/editor/openPages';
 import {
   pageAttribution,
   readNoteSource,
@@ -51,8 +52,9 @@ export async function renameKeepingLinks({
   const { toast } = useUiStore.getState();
   const sameVault = () => useVaultStore.getState().vaultPath === vault;
   let finishPointers = () => {};
+  let finishDocuments = () => {};
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return null;
     if (!sameVault()) return null;
     // Store rescan preserves its last good snapshot after a read failure.
     // A rename must instead refuse: an unseen citer may need rewriting.
@@ -177,7 +179,7 @@ export async function renameKeepingLinks({
       0;
     if (needsPrompt && !(await askRename(prompt))) return null;
     if (!sameVault()) return null;
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return null;
     if (!sameVault()) return null;
     {
       // A new citer or a competing stem can change resolution without
@@ -195,6 +197,7 @@ export async function renameKeepingLinks({
       toast(`${nowHeld} has changes waiting on you. Settle them before renaming.`);
       return null;
     }
+    finishDocuments = beginDocumentRename(vault, steps);
     finishPointers = beginPointerRename(vault);
     let undoChange: RenameChange | null = null;
     if (needsPrompt || steps.length > 1 || ops.length > 0) {
@@ -208,6 +211,9 @@ export async function renameKeepingLinks({
           })),
         ],
         {
+          onApplied: () => {
+            for (const { from, to } of steps) followRename(vault, from, to);
+          },
           onRefused: (reason) =>
             toast(
               reason.startsWith('stale_content:')
@@ -227,14 +233,21 @@ export async function renameKeepingLinks({
         anchors: [],
       };
     } else {
-      for (const step of steps) await renameNote(vault, step.from, step.to);
-    }
-    // Every pointer follows landed steps before the catch-up read. Concept
-    // about updates below can fail independently of the move.
-    if (sameVault()) {
-      for (const { from: old, to: next } of steps) {
-        followRename(vault, old, next);
-      }
+      let renameError: unknown;
+      await announceExternalWrites(
+        steps.flatMap(({ from, to }) => [from, to]),
+        async () => {
+          try {
+            for (const step of steps) {
+              await renameNote(vault, step.from, step.to);
+              followRename(vault, step.from, step.to);
+            }
+          } catch (error) {
+            renameError = error;
+          }
+        },
+      );
+      if (renameError !== undefined) throw renameError;
     }
     const refusedTitles = new Set(prompt.refused.map((row) => row.title));
     for (const row of prompt.sources) refusedTitles.add(row.title);
@@ -286,6 +299,7 @@ export async function renameKeepingLinks({
     }
     return null;
   } finally {
+    finishDocuments();
     finishPointers();
   }
 }
@@ -348,8 +362,9 @@ export async function undoRename(
   const currentVault = () => useVaultStore.getState().vaultPath === vault;
   if (!currentVault() || !undoableRename(change)) return { kind: 'dropped' };
   let finishPointers = () => {};
+  let finishDocuments = () => {};
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return { kind: 'retry' };
     await useVaultStore.getState().rescan();
     if (!currentVault() || refusedAcrossVaults(useVaultStore.getState()))
       return { kind: 'dropped' };
@@ -399,10 +414,14 @@ export async function undoRename(
     if (!currentVault()) return { kind: 'dropped' };
     if (ops.length === 0 && steps.length === 0) return { kind: 'done', inverse, kept };
     const refused: { message: string | null } = { message: null };
+    finishDocuments = beginDocumentRename(vault, steps);
     finishPointers = beginPointerRename(vault);
     const applied = await useVaultStore
       .getState()
       .applyBatch([...ops, ...steps.map(({ from, to }): BatchOp => ({ op: 'rename', from, to }))], {
+        onApplied: () => {
+          for (const { from, to } of steps) followRename(vault, from, to);
+        },
         onRefused: (message) => {
           refused.message = message;
         },
@@ -415,9 +434,6 @@ export async function undoRename(
       };
     }
     if (!currentVault()) return { kind: 'dropped' };
-    for (const { from, to } of steps) {
-      followRename(vault, from, to);
-    }
     for (const anchor of change.anchors) {
       try {
         const source = await readNoteSource(vault, anchor.path);
@@ -446,6 +462,7 @@ export async function undoRename(
       toast(`Couldn't undo the rename: ${error instanceof Error ? error.message : String(error)}`);
     return { kind: 'retry' };
   } finally {
+    finishDocuments();
     finishPointers();
   }
 }

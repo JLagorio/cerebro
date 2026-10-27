@@ -17,6 +17,29 @@ src-tauri/gen/schemas/
 # Playwright artifacts
 test-results/
 playwright-report/
+/.playwright-mcp/
+
+# Local verification evidence. Keep maintained plans, specs, implementation
+# summaries and test/runner source tracked; raw runs and copied snapshots stay
+# on this machine. Links into these directories are local evidence references.
+/docs/acceptance/
+/docs/superpowers/**/captures/
+/docs/superpowers/validation/**/*.log
+/docs/superpowers/specs/*-ui-implementation/*-manifest.json
+/docs/superpowers/specs/*-ui-implementation/source-before.json
+/docs/superpowers/specs/*-ui-implementation/source-after.json
+/docs/superpowers/plans/*-store-comparison/*.json
+/docs/superpowers/plans/*-store-comparison/*.diff
+
+# Generated quit-smoke bundles; web/index.html and web/smoke.js are source.
+/conformance/native-read-smoke/web/quit.js
+/conformance/native-read-smoke/web/quit-*.js
+/conformance/native-read-smoke/web/quit-*.wasm
+/conformance/native-read-smoke/web/quit-build.json
+
+# Python interpreter caches, not maintained Python runners/tests.
+__pycache__/
+*.py[cod]
 
 docs/examples
 docs/archive

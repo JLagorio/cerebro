@@ -1,3 +1,6 @@
+import { checkedArchive } from './archiveContract';
+import { guardMockLegacy } from '@/lib/selectedMock';
+import { readGenerationObservation } from './generationObservation';
 import { runMockAgent, type MockRun } from './mockAgent';
 import {
   abortMockAnswer,
@@ -17,6 +20,7 @@ import type {
   ClaudeUserSettings,
   CliWorkspace,
   ForkPoint,
+  GenerationObservation,
   LiveTurn,
   PendingInteraction,
   PersonAnswer,
@@ -95,12 +99,39 @@ async function invokeTauri<T>(cmd: string, args: Record<string, unknown> = {}): 
   return invoke<T>(cmd, args);
 }
 
+/** One native original-root observation, never resend or effect authority. */
+export function readChatRecovery(
+  runId: string,
+): Promise<import('@/lib/generated/actions').ChatRecoveryInspection> {
+  return inTauri()
+    ? invokeTauri('chat_recovery_inspect', { runId })
+    : Promise.reject({
+        code: 'unavailable',
+        message: 'Historical action inspection is unavailable in the browser.',
+        retryDisposition: 'never',
+      } satisfies import('@/lib/generated/actions').ActionReadError);
+}
+
 export function checkAgent(): Promise<AgentStatus> {
   return inTauri()
     ? invokeTauri('check_agent')
     : // The mock stands in for a working install so the panel is usable in
       // `pnpm dev`; the version string says plainly that it is not real.
       Promise.resolve({ installed: true, version: 'mock (browser)', path: null });
+}
+
+/** A discovery error stays unavailable; this observation does not verify sign-in. */
+export function readCliReadiness(): Promise<import('./cliReadinessTypes').CliReadinessProbe> {
+  return inTauri()
+    ? invokeTauri('check_cli_readiness')
+    : faulted('check_cli_readiness', () =>
+        Promise.resolve({
+          state: 'available',
+          backend: 'browser_mock',
+          version: 'mock (browser)',
+          path: null,
+        }),
+      );
 }
 
 /** What the CLI has stored about this vault outside it (M17.14). */
@@ -176,6 +207,11 @@ export async function readCliTranscript(
 }
 
 export interface RunOptions {
+  /** One accepted attended logical send's key; kept across an explicit
+   * caller-owned redelivery. Omitted by unattended and legacy callers. */
+  generationRequestKey?: string;
+  /** Frozen display-only question and IDs, outside the CLI request. */
+  archiveBinding?: import('@/lib/generated/conversations').AttemptBinding | null;
   message: string;
   systemPrompt?: string;
   sessionId?: string | null;
@@ -345,7 +381,10 @@ export interface RunHandle {
  * started and nothing is owed; `skipped` is held for a later part's check.
  */
 export type RunStart =
-  RunHandle | { deferred: string[]; words?: string[] } | { settled: 'gone' | 'skipped' };
+  | RunHandle
+  | { observed_generation: GenerationObservation }
+  | { deferred: string[]; words?: string[] }
+  | { settled: 'gone' | 'skipped' };
 
 /** The bounded pre-run check answers only the pending wakes it found. */
 export type WakeCheck =
@@ -358,16 +397,27 @@ export function checkWake(
   wakes: string[],
   question: string,
 ): Promise<WakeCheck> {
+  if (!inTauri()) {
+    try {
+      guardMockLegacy(vault, 'check_wake');
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
   return inTauri()
     ? invokeTauri('check_wake', { vault, actor, wakes, question })
     : checkMockWake(vault, actor, wakes, question);
 }
 
-/** Narrow a RunStart to its handle. Attended callers — every call without a
- * `lane` or a `wake` — are never gated, deferred or settled, so reaching
- * either there is a contract break: thrown loudly rather than rendered as a
- * silent no-run. Unattended callers must NOT use this — they read both. */
+/** Require a genuine process handle. Callers accepting observations,
+ * deferrals or settled wakes read those arms first; none is authority to
+ * attach, resume or stop a local process. An unhandled arm throws rather
+ * than being rendered as an undefined or silent no-run handle. */
 export function startedOrThrow(start: RunStart): RunHandle {
+  if ('observed_generation' in start) {
+    throw new Error('The generation already exists; its observation is not a process handle.');
+  }
   if ('deferred' in start) {
     throw new Error(`run deferred by the budget gate: ${start.deferred.join(', ')}`);
   }
@@ -381,6 +431,10 @@ export function startedOrThrow(start: RunStart): RunHandle {
  * durable id of the row this run will be recorded in — or to a typed
  * deferral with codes and human words when the ambient gate refused an unattended, laned run. */
 export async function runAgent(vault: string, options: RunOptions): Promise<RunStart> {
+  if (!inTauri()) {
+    guardMockLegacy(vault, 'run_agent');
+  }
+
   if (!inTauri()) {
     // M33b.5 — the browser mirrors the Rust guard rather than skipping it. In
     // Tauri the refusal lives in `run_agent`, ahead of the token and the
@@ -505,10 +559,13 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
   }
   return invokeTauri<
     | { run: number; run_id: string; session_id: string }
+    | { observed_generation: unknown }
     | { deferred: string[]; words?: string[] }
     | { settled: 'gone' | 'skipped' }
   >('run_agent', {
     vault,
+    generationRequestKey: options.generationRequestKey ?? null,
+    archiveBinding: options.archiveBinding ?? null,
     request: {
       message: options.message,
       system_prompt: options.systemPrompt ?? null,
@@ -534,16 +591,21 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
     },
     wake: options.wake ?? null,
     followup: options.followup ?? null,
-  }).then((result) =>
-    'deferred' in result || 'settled' in result
+  }).then((result) => {
+    if ('observed_generation' in result) {
+      const observation = readGenerationObservation(result.observed_generation);
+      if (observation === null) throw new Error('Invalid native generation observation.');
+      return { observed_generation: observation };
+    }
+    return 'deferred' in result || 'settled' in result
       ? result
       : announced({
           run: result.run,
           durableId: result.run_id,
           sessionId: result.session_id,
           attach: result.run_id,
-        }),
-  );
+        });
+  });
 }
 
 /** What is wrong with a woken request, in `wakes::refuse_request`'s words,
@@ -910,14 +972,15 @@ async function runUnattended(
     scope: run.scope ?? null,
   });
   if ('deferred' in start || 'settled' in start) return start;
+  const handle = startedOrThrow(start);
   await new Promise<void>((resolve) => {
     const off = onAgentEvent((event) => {
       if (event.kind !== 'Done') return;
       off();
       resolve();
-    }, start.run);
+    }, handle.run);
   });
-  return start;
+  return handle;
 }
 
 if (typeof window !== 'undefined' && !inTauri()) {
@@ -961,6 +1024,10 @@ export async function startThreadTurn(
   vault: string,
   request: ThreadTurnRequest,
 ): Promise<ThreadTurnStarted> {
+  if (!inTauri()) {
+    guardMockLegacy(vault, 'start_thread_turn');
+  }
+
   if (inTauri()) {
     const started = await invokeTauri<{ run_id: string; placeholder: string }>(
       'start_thread_turn',
@@ -1042,7 +1109,10 @@ export async function startThreadTurn(
  * refusal is an answer to read, not an error (CV-03's proposal-channel rule):
  * the card says it in its own words.
  */
-export type AnswerResult = { resumed: RunHandle } | { refused: { code: string; message: string } };
+export type AnswerResult =
+  | { resumed: RunHandle }
+  | { answered: { interactionId: string } }
+  | { refused: { code: string; message: string } };
 
 /**
  * Answer a waiting call (M57.1): the one way an answer reaches the book. In
@@ -1058,6 +1128,10 @@ export async function answerInteraction(
   id: string,
   answer: PersonAnswer,
 ): Promise<AnswerResult> {
+  if (!inTauri()) {
+    guardMockLegacy(vault, 'answer_interaction');
+  }
+
   if (!inTauri()) {
     // M57.2: This conversation only for a card the table asked about, on a
     // subject that was not cut, as Rust's book refuses it otherwise.
@@ -1095,6 +1169,7 @@ export async function answerInteraction(
   }
   const result = await invokeTauri<
     | { run: number; run_id: string; session_id: string }
+    | { answered: { interaction_id: string } }
     | { refused: { code: string; message: string } }
   >('answer_interaction', {
     vault,
@@ -1102,6 +1177,23 @@ export async function answerInteraction(
     answer: answer.kind === 'allow' ? { kind: 'allow', remember: answer.remember } : answer,
     updatedInput: answer.kind === 'allow' ? (answer.updatedInput ?? null) : null,
   });
+  if ('answered' in result) {
+    const acknowledgement: unknown = result.answered;
+    if (
+      Object.keys(result).length !== 1 ||
+      acknowledgement === null ||
+      typeof acknowledgement !== 'object' ||
+      Array.isArray(acknowledgement) ||
+      Object.keys(acknowledgement).length !== 1 ||
+      !('interaction_id' in acknowledgement) ||
+      typeof acknowledgement.interaction_id !== 'string' ||
+      !/^[a-f0-9]{32}$/.test(acknowledgement.interaction_id) ||
+      acknowledgement.interaction_id !== id
+    ) {
+      throw new Error('This response did not match the waiting call.');
+    }
+    return { answered: { interactionId: acknowledgement.interaction_id } };
+  }
   return 'refused' in result
     ? { refused: result.refused }
     : {
@@ -1409,7 +1501,8 @@ export const MOCK_CONTEXT_SESSIONS = 64;
  * The browser's context book (M91.5), standing in for Rust's: each
  * attended mock run that reached its model files a reading for its session
  * before its Done (`fillMockContext`), the newest last. Memory only.
- * Exported for the adapter's and the hook's tests, which seed it.
+ * Exported for the adapter's and the hook's tests, which seed it, and on
+ * the window for specs (`__cerebroMockContextBook`).
  */
 export const mockContextBook = (() => {
   const sessions = new Map<string, ContextUseRecorded>();
@@ -1428,6 +1521,13 @@ export const mockContextBook = (() => {
     },
   };
 })();
+
+// Browser mode only: a spec's handle on the book, as on the other mock seams.
+if (typeof window !== 'undefined' && !inTauri()) {
+  (
+    window as unknown as { __cerebroMockContextBook: typeof mockContextBook }
+  ).__cerebroMockContextBook = mockContextBook;
+}
 
 /** What Claude Code's own system prompt and tool definitions take before a
  * word of the conversation: where a mock session's first reading starts. */
@@ -1622,3 +1722,50 @@ export function onUiAction(listener: UiListener): () => void {
 export function emitUiAction(action: UiAction): void {
   for (const listener of [...uiListeners]) listener(action);
 }
+
+/** Original live run access; the native window authenticates the selector again. */
+export function readManagedActionAccess(
+  run: number,
+): Promise<import('@/lib/generated/actions').RunActionAccessView> {
+  if (inTauri() && Number.isSafeInteger(run) && run >= 0) {
+    return invokeTauri('read_managed_action_access', { run });
+  }
+  return Promise.reject({
+    code: 'unavailable',
+    message: 'Run access is unavailable.',
+    retryDisposition: 'never',
+  });
+}
+export function setManagedActionAccess(
+  run: number,
+  request: import('@/lib/generated/actions').SetRunActionAccess,
+): Promise<import('@/lib/generated/actions').SetRunActionAccessResult> {
+  if (inTauri() && Number.isSafeInteger(run) && run >= 0) {
+    return invokeTauri('set_managed_action_access', { run, request });
+  }
+  return Promise.resolve({
+    state: 'refused',
+    error: {
+      code: 'unavailable',
+      message: 'Run access is unavailable.',
+      retryDisposition: 'never',
+    },
+  });
+}
+
+
+/** Archive commands remain inside the existing native IPC adapter. */
+function archiveUnavailable(): Promise<never> {
+  return Promise.reject({code:'unavailable',message:'Conversation archive is available in the desktop app.'});
+}
+function archiveAnswer<T>(type:string,read:Promise<unknown>):Promise<T>{return read.then((value)=>checkedArchive<T>(type,value));}
+export function archiveContext(){return archiveAnswer<import('@/lib/generated/conversations').ArchiveContext>('ArchiveContext',inTauri()?invokeTauri('conversation_context'):faulted('conversation_context',archiveUnavailable));}
+export function archiveSetting(context:import('@/lib/generated/conversations').ArchiveContext){return archiveAnswer<import('@/lib/generated/conversations').ArchiveSetting>('ArchiveSetting',inTauri()?invokeTauri('conversation_retention',{context}):faulted('conversation_retention',archiveUnavailable));}
+export function setArchiveRetention(context:import('@/lib/generated/conversations').ArchiveContext,choice:import('@/lib/generated/conversations').RetentionChoice,expectedRevision:number){return archiveAnswer<import('@/lib/generated/conversations').ArchiveSetting>('ArchiveSetting',inTauri()?invokeTauri('conversation_set_retention',{context,choice,expectedRevision}):faulted('conversation_set_retention',archiveUnavailable));}
+export function archiveThreads(context:import('@/lib/generated/conversations').ArchiveContext,query='',after:string|null=null){return archiveAnswer<import('@/lib/generated/conversations').ThreadPage>('ThreadPage',inTauri()?invokeTauri('conversation_list',{context,query:query||null,after,limit:50}):faulted('conversation_list',archiveUnavailable));}
+export function archiveMessages(context:import('@/lib/generated/conversations').ArchiveContext,threadId:string,before:string|null=null){return archiveAnswer<import('@/lib/generated/conversations').MessagePage>('MessagePage',inTauri()?invokeTauri('conversation_messages',{context,threadId,before,limit:20}):faulted('conversation_messages',archiveUnavailable));}
+export function deleteArchivedThread(context:import('@/lib/generated/conversations').ArchiveContext,threadId:string){return archiveAnswer<import('@/lib/generated/conversations').DeleteResult>('DeleteResult',inTauri()?invokeTauri('conversation_delete',{context,threadId}):faulted('conversation_delete',archiveUnavailable));}
+export function pruneArchive(context:import('@/lib/generated/conversations').ArchiveContext){return archiveAnswer<import('@/lib/generated/conversations').PruneResult>('PruneResult',inTauri()?invokeTauri('conversation_prune',{context}):faulted('conversation_prune',archiveUnavailable));}
+export function exportArchivedThread(context:import('@/lib/generated/conversations').ArchiveContext,threadId:string,format:import('@/lib/generated/conversations').ExportFormat){return archiveAnswer<import('@/lib/generated/conversations').ExportResult>('ExportResult',inTauri()?invokeTauri('conversation_export',{context,threadId,format}):faulted('conversation_export',archiveUnavailable));}
+
+export function importCachedConversation(context:import('@/lib/generated/conversations').ArchiveContext,batch:import('@/lib/generated/conversations').ImportBatch){return archiveAnswer<import('@/lib/generated/conversations').ImportResult>('ImportResult',inTauri()?invokeTauri('conversation_import',{context,batch}):faulted('conversation_import',archiveUnavailable));}

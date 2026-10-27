@@ -37,3 +37,19 @@ it('rejects unknown and unavailable rows without recording a use', () => {
   useLauncherStore.getState().startCreate('database');
   expect(useLauncherStore.getState()).toMatchObject({ flow: null, recents: {} });
 });
+it('freezes explicit folder and immutable recipe before opening the dialog', () => {
+  const destination = {
+    kind: 'page' as const,
+    folder: 'notes',
+    recipe: { kind: 'sheet' as const, sheetName: 'Sheet1' as const },
+  };
+  useLauncherStore.getState().startCreate('sheet', destination);
+  destination.folder = 'changed';
+  expect(useLauncherStore.getState().flow?.context.destination).toEqual({
+    kind: 'page',
+    folder: 'notes',
+    recipe: { kind: 'sheet', sheetName: 'Sheet1' },
+  });
+  useLauncherStore.getState().startCreate('page');
+  expect(useLauncherStore.getState().flow?.id).toBe('sheet');
+});

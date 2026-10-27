@@ -1,0 +1,3598 @@
+{
+  "version": 1,
+  "types": {
+    "WorkflowScheduleView": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowScheduleView",
+      "type": "object",
+      "required": [
+        "configuration",
+        "context",
+        "monitoring",
+        "readiness",
+        "workflowId"
+      ],
+      "properties": {
+        "configuration": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkflowScheduleConfiguration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "monitoring": {
+          "$ref": "#/definitions/WorkflowMonitorState"
+        },
+        "readiness": {
+          "$ref": "#/definitions/WorkflowScheduleReadiness"
+        },
+        "workflowId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowAccountPermission": {
+          "type": "object",
+          "required": [
+            "account",
+            "action",
+            "capabilities",
+            "connection",
+            "definition",
+            "inputDigest",
+            "inputScope"
+          ],
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "connection": {
+              "type": "string"
+            },
+            "definition": {
+              "type": "string"
+            },
+            "inputDigest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "inputScope": {
+              "$ref": "#/definitions/WorkflowInputScope"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowInputScope": {
+          "type": "string",
+          "enum": [
+            "all_valid_inputs",
+            "exact_canonical_input"
+          ]
+        },
+        "WorkflowMonitorState": {
+          "type": "string",
+          "enum": [
+            "watching",
+            "stopped",
+            "unavailable"
+          ]
+        },
+        "WorkflowPermissions": {
+          "type": "object",
+          "required": [
+            "accounts",
+            "queryRecords",
+            "readPrefixes"
+          ],
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WorkflowAccountPermission"
+              }
+            },
+            "queryRecords": {
+              "type": "boolean"
+            },
+            "readPrefixes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowScheduleConfiguration": {
+          "type": "object",
+          "required": [
+            "activationId",
+            "anchorMs",
+            "coalescedCount",
+            "configurationDigest",
+            "coverageKnown",
+            "cursorMs",
+            "epoch",
+            "firstSkippedMs",
+            "inputDigest",
+            "inputJson",
+            "lastSkippedMs",
+            "observedAtMs",
+            "permissionDigest",
+            "permissions",
+            "recoveryHeld",
+            "revision",
+            "skippedCount",
+            "state",
+            "triggerDigest",
+            "version"
+          ],
+          "properties": {
+            "activationId": {
+              "type": "string"
+            },
+            "anchorMs": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "coalescedCount": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "configurationDigest": {
+              "type": "string"
+            },
+            "coverageKnown": {
+              "type": "boolean"
+            },
+            "cursorMs": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "epoch": {
+              "type": "string"
+            },
+            "firstSkippedMs": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeCounter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "inputDigest": {
+              "type": "string"
+            },
+            "inputJson": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "lastSkippedMs": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeCounter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtMs": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeCounter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "permissionDigest": {
+              "type": "string"
+            },
+            "permissions": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/WorkflowPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "recoveryHeld": {
+              "type": "boolean"
+            },
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "skippedCount": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "state": {
+              "$ref": "#/definitions/WorkflowScheduleState"
+            },
+            "triggerDigest": {
+              "type": "string"
+            },
+            "version": {
+              "$ref": "#/definitions/WorkflowVersionRef"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowScheduleReadiness": {
+          "type": "string",
+          "enum": [
+            "unconfigured",
+            "ready",
+            "paused",
+            "removed",
+            "recovery_held",
+            "needs_access",
+            "unavailable"
+          ]
+        },
+        "WorkflowScheduleState": {
+          "type": "string",
+          "enum": [
+            "enabled",
+            "paused",
+            "removed"
+          ]
+        },
+        "WorkflowVersionRef": {
+          "type": "object",
+          "required": [
+            "definitionHash",
+            "workflowId"
+          ],
+          "properties": {
+            "definitionHash": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowScheduleEnableRequest": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowScheduleEnableRequest",
+      "type": "object",
+      "required": [
+        "context",
+        "expectedRevision",
+        "inputJson",
+        "permissions",
+        "requestKey",
+        "version"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "expectedRevision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "inputJson": {
+          "type": "string"
+        },
+        "permissions": {
+          "$ref": "#/definitions/WorkflowPermissions"
+        },
+        "requestKey": {
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/definitions/WorkflowVersionRef"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowAccountPermission": {
+          "type": "object",
+          "required": [
+            "account",
+            "action",
+            "capabilities",
+            "connection",
+            "definition",
+            "inputDigest",
+            "inputScope"
+          ],
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "connection": {
+              "type": "string"
+            },
+            "definition": {
+              "type": "string"
+            },
+            "inputDigest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "inputScope": {
+              "$ref": "#/definitions/WorkflowInputScope"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowInputScope": {
+          "type": "string",
+          "enum": [
+            "all_valid_inputs",
+            "exact_canonical_input"
+          ]
+        },
+        "WorkflowPermissions": {
+          "type": "object",
+          "required": [
+            "accounts",
+            "queryRecords",
+            "readPrefixes"
+          ],
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WorkflowAccountPermission"
+              }
+            },
+            "queryRecords": {
+              "type": "boolean"
+            },
+            "readPrefixes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowVersionRef": {
+          "type": "object",
+          "required": [
+            "definitionHash",
+            "workflowId"
+          ],
+          "properties": {
+            "definitionHash": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowScheduleChangeRequest": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowScheduleChangeRequest",
+      "type": "object",
+      "required": [
+        "context",
+        "expectedRevision",
+        "requestKey",
+        "workflowId"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "expectedRevision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "requestKey": {
+          "type": "string"
+        },
+        "workflowId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowScheduleAck": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowScheduleAck",
+      "type": "object",
+      "required": [
+        "context",
+        "current",
+        "monitoring",
+        "receipt",
+        "replayed",
+        "workflowId"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "current": {
+          "$ref": "#/definitions/WorkflowScheduleConfiguration"
+        },
+        "monitoring": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkflowMonitoring"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "receipt": {
+          "$ref": "#/definitions/WorkflowScheduleReceipt"
+        },
+        "replayed": {
+          "type": "boolean"
+        },
+        "workflowId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowAccountPermission": {
+          "type": "object",
+          "required": [
+            "account",
+            "action",
+            "capabilities",
+            "connection",
+            "definition",
+            "inputDigest",
+            "inputScope"
+          ],
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "connection": {
+              "type": "string"
+            },
+            "definition": {
+              "type": "string"
+            },
+            "inputDigest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "inputScope": {
+              "$ref": "#/definitions/WorkflowInputScope"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowInputScope": {
+          "type": "string",
+          "enum": [
+            "all_valid_inputs",
+            "exact_canonical_input"
+          ]
+        },
+        "WorkflowMonitoring": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "observed",
+            "busy",
+            "unavailable"
+          ]
+        },
+        "WorkflowPermissions": {
+          "type": "object",
+          "required": [
+            "accounts",
+            "queryRecords",
+            "readPrefixes"
+          ],
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WorkflowAccountPermission"
+              }
+            },
+            "queryRecords": {
+              "type": "boolean"
+            },
+            "readPrefixes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowScheduleConfiguration": {
+          "type": "object",
+          "required": [
+            "activationId",
+            "anchorMs",
+            "coalescedCount",
+            "configurationDigest",
+            "coverageKnown",
+            "cursorMs",
+            "epoch",
+            "firstSkippedMs",
+            "inputDigest",
+            "inputJson",
+            "lastSkippedMs",
+            "observedAtMs",
+            "permissionDigest",
+            "permissions",
+            "recoveryHeld",
+            "revision",
+            "skippedCount",
+            "state",
+            "triggerDigest",
+            "version"
+          ],
+          "properties": {
+            "activationId": {
+              "type": "string"
+            },
+            "anchorMs": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "coalescedCount": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "configurationDigest": {
+              "type": "string"
+            },
+            "coverageKnown": {
+              "type": "boolean"
+            },
+            "cursorMs": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "epoch": {
+              "type": "string"
+            },
+            "firstSkippedMs": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeCounter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "inputDigest": {
+              "type": "string"
+            },
+            "inputJson": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "lastSkippedMs": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeCounter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtMs": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeCounter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "permissionDigest": {
+              "type": "string"
+            },
+            "permissions": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/WorkflowPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "recoveryHeld": {
+              "type": "boolean"
+            },
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "skippedCount": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "state": {
+              "$ref": "#/definitions/WorkflowScheduleState"
+            },
+            "triggerDigest": {
+              "type": "string"
+            },
+            "version": {
+              "$ref": "#/definitions/WorkflowVersionRef"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowScheduleOperation": {
+          "type": "string",
+          "enum": [
+            "enable",
+            "pause",
+            "remove"
+          ]
+        },
+        "WorkflowScheduleReceipt": {
+          "type": "object",
+          "required": [
+            "epoch",
+            "operation",
+            "revision",
+            "state",
+            "version"
+          ],
+          "properties": {
+            "epoch": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/WorkflowScheduleOperation"
+            },
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "state": {
+              "$ref": "#/definitions/WorkflowScheduleState"
+            },
+            "version": {
+              "$ref": "#/definitions/WorkflowVersionRef"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowScheduleState": {
+          "type": "string",
+          "enum": [
+            "enabled",
+            "paused",
+            "removed"
+          ]
+        },
+        "WorkflowVersionRef": {
+          "type": "object",
+          "required": [
+            "definitionHash",
+            "workflowId"
+          ],
+          "properties": {
+            "definitionHash": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowScheduleMonitorAck": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowScheduleMonitorAck",
+      "type": "object",
+      "required": [
+        "context",
+        "monitoring"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "monitoring": {
+          "$ref": "#/definitions/WorkflowMonitoring"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowMonitoring": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "observed",
+            "busy",
+            "unavailable"
+          ]
+        }
+      }
+    },
+    "WorkflowSchedulePreview": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowSchedulePreview",
+      "type": "object",
+      "required": [
+        "coalescedCount",
+        "context",
+        "coverageKnown",
+        "cursorMs",
+        "disposition",
+        "dueAtMs",
+        "epoch",
+        "revision",
+        "skippedCount",
+        "workflowId"
+      ],
+      "properties": {
+        "coalescedCount": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "coverageKnown": {
+          "type": "boolean"
+        },
+        "cursorMs": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "disposition": {
+          "$ref": "#/definitions/WorkflowScheduleDisposition"
+        },
+        "dueAtMs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "revision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "skippedCount": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "workflowId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowScheduleDisposition": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "due",
+            "paused",
+            "not_ready",
+            "recovery_held",
+            "clock_backwards"
+          ]
+        }
+      }
+    },
+    "WorkflowContext": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowContext",
+      "type": "object",
+      "required": [
+        "storeUuid",
+        "vaultId"
+      ],
+      "properties": {
+        "storeUuid": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "WorkflowDraft": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowDraft",
+      "type": "object",
+      "required": [
+        "entryStepId",
+        "inputSchemaJson",
+        "steps",
+        "triggerJson",
+        "workflowId"
+      ],
+      "properties": {
+        "entryStepId": {
+          "type": "string"
+        },
+        "inputSchemaJson": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkflowStepDraft"
+          }
+        },
+        "triggerJson": {
+          "type": "string"
+        },
+        "workflowId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "WorkflowOperationDraft": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "nextStepId",
+                "outputSchemaJson",
+                "queryJson"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "read"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                },
+                "outputSchemaJson": {
+                  "type": "string"
+                },
+                "queryJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "mappingJson",
+                "nextStepId",
+                "outputSchemaJson"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "transform"
+                  ]
+                },
+                "mappingJson": {
+                  "type": "string"
+                },
+                "nextStepId": {
+                  "type": "string"
+                },
+                "outputSchemaJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "ifFalse",
+                "ifTrue",
+                "kind",
+                "predicateJson"
+              ],
+              "properties": {
+                "ifFalse": {
+                  "type": "string"
+                },
+                "ifTrue": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "condition"
+                  ]
+                },
+                "predicateJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "accountId",
+                "actionId",
+                "connectionId",
+                "definitionDigest",
+                "inputJson",
+                "kind",
+                "nextStepId"
+              ],
+              "properties": {
+                "accountId": {
+                  "type": "string"
+                },
+                "actionId": {
+                  "type": "string"
+                },
+                "connectionId": {
+                  "type": "string"
+                },
+                "definitionDigest": {
+                  "type": "string"
+                },
+                "inputJson": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "action"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "at",
+                "kind",
+                "nextStepId"
+              ],
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "timer"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "expiresAt",
+                "kind",
+                "nextStepId",
+                "schemaJson"
+              ],
+              "properties": {
+                "expiresAt": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "external_input"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                },
+                "schemaJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "outputJson"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "result"
+                  ]
+                },
+                "outputJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "WorkflowStepDraft": {
+          "type": "object",
+          "required": [
+            "label",
+            "operation",
+            "stepId"
+          ],
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/WorkflowOperationDraft"
+            },
+            "stepId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowDocument": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowDocument",
+      "type": "object",
+      "required": [
+        "activation",
+        "context",
+        "draft",
+        "publication",
+        "publicationRevision",
+        "versions",
+        "versionsTruncated",
+        "workflowId"
+      ],
+      "properties": {
+        "activation": {
+          "$ref": "#/definitions/WorkflowActivationView"
+        },
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "draft": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkflowDraftSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publication": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkflowPublication"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publicationRevision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkflowVersionRef"
+          }
+        },
+        "versionsTruncated": {
+          "type": "boolean"
+        },
+        "workflowId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowActivationView": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unavailable"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "revision",
+                "state"
+              ],
+              "properties": {
+                "revision": {
+                  "$ref": "#/definitions/SafeCounter"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "disabled"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "revision",
+                "state",
+                "version"
+              ],
+              "properties": {
+                "revision": {
+                  "$ref": "#/definitions/SafeCounter"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "enabled"
+                  ]
+                },
+                "version": {
+                  "$ref": "#/definitions/WorkflowVersionRef"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowDraft": {
+          "type": "object",
+          "required": [
+            "entryStepId",
+            "inputSchemaJson",
+            "steps",
+            "triggerJson",
+            "workflowId"
+          ],
+          "properties": {
+            "entryStepId": {
+              "type": "string"
+            },
+            "inputSchemaJson": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WorkflowStepDraft"
+              }
+            },
+            "triggerJson": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowDraftSnapshot": {
+          "type": "object",
+          "required": [
+            "draft",
+            "etag"
+          ],
+          "properties": {
+            "draft": {
+              "$ref": "#/definitions/WorkflowDraft"
+            },
+            "etag": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowOperationDraft": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "nextStepId",
+                "outputSchemaJson",
+                "queryJson"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "read"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                },
+                "outputSchemaJson": {
+                  "type": "string"
+                },
+                "queryJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "mappingJson",
+                "nextStepId",
+                "outputSchemaJson"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "transform"
+                  ]
+                },
+                "mappingJson": {
+                  "type": "string"
+                },
+                "nextStepId": {
+                  "type": "string"
+                },
+                "outputSchemaJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "ifFalse",
+                "ifTrue",
+                "kind",
+                "predicateJson"
+              ],
+              "properties": {
+                "ifFalse": {
+                  "type": "string"
+                },
+                "ifTrue": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "condition"
+                  ]
+                },
+                "predicateJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "accountId",
+                "actionId",
+                "connectionId",
+                "definitionDigest",
+                "inputJson",
+                "kind",
+                "nextStepId"
+              ],
+              "properties": {
+                "accountId": {
+                  "type": "string"
+                },
+                "actionId": {
+                  "type": "string"
+                },
+                "connectionId": {
+                  "type": "string"
+                },
+                "definitionDigest": {
+                  "type": "string"
+                },
+                "inputJson": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "action"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "at",
+                "kind",
+                "nextStepId"
+              ],
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "timer"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "expiresAt",
+                "kind",
+                "nextStepId",
+                "schemaJson"
+              ],
+              "properties": {
+                "expiresAt": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "external_input"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                },
+                "schemaJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "outputJson"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "result"
+                  ]
+                },
+                "outputJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "WorkflowPublication": {
+          "type": "object",
+          "required": [
+            "revision",
+            "version"
+          ],
+          "properties": {
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "version": {
+              "$ref": "#/definitions/WorkflowVersionRef"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowStepDraft": {
+          "type": "object",
+          "required": [
+            "label",
+            "operation",
+            "stepId"
+          ],
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/WorkflowOperationDraft"
+            },
+            "stepId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowVersionRef": {
+          "type": "object",
+          "required": [
+            "definitionHash",
+            "workflowId"
+          ],
+          "properties": {
+            "definitionHash": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowCatalog": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowCatalog",
+      "type": "object",
+      "required": [
+        "context",
+        "items",
+        "nextCursor",
+        "truncated"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkflowListItem"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowListItem": {
+          "type": "object",
+          "required": [
+            "publication",
+            "readable",
+            "workflowId"
+          ],
+          "properties": {
+            "publication": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/WorkflowPublication"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "readable": {
+              "type": "boolean"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowPublication": {
+          "type": "object",
+          "required": [
+            "revision",
+            "version"
+          ],
+          "properties": {
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "version": {
+              "$ref": "#/definitions/WorkflowVersionRef"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowVersionRef": {
+          "type": "object",
+          "required": [
+            "definitionHash",
+            "workflowId"
+          ],
+          "properties": {
+            "definitionHash": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowValidation": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowValidation",
+      "type": "object",
+      "required": [
+        "diagnostics",
+        "valid"
+      ],
+      "properties": {
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkflowDiagnostic"
+          }
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "WorkflowDiagnostic": {
+          "type": "object",
+          "required": [
+            "code",
+            "field",
+            "stepId"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "#/definitions/WorkflowErrorCode"
+            },
+            "field": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "stepId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowErrorCode": {
+          "type": "string",
+          "enum": [
+            "invalid_input",
+            "invalid_definition",
+            "unsupported_format",
+            "limit_exceeded",
+            "conflict",
+            "stale",
+            "denied",
+            "unavailable"
+          ]
+        }
+      }
+    },
+    "WorkflowStartRequest": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowStartRequest",
+      "type": "object",
+      "required": [
+        "context",
+        "inputJson",
+        "permissions",
+        "startKey",
+        "version"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "inputJson": {
+          "type": "string"
+        },
+        "permissions": {
+          "$ref": "#/definitions/WorkflowPermissions"
+        },
+        "startKey": {
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/definitions/WorkflowVersionRef"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "WorkflowAccountPermission": {
+          "type": "object",
+          "required": [
+            "account",
+            "action",
+            "capabilities",
+            "connection",
+            "definition",
+            "inputDigest",
+            "inputScope"
+          ],
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "connection": {
+              "type": "string"
+            },
+            "definition": {
+              "type": "string"
+            },
+            "inputDigest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "inputScope": {
+              "$ref": "#/definitions/WorkflowInputScope"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowInputScope": {
+          "type": "string",
+          "enum": [
+            "all_valid_inputs",
+            "exact_canonical_input"
+          ]
+        },
+        "WorkflowPermissions": {
+          "type": "object",
+          "required": [
+            "accounts",
+            "queryRecords",
+            "readPrefixes"
+          ],
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WorkflowAccountPermission"
+              }
+            },
+            "queryRecords": {
+              "type": "boolean"
+            },
+            "readPrefixes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowVersionRef": {
+          "type": "object",
+          "required": [
+            "definitionHash",
+            "workflowId"
+          ],
+          "properties": {
+            "definitionHash": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowStartAck": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowStartAck",
+      "type": "object",
+      "required": [
+        "admission",
+        "admissionEpoch",
+        "context",
+        "created",
+        "revision",
+        "runId",
+        "version"
+      ],
+      "properties": {
+        "admission": {
+          "$ref": "#/definitions/WorkflowAdmission"
+        },
+        "admissionEpoch": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "created": {
+          "type": "boolean"
+        },
+        "revision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/definitions/WorkflowVersionRef"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowAdmission": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "busy",
+            "unavailable"
+          ]
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowVersionRef": {
+          "type": "object",
+          "required": [
+            "definitionHash",
+            "workflowId"
+          ],
+          "properties": {
+            "definitionHash": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowSaveRequest": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowSaveRequest",
+      "type": "object",
+      "required": [
+        "context",
+        "draft",
+        "expectedEtag"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "draft": {
+          "$ref": "#/definitions/WorkflowDraft"
+        },
+        "expectedEtag": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowDraft": {
+          "type": "object",
+          "required": [
+            "entryStepId",
+            "inputSchemaJson",
+            "steps",
+            "triggerJson",
+            "workflowId"
+          ],
+          "properties": {
+            "entryStepId": {
+              "type": "string"
+            },
+            "inputSchemaJson": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WorkflowStepDraft"
+              }
+            },
+            "triggerJson": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowOperationDraft": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "nextStepId",
+                "outputSchemaJson",
+                "queryJson"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "read"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                },
+                "outputSchemaJson": {
+                  "type": "string"
+                },
+                "queryJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "mappingJson",
+                "nextStepId",
+                "outputSchemaJson"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "transform"
+                  ]
+                },
+                "mappingJson": {
+                  "type": "string"
+                },
+                "nextStepId": {
+                  "type": "string"
+                },
+                "outputSchemaJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "ifFalse",
+                "ifTrue",
+                "kind",
+                "predicateJson"
+              ],
+              "properties": {
+                "ifFalse": {
+                  "type": "string"
+                },
+                "ifTrue": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "condition"
+                  ]
+                },
+                "predicateJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "accountId",
+                "actionId",
+                "connectionId",
+                "definitionDigest",
+                "inputJson",
+                "kind",
+                "nextStepId"
+              ],
+              "properties": {
+                "accountId": {
+                  "type": "string"
+                },
+                "actionId": {
+                  "type": "string"
+                },
+                "connectionId": {
+                  "type": "string"
+                },
+                "definitionDigest": {
+                  "type": "string"
+                },
+                "inputJson": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "action"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "at",
+                "kind",
+                "nextStepId"
+              ],
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "timer"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "expiresAt",
+                "kind",
+                "nextStepId",
+                "schemaJson"
+              ],
+              "properties": {
+                "expiresAt": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "external_input"
+                  ]
+                },
+                "nextStepId": {
+                  "type": "string"
+                },
+                "schemaJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "outputJson"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "result"
+                  ]
+                },
+                "outputJson": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "WorkflowStepDraft": {
+          "type": "object",
+          "required": [
+            "label",
+            "operation",
+            "stepId"
+          ],
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/WorkflowOperationDraft"
+            },
+            "stepId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowPublishRequest": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowPublishRequest",
+      "type": "object",
+      "required": [
+        "context",
+        "expectedDraftEtag",
+        "expectedPublicationRevision",
+        "workflowId"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "expectedDraftEtag": {
+          "type": "string"
+        },
+        "expectedPublicationRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workflowId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowUnpublishRequest": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowUnpublishRequest",
+      "type": "object",
+      "required": [
+        "context",
+        "publication",
+        "requestKey"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "publication": {
+          "$ref": "#/definitions/WorkflowPublication"
+        },
+        "requestKey": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowPublication": {
+          "type": "object",
+          "required": [
+            "revision",
+            "version"
+          ],
+          "properties": {
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "version": {
+              "$ref": "#/definitions/WorkflowVersionRef"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowVersionRef": {
+          "type": "object",
+          "required": [
+            "definitionHash",
+            "workflowId"
+          ],
+          "properties": {
+            "definitionHash": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowUnpublishAck": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowUnpublishAck",
+      "type": "object",
+      "required": [
+        "context",
+        "original",
+        "publicationRevision",
+        "replayed",
+        "requestKey"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "original": {
+          "$ref": "#/definitions/WorkflowPublication"
+        },
+        "publicationRevision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "replayed": {
+          "type": "boolean"
+        },
+        "requestKey": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowPublication": {
+          "type": "object",
+          "required": [
+            "revision",
+            "version"
+          ],
+          "properties": {
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "version": {
+              "$ref": "#/definitions/WorkflowVersionRef"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowVersionRef": {
+          "type": "object",
+          "required": [
+            "definitionHash",
+            "workflowId"
+          ],
+          "properties": {
+            "definitionHash": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowRunRequest": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowRunRequest",
+      "type": "object",
+      "required": [
+        "context",
+        "expectedEpoch",
+        "expectedRevision",
+        "runId"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "expectedEpoch": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "expectedRevision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowReauthorizeRequest": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowReauthorizeRequest",
+      "type": "object",
+      "required": [
+        "context",
+        "expectedEpoch",
+        "permissions",
+        "runId"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "expectedEpoch": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "permissions": {
+          "$ref": "#/definitions/WorkflowPermissions"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowAccountPermission": {
+          "type": "object",
+          "required": [
+            "account",
+            "action",
+            "capabilities",
+            "connection",
+            "definition",
+            "inputDigest",
+            "inputScope"
+          ],
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "connection": {
+              "type": "string"
+            },
+            "definition": {
+              "type": "string"
+            },
+            "inputDigest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "inputScope": {
+              "$ref": "#/definitions/WorkflowInputScope"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowInputScope": {
+          "type": "string",
+          "enum": [
+            "all_valid_inputs",
+            "exact_canonical_input"
+          ]
+        },
+        "WorkflowPermissions": {
+          "type": "object",
+          "required": [
+            "accounts",
+            "queryRecords",
+            "readPrefixes"
+          ],
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WorkflowAccountPermission"
+              }
+            },
+            "queryRecords": {
+              "type": "boolean"
+            },
+            "readPrefixes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowWaitAnswer": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowWaitAnswer",
+      "type": "object",
+      "required": [
+        "context",
+        "continuationId",
+        "expectedRevision",
+        "inputJson",
+        "runId",
+        "signalKey"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "continuationId": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "inputJson": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "signalKey": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowActionAnswer": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowActionAnswer",
+      "type": "object",
+      "required": [
+        "allow",
+        "approvalId",
+        "context",
+        "editedInputJson",
+        "expectedApprovalRevision",
+        "expectedInvocationRevision",
+        "invocationId",
+        "runId"
+      ],
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "editedInputJson": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expectedApprovalRevision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "expectedInvocationRevision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "invocationId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowRunView": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowRunView",
+      "type": "object",
+      "required": [
+        "admissionEpoch",
+        "cancelRequested",
+        "configurationDigest",
+        "context",
+        "inputDigest",
+        "nativeRunId",
+        "reason",
+        "revision",
+        "runId",
+        "state",
+        "steps",
+        "version"
+      ],
+      "properties": {
+        "admissionEpoch": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "cancelRequested": {
+          "type": "boolean"
+        },
+        "configurationDigest": {
+          "type": "string"
+        },
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "inputDigest": {
+          "type": "string"
+        },
+        "nativeRunId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/WorkflowRunState"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkflowStepView"
+          }
+        },
+        "version": {
+          "$ref": "#/definitions/WorkflowVersionRef"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowRunState": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "waiting",
+            "blocked",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "WorkflowStepKind": {
+          "type": "string",
+          "enum": [
+            "read",
+            "transform",
+            "condition",
+            "action",
+            "timer",
+            "external_input",
+            "result"
+          ]
+        },
+        "WorkflowStepState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "waiting",
+            "blocked",
+            "succeeded",
+            "failed",
+            "skipped",
+            "cancelled"
+          ]
+        },
+        "WorkflowStepView": {
+          "type": "object",
+          "required": [
+            "input",
+            "invocationId",
+            "kind",
+            "label",
+            "ordinal",
+            "output",
+            "reason",
+            "state",
+            "stepId",
+            "wait"
+          ],
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/WorkflowValueView"
+            },
+            "invocationId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "$ref": "#/definitions/WorkflowStepKind"
+            },
+            "label": {
+              "type": "string"
+            },
+            "ordinal": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "output": {
+              "$ref": "#/definitions/WorkflowValueView"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/definitions/WorkflowStepState"
+            },
+            "stepId": {
+              "type": "string"
+            },
+            "wait": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/WorkflowWaitView"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowValueView": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "bytes",
+                "digest",
+                "state"
+              ],
+              "properties": {
+                "bytes": {
+                  "$ref": "#/definitions/SafeCounter"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "available"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "state"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "not_recorded"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "digest",
+                "state"
+              ],
+              "properties": {
+                "digest": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "not_retained"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "state"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "unavailable"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "WorkflowVersionRef": {
+          "type": "object",
+          "required": [
+            "definitionHash",
+            "workflowId"
+          ],
+          "properties": {
+            "definitionHash": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowWaitKind": {
+          "type": "string",
+          "enum": [
+            "timer",
+            "external_input",
+            "person_approval"
+          ]
+        },
+        "WorkflowWaitState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "consumed",
+            "cancelled",
+            "expired"
+          ]
+        },
+        "WorkflowWaitView": {
+          "type": "object",
+          "required": [
+            "continuationId",
+            "dueAt",
+            "expiresAt",
+            "kind",
+            "revision",
+            "schemaJson",
+            "state"
+          ],
+          "properties": {
+            "continuationId": {
+              "type": "string"
+            },
+            "dueAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "expiresAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "$ref": "#/definitions/WorkflowWaitKind"
+            },
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "schemaJson": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/definitions/WorkflowWaitState"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowAccessView": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowAccessView",
+      "description": "Original permission ceiling and current selection, read-only comparison data.",
+      "type": "object",
+      "required": [
+        "admissionEpoch",
+        "context",
+        "current",
+        "original",
+        "runId"
+      ],
+      "properties": {
+        "admissionEpoch": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "current": {
+          "$ref": "#/definitions/WorkflowPermissions"
+        },
+        "original": {
+          "$ref": "#/definitions/WorkflowPermissions"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowAccountPermission": {
+          "type": "object",
+          "required": [
+            "account",
+            "action",
+            "capabilities",
+            "connection",
+            "definition",
+            "inputDigest",
+            "inputScope"
+          ],
+          "properties": {
+            "account": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "connection": {
+              "type": "string"
+            },
+            "definition": {
+              "type": "string"
+            },
+            "inputDigest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "inputScope": {
+              "$ref": "#/definitions/WorkflowInputScope"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowInputScope": {
+          "type": "string",
+          "enum": [
+            "all_valid_inputs",
+            "exact_canonical_input"
+          ]
+        },
+        "WorkflowPermissions": {
+          "type": "object",
+          "required": [
+            "accounts",
+            "queryRecords",
+            "readPrefixes"
+          ],
+          "properties": {
+            "accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WorkflowAccountPermission"
+              }
+            },
+            "queryRecords": {
+              "type": "boolean"
+            },
+            "readPrefixes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowRunCatalog": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowRunCatalog",
+      "type": "object",
+      "required": [
+        "context",
+        "items",
+        "nextCursor",
+        "truncated"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkflowRunListItem"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowRunListItem": {
+          "description": "Finite paged history; completed content is never part of the run index.",
+          "type": "object",
+          "required": [
+            "admissionEpoch",
+            "reason",
+            "revision",
+            "runId",
+            "startedAt",
+            "state",
+            "updatedAt",
+            "version"
+          ],
+          "properties": {
+            "admissionEpoch": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "runId": {
+              "type": "string"
+            },
+            "startedAt": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/definitions/WorkflowRunState"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "version": {
+              "$ref": "#/definitions/WorkflowVersionRef"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowRunState": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "waiting",
+            "blocked",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "WorkflowVersionRef": {
+          "type": "object",
+          "required": [
+            "definitionHash",
+            "workflowId"
+          ],
+          "properties": {
+            "definitionHash": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "WorkflowValueRequest": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowValueRequest",
+      "type": "object",
+      "required": [
+        "context",
+        "digest",
+        "role",
+        "runId",
+        "stepId"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/WorkflowContext"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/WorkflowValueRole"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "stepId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "WorkflowContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowValueRole": {
+          "type": "string",
+          "enum": [
+            "run_input",
+            "step_input",
+            "step_output"
+          ]
+        }
+      }
+    },
+    "WorkflowValueDetail": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowValueDetail",
+      "type": "object",
+      "required": [
+        "digest",
+        "json"
+      ],
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "json": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "WorkflowError": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "WorkflowError",
+      "type": "object",
+      "required": [
+        "code",
+        "diagnostics"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/WorkflowErrorCode"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkflowDiagnostic"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "WorkflowDiagnostic": {
+          "type": "object",
+          "required": [
+            "code",
+            "field",
+            "stepId"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "#/definitions/WorkflowErrorCode"
+            },
+            "field": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "stepId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "WorkflowErrorCode": {
+          "type": "string",
+          "enum": [
+            "invalid_input",
+            "invalid_definition",
+            "unsupported_format",
+            "limit_exceeded",
+            "conflict",
+            "stale",
+            "denied",
+            "unavailable"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -246,6 +246,42 @@ pub fn read_ledger(dir: &Path) -> Result<LedgerRead, LedgerFault> {
         // Anything else (store.json, lock, temps, foreign debris) is not a
         // segment; recovery::classify names debris states, this layer skips.
     }
+    read_chain(store, names, |name, anchor| {
+        segment::read_segment(&dir.join(name.file_name()), name, anchor, name.start_seq)
+    })
+}
+
+/// The existing chain verifier over caller-bounded captured bytes. No filesystem
+/// access or recovery occurs here; consumers decide whether a non-clean tail is admissible.
+pub(crate) fn read_captured(
+    store: store::StoreInfo,
+    parts: &std::collections::BTreeMap<String, Vec<u8>>,
+) -> Result<LedgerRead, LedgerFault> {
+    let names = parts
+        .keys()
+        .map(|path| {
+            path.is_ascii()
+                .then(|| segment::parse_segment_name(path))
+                .flatten()
+                .ok_or_else(|| {
+                    LedgerFault::StoreUnreadable(
+                        "Captured ledger contains an unsupported segment name.".into(),
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    read_chain(store, names, |name, anchor| {
+        let bytes = parts
+            .get(&name.file_name())
+            .ok_or("Captured segment is missing.")?;
+        segment::parse_segment(bytes, name.sealed, anchor, name.start_seq)
+    })
+}
+fn read_chain(
+    store: store::StoreInfo,
+    mut names: Vec<segment::SegmentName>,
+    mut read_part: impl FnMut(&segment::SegmentName, &str) -> Result<segment::SegmentRead, String>,
+) -> Result<LedgerRead, LedgerFault> {
     names.sort_by_key(|n| n.start_seq);
 
     // v1 is single-writer: every segment must carry one writer id. A second
@@ -286,16 +322,21 @@ pub fn read_ledger(dir: &Path) -> Result<LedgerRead, LedgerFault> {
                 });
             }
         }
-        let read =
-            segment::read_segment(&dir.join(name.file_name()), name, &anchor, name.start_seq)
-                .map_err(|detail| LedgerFault::SegmentCorrupt {
-                    file: name.file_name(),
-                    detail,
-                })?;
+        let read = read_part(name, &anchor).map_err(|detail| LedgerFault::SegmentCorrupt {
+            file: name.file_name(),
+            detail,
+        })?;
         if let Some(frame) = read.frames.last() {
             anchor = frame.hash.clone();
         }
-        next_seq = Some(name.start_seq + read.frames.len() as u64);
+        next_seq = Some(
+            name.start_seq
+                .checked_add(read.frames.len() as u64)
+                .ok_or_else(|| LedgerFault::SegmentCorrupt {
+                    file: name.file_name(),
+                    detail: "Sequence exceeds its bound.".into(),
+                })?,
+        );
         frames.extend(read.frames);
         tail = read.tail;
     }

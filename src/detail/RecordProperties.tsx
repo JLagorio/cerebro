@@ -1,3 +1,4 @@
+import { selectedEntryIssue, selectedPropertyKeys } from '@/engine/selectedEntryProjection';
 import React, { useEffect, useRef, useState } from 'react';
 import { addPropertyToEntry, moveFieldOnType } from '@/app/typeActions';
 import { Icon } from '@/components/ui/Icon';
@@ -31,7 +32,11 @@ import { isStructured, StructuredValue } from '@/detail/StructuredValue';
  * hand, can hold maps (a daterange's {start, end}, a `generated:` stamp) —
  * `String(value)` turned those into "[object Object]", so they draw as
  * `StructuredValue`'s lines. */
-function undeclaredDisplay(entry: Entry, name: string): React.ReactNode {
+function undeclaredDisplay(entry: Entry, name: string, schema: Schema): React.ReactNode {
+  if (entry.authority?.kind === 'sqlite_metadata') {
+    const resolved = schema.resolveField(entry, name);
+    return <span>{resolved.display || 'Empty'}{resolved.unavailableReason && <span role="status" className="block text-xs text-n-600">{resolved.unavailableReason}</span>}</span>;
+  }
   if (name in entry.relationships) return entry.relationships[name].join(', ');
   const value = entry.properties[name];
   if (value === null || value === undefined) return '—';
@@ -60,10 +65,12 @@ export function RecordProperties({
   entry,
   schema,
   onEditingChange,
+  sourceField = null,
 }: {
   entry: Entry;
   schema: Schema;
   onEditingChange?: (editing: boolean) => void;
+  sourceField?: string | null;
 }) {
   const editingFields = useRef(new Set<string>());
   const fieldEditing = (name: string, editing: boolean) => {
@@ -93,7 +100,9 @@ export function RecordProperties({
   const [revealed, setRevealed] = useState(false);
   const folds = foldsWhenUnset(entry, schema, showEmpty);
   const { shown } = splitByVisibility(allDeclared, folds);
-  const declared = revealed ? allDeclared : shown;
+  const declared = revealed
+    ? allDeclared
+    : allDeclared.filter((field) => shown.includes(field) || field.name === sourceField);
 
   // M45.1: `layout:` arranges the stack into named groups. M46.1: and that
   // arrangement is the record's whole answer — no tab narrows it.
@@ -101,7 +110,12 @@ export function RecordProperties({
   // Per container, the SAME fold the flat stack makes; revealing opens each
   // container's folds in place.
   const containerRows = (fields: FieldDef[]) =>
-    revealed ? fields : splitByVisibility(fields, folds).shown;
+    revealed
+      ? fields
+      : fields.filter(
+          (field) =>
+            field.name === sourceField || splitByVisibility([field], folds).shown.length > 0,
+        );
   // The pooled hidden count is what THIS stack can reveal — every folded
   // field in every container, because the expander promises rows and each one
   // opens in its own section. `revealableFields` owns the union and the
@@ -112,9 +126,11 @@ export function RecordProperties({
   // Heading fields the strip folded. The strip cannot reveal them, so on
   // reveal they surface at the TOP of the stack — the heading is the topmost
   // container — headerless. The strip's SHOWN fields stay out of the stack.
-  const headingFolds = splitByVisibility(layout.heading, folds).hidden;
+  const headingFolds = layout.heading.filter(
+    (field) => field.name === sourceField || splitByVisibility([field], folds).hidden.length > 0,
+  );
   const undeclared = visibleProperties([
-    ...Object.keys(entry.properties),
+    ...selectedPropertyKeys(entry),
     ...Object.keys(entry.relationships),
   ]).filter((k) => !declaredNames.has(k) && k !== 'type' && k !== 'key');
 
@@ -182,6 +198,7 @@ export function RecordProperties({
 
   return (
     <div className="cb-record-properties mb-4 flex flex-col gap-1">
+      {(selectedEntryIssue(entry) ?? typeDef?.unavailableReason) && <p role="status" className="section-unavailable text-xs text-n-600">{selectedEntryIssue(entry) ?? typeDef?.unavailableReason}</p>}
       {layout.flat ? (
         /* Declared fields get their own container: the sortable measures its
            children as the rows, and undeclared keys are not part of the type's
@@ -226,7 +243,7 @@ export function RecordProperties({
         </div>
       ) : (
         <>
-          {revealed && headingFolds.length > 0 && (
+          {(revealed || sourceField !== null) && headingFolds.length > 0 && (
             <div className="flex flex-col gap-1">{headingFolds.map(groupedRow)}</div>
           )}
           {layout.groups.map((g) => {
@@ -295,7 +312,7 @@ export function RecordProperties({
           }
         >
           <div className="p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">
-            {undeclaredDisplay(entry, name)}
+            {undeclaredDisplay(entry, name, schema)}
           </div>
         </PropertyRow>
       ))}

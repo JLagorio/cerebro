@@ -28,6 +28,7 @@ use super::pass::{Runner, ACTOR};
 
 /// Everything a live maintenance spawn needs from the app.
 pub struct Live<'a> {
+    pub(crate) preparation: &'a crate::agent::RunPreparation,
     pub app: &'a AppHandle,
     pub agents: &'a AgentState,
     pub mcp: &'a McpState,
@@ -88,6 +89,7 @@ impl Runner for Live<'_> {
                 cause: Some(RunCause::of(CauseKind::Maintenance)),
             }),
             Some(tx),
+            self.preparation,
         )?;
         // Blocking, deliberately: a timeout here would report an outcome the
         // run never had and leave a live child behind.

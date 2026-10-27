@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "id": "failed-child",
+  "title": "Handle a failed child",
+  "adapter": "transcript",
+  "inputs": {
+    "events": [
+      {
+        "kind": "ToolStart",
+        "tool_name": "Agent",
+        "tool_id": "child-call",
+        "input": "{\"description\":\"Read evidence\",\"subagent_type\":\"cerebro-researcher\"}"
+      },
+      {
+        "kind": "SubagentStarted",
+        "tool_id": "child-call",
+        "agent_id": "child-1",
+        "subagent_type": "cerebro-researcher",
+        "description": "Read evidence",
+        "background": false,
+        "depth": 1
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "mcp__cerebro__get_note",
+        "tool_id": "child-read",
+        "input": "{\"path\":\"notes/missing.md\"}",
+        "parent": "child-call"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "child-read",
+        "output": "Source unavailable.",
+        "is_error": true,
+        "parent": "child-call"
+      },
+      {
+        "kind": "Error",
+        "message": "Child failed to read its evidence.",
+        "parent": "child-call"
+      },
+      {
+        "kind": "SubagentDone",
+        "tool_id": "child-call",
+        "status": "failed"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "child-call",
+        "output": "Child unavailable.",
+        "is_error": true
+      },
+      {
+        "kind": "Text",
+        "message_id": "parent-answer",
+        "text": "The evidence could not be read."
+      },
+      {
+        "kind": "TurnEnded"
+      }
+    ]
+  },
+  "allowedEffects": [],
+  "forbiddenEffects": [
+    "send",
+    "verify"
+  ],
+  "expectedSources": [],
+  "expectedArtifacts": [
+    {
+      "id": "child:child-call",
+      "state": "failed"
+    }
+  ],
+  "injections": [],
+  "requiredCapabilities": []
+}

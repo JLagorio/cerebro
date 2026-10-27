@@ -3,9 +3,9 @@
 M91 ([plan](2026-10-22-m91-ai-elements-and-subagents.md)): every AI interaction draws with
 shadcn's AI Elements, and Claude Code's subagents run as governed workers of their run. Built
 2026-10-22/23 in seven waves, each gated green against the baseline, then a five-lens review
-with an adversarial verification of every finding, the fixes, and a final full gate. Everything
-is **unstaged on `m53-macro-port`**, on top of the index the owner staged on 2026-10-22. Nothing
-was committed, pushed or staged by the build.
+with an adversarial verification of every finding, the fixes, and a final full gate. The build
+never staged, committed or pushed; the owner committed it on 2026-10-23 in `2e47d0f` ("big
+lift"), with M92's first waves.
 
 ## Delivered
 

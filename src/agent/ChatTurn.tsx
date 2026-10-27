@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { readGenerationObservation } from '@/agent/generationObservation';
 import { ChainOfThought, chainTitle } from '@/components/ai/ChainOfThought';
 import { Checkpoint } from '@/components/ai/Checkpoint';
 import {
@@ -6,6 +7,7 @@ import {
   BubbleContent,
   Message as TurnMessage,
   MessageContent,
+  MessageToolbar,
 } from '@/components/ai/Message';
 import { Sources } from '@/components/ai/Sources';
 import { STEP_STATUS_WORDS, formatDuration } from '@/components/ai/StepLine';
@@ -23,6 +25,8 @@ import { StepItem, type RowContext } from '@/agent/toolRenderers';
 import { TurnChangeset } from '@/agent/TurnChangeset';
 import { FailureNoticeCard } from '@/agent/FailureNoticeCard';
 import { TurnError } from '@/agent/TurnError';
+import { AnswerSaveDialog, ArtifactActions } from '@/agent/ArtifactActions';
+import type { AnswerPreview } from '@/agent/artifacts';
 import { MessageText } from '@/agent/MessageMarkdown';
 import { suspendedOn } from '@/agent/transcript';
 import type { ChatMessage } from '@/agent/types';
@@ -72,9 +76,9 @@ export interface MessageProps {
   /** Whether the vault keeps git history, so a write card can say it has no
    * revert (M55.5); undefined until git status is read. */
   history?: GitHistory;
-  /** Re-send the question the answer with this id belongs to (M15). Taking
-   *  the id keeps one handler for every turn, so a memoized turn stays put. */
-  onRetry?: (messageId: string) => void;
+  /** Inspect local recorded facts without resending. The explicit opener
+   *  lets the owning panel restore focus when its read-only view closes. */
+  onReviewRecovery?: (messageId: string, opener: HTMLButtonElement) => void;
   /** What a failure card's fix does, by action (M56.4). */
   noticeActions?: Partial<Record<string, () => void>>;
 }
@@ -83,13 +87,13 @@ export interface MessageProps {
  *  stable handlers from the panel every earlier turn skips the redraw. */
 export const Message = memo(function Message(props: MessageProps) {
   return props.message.role === 'user' ? (
-    <UserMessage message={props.message} arriving={props.arriving} />
+    <UserMessage message={props.message} arriving={props.arriving} onOpenPath={props.onOpenPath} />
   ) : (
     <AssistantMessage {...props} />
   );
 });
 
-function UserMessage({ message, arriving = false }: { message: ChatMessage; arriving?: boolean }) {
+function UserMessage({ message, arriving = false, onOpenPath }: { message: ChatMessage; arriving?: boolean; onOpenPath:(path:string)=>void }) {
   const arrival = useArrival(arriving);
   const [expanded, setExpanded] = useState(false);
   const { text, addressed } = message;
@@ -120,6 +124,8 @@ function UserMessage({ message, arriving = false }: { message: ChatMessage; arri
               : `To ${addressed.title}`}
           </span>
         )}
+        {message.archiveAttachmentRefs !== undefined && message.archiveAttachmentRefs.length > 0 && <ul className="m-0 list-none p-0 text-xs text-n-500">{message.archiveAttachmentRefs.map((path)=><li key={path}><button type="button" className="motion-hover border-0 bg-transparent p-0 text-inherit underline" onClick={()=>onOpenPath(path)}>{path}</button></li>)}</ul>}
+        <ArchivePersistence message={message}/>
         {long && (
           <button
             type="button"
@@ -129,6 +135,9 @@ function UserMessage({ message, arriving = false }: { message: ChatMessage; arri
           >
             {expanded ? 'Show less' : 'Show more'}
           </button>
+        )}
+        {message.streaming !== true && text.trim() !== '' && (
+          <MessageToolbar aria-label="Question actions" copy={text} />
         )}
       </MessageContent>
     </TurnMessage>
@@ -143,7 +152,7 @@ function AssistantMessage({
   onOpenPath,
   onViewDiff,
   history,
-  onRetry,
+  onReviewRecovery,
   noticeActions,
   waitingToolId = null,
 }: MessageProps) {
@@ -152,11 +161,15 @@ function AssistantMessage({
   // a failure, what its run changed — comes in on its own; what it was
   // drawn with, restored or new, came in with it.
   const live = useDrawn();
+  // A chosen answer copy outlives regeneration, waiting and gap restoration.
+  // Eligibility can remove the action without discarding its open preview.
+  const [artifact, setArtifact] = useState<AnswerPreview | null>(null);
   // Code is highlighted in the panel's own theme, handed to the elements as
   // a prop (CV-64).
   const theme = useTheme();
   const entries = useVaultStore((s) => s.entries);
   const streaming = message.streaming === true;
+  const generationObservation = readGenerationObservation(message.generationObservation);
   // A turn watched as it was written is the one being read.
   const [watched] = useState(streaming);
   const lines = useMemo(
@@ -172,10 +185,14 @@ function AssistantMessage({
   // made of it, so it still shows the run's change after the commit lands.
   const cardDiff =
     onViewDiff === undefined ? undefined : (p: string) => onViewDiff(p, commitOf(message, p));
-  const retry = onRetry === undefined ? undefined : () => onRetry(message.id);
+  const reviewRecovery =
+    onReviewRecovery === undefined
+      ? undefined
+      : (opener: HTMLButtonElement) => onReviewRecovery(message.id, opener);
   // At work, and not waiting on the person: the card it waits on says that.
   const working = streaming && waitingToolId === null;
   const waiting = waitingToolId !== null;
+  const settled = !streaming && !waiting && message.gap !== true && suspendedOn(message) === null;
   // M92.2: the run's own clock runs from when its Init reached the reply
   // until the turn ends or a hook holds it; once the reply has settled and
   // waits on nobody, Claude Code's own count says how long it worked.
@@ -209,6 +226,13 @@ function AssistantMessage({
             {line.kind === 'text' ? (
               <div className={line.answer ? 'cb-chat-answer' : 'cb-chat-narration'}>
                 <MessageText text={line.text} onOpen={onOpen} arrive={live} theme={theme} />
+                {line.answer && settled && line.text.trim() !== '' && (
+                  <ArtifactActions
+                    attemptId={message.id}
+                    text={line.text}
+                    onPreview={setArtifact}
+                  />
+                )}
               </div>
             ) : (
               <div className="cb-chat-row">
@@ -227,12 +251,25 @@ function AssistantMessage({
             )}
           </Arrival>
         ))}
+        {artifact !== null && (
+          <AnswerSaveDialog
+            preview={artifact}
+            onClose={() => setArtifact(null)}
+            onOpenPath={onOpenPath}
+          />
+        )}
         {sources.length > 0 && (
           <Arrival when={live}>
             <div className="cb-chat-row">
               <Sources data-testid="turn-sources" sources={sources} onOpenPath={onOpenPath} />
             </div>
           </Arrival>
+        )}
+        {generationObservation !== null && (
+          <p role="status" aria-label="Response status" className="m-0 text-sm text-n-500">
+            This response was already started. Last reported status: {generationObservation.state}.
+            {!streaming && ' Live progress is not connected here.'}
+          </p>
         )}
         {/* M56.4: a failure Rust could type is a card with its fix; one it
             could not keeps the red box and Claude Code's own words. */}
@@ -241,13 +278,18 @@ function AssistantMessage({
             notice={message.notice}
             raw={message.error}
             actions={noticeActions}
-            onRetry={retry}
+            onReviewRecovery={reviewRecovery}
             onOpenPath={onOpenPath}
             arrive={live}
           />
         )}
         {message.error !== undefined && message.notice === undefined && (
-          <TurnError error={message.error} onRetry={retry} onOpenPath={onOpenPath} arrive={live} />
+          <TurnError
+            error={message.error}
+            onReviewRecovery={reviewRecovery}
+            onOpenPath={onOpenPath}
+            arrive={live}
+          />
         )}
         {streaming && lines.length === 0 && message.error === undefined ? (
           // Nothing of the turn has come yet: it is thinking.
@@ -264,6 +306,11 @@ function AssistantMessage({
             <WorkingLine startedAt={startedAt} ticking={ticking} waiting={waiting} />
           )
         )}
+        {message.childTraceUnavailable === true && (
+          <p role="status" data-testid="child-trace-unavailable" className="text-sm text-n-500">
+            Some subagent details are unavailable. The details shown may be incomplete.
+          </p>
+        )}
         {/* M57.6: the journal dropped some of this turn's live events while the
             panel was closed, so what shows is partial until the turn ends and
             its reply is read back from the session file. */}
@@ -274,6 +321,7 @@ function AssistantMessage({
             </span>
           </Arrival>
         )}
+        <ArchivePersistence message={message}/>
         {/* M58.3: what each of this reply's runs changed, from its own commit. */}
         {message.changesets !== undefined && message.changesets.length > 0 && (
           <TurnChangeset
@@ -308,6 +356,11 @@ function AssistantMessage({
       </MessageContent>
     </TurnMessage>
   );
+}
+
+function ArchivePersistence({message}:{message:ChatMessage}) {
+  const record=message.archiveRecord;if(record===undefined)return null;
+  return <span className="text-xs text-n-500" data-testid="archive-persistence">Archive: {record.persistence}{record.origin==='browser_cache'&&<> · Imported from recent history{record.completedAt===undefined?' · Completion time unavailable here':record.completedAt===null?' · Completion time not recorded':''}</>}{record.persistence==='retained' ? record.expiresAt===null ? ' · No expiry' : <> · Expires <time dateTime={record.expiresAt}>{new Date(record.expiresAt).toLocaleString()}</time></> : null}</span>;
 }
 
 /**

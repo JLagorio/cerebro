@@ -169,7 +169,7 @@ describe('ipc backend detection', () => {
   });
   it('passes the optional save version and returns the written hash', async () => {
     (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
-    invokeSpy.mockResolvedValueOnce('new-hash');
+    invokeSpy.mockResolvedValueOnce({ kind: 'file', contentHash: 'new-hash' });
     expect(await saveNote('/vault', 'a.md', 'New body', 'loaded-hash')).toBe('new-hash');
     expect(invokeSpy).toHaveBeenLastCalledWith('save_note', {
       vault: '/vault',
@@ -177,7 +177,10 @@ describe('ipc backend detection', () => {
       body: 'New body',
       expectHash: 'loaded-hash',
     });
-    invokeSpy.mockResolvedValueOnce(null);
+    invokeSpy.mockResolvedValueOnce({
+      kind: 'governed',
+      projectionHash: 'confirmed-projection-hash',
+    });
     expect(await saveNote('/vault', 'knowledge/a.md', 'Capture')).toBeNull();
     expect(invokeSpy).toHaveBeenLastCalledWith('save_note', {
       vault: '/vault',
@@ -538,7 +541,7 @@ describe('page writes', () => {
     await tick();
     expect(settled).toBeUndefined();
     const title = setNoteTitle('/v', 'a.md', 'Title');
-    first.resolve(undefined);
+    first.resolve({ kind: 'file', contentHash: 'written-body-hash' });
     await save;
     await tick();
     await tick();

@@ -1,6 +1,11 @@
+import { FocusedFieldInput } from '@/editor/FocusedFieldInput';
+import METADATA_PATCH from '../../shared/workspace/metadata-patch.v1.json';
+import { SelectedMetadataFieldInput } from '@/editor/SelectedMetadataFieldInput';
+import { fieldKey, unresolvedField } from '@/editor/fieldSaveParticipant';
 import { parsePullRequestUrl } from '@/engine/pullRequest';
 import { PullRequestChip } from './PullRequestChip';
 import { useEffect, useId, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { RepeatEditor } from './RepeatEditor';
 import { repeatAnchor, repeatFieldFor } from '@/engine/recurrence';
 import { writeReciprocal } from '@/app/relatedActions';
@@ -39,7 +44,7 @@ import {
 import { typeStyle } from '@/engine/typeCatalog';
 import { formatWikilink, linkTargetOfPath, resolveTarget } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useVaultStore, type VaultState } from '@/stores/vaultStore';
 import type { ChipStyle, Entry, FieldDef, Schema } from '@/engine/types';
 import { TABLE_ANATOMY } from '@/views/tableAnatomy';
 import { AnchoredFieldStatus } from './AnchoredFieldStatus';
@@ -181,6 +186,8 @@ const CHROME: Record<FieldChrome, string> = {
     'min-h-[30px] cursor-pointer overflow-hidden rounded-xs px-1.5 py-1 motion-hover hover:bg-n-50',
 };
 
+export type ScalarFieldDraft = { text: string; error: string | null };
+
 export interface FieldEditorProps {
   entry: Entry;
   def: FieldDef;
@@ -199,16 +206,56 @@ export interface FieldEditorProps {
   chrome?: FieldChrome;
   /** Edit a caller-owned draft instead of writing this record. */
   onPatch?: (value: unknown) => void;
+  /** Optional session owner for uncommitted scalar text; ordinary writers omit it. */
+  scalarDraft?: ScalarFieldDraft;
+  onScalarDraftChange?: (draft: ScalarFieldDraft | null) => void;
   /** Keep the owning row stable until this input or picker closes. */
   onEditingChange?: (editing: boolean) => void;
 }
 
+type FieldEditorVault = Pick<
+  VaultState,
+  'vaultPath' | 'patchFrontmatter' | 'entries' | 'createItem'
+>;
+
+const selectFieldEditorVault = (state: VaultState): FieldEditorVault => ({
+  vaultPath: state.vaultPath,
+  patchFrontmatter: state.patchFrontmatter,
+  entries: state.entries,
+  createItem: state.createItem,
+});
+
 export function FieldEditor(props: FieldEditorProps) {
   // A draft belongs to a file and property, even if a view reuses its cell.
-  return <FieldEditorValue key={`${props.entry.path}:${props.def.name}`} {...props} />;
+  const vaultState = useVaultStore(useShallow(selectFieldEditorVault));
+  if(props.onPatch===undefined&&props.entry.authority?.kind==='sqlite_metadata')return <SelectedMetadataFieldCell key={vaultState.vaultPath+':'+props.entry.path+':'+props.entry.authority.workspaceId+':'+props.entry.authority.recordId+':'+props.def.name} {...props} vaultState={vaultState}/>;
+  return (
+    <FieldEditorValue
+      key={`${vaultState.vaultPath}:${props.entry.path}:${props.def.name}`}
+      {...props}
+      vaultState={vaultState}
+    />
+  );
+}
+
+/** The bounded first selected property consumer. Other canonical kinds have
+ * no ordinary inline writer yet; caller-owned draft forms stay onPatch. */
+const SELECTED_FIELD_INPUTS:Partial<Record<FieldDef['kind'],{kind:'text'|'checkbox'|'number'|'date';inputMode:'text'|'email'|'tel'|'url'|'decimal'}>>={
+ date:{kind:'date',inputMode:'text'},number:{kind:'number',inputMode:'decimal'},text:{kind:'text',inputMode:'text'},checkbox:{kind:'checkbox',inputMode:'text'},email:{kind:'text',inputMode:'email'},phone:{kind:'text',inputMode:'tel'},url:{kind:'text',inputMode:'url'},
+};
+function SelectedMetadataFieldCell({entry,def,schema,vaultState,onEditingChange,chrome='cell',placeholder='ghost'}:FieldEditorProps&{vaultState:FieldEditorVault}){
+ const [editing,setEditing]=useState(false);const callback=useRef(onEditingChange);callback.current=onEditingChange;
+ useEffect(()=>{callback.current?.(editing);},[editing]);useEffect(()=>()=>callback.current?.(false),[]);
+ const label=humanize(def.name);const resolved=schema.resolveField(entry,def.name);
+ const display=resolved.display||'';
+ const renderer=SELECTED_FIELD_INPUTS[def.kind];
+ if(vaultState.vaultPath===null||renderer===undefined||!METADATA_PATCH.supportedDeclaredKinds.includes(def.kind)||def.from!==undefined)return <span className="text-ui text-n-600">{display||'Empty'}<span role="status" className="block text-xs">This property needs a different editor.</span></span>;
+ if(editing)return <SelectedMetadataFieldInput entry={entry} vault={vaultState.vaultPath} field={def.name} label={label} kind={renderer.kind} inputMode={renderer.inputMode} onEnd={()=>setEditing(false)}/>;
+ return <span className="inline-flex min-w-0 max-w-full flex-col"><button type="button" data-cell-primary className={'min-w-0 text-left text-ui text-n-800 '+CHROME[chrome]} aria-label={def.kind==='checkbox'||def.kind==='number'||def.kind==='date'?'Edit '+label:display||label} onClick={event=>{event.stopPropagation();setEditing(true);}}>{display||(placeholder==='blank'?null:<span className="text-n-400">Empty</span>)}</button>{resolved.unavailableReason&&<span role="status" className="text-xs text-n-600">{resolved.unavailableReason}</span>}</span>;
 }
 
 function FieldEditorValue({
+  vaultState,
   entry,
   def,
   schema,
@@ -218,10 +265,20 @@ function FieldEditorValue({
   chrome = 'cell',
   onPatch,
   onEditingChange,
-}: FieldEditorProps) {
+  scalarDraft,
+  onScalarDraftChange,
+}: FieldEditorProps & { vaultState: FieldEditorVault }) {
+  const { vaultPath: vault, patchFrontmatter, entries, createItem } = vaultState;
   const wrapClass = compact ? 'flex-nowrap overflow-hidden' : 'flex-wrap';
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<string | null>(null);
+  const [draft, setDraft] = useState<string | null>(
+    () =>
+      scalarDraft?.text ??
+      (onPatch === undefined
+        ? (unresolvedField(fieldKey(vault ?? '', entry.path, def.name))?.snapshot().latestDraft ??
+          null)
+        : null),
+  );
   const editing = open || draft !== null;
   const editingCallback = useRef(onEditingChange);
   editingCallback.current = onEditingChange;
@@ -229,11 +286,6 @@ function FieldEditorValue({
     editingCallback.current?.(editing);
   }, [editing]);
   useEffect(() => () => editingCallback.current?.(false), []);
-  const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
-  const entries = useVaultStore((s) => s.entries);
-  // M20.1: the person branch can create a person. Hooks cannot live inside it —
-  // this component is a chain of early returns keyed on `def.kind`.
-  const createItem = useVaultStore((s) => s.createItem);
   const resolved = schema.resolveField(entry, def.name);
 
   const patch = (value: unknown) => {
@@ -876,6 +928,37 @@ function FieldEditorValue({
 
   // text | number — inline input on click
   if (draft !== null) {
+    if (onPatch === undefined)
+      return (
+        <FocusedFieldInput
+          identity={fieldKey(vault ?? '', entry.path, def.name)}
+          initial={draft}
+          label={humanize(def.name)}
+          floating={chrome === 'cell'}
+          inputType={def.kind === 'email' ? 'email' : def.kind === 'phone' ? 'tel' : 'text'}
+          validate={(text) => {
+            const trimmed = text.trim();
+            const numeric = def.kind === 'number' ? trimmed.replace(/[%$,]/g, '').trim() : trimmed;
+            if (def.kind === 'number' && numeric !== '' && !Number.isFinite(Number(numeric)))
+              return { ok: false, error: 'Enter a finite number.' };
+            return {
+              ok: true,
+              value:
+                def.kind === 'number'
+                  ? numeric === ''
+                    ? null
+                    : Number(numeric)
+                  : (def.kind === 'url' ? normalizeUrl(trimmed) : trimmed) || null,
+            };
+          }}
+          write={(value) =>
+            useVaultStore.getState().vaultPath !== vault
+              ? Promise.resolve(false)
+              : patchFrontmatter(entry.path, { [def.name]: value })
+          }
+          onEnd={() => setDraft(null)}
+        />
+      );
     return (
       <ScalarFieldInput
         label={humanize(def.name)}
@@ -883,10 +966,19 @@ function FieldEditorValue({
         floatingStatus={chrome === 'cell'}
         submitOnModifiedEnter={onPatch !== undefined}
         draft={draft}
-        onChange={setDraft}
-        onCancel={() => setDraft(null)}
+        initialError={scalarDraft?.error ?? null}
+        onErrorChange={(error) => onScalarDraftChange?.({ text: draft, error })}
+        onChange={(text) => {
+          setDraft(text);
+          onScalarDraftChange?.({ text, error: null });
+        }}
+        onCancel={() => {
+          setDraft(null);
+          onScalarDraftChange?.(null);
+        }}
         onCommit={async (value) => {
           if (onPatch !== undefined) {
+            onScalarDraftChange?.(null);
             onPatch(value);
             return true;
           }
@@ -971,7 +1063,11 @@ function ScalarFieldInput({
   onChange,
   onCancel,
   onCommit,
+  initialError,
+  onErrorChange,
 }: {
+  initialError: string | null;
+  onErrorChange: (error: string | null) => void;
   label: string;
   kind: FieldDef['kind'];
   floatingStatus: boolean;
@@ -987,7 +1083,11 @@ function ScalarFieldInput({
   const lastAttempt = useRef<string | null>(null);
   const cancelled = useRef(false);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
+  const reportError = (message: string) => {
+    setError(message);
+    onErrorChange(message);
+  };
 
   const restoreKeyboardFocus = () => {
     const grid = inputRef.current?.closest<HTMLElement>('[role="grid"]');
@@ -1018,7 +1118,7 @@ function ScalarFieldInput({
     const trimmed = draft.trim();
     const numeric = kind === 'number' ? trimmed.replace(/[%$,]/g, '').trim() : trimmed;
     if (kind === 'number' && numeric !== '' && !Number.isFinite(Number(numeric))) {
-      setError('Enter a finite number.');
+      reportError('Enter a finite number.');
       useUiStore.getState().toast('Enter a number');
       return false;
     }
@@ -1034,7 +1134,7 @@ function ScalarFieldInput({
           if (focusAfter) restoreKeyboardFocus();
           onCancel();
         } else {
-          setError('Could not save. Your draft is kept. Edit it or press Enter to retry.');
+          reportError('Could not save. Your draft is kept. Edit it or press Enter to retry.');
         }
       } finally {
         pendingRef.current = false;

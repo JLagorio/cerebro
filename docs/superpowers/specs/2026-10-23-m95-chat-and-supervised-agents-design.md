@@ -166,9 +166,11 @@ no effect. Children cannot outlive the parent automatically: detach/background i
 a separate owner decision. Validate bounded output against its frozen schema and
 return explicit invalid/partial results. Attribute each action and usage fact to
 one run; whole-tree aggregates include each child once, preserving unknown shares.
-Initial proposed limits reuse M91's one-level/two-concurrent/eight-per-session
-ceilings, plus a ten-minute child deadline and 256 KiB validated result cap. These
-are new job proposals, not claims about current enforcement.
+The owner approved M91's one-level/two-concurrent/eight-per-session ceilings,
+a ten-minute child deadline including decision waits, and a 256 KiB validated
+result cap on 2026-10-24. See the [limits decision](2026-10-24-m95-supervised-job-decision.md).
+Implementation is authorized; backend isolation remains unproven, so jobs remain
+disabled. This approval does not choose durable result-body retention.
 
 **CHAT-09 — Retention is a product contract.** Recommended owner decision: keep
 completed normalized chat content for 90 days by default, with `off`, `30 days`,

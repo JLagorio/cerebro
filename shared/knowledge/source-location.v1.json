@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "quoteScalars": 240,
+  "contextScalars": 80,
+  "maxSourceBytes": 8388608,
+  "maxBodyBytes": 102400,
+  "maxPathBytes": 4096,
+  "maxVaultIdBytes": 128,
+  "kinds": [
+    "body",
+    "property"
+  ],
+  "carriers": [
+    "markdown",
+    "unsupported"
+  ]
+}

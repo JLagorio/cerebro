@@ -34,6 +34,7 @@ import { DocPage } from '@/pages/DocPage';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { VIEW_TAB_STRIP, viewTabClass } from '@/views/ViewTabs';
+import './workspacePages.css';
 
 /**
  * Knowledge (M5, M8.1; rebuilt as lists in M50, three tabs in M51, tables in
@@ -60,10 +61,9 @@ import { VIEW_TAB_STRIP, viewTabClass } from '@/views/ViewTabs';
 
 type Tab = 'all' | 'review' | 'activity';
 
-/** A body that is read rather than scanned sits on the page's 24px edge; the
- * tables — Concepts, and Review's queue — run flush under the tab strip
- * instead, as a view's does. */
-const PADDED = 'px-6 pb-10 pt-6';
+/** The page owns the shared horizontal inset. Read sections retain their
+ * vertical rhythm; each table still owns its scrollport and cell geometry. */
+const PADDED = 'pb-10 pt-6';
 
 /** Which tab a nav lights. A folder is a filter of Concepts; a subject and a
  * run deep link are no tab at all. */
@@ -110,7 +110,7 @@ function ReviewBody({
     <div className="flex flex-col">
       <section data-testid="review-to-verify">
         {queue.length === 0 ? (
-          <div className="px-5 pt-4">
+          <div className="pt-4">
             <h2 className="m-0 text-sm font-semibold text-n-800">To verify</h2>
             <div className="flex justify-center py-10">
               <EmptyState
@@ -124,7 +124,7 @@ function ReviewBody({
           <ReviewQueueList queue={queue} proposals={proposals} />
         )}
       </section>
-      <div className="px-5 pb-10 pt-8">
+      <div className="pb-10 pt-8">
         <WaitingOnYou vaultPath={vaultPath} />
       </div>
     </div>
@@ -402,9 +402,12 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
             .join(' · ');
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="knowledge-page">
+    <div
+      className="cb-knowledge-page cb-composition flex min-h-0 min-w-0 flex-1 flex-col"
+      data-testid="knowledge-page"
+    >
       <PageHeader
-        icon={<Icon name="brain" size={18} />}
+        composition="collection"
         headingTestId="knowledge-heading"
         title={
           crumb === null ? (
@@ -477,12 +480,14 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
       {/* A container of its own (M52.5): at 1100px with the Assistant open,
           Start review sat on top of the Activity tab. Narrow, the button
           keeps its glyph and count and its words go to screen readers only;
-          narrower still, the tabs scroll under their own edge rather than
-          under the button. */}
-      <div className={`${VIEW_TAB_STRIP} @container/ktabs px-6`}>
+          narrower still, whole navigation buttons wrap into another row
+          while the review action stays aligned with the first row. */}
+      <div
+        className={`${VIEW_TAB_STRIP} cb-composition-content cb-knowledge-tabs @container/ktabs`}
+      >
         <nav
           aria-label="Knowledge views"
-          className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex min-w-0 flex-1 flex-wrap items-end gap-0.5"
         >
           {tabs.map((t) => {
             const on = tab === t.tab;
@@ -493,7 +498,7 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
                 data-testid={`knowledge-tab-${t.tab}`}
                 aria-current={on ? 'page' : undefined}
                 onClick={() => navigate({ kind: 'knowledge', nav: { tab: t.tab } })}
-                className={viewTabClass(on)}
+                className={`${viewTabClass(on)} flex-none`}
                 style={{ borderBottomStyle: 'solid' }}
               >
                 <Icon name={t.icon} size={13} />
@@ -514,12 +519,13 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
             so it rides on the button. With nothing waiting there is no
             button — the summary says so. */}
         {waiting.length > 0 && (
-          <div className="flex flex-none items-center gap-0.5 pb-1 pl-2">
+          <div className="flex flex-none self-start items-center gap-0.5 pb-1 pl-2">
             <Button
               variant="primary"
               size="sm"
               icon="play"
               testId="knowledge-start-review"
+              tabIndex={0}
               onClick={start}
             >
               <span className="@max-[440px]/ktabs:sr-only">Start review</span>
@@ -538,7 +544,7 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
           the headings and cards around it stay put. Concepts' table is the
           page, and its box takes this whole column — a flex child that
           fills it — so its header stays pinned while its rows scroll. */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+      <div className="cb-composition-content cb-knowledge-content flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
         {body}
       </div>
     </div>

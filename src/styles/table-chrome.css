@@ -136,3 +136,49 @@
   font-size: var(--fs-meta);
   line-height: var(--lh-meta);
 }
+
+/* Legacy selected values lose ellipsis. The scoped resting scalar below keeps
+ * it until its actual glyph geometry requires the owned fallback. Clearing
+ * restores the original scroll and attributes for every field kind. */
+.cb-row [data-selection-reveal='true'] {
+  text-overflow: clip;
+}
+
+/* Static field wrappers clip without per-cell scroll containers. Descendant
+ * controls keep their overflow; nonwrapped editable text rests clipped below. */
+.cb-row > [role='gridcell'][data-field-kind],
+.cb-row .cb-cell-chrome {
+  overflow: clip;
+}
+
+/* Keep the original text, ellipsis, dimensions and editing button. Avoid a
+ * scroll container for each resting nonwrapped editable text scalar; wrapped,
+ * computed and other field kinds remain outside this exact anatomy. */
+.cb-row
+  > [role='gridcell'][data-field-kind='text']
+  > .cb-cell-chrome.items-center
+  > button[data-cell-primary]
+  > span.truncate {
+  overflow: clip;
+}
+
+/* One real non-pointer selected box becomes scrollable before glyph reveal.
+ * The helper restores its scroll before removing this transient attribute. */
+.cb-row
+  > [role='gridcell'][data-field-kind='text']
+  > .cb-cell-chrome.items-center
+  > button[data-cell-primary]
+  > span.truncate[data-selection-reveal='true'] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Only this owned scalar loses ellipsis when its actual selected glyphs have
+ * no rectangle. The helper restores the prior marker on every clear path. */
+.cb-row
+  > [role='gridcell'][data-field-kind='text']
+  > .cb-cell-chrome.items-center
+  > button[data-cell-primary]
+  > span.truncate[data-selection-reveal='true'][data-selection-reveal-clip='true'] {
+  text-overflow: clip;
+}

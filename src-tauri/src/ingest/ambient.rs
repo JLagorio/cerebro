@@ -67,82 +67,88 @@ pub const INTERVAL_SECONDS: u64 = 300;
 /// alive for five minutes.
 const STEP: Duration = Duration::from_millis(250);
 
-/// Which vault the supervisor is watching, and the flag that stops it.
+/// One retained scheduler owner. A stop request is distinct from its actual join.
 #[derive(Default)]
 pub struct AmbientState {
     inner: Mutex<Option<Watching>>,
+    changing: AtomicBool,
 }
-
 struct Watching {
     vault: PathBuf,
     stop: Arc<AtomicBool>,
+    worker: Option<crate::spawn::retained_thread::RetainedThread>,
 }
-
-/// What a retarget asks the caller to do.
+impl Drop for Watching {
+    fn drop(&mut self) { self.stop.store(true, Ordering::Release); }
+}
+struct AmbientTransition<'a>(&'a AtomicBool);
+impl Drop for AmbientTransition<'_> {
+    fn drop(&mut self) { self.0.store(false, Ordering::Release); }
+}
+#[cfg(test)]
 #[derive(Debug, Clone)]
-pub enum Action {
-    /// Already watching this vault. Starting a second loop would put two
-    /// supervisors on one subscription.
-    Unchanged,
-    /// Start a loop, and stop when this flag is set.
-    Start(Arc<AtomicBool>),
-}
-
+pub enum Action { Unchanged, Start(Arc<AtomicBool>) }
 impl AmbientState {
-    /// Point the supervisor at `vault`, stopping whatever it was watching.
-    pub fn retarget(&self, vault: &Path) -> Action {
-        let Ok(mut guard) = self.inner.lock() else {
-            // A poisoned lock means a previous holder panicked. Refusing to
-            // start is the conservative answer: the alternative is a second
-            // supervisor with no way to stop the first.
-            return Action::Unchanged;
-        };
-        if let Some(current) = guard.as_ref() {
-            if current.vault == vault {
-                return Action::Unchanged;
+    fn transition(&self) -> Result<AmbientTransition<'_>, String> {
+        self.changing.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| "An ambient lifecycle transition is still running.".to_owned())?;
+        Ok(AmbientTransition(&self.changing))
+    }
+    fn stop_owned(&self, timeout: Duration) -> Result<(), String> {
+        let mut current = self.inner.lock().map_err(|_| "Ambient ownership is unavailable.".to_owned())?.take();
+        let Some(mut current) = current.take() else { return Ok(()); };
+        current.stop.store(true, Ordering::Release);
+        if let Some(worker) = current.worker.as_mut() {
+            if let Err(error) = worker.wait_within(timeout) {
+                *self.inner.lock().map_err(|_| "Ambient ownership is unavailable.".to_owned())? = Some(current);
+                return Err(error);
             }
-            current.stop.store(true, Ordering::Relaxed);
         }
+        Ok(())
+    }
+    pub(crate) fn request_stop(&self) -> Result<(), String> {
+        let current = self.inner.lock().map_err(|_| "Ambient ownership is unavailable.".to_owned())?;
+        if let Some(current) = current.as_ref() { current.stop.store(true, Ordering::Release); }
+        Ok(())
+    }
+    pub fn stop(&self) -> Result<(), String> { self.stop_within(Duration::from_secs(2)) }
+    fn stop_within(&self, timeout: Duration) -> Result<(), String> {
+        let _transition = self.transition()?;
+        self.stop_owned(timeout)
+    }
+    /// Metadata-only fixture compatibility; real start owns the spawned handle.
+    #[cfg(test)]
+    pub fn retarget(&self, vault: &Path) -> Action {
+        let Ok(_transition) = self.transition() else { return Action::Unchanged; };
+        if self.inner.lock().ok().and_then(|current| current.as_ref().map(|current| current.vault == vault && !current.stop.load(Ordering::Acquire))).unwrap_or(false) {
+            return Action::Unchanged;
+        }
+        if self.stop_owned(Duration::from_secs(2)).is_err() { return Action::Unchanged; }
         let stop = Arc::new(AtomicBool::new(false));
-        *guard = Some(Watching {
-            vault: vault.to_path_buf(),
-            stop: stop.clone(),
-        });
+        let Ok(mut current) = self.inner.lock() else { return Action::Unchanged; };
+        *current = Some(Watching { vault: vault.to_path_buf(), stop: stop.clone(), worker: None });
         Action::Start(stop)
     }
-
-    /// Stop whatever is running. Idempotent.
-    pub fn stop(&self) {
-        let Ok(mut guard) = self.inner.lock() else {
-            return;
-        };
-        if let Some(current) = guard.take() {
-            current.stop.store(true, Ordering::Relaxed);
-        }
-    }
-
-    /// The vault currently watched, if any.
     pub fn watching(&self) -> Option<PathBuf> {
-        self.inner
-            .lock()
-            .ok()?
-            .as_ref()
-            .map(|current| current.vault.clone())
+        self.inner.lock().ok()?.as_ref().map(|current| current.vault.clone())
     }
 }
 
-/// Start the loop for `vault`, unless one is already running for it.
-///
-/// Returns whether a loop was started — false means "already watching this
-/// vault", which is not a failure.
-pub fn start(app: &AppHandle, state: &AmbientState, vault: &Path, config_dir: &Path) -> bool {
-    let Action::Start(stop) = state.retarget(vault) else {
-        return false;
-    };
+pub fn start(app: &AppHandle, state: &AmbientState, vault: &Path, config_dir: &Path) -> Result<bool, String> {
+    let _transition = state.transition()?;
+    if state.inner.lock().map_err(|_| "Ambient ownership is unavailable.".to_owned())?.as_ref()
+        .is_some_and(|current| current.vault == vault && !current.stop.load(Ordering::Acquire)) {
+        return Ok(false);
+    }
+    state.stop_owned(Duration::from_secs(2))?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker_stop = stop.clone();
     let app = app.clone();
-    let vault = vault.to_path_buf();
+    let worker_vault = vault.to_path_buf();
     let config_dir = config_dir.to_path_buf();
-    std::thread::spawn(move || {
+    let handle = std::thread::Builder::new().name("ambient-ingest".into()).spawn(move || {
+        let stop = worker_stop;
+        let vault = worker_vault;
         if !sleep_until(&stop, Duration::from_secs(SETTLE_SECONDS)) {
             return;
         }
@@ -158,8 +164,10 @@ pub fn start(app: &AppHandle, state: &AmbientState, vault: &Path, config_dir: &P
                 return;
             }
         }
-    });
-    true
+    }).map_err(|_| "Ambient worker could not start.".to_owned())?;
+    let owner = Watching { vault: vault.to_path_buf(), stop, worker: Some(crate::spawn::retained_thread::RetainedThread::new(handle)) };
+    *state.inner.lock().map_err(|_| "Ambient ownership is unavailable.".to_owned())? = Some(owner);
+    Ok(true)
 }
 
 /// Sleep in short steps. Returns false if the loop was told to stop.
@@ -217,6 +225,8 @@ fn sweep_abandoned(conn: &rusqlite::Connection, now: chrono::DateTime<chrono::Ut
 /// One pass: sweep what a dead process left, check the owner's switch, then
 /// drive a tick.
 fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), String> {
+    let agents = app.state::<crate::agent::AgentState>();
+    let preparation = agents.prepare_run(vault)?;
     let conn = crate::runtime::open_existing(config_dir)?;
     let vault_id = crate::runtime::scope::register(&conn, vault)?;
 
@@ -258,9 +268,9 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
         return Ok(());
     }
 
-    let agents = app.state::<crate::agent::AgentState>();
     let mcp = app.state::<crate::mcp::McpState>();
     let live = super::spawn::Live {
+        preparation: &preparation,
         app,
         agents: agents.inner(),
         mcp: mcp.inner(),
@@ -310,6 +320,7 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
         &store_uuid,
         &state,
         &chain_head,
+        &preparation,
     )
 }
 
@@ -606,6 +617,7 @@ fn maintain(
     store_uuid: &str,
     state: &crate::ledger::reduce::EpistemicState,
     chain_head: &str,
+    preparation: &crate::agent::RunPreparation,
 ) -> Result<(), String> {
     let context = crate::maintain::pass::Context {
         vault_id,
@@ -619,6 +631,7 @@ fn maintain(
     let agents = app.state::<crate::agent::AgentState>();
     let mcp = app.state::<crate::mcp::McpState>();
     let live = crate::maintain::live::Live {
+        preparation,
         app,
         agents: agents.inner(),
         mcp: mcp.inner(),
@@ -945,8 +958,8 @@ mod tests {
         let Action::Start(stop) = state.retarget(Path::new("/tmp/cerebro-ambient-a")) else {
             panic!("expected a start");
         };
-        state.stop();
-        state.stop();
+        state.stop().unwrap();
+        state.stop().unwrap();
         assert!(stop.load(Ordering::Relaxed));
         assert_eq!(state.watching(), None);
     }
@@ -963,5 +976,30 @@ mod tests {
     fn a_sleep_that_is_never_interrupted_completes() {
         let stop = AtomicBool::new(false);
         assert!(sleep_until(&stop, Duration::from_millis(1)));
+    }
+}
+
+#[cfg(test)]
+mod shutdown_lifetime_tests {
+    use super::*;
+    #[test]
+    fn actual_ambient_stop_retains_inflight_tick_until_real_thread_joins() {
+        let state = AmbientState::default();
+        let (entered_send, entered) = std::sync::mpsc::sync_channel(0);
+        let (release, wait) = std::sync::mpsc::sync_channel(0);
+        let handle = std::thread::spawn(move || { entered_send.send(()).unwrap(); let _ = wait.recv(); });
+        *state.inner.lock().unwrap() = Some(Watching {
+            vault: PathBuf::from("/ambient-fixture"), stop: Arc::new(AtomicBool::new(false)),
+            worker: Some(crate::spawn::retained_thread::RetainedThread::new(handle)),
+        });
+        entered.recv().unwrap();
+        let first = state.stop_within(Duration::ZERO);
+        let retained = state.inner.lock().unwrap().as_ref().is_some_and(|owner| owner.worker.is_some());
+        release.send(()).unwrap();
+        let final_result = state.stop_within(Duration::from_secs(2));
+        assert!(first.is_err(), "a stop flag is not completion of an in-flight deterministic tick");
+        assert!(retained);
+        assert!(final_result.is_ok());
+        assert!(state.inner.lock().unwrap().is_none());
     }
 }

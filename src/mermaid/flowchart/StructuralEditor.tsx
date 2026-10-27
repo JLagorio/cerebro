@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '@/components/ui/Icon';
+import { registerSavePreparation } from '@/editor/openPages';
 import type { Entry } from '@/engine/types';
 import {
   useCanvasOverlayHost,
@@ -201,6 +202,8 @@ export function StructuralEditor({
   const manualRef = useRef<ManualLayoutSession | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
+  const prepareRename = useRef<() => void>(() => {});
+  useEffect(() => registerSavePreparation(() => prepareRename.current()), []);
   // `dx`/`dy` are the SCREEN-pixel offsets from the anchor — see TOOLBAR_H.
   const [toolbarPos, setToolbarPos] = useState<{
     x: number;
@@ -383,6 +386,14 @@ export function StructuralEditor({
     // check below — history churn is a real cost, not a cosmetic one.
     if (out === code) return;
     onChangeCode(out);
+  };
+
+  prepareRename.current = () => {
+    if (renaming === null) return;
+    if (model === null || !nodes(model).has(renaming.id))
+      throw new Error('The renamed diagram node is no longer available.');
+    apply(renameNode(model, renaming.id, renaming.value));
+    setRenaming(null);
   };
 
   /**

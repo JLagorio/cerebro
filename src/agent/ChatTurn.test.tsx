@@ -1009,7 +1009,11 @@ describe('keys and failures', () => {
       false,
     );
     render(<Message message={message} latest {...handlers()} />);
-    for (const button of screen.getAllByRole('button')) act(() => button.click());
+    // Opening Save uses the shared Dialog's separately allowlisted modal
+    // Escape/Tab owner. Transcript controls themselves install no listener.
+    for (const button of screen.getAllByRole('button')) {
+      if (button.getAttribute('aria-label') !== 'Save answer') act(() => button.click());
+    }
     const keydowns = [...windowAdd.mock.calls, ...documentAdd.mock.calls].filter(
       ([type]) => type === 'keydown',
     );
@@ -1037,4 +1041,62 @@ describe('keys and failures', () => {
     );
     expect(box.querySelector('[data-slot="stack-trace"]')).not.toBeNull();
   });
+});
+
+describe('M95 existing generation observation', () => {
+  const receipt = {
+    generationId: '11111111111111111111111111111111',
+    firstRunId: '22222222222222222222222222222222',
+    currentRunId: '33333333333333333333333333333333',
+    state: 'running',
+  };
+
+  it('explains a detached running observation without presenting an error, completion or retry', () => {
+    const message = {
+      id: 'observed-reply',
+      role: 'assistant',
+      text: '',
+      tools: [],
+      streaming: false,
+      generationObservation: receipt,
+    } as ChatMessage;
+    render(<Message message={message} {...handlers()} />);
+    const status = screen.getByRole('status', { name: 'Response status' });
+    expect(status.textContent).toMatch(/response.*already|already.*response/i);
+    expect(status.textContent).toMatch(/running/i);
+    expect(status.textContent).toMatch(/not connected|unavailable/i);
+    expect(screen.queryByTestId('turn-error')).toBeNull();
+    expect(screen.queryByText('Thinking…')).toBeNull();
+    expect(screen.queryByRole('button', { name: /retry|ask again|continue/i })).toBeNull();
+    expect(screen.queryByTestId('turn-cancelled')).toBeNull();
+    expect(screen.queryByTestId('turn-stopped')).toBeNull();
+  });
+
+  it('keeps the genuine live reply visible when observation metadata arrives beside it', () => {
+    const message = {
+      ...live([{ kind: 'TextDelta', text: 'The original stream continues.' }]),
+      generationObservation: receipt,
+    } as ChatMessage;
+    render(<Message message={message} {...handlers()} />);
+    expect(screen.getByText('The original stream continues.')).toBeTruthy();
+    expect(screen.getByRole('status', { name: 'Response status' }).textContent).toMatch(/running/i);
+    expect(screen.getByRole('status', { name: 'Response status' }).textContent).not.toMatch(
+      /not connected|unavailable/i,
+    );
+    expect(screen.queryByTestId('turn-error')).toBeNull();
+  });
+});
+
+it('does not render a malformed cached generation object as a current status or action', () => {
+  const message = {
+    id: 'malformed-observation',
+    role: 'assistant',
+    text: 'Retain the original answer.',
+    tools: [],
+    generationObservation: { currentRunId: 99, state: { kind: 'success' } },
+  } as unknown as ChatMessage;
+  render(<Message message={message} {...handlers()} />);
+  expect(screen.getByText('Retain the original answer.')).toBeTruthy();
+  expect(screen.queryByRole('status', { name: 'Response status' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /retry|ask again|continue/i })).toBeNull();
 });

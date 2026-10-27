@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "pendingLeaseSeconds": 60,
+  "maxPendingWorkflows": 1,
+  "maxActiveWorkers": 1,
+  "maxTerminalOutcomes": 1,
+  "restoreChildren": {
+    "bodies": "Pages",
+    "metadata": "Workspace data"
+  },
+  "destinationNames": {
+    "backupPrefix": "Cerebro backup ",
+    "restorePrefix": "Restored copy "
+  }
+}

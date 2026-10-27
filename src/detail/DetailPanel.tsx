@@ -15,6 +15,7 @@ import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
 import { setTypeTabs } from '@/app/typeActions';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
+import { DeletedDraftRecovery, useRecoveryHold } from '@/editor/DeletedDraftRecoveryFace';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
 import { localDateOf } from '@/engine/dates';
@@ -193,6 +194,7 @@ export function DetailPanel({
   // by CSS; this is the width it comes to, for the handle and the header.
   const drawn = room === null ? width : fitWidth(width, room);
   const entry = useEntry(detailPath);
+  const vaultPath = useVaultStore((s) => s.vaultPath);
   const schema = useSchema();
   const entries = useVaultStore((s) => s.entries);
   // The saved-view catalog a `content: 'view'` tab resolves against.
@@ -259,7 +261,35 @@ export function DetailPanel({
     { scope: peekScope },
   );
 
-  if (!detailPath || !entry) return null;
+  const recoveryHeld = useRecoveryHold(vaultPath, detailPath ?? '');
+  if (!detailPath) return null;
+  if (!entry || recoveryHeld) {
+    return (
+      <DeletedDraftRecovery
+        vaultId={vaultPath}
+        path={detailPath}
+        fallback={null}
+        frame={(content) => (
+          <aside
+            data-testid="detail-panel"
+            aria-label="Detail panel"
+            className="cb-record-peek cb-panel-in relative z-30 flex h-full shrink flex-col border-l border-n-200 bg-n-0"
+            style={{ width, minWidth: RIGHT_PANEL_MIN_WIDTH }}
+            {...peekScope.props}
+          >
+            <peekScope.Provider>
+              <DetailEscapeLayer onClose={closeDetail} />
+              <header className="cb-peek-header flex items-center gap-2 border-b border-n-100">
+                <span className="flex-1 text-sm font-medium">Retained draft</span>
+                <IconButton icon="x" label="Close" onClick={closeDetail} />
+              </header>
+              {content}
+            </peekScope.Provider>
+          </aside>
+        )}
+      />
+    );
+  }
 
   const knowledgeFile = isKnowledgePath(entry.path);
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';

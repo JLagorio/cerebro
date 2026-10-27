@@ -28,9 +28,6 @@ pub(crate) enum Handling {
 
 use Handling::{Ignored, Translated};
 
-const STREAM_JSON_ONLY: &str =
-    "only the long-lived stream-json transport (D4 (b)) speaks the control protocol; a per-turn run never sees one";
-
 const BOOKKEEPING: &str = "the CLI's own bookkeeping for the session, with nothing to show";
 
 /// A model swap is named where it lands: the fold reads the answering model
@@ -78,9 +75,21 @@ pub(crate) const STREAM_KINDS: &[(&str, Handling)] = &[
         "command_lifecycle",
         Ignored("the CLI's bookkeeping around a resumed deferred call, whose own lines carry what happened"),
     ),
-    ("control_cancel_request", Ignored(STREAM_JSON_ONLY)),
-    ("control_request", Ignored(STREAM_JSON_ONLY)),
-    ("control_response", Ignored(STREAM_JSON_ONLY)),
+    // M92.13: a seated run's stdin speaks the control protocol
+    // (`turn_input`), and only to ask how full its context is; the reader
+    // answers no request of the CLI's.
+    (
+        "control_cancel_request",
+        Ignored("the CLI withdrawing a request it made of a seated run, whose stdin the reader closed when the request came"),
+    ),
+    (
+        "control_request",
+        Ignored("a request the CLI makes of a seated run, such as a permission ask; the reader answers none and closes the run's stdin, so the call is refused and the turn goes on"),
+    ),
+    (
+        "control_response",
+        Ignored("the CLI's answer to a seated run's context ask, which the meter alone reads, into the memory-only context book"),
+    ),
     ("cost-state", Ignored(BOOKKEEPING)),
     (
         "custom-title",
@@ -430,6 +439,32 @@ mod tests {
             kinds_of(&json!({ "type": "attachment" })),
             vec!["attachment"]
         );
+    }
+
+    #[test]
+    fn a_seated_runs_control_lines_are_their_own_ignored_kinds() {
+        // M92.13: a seated run's stream carries the answer to its context
+        // ask, and may carry a request of the CLI's, as these shapes.
+        for (line, kind) in [
+            (
+                json!({ "type": "control_response", "response": { "subtype": "success",
+                    "request_id": "ctx-1", "response": { "categories": [] } } }),
+                "control_response",
+            ),
+            (
+                json!({ "type": "control_request", "request_id": "req_1",
+                    "request": { "subtype": "can_use_tool", "tool_name": "Write" } }),
+                "control_request",
+            ),
+            (
+                json!({ "type": "control_cancel_request", "request_id": "req_1" }),
+                "control_cancel_request",
+            ),
+        ] {
+            assert_eq!(kinds_of(&line), vec![kind]);
+            assert!(matches!(handling(kind), Some(Ignored(_))), "{kind}");
+            assert!(unclassified(&line).is_empty(), "{kind}");
+        }
     }
 
     #[test]

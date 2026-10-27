@@ -37,6 +37,7 @@ import {
 } from '@/agent/elements/turnTitles';
 import type { ToolGroupRow as GroupRow, ToolRow, ToolStatus } from '@/agent/transcriptRows';
 import { unwrapToolError } from '@/agent/errorText';
+import { openOutside } from '@/agent/rail/ConversationRail';
 import { useRevealedStep } from '@/agent/stepReveal';
 import type { ToolCall } from '@/agent/types';
 import { parseStackTrace } from '@/engine/ai/stackFrames';
@@ -46,6 +47,7 @@ import { toolRenderer } from '@/engine/tools';
 import { resolveTarget } from '@/engine/wikilink';
 import type { Renderer } from '@/lib/policy/tools';
 import { useNavStore } from '@/stores/navStore';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import './chat-turn.css';
 
@@ -182,6 +184,10 @@ function ConceptRow(props: RowProps) {
  * lines under the line and the whole of it inside. Until it has answered
  * either way (running, interrupted, or held by a hook, M57.1), it is the
  * plain card, which says which.
+ *
+ * In the canvas the run's page would open behind the conversation, so the
+ * line floats the conversation first, as the rail's opens do (`openOutside`,
+ * M92.1); floating or docked, the page opens beside it.
  */
 function HandoffRow(props: RowProps) {
   const navigate = useNavStore((s) => s.navigate);
@@ -208,15 +214,18 @@ function HandoffRow(props: RowProps) {
     );
   }
   const run = handoffRunId(outputOf(props.tool));
+  const openRun = (id: string) => {
+    const open = () => navigate({ kind: 'knowledge', nav: { tab: 'runs', run: id } });
+    if (useUiStore.getState().aiPanelPresentation === 'canvas') openOutside(open);
+    else open();
+  };
   return (
     <SubagentHandoff
       {...actionAttributes(props.tool, props.status)}
       agent={agent}
       status={step}
       icon={toolIcon(props.tool.name)}
-      onOpenRun={
-        run === null ? undefined : () => navigate({ kind: 'knowledge', nav: { tab: 'runs', run } })
-      }
+      onOpenRun={run === null ? undefined : () => openRun(run)}
     />
   );
 }

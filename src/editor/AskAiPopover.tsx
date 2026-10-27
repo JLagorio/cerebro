@@ -57,11 +57,14 @@ import './editor.css';
  * It cannot read the vault, cannot write to it, and cannot call open_note to
  * navigate you somewhere mid-edit. What it gets is the passage, in the prompt.
  */
+export type SelectionApplyResult = { kind: 'applied' | 'unchanged' | 'conflict' };
+
 export function AskAiPopover({
   selection,
   preset,
   onReplace,
   onClose,
+  isCurrent = () => true,
 }: {
   /** The exact text the user selected. */
   selection: string;
@@ -72,7 +75,9 @@ export function AskAiPopover({
    */
   preset?: string;
   /** Apply the decided text. Called once, with the final passage. */
-  onReplace: (text: string) => void;
+  onReplace: (text: string) => SelectionApplyResult;
+  /** The editor owns this guard; focus-only selection changes remain valid. */
+  isCurrent?: () => boolean;
   onClose: () => void;
 }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -88,6 +93,8 @@ export function AskAiPopover({
     preset !== undefined && preset.trim() !== '' ? 'running' : 'asking',
   );
   const [result, setResult] = useState('');
+  const [conflicted, setConflicted] = useState(false);
+  const applied = useRef(false);
   const [accepted, setAccepted] = useState<Set<number>>(new Set());
   // The skill a run applies, so its working line can name it.
   const [skillRun, setSkillRun] = useState<string | undefined>(undefined);
@@ -108,7 +115,15 @@ export function AskAiPopover({
     };
   }, []);
 
+  const ensureCurrent = () => {
+    if (isCurrent()) return true;
+    setConflicted(true);
+    setState((previous) => (previous === 'running' ? 'asking' : previous));
+    return false;
+  };
+
   const run = (message: string, skill?: string) => {
+    if (!ensureCurrent()) return;
     if (vaultPath === null || message.trim() === '') return;
     setState('running');
     setSkillRun(skill);
@@ -190,12 +205,13 @@ export function AskAiPopover({
   }, []);
 
   const runSkill = (skill: SkillRef) => {
-    if (vaultPath === null) return;
+    if (vaultPath === null || !ensureCurrent()) return;
     setState('running');
     setSkillRun(skill.name);
     void (async () => {
       try {
         const raw = await readNote(vaultPath, skill.path);
+        if (cancelled.current || !ensureCurrent()) return;
         // M17.17: the same record, the same body, a second entry point. The
         // skill is told the passage IS the input, so a skill written for the
         // chat works here without being rewritten for it.
@@ -238,7 +254,7 @@ export function AskAiPopover({
             onSubmit={() => {
               if (instruction.trim() !== '') ask();
             }}
-            disabled={state === 'running'}
+            disabled={state === 'running' || conflicted}
             className="cb-ask-ai-field"
           >
             <Icon name="sparkles" size={13} color="var(--synapse-500)" />
@@ -385,15 +401,34 @@ export function AskAiPopover({
             </div>
           )}
           <div className="flex items-center justify-end gap-1.5">
-            <Button tabIndex={0} size="sm" variant="secondary" onClick={() => setState('asking')}>
+            <Button
+              tabIndex={0}
+              size="sm"
+              variant="secondary"
+              disabled={conflicted}
+              onClick={() => {
+                if (ensureCurrent()) setState('asking');
+              }}
+            >
               Retry
             </Button>
             <Button
               tabIndex={0}
               size="sm"
               variant="primary"
+              disabled={conflicted}
               onClick={() => {
-                onReplace(applyHunks(rewrite, accepted));
+                if (applied.current || !ensureCurrent()) return;
+                // Keep mine preserves the captured text, including whitespace that
+                // the word-level preview treats as shared with the proposal.
+                const outcome = onReplace(
+                  accepted.size === 0 ? selection : applyHunks(rewrite, accepted),
+                );
+                if (outcome.kind === 'conflict') {
+                  setConflicted(true);
+                  return;
+                }
+                applied.current = true;
                 onClose();
               }}
             >
@@ -401,6 +436,17 @@ export function AskAiPopover({
             </Button>
           </div>
         </Confirmation>
+      )}
+      {conflicted && (
+        <div role="alert" className="mt-2 text-sm text-n-700">
+          <p>
+            The page or passage changed. Reselect the passage and ask again to regenerate the
+            rewrite.
+          </p>
+          <Button tabIndex={0} size="sm" variant="secondary" onClick={onClose}>
+            Reselect passage
+          </Button>
+        </div>
       )}
     </div>
   );

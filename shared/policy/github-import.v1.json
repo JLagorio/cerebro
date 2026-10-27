@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "provider": "github",
+  "evidenceHeader": "x-oauth-scopes",
+  "evidenceModel": "classic_oauth_scope_header",
+  "supportedScopes": [
+    "gist",
+    "read:org",
+    "repo",
+    "workflow"
+  ],
+  "unsupported": "unsupported",
+  "scopeDigestDomain": "cerebro.github.oauth-scope-evidence.v1",
+  "issuer": "https://github.com",
+  "betaLimitation": "The GitHub beta imports credentials reporting only repo, read:org, gist and workflow classic scopes. Other scope names, empty or missing scope evidence, fine-grained personal access tokens and GitHub App tokens are unsupported. No scope evidence grants a local action capability."
+}

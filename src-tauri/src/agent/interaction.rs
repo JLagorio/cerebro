@@ -217,6 +217,8 @@ pub struct Seat {
     /// The run's argv names `ask_host` as its permission prompt tool, so its
     /// `tools/list` lists it (`hand_prompt_tool`).
     prompted: bool,
+    generation_bound: bool,
+    generation_settlement: Option<Arc<crate::actions::native_owner::NativeGenerationSettlement>>,
 }
 
 impl Seat {
@@ -233,7 +235,15 @@ impl Seat {
             snapshot: Arc::new(snapshot),
             settle: None,
             prompted: false,
+            generation_bound: false,
+            generation_settlement: None,
         }
+    }
+
+    pub(crate) fn with_generation(mut self, tracking: Option<Arc<crate::actions::native_owner::NativeGenerationSettlement>>) -> Self {
+        self.generation_bound = tracking.is_some();
+        self.generation_settlement = tracking;
+        self
     }
 
     /// The seat with the plan its run's argv was built from (`agent::stream`).
@@ -327,6 +337,10 @@ pub enum Kind {
     Write,
     /// AskUserQuestion's questions (M57.3).
     Question,
+    /// A genuinely held native managed-action tools/call; never a CLI resume.
+    ManagedAction,
+    /// Original held account/action access choice; no invocation or effect.
+    ManagedAccess,
 }
 
 impl Kind {
@@ -406,6 +420,12 @@ pub enum PersonAnswer {
 }
 
 impl PersonAnswer {
+    /// Finite held-action control, not person admission. Only the native answer
+    /// command constructs this value from IPC; the original ACT worker still
+    /// authenticates its owner and commits the real approval separately.
+    pub(crate) fn managed_choice(&self)->Option<bool>{
+        match self {Self::Allow{remember:Remember::Once}=>Some(true),Self::Deny{..}=>Some(false),_=>None}
+    }
     /// The webview's answer, cleaned: a deny message trimmed, its control
     /// characters (C0, DEL, C1) turned into spaces, and cut at 2000
     /// characters; an empty one is none.
@@ -567,11 +587,15 @@ impl HostPrompt {
 }
 
 /// A call waiting for the person, as the panel draws it.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InteractionCard {
     /// 128-bit hex, minted by the book.
     pub id: String,
     pub kind: Kind,
+    /// Managed-only native in-flight person decision; absent for legacy cards.
+    pub answering: Option<bool>,
+    /// Actual original handle selector; never an execution or origin proof.
+    pub run: Option<crate::actions::SafeCounter>,
     pub tool_name: String,
     pub tool_id: String,
     pub session_id: String,
@@ -593,7 +617,6 @@ pub struct InteractionCard {
     pub actor: Option<String>,
     /// A question card's questions (M57.3), parsed; left out of every other
     /// card, so a permission or write card reads as it did before.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub questions: Option<Vec<Question>>,
     /// The call's input, pretty JSON, cut at 256 KiB.
     pub input: String,
@@ -601,10 +624,30 @@ pub struct InteractionCard {
     pub asked_at: String,
 }
 
+
+impl Serialize for InteractionCard {
+ fn serialize<S:serde::Serializer>(&self,serializer:S)->Result<S::Ok,S::Error>{
+  use serde::ser::SerializeMap;
+  let mut wire=serializer.serialize_map(None)?;
+  wire.serialize_entry("id",&self.id)?;wire.serialize_entry("kind",&self.kind)?;
+  let managed=matches!(self.kind,Kind::ManagedAction|Kind::ManagedAccess);
+  if managed{wire.serialize_entry("answering",&self.answering.unwrap_or(false))?;wire.serialize_entry("run",&self.run)?;}
+  wire.serialize_entry("tool_name",&self.tool_name)?;
+  let tool_id=if managed&&self.tool_id.is_empty(){None}else{Some(&self.tool_id)};
+  wire.serialize_entry("tool_id",&tool_id)?;wire.serialize_entry("session_id",&self.session_id)?;
+  wire.serialize_entry("summary",&self.summary)?;wire.serialize_entry("family",&self.family)?;
+  wire.serialize_entry("subject",&self.subject)?;wire.serialize_entry("title",&self.title)?;
+  wire.serialize_entry("target",&self.target)?;wire.serialize_entry("actor",&self.actor)?;
+  if let Some(questions)=&self.questions{wire.serialize_entry("questions",questions)?;}
+  wire.serialize_entry("input",&self.input)?;wire.serialize_entry("asked_at",&self.asked_at)?;wire.end()
+ }
+}
+
 /// What an answer resumes: the run's request, on the same session, in the
 /// same vault.
 #[derive(Debug, Clone)]
 pub struct Resume {
+    pub(crate) link: AnswerLink,
     pub id: String,
     pub session_id: String,
     pub vault: PathBuf,
@@ -613,6 +656,37 @@ pub struct Resume {
     /// takes at dispatch. Only the answer command hands it to
     /// `record_write_approval`.
     pub approval: Option<WriteApproval>,
+}
+
+
+/// Minted only while the original interaction is accepted for an answer. IDs
+/// copied out of a card or CLI session cannot construct or reactivate this link.
+#[derive(Debug, Clone)]
+pub(crate) struct AnswerLink {
+    book: std::sync::Weak<Mutex<Book>>,
+    id: String,
+    source_run: String,
+    session: String,
+    vault: PathBuf,
+    answer_key: String,
+    generation_bound: bool,
+}
+impl AnswerLink {
+    pub(crate) fn source_run(&self)->&str {&self.source_run}
+    pub(crate) fn session(&self)->&str {&self.session}
+    pub(crate) fn answer_key(&self)->&str {&self.answer_key}
+    pub(crate) fn generation_bound(&self)->bool {self.generation_bound}
+    pub(crate) fn belongs_to(&self, interactions:&Interactions)->bool {self.book.ptr_eq(&Arc::downgrade(&interactions.book))}
+    fn matches(&self, book:&Book)->bool {
+        book.entries.iter().any(|entry|entry.id==self.id && entry.run_id==self.source_run
+            && entry.session_id==self.session && entry.vault==self.vault
+            && entry.answer_key.as_deref()==Some(&self.answer_key)
+            && matches!(entry.state,State::Answering(_)) && !entry.consumed && entry.resume_run.is_none())
+    }
+    pub(crate) fn validate(&self,vault:&Path)->bool {
+        let Some(book)=self.book.upgrade() else {return false};
+        vault==self.vault && self.matches(&lock(&book))
+    }
 }
 
 /// A person's Allow of one ask-first write (M57.4): the vault, Claude Code
@@ -801,6 +875,9 @@ struct Entry {
     consumed: bool,
     /// The run resuming it.
     resume_run: Option<String>,
+    answer_key: Option<String>,
+    generation_bound: bool,
+    generation_settlement: Option<Arc<crate::actions::native_owner::NativeGenerationSettlement>>,
     seq: u64,
     asked_at: String,
 }
@@ -812,6 +889,8 @@ impl Entry {
         InteractionCard {
             id: self.id.clone(),
             kind: self.kind,
+            answering: None,
+            run: None,
             tool_name: self.tool_name.clone(),
             tool_id: self.tool_use_id.clone(),
             session_id: self.session_id.clone(),
@@ -1116,13 +1195,6 @@ pub fn supports_gate(version: Option<&str>) -> bool {
         .is_some_and(|found| found >= MIN_CLI_VERSION)
 }
 
-/// The installed Claude Code's version, asked once per process and only
-/// when a run would ask (`AgentState::status` is not cached).
-pub fn cached_cli_version() -> Option<String> {
-    static VERSION: OnceLock<Option<String>> = OnceLock::new();
-    VERSION.get_or_init(|| super::status().version).clone()
-}
-
 /// A tool name the matcher can hold: `[A-Za-z0-9_-]` only, so a `|` (the
 /// matcher's list separator in 2.1.250) or a regex character can never widen
 /// it.
@@ -1193,6 +1265,7 @@ const HOOKS: &str = "hooks";
 pub struct Interactions {
     book: Arc<Mutex<Book>>,
     asks: Arc<Vec<String>>,
+    managed: Arc<Mutex<managed_action_wait::ManagedBook>>,
 }
 
 impl Default for Interactions {
@@ -1216,6 +1289,7 @@ impl Interactions {
         Self {
             book: Arc::default(),
             asks: Arc::new(asks),
+            managed: Arc::default(),
         }
     }
 
@@ -1226,9 +1300,20 @@ impl Interactions {
     /// Cancelled(NotAnswered), and the marker's tool joins this run's
     /// matcher, so Claude Code's re-emitted call is refused and the new text
     /// runs.
-    pub fn open_seat(&self, mut seat: Seat, pending: Option<PendingDeferral>) {
+    #[cfg(test)]
+    pub fn open_seat(&self, seat: Seat, pending: Option<PendingDeferral>) {
+        let _=self.open_seat_inner(seat,pending,false);
+    }
+    pub(crate) fn open_unlinked_seat(&self,seat:Seat,pending:Option<PendingDeferral>)->Result<(),String> {
+        self.open_seat_inner(seat,pending,true)
+    }
+    fn open_seat_inner(&self,mut seat:Seat,pending:Option<PendingDeferral>,checked:bool)->Result<(),String> {
         let mut book = lock(&self.book);
         let session = seat.session_id.clone();
+        if checked && book.entries.iter().any(|entry|entry.session_id==session && entry.generation_bound && !entry.consumed && matches!(entry.state,State::Answering(_) | State::Answered(_))) {
+            return Err("This conversation is resuming a waiting call. Nothing was started.".into());
+        }
+        let mut cancelled_generations=Vec::new();
         let answering = book
             .entries
             .iter_mut()
@@ -1236,12 +1321,13 @@ impl Interactions {
         if let Some(entry) = answering {
             entry.resume_run = Some(seat.run_id.clone());
             book.seats.insert(seat.run_id.clone(), seat);
-            return;
+            return Ok(());
         }
         let mut settle = None;
         for entry in book.entries.iter_mut().filter(|e| e.session_id == session) {
             if matches!(entry.state, State::Waiting | State::Registered) {
                 entry.state = State::Cancelled(CancelReason::NotAnswered);
+                cancelled_generations.extend(entry.generation_settlement.clone());
             }
         }
         if let Some(marker) = pending {
@@ -1265,6 +1351,9 @@ impl Interactions {
                     state: State::Cancelled(CancelReason::NotAnswered),
                     consumed: false,
                     resume_run: None,
+                    answer_key: None,
+                    generation_bound: seat.generation_bound,
+                    generation_settlement: seat.generation_settlement.clone(),
                     seq,
                     asked_at: now_rfc3339(),
                 });
@@ -1286,15 +1375,33 @@ impl Interactions {
         seat.settle = settle.filter(|name| !name.is_empty());
         book.bound(&session);
         book.seats.insert(seat.run_id.clone(), seat);
+        drop(book);
+        for generation in cancelled_generations {generation.cancel_wait();}
+        Ok(())
+    }
+
+    pub(crate) fn open_answer_seat(&self, seat: Seat, link: &AnswerLink) -> Result<(), String> {
+        let mut book=lock(&self.book);
+        if !link.book.ptr_eq(&Arc::downgrade(&self.book)) || !link.matches(&book)
+            || seat.vault!=link.vault || seat.session_id!=link.session
+            || seat.generation_bound!=link.generation_bound {
+            return Err("The waiting call changed. Nothing was started.".into());
+        }
+        let entry=book.entries.iter_mut().find(|entry|entry.id==link.id).expect("checked above");
+        entry.resume_run=Some(seat.run_id.clone());
+        book.seats.insert(seat.run_id.clone(),seat);
+        Ok(())
     }
 
     /// Unseat a run, once it has been reaped. Its unconfirmed registrations
     /// die with it; a call it resumed is gone once the gate read the answer,
     /// and back to Waiting when the resume never reached the gate; refusals
     /// it read are dropped.
-    pub fn close_seat(&self, run_id: &str) {
+    pub fn close_seat(&self, run_id: &str) -> bool {
         let mut book = lock(&self.book);
+        let restored = book.entries.iter().any(|entry|entry.resume_run.as_deref()==Some(run_id) && !entry.consumed && matches!(entry.state,State::Answering(_) | State::Answered(_)));
         let seat = book.seats.remove(run_id);
+        self.close_managed_run(run_id);
         // M57.4: an approval dies with the run that resumed its call.
         book.approvals
             .retain(|a| a.resume_run.as_deref() != Some(run_id));
@@ -1315,6 +1422,7 @@ impl Interactions {
                     && matches!(e.state, State::Cancelled(_)))
             });
         }
+        restored
     }
 
     /// What a seated run's argv and settings take: the debug asks it holds
@@ -1448,7 +1556,7 @@ impl Interactions {
                             return GateAnswer::Deny(tool_approval::question_malformed(&reason))
                         }
                     },
-                    Kind::Permission | Kind::Write => None,
+                    Kind::Permission | Kind::Write | Kind::ManagedAction | Kind::ManagedAccess => None,
                 };
                 let seq = book.next_seq();
                 book.entries.push(Entry {
@@ -1469,6 +1577,9 @@ impl Interactions {
                     state: State::Registered,
                     consumed: false,
                     resume_run: None,
+                    answer_key: None,
+                    generation_bound: seat.generation_bound,
+                    generation_settlement: seat.generation_settlement.clone(),
                     seq,
                     asked_at: now_rfc3339(),
                 });
@@ -1641,13 +1752,24 @@ impl Interactions {
                     resume_run: None,
                 }
             });
+        let answer_key = crate::ledger::new_id128();
         let resume = Resume {
+            link: AnswerLink {
+                book: Arc::downgrade(&self.book),
+                id: entry.id.clone(),
+                source_run: entry.run_id.clone(),
+                session: entry.session_id.clone(),
+                vault: entry.vault.clone(),
+                answer_key: answer_key.clone(),
+                generation_bound: entry.generation_bound,
+            },
             id: entry.id.clone(),
             session_id: entry.session_id.clone(),
             vault: entry.vault.clone(),
             snapshot: (**snapshot).clone(),
             approval,
         };
+        entry.answer_key = Some(answer_key);
         entry.state = State::Answering(answer);
         // M57.4b: the edited draft is what the resume's gate allows with.
         entry.answered_input = answered_input.or(edit);
@@ -1712,7 +1834,8 @@ impl Interactions {
 
     /// Cancel a call no one has answered. True when this cancelled it; a
     /// second cancel, or one after an answer, is false.
-    pub fn cancel(&self, id: &str, reason: CancelReason) -> bool {
+    pub fn cancel(&self,id:&str,reason:CancelReason)->bool{if self.cancel_managed(id){return true;}self.cancel_inner(id,reason)}
+    fn cancel_inner(&self, id: &str, reason: CancelReason) -> bool {
         let mut book = lock(&self.book);
         let Some(entry) = book.entries.iter_mut().find(|e| e.id == id) else {
             return false;
@@ -1721,8 +1844,11 @@ impl Interactions {
             return false;
         }
         entry.state = State::Cancelled(reason);
+        let generation=entry.generation_settlement.clone();
         let session = entry.session_id.clone();
         book.bound(&session);
+        drop(book);
+        if let Some(generation)=generation {generation.cancel_wait();}
         true
     }
 
@@ -1731,20 +1857,66 @@ impl Interactions {
     /// forgotten (M57.2). Returns the cards it cancelled.
     pub fn cancel_other_vaults(&self, vault: &Path) -> Vec<String> {
         let mut book = lock(&self.book);
+        let retired_runs:Vec<_>=book.seats.iter().filter(|(_,seat)|seat.vault!=vault).map(|(run,_)|run.clone()).collect();
+        let managed_cancelled=self.cancel_managed_other_vaults(vault,&retired_runs);
+        #[cfg(test)] managed_action_wait::probes::after_other_scan();
         book.grants.forget_other_vaults(vault);
         let mut cancelled = Vec::new();
+        let mut generations=Vec::new();
         let mut sessions = Vec::new();
         for entry in book.entries.iter_mut() {
             if entry.vault != vault && matches!(entry.state, State::Waiting | State::Registered) {
                 entry.state = State::Cancelled(CancelReason::VaultClosed);
                 cancelled.push(entry.id.clone());
+                generations.extend(entry.generation_settlement.clone());
                 sessions.push(entry.session_id.clone());
             }
         }
         for session in sessions {
             book.bound(&session);
         }
+        drop(book);
+        for generation in generations {generation.cancel_wait();}
+        cancelled.extend(managed_cancelled);
         cancelled
+    }
+
+    /// Selected opening keeps no legacy conversation authority. Revoke seats
+    /// before their exiting hooks can register more calls, and detach unfinished
+    /// resumes so close_seat cannot put their cancelled calls back in Waiting.
+    /// A consumed answer remains historical; unused dispatch approvals do not.
+    pub(super) fn cancel_all(&self) {
+        let mut book = lock(&self.book);
+        book.seats.clear();
+        self.cancel_managed_all();
+        #[cfg(test)] managed_action_wait::probes::after_all_scan();
+        book.grants = ConversationGrants::default();
+        book.approvals.clear();
+        let mut sessions = HashSet::new();
+        let mut generations=Vec::new();
+        for entry in &mut book.entries {
+            if entry.consumed {
+                // The hook already delivered this answer. Finalize that
+                // history without minting a conversation grant: a command's
+                // late finish_answer must not recreate retired authority.
+                if let State::Answering(answer) = entry.state.clone() {
+                    entry.state = State::Answered(answer);
+                }
+            } else {
+                generations.extend(entry.generation_settlement.clone());
+                if !matches!(entry.state, State::Cancelled(_)) {
+                    entry.state = State::Cancelled(CancelReason::VaultClosed);
+                }
+                entry.resume_run = None;
+                entry.answered_input = None;
+                sessions.insert(entry.session_id.clone());
+            }
+        }
+        for session in sessions {
+            book.bound(&session);
+        }
+        drop(book);
+        for generation in generations {generation.cancel_wait();}
     }
 
     /// Record a person's Allow of a write (M57.4): the one writer of the
@@ -1753,6 +1925,30 @@ impl Interactions {
     /// replaces the first.
     pub fn record_write_approval(&self, approval: WriteApproval) {
         let mut book = lock(&self.book);
+        // The native command can pause after begin_answer_edited. Validate
+        // against that still-current answer under this same lock before
+        // replacing anything: retirement or a new edit invalidates its copy.
+        let current = book.entries.iter().any(|entry| {
+            if entry.id != approval.entry
+                || entry.vault != approval.vault
+                || entry.session_id != approval.session_id
+                || entry.kind != Kind::Write
+                || !matches!(entry.state, State::Answering(PersonAnswer::Allow { .. }))
+                || crate::policy::tools::bare_name(&entry.tool_name) != approval.tool
+                || !entry.snapshot.as_ref().is_some_and(|snapshot| {
+                    crate::mcp::normalize_actor(snapshot.actor.as_deref()) == approval.actor
+                })
+            {
+                return false;
+            }
+            let approved = entry.answered_input.as_ref().unwrap_or(&entry.tool_input);
+            canonical_hash(&entry.tool_input) == approval.asked_hash
+                && canonical_hash(approved) == approval.approved_hash
+                && approved == &approval.approved_input
+        });
+        if !current {
+            return;
+        }
         book.approvals.retain(|a| a.entry != approval.entry);
         book.approvals.push(approval);
     }
@@ -1834,7 +2030,8 @@ impl Interactions {
             .filter(|e| e.vault == vault && e.state == State::Waiting)
             .collect();
         waiting.sort_by_key(|e| e.seq);
-        waiting.into_iter().map(Entry::card).collect()
+        let mut cards:Vec<_>=waiting.into_iter().map(Entry::card).collect();
+        drop(book);cards.extend(self.managed_pending(vault));cards.sort_by(|a,b|a.asked_at.cmp(&b.asked_at));cards
     }
 }
 
@@ -2841,29 +3038,34 @@ mod tests {
         let sources = sources();
         assert!(sources.len() > 20);
         for (name, body) in &sources {
+            // Exact cfg(test)-owned fixture files may exercise the existing
+            // parser/control values. No production file gains mint permission.
+            let fixture_owner=match name.as_str(){
+                "agent/managed_action_wait_tests.rs"=>Some(("agent/managed_action_wait.rs","#[cfg(test)]#[path=\"managed_action_wait_tests.rs\"]modtests;")),
+                "actions/native_chat_generation_tests.rs"=>Some(("actions/native_chat_generation.rs","#[cfg(test)]#[path=\"native_chat_generation_tests.rs\"]modtests;")),
+                _=>None,
+            };
+            if let Some((owner,expected))=fixture_owner{
+                let owner=&sources.iter().find(|(name,_)|name==owner).unwrap().1;
+                let compact:String=owner.split_whitespace().collect();
+                assert!(compact.contains(expected),"{name} must have its exact cfg(test) source owner");
+            }
             let mints = body.matches("PersonAnswer::from_ipc(").count();
             match name.as_str() {
                 "lib.rs" => assert_eq!(mints, 1, "the answer command mints it once"),
                 "agent/interaction.rs" => {}
+                _ if fixture_owner.is_some()=>{},
                 _ => assert_eq!(mints, 0, "{name} mints a person's answer"),
             }
-            if name != "agent/interaction.rs" {
-                for built in [
-                    "PersonAnswer::Allow",
-                    "PersonAnswer::Deny",
-                    "PersonAnswer::Answers",
-                ] {
-                    assert!(!body.contains(built), "{name} builds {built}");
+            if name != "agent/interaction.rs" && fixture_owner.is_none() {
+                for built in ["PersonAnswer::Allow","PersonAnswer::Deny","PersonAnswer::Answers"]{
+                    assert!(!body.contains(built),"{name} builds {built}");
                 }
             }
         }
-        let mcp = &sources.iter().find(|(name, _)| name == "mcp.rs").unwrap().1;
-        assert!(
-            !mcp.contains("begin_answer"),
-            "no MCP path records an answer"
-        );
-        assert!(!mcp.contains("finish_answer"));
-        assert!(!mcp.contains("PersonAnswer"));
+        let mcp=&sources.iter().find(|(name,_)|name=="mcp.rs").unwrap().1;
+        assert!(!mcp.contains("begin_answer"),"no MCP path records an answer");
+        assert!(!mcp.contains("finish_answer"));assert!(!mcp.contains("PersonAnswer"));
     }
 
     #[test]
@@ -3627,4 +3829,357 @@ mod tests {
         let resumed = book.begin_answer(vault, &source_card.id, allow()).unwrap();
         assert_eq!(resumed.session_id, SOURCE);
     }
+
+    #[test]
+    fn selected_open_cancels_prior_vault_waiting_calls_without_live_process() {
+        let _sink = crate::runtime::sink::test_lock();
+        let _shadow = crate::ledger::shadow::testing::lock();
+        let agents = crate::agent::AgentState {
+            interactions: book(),
+            ..Default::default()
+        };
+        let card = waiting(agents.interactions());
+        assert_eq!(
+            agents.interactions().pending(Path::new("/v")),
+            vec![card.clone()]
+        );
+        let watcher = crate::vault::watcher::WatcherState::default();
+        let ambient = crate::ingest::ambient::AmbientState::default();
+        crate::suspend_legacy_for_selected(&watcher, &ambient, &agents).unwrap();
+        // Expected RED: current stop_all() has no interaction/journal teardown.
+        assert!(agents.interactions().pending(Path::new("/v")).is_empty());
+        assert!(agents
+            .interactions()
+            .begin_answer(Path::new("/v"), &card.id, allow())
+            .is_err());
+    }
+
+    #[test]
+    fn selected_open_forgets_prior_vault_conversation_grants() {
+        let _sink = crate::runtime::sink::test_lock();
+        let _shadow = crate::ledger::shadow::testing::lock();
+        let agents = crate::agent::AgentState {
+            interactions: Interactions::with_asks(Vec::new()),
+            ..Default::default()
+        };
+        let book = agents.interactions();
+        let card = asked(book, "run-1", "s-1", "t1", "git status");
+        book.begin_answer(Path::new("/v"), &card.id, conversation())
+            .unwrap();
+        book.finish_answer(&card.id, "run-2");
+        book.open_seat(seat_under("ask", "run-3", "s-1", "/v"), None);
+        assert_eq!(
+            book.gate("run-3", &bash("s-1", "t2", "git status")),
+            GateAnswer::Allow {
+                updated_input: None
+            }
+        );
+        book.close_seat("run-3");
+        let watcher = crate::vault::watcher::WatcherState::default();
+        let ambient = crate::ingest::ambient::AmbientState::default();
+        crate::suspend_legacy_for_selected(&watcher, &ambient, &agents).unwrap();
+        book.open_seat(seat_under("ask", "run-4", "s-1", "/v"), None);
+        assert_eq!(
+            book.gate("run-4", &bash("s-1", "t3", "git status")),
+            GateAnswer::Defer
+        );
+    }
+
+    #[test]
+    fn selected_open_releases_finished_and_late_finishing_journals() {
+        let _sink = crate::runtime::sink::test_lock();
+        let _shadow = crate::ledger::shadow::testing::lock();
+        let agents = crate::agent::AgentState::default();
+        let none = HashSet::new();
+        let now = std::time::Instant::now();
+        agents
+            .journal
+            .open(1, "run-ended", Path::new("/v"), "s-1", now, &none);
+        agents
+            .journal
+            .open(2, "run-live", Path::new("/w"), "s-2", now, &none);
+        agents.journal.finish(1, now);
+        let watcher = crate::vault::watcher::WatcherState::default();
+        let ambient = crate::ingest::ambient::AmbientState::default();
+        crate::suspend_legacy_for_selected(&watcher, &ambient, &agents).unwrap();
+        assert_eq!(
+            agents.events_since(1, "run-ended", 0),
+            super::super::journal::EventsSince::Unknown
+        );
+        // A reader finishing after suspension must release its journal too.
+        agents.journal.finish(2, std::time::Instant::now());
+        assert_eq!(
+            agents.events_since(2, "run-live", 0),
+            super::super::journal::EventsSince::Unknown
+        );
+    }
+
+    #[test]
+    fn stopping_all_preserves_waiting_cards_grants_and_finished_journals() {
+        let agents = crate::agent::AgentState {
+            interactions: Interactions::with_asks(Vec::new()),
+            ..Default::default()
+        };
+        let book = agents.interactions();
+        let allowed = asked(book, "run-1", "s-1", "t1", "git status");
+        book.begin_answer(Path::new("/v"), &allowed.id, conversation())
+            .unwrap();
+        book.finish_answer(&allowed.id, "run-2");
+        let waiting = asked(book, "run-3", "s-2", "t2", "git diff");
+        let now = std::time::Instant::now();
+        agents
+            .journal
+            .open(1, "run-ended", Path::new("/v"), "s-1", now, &HashSet::new());
+        agents.journal.finish(1, now);
+        assert!(agents.stop_all().unwrap().is_empty());
+        assert!(book.pending(Path::new("/v")).contains(&waiting));
+        assert!(matches!(
+            agents.events_since(1, "run-ended", 0),
+            super::super::journal::EventsSince::Held { done: true, .. }
+        ));
+        book.open_seat(seat_under("ask", "run-4", "s-1", "/v"), None);
+        assert_eq!(
+            book.gate("run-4", &bash("s-1", "t3", "git status")),
+            GateAnswer::Allow {
+                updated_input: None
+            }
+        );
+    }
+
+    #[test]
+    fn selected_open_does_not_requeue_a_resume_that_closes_after_suspension() {
+        let _sink = crate::runtime::sink::test_lock();
+        let _shadow = crate::ledger::shadow::testing::lock();
+        let agents = crate::agent::AgentState {
+            interactions: book(),
+            ..Default::default()
+        };
+        let book = agents.interactions();
+        let card = waiting(book);
+        book.begin_answer(Path::new("/v"), &card.id, allow())
+            .unwrap();
+        book.open_seat(seat("run-2", "s-1", "/v"), None);
+        book.finish_answer(&card.id, "run-2");
+        let watcher = crate::vault::watcher::WatcherState::default();
+        let ambient = crate::ingest::ambient::AmbientState::default();
+        crate::suspend_legacy_for_selected(&watcher, &ambient, &agents).unwrap();
+        book.close_seat("run-2");
+        assert!(book.pending(Path::new("/v")).is_empty());
+        assert!(book
+            .begin_answer(Path::new("/v"), &card.id, allow())
+            .is_err());
+    }
+
+    #[test]
+    fn selected_open_revokes_unused_write_approvals_after_the_hook_read_allow() {
+        let _sink = crate::runtime::sink::test_lock();
+        let _shadow = crate::ledger::shadow::testing::lock();
+        let agents = crate::agent::AgentState {
+            interactions: Interactions::with_asks(Vec::new()),
+            ..Default::default()
+        };
+        let book = agents.interactions();
+        let card = waiting_write(book);
+        let resume = book
+            .begin_answer(Path::new("/v"), &card.id, allow())
+            .unwrap();
+        book.record_write_approval(resume.approval.unwrap());
+        book.open_seat(ask_first_seat("run-2", "s-1"), None);
+        book.finish_answer(&card.id, "run-2");
+        assert!(matches!(
+            book.gate("run-2", &named_call("s-1", "t1", CREATE, draft())),
+            GateAnswer::Allow { .. }
+        ));
+        let watcher = crate::vault::watcher::WatcherState::default();
+        let ambient = crate::ingest::ambient::AmbientState::default();
+        crate::suspend_legacy_for_selected(&watcher, &ambient, &agents).unwrap();
+        assert!(book
+            .take_write_approval(&scout_grant("run-2"), CREATE, &draft())
+            .is_none());
+        // The consumed decision is historical; suspension revokes unused
+        // dispatch authority without rewriting a decision already delivered.
+        assert!(matches!(
+            lock(&book.book)
+                .entries
+                .iter()
+                .find(|entry| entry.id == card.id)
+                .unwrap()
+                .state,
+            State::Answered(_)
+        ));
+        book.close_seat("run-2");
+        assert!(book.pending(Path::new("/v")).is_empty());
+    }
+
+    #[test]
+    fn selected_open_closes_legacy_run_admission_before_late_preparation_finishes() {
+        let _sink = crate::runtime::sink::test_lock();
+        let _shadow = crate::ledger::shadow::testing::lock();
+        let agents = crate::agent::AgentState::default();
+        // A command admitted before opening may still be preparing its CLI.
+        assert!(agents.admit().is_ok());
+        let watcher = crate::vault::watcher::WatcherState::default();
+        let ambient = crate::ingest::ambient::AmbientState::default();
+        crate::suspend_legacy_for_selected(&watcher, &ambient, &agents).unwrap();
+        // Re-enter the real pre-spawn admission seam after selected teardown.
+        // No seat, run config, child or slot may be created from this point.
+        assert!(agents.admit().is_err());
+    }
+
+    #[test]
+    fn selected_open_does_not_restore_a_grant_from_a_late_consumed_answer() {
+        let _sink = crate::runtime::sink::test_lock();
+        let _shadow = crate::ledger::shadow::testing::lock();
+        let agents = crate::agent::AgentState {
+            interactions: Interactions::with_asks(Vec::new()),
+            ..Default::default()
+        };
+        let book = agents.interactions();
+        let card = asked(book, "run-1", "s-1", "t1", "git status");
+        book.begin_answer(Path::new("/v"), &card.id, conversation())
+            .unwrap();
+        // stream_prepared has opened the seat and launched the reader, but
+        // answer_interaction has not yet reached finish_answer.
+        book.open_seat(seat_under("ask", "run-2", "s-1", "/v"), None);
+        assert_eq!(
+            book.gate("run-2", &bash("s-1", "t1", "git status")),
+            GateAnswer::Allow {
+                updated_input: None
+            }
+        );
+        let watcher = crate::vault::watcher::WatcherState::default();
+        let ambient = crate::ingest::ambient::AmbientState::default();
+        crate::suspend_legacy_for_selected(&watcher, &ambient, &agents).unwrap();
+        // The command's post-spawn continuation is outside admission lock.
+        book.finish_answer(&card.id, "run-2");
+        // A later Legacy opening may start the same conversation. Seat setup
+        // here uses the established grant regression fixture; it is not an
+        // actual process start or a claim to prove native opening.
+        book.open_seat(seat_under("ask", "run-3", "s-1", "/v"), None);
+        assert_eq!(
+            book.gate("run-3", &bash("s-1", "t2", "git status")),
+            GateAnswer::Defer
+        );
+    }
+
+    #[test]
+    fn selected_open_rejects_a_late_write_approval_from_a_retired_answer() {
+        let _sink = crate::runtime::sink::test_lock();
+        let _shadow = crate::ledger::shadow::testing::lock();
+        let agents = crate::agent::AgentState {
+            interactions: Interactions::with_asks(Vec::new()),
+            ..Default::default()
+        };
+        let book = agents.interactions();
+        let card = waiting_write(book);
+        let resume = book
+            .begin_answer_edited(Path::new("/v"), &card.id, allow(), None, |_, _, _| Ok(()))
+            .unwrap();
+        let approval = resume.approval.expect("the person allowed this write");
+        // The command is paused between lib.rs begin_answer_edited and
+        // record_write_approval. Selected opening retires this answer now.
+        crate::suspend_legacy_for_selected(&Default::default(), &Default::default(), &agents)
+            .unwrap();
+        assert!(book.pending(Path::new("/v")).is_empty());
+        // The delayed native command has not yet reached stream's stale-ticket
+        // refusal/abort_answer. Its next line tries to restore the old approval.
+        book.record_write_approval(approval);
+        book.open_seat(ask_first_seat("fresh-run", "s-1"), None);
+        assert!(
+            book.take_write_approval(&scout_grant("fresh-run"), CREATE, &draft())
+                .is_none(),
+            "selected retirement must also reject approval insertion delayed until after its sweep"
+        );
+    }
+    #[test]
+    fn a_live_consumed_answer_records_its_current_edited_write_approval() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = waiting_write(&book);
+        let resume = book
+            .begin_answer_edited(
+                Path::new("/v"),
+                &card.id,
+                allow(),
+                Some(edited_draft()),
+                |_, _, _| Ok(()),
+            )
+            .unwrap();
+        book.open_seat(ask_first_seat("run-2", "s-1"), None);
+        assert_eq!(
+            book.gate("run-2", &named_call("s-1", "t1", CREATE, draft())),
+            GateAnswer::Allow {
+                updated_input: Some(edited_draft())
+            },
+        );
+        book.record_write_approval(resume.approval.unwrap());
+        let approved = book
+            .take_write_approval(&scout_grant("run-2"), CREATE, &draft())
+            .expect("the live current answer still grants its edited write");
+        assert_eq!(approved.input, edited_draft());
+        assert_eq!(approved.edited, vec!["body".to_string()]);
+        assert!(book
+            .take_write_approval(&scout_grant("run-2"), CREATE, &edited_draft())
+            .is_none());
+    }
+
+    #[test]
+    fn a_detached_prior_edit_cannot_replace_the_current_answers_approval() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = waiting_write(&book);
+        let old = book
+            .begin_answer_edited(
+                Path::new("/v"),
+                &card.id,
+                allow(),
+                Some(edited_draft()),
+                |_, _, _| Ok(()),
+            )
+            .unwrap()
+            .approval
+            .unwrap();
+        book.abort_answer(&card.id);
+        let current = book
+            .begin_answer(Path::new("/v"), &card.id, allow())
+            .unwrap()
+            .approval
+            .unwrap();
+        book.record_write_approval(current);
+        book.record_write_approval(old);
+        book.open_seat(ask_first_seat("run-2", "s-1"), None);
+        let approved = book
+            .take_write_approval(&scout_grant("run-2"), CREATE, &draft())
+            .expect("the current Allow remains recorded");
+        assert_eq!(approved.input, draft());
+        assert!(approved.edited.is_empty());
+    }
+    #[test]
+    fn generation_answer_link_comes_from_the_original_entry_and_dies_on_abort() {
+        let book=book(); let card=waiting(&book);
+        let resume=book.begin_answer(Path::new("/v"),&card.id,allow()).unwrap();
+        assert_eq!(resume.link.source_run(),"run-1");
+        assert_eq!(resume.link.session(),"s-1");
+        assert!(resume.link.validate(Path::new("/v")));
+        assert!(!resume.link.validate(Path::new("/wrong")));
+        book.abort_answer(&resume.id);
+        assert!(!resume.link.validate(Path::new("/v")));
+        let next=book.begin_answer(Path::new("/v"),&card.id,allow()).unwrap();
+        assert_ne!(next.link.answer_key(),resume.link.answer_key());
+        assert!(!resume.link.validate(Path::new("/v")));
+    }
+    #[test]
+    fn generation_answer_seat_cannot_take_another_books_or_sessions_answer() {
+        let book=book(); let card=waiting(&book);
+        let resume=book.begin_answer(Path::new("/v"),&card.id,allow()).unwrap();
+        assert!(book.open_answer_seat(seat("run-2","wrong","/v"),&resume.link).is_err());
+        let other=Interactions::default();
+        assert!(other.open_answer_seat(seat("run-2","s-1","/v"),&resume.link).is_err());
+        book.open_answer_seat(seat("run-2","s-1","/v"),&resume.link).unwrap();
+        book.finish_answer(&resume.id,"run-2");
+        assert!(matches!(book.gate("run-2",&call("s-1","t1",ASKED)),GateAnswer::Allow {..}));
+        assert!(!resume.link.validate(Path::new("/v")),"consumed answer is not a launch credential");
+    }
+
 }
+
+#[path="managed_action_wait.rs"]
+pub(crate) mod managed_action_wait;

@@ -53,20 +53,24 @@ import { SheetMenu } from './SheetMenu';
 import { SheetExportMenu } from './SheetExportMenu';
 import { SheetAsk } from './SheetAsk';
 import { sheetCellPresentation } from './SheetView';
+import type { SheetDraftSnapshot } from './pendingSheets';
 
-interface Draft {
-  cell: Cell;
-  text: string;
-  origin: 'cell' | 'bar';
-}
+type Draft = SheetDraftSnapshot;
 interface Props {
   id: string;
   sources: readonly SheetSource[];
   computed?: SheetComputed;
-  onCommit?: (edits: SheetSource[]) => void;
+  initialDraft?: SheetDraftSnapshot;
+  onCommit?: (edits: SheetSource[]) => boolean;
   getSources?: () => readonly SheetSource[];
   getPage?: () => Promise<string>;
-  registerDraft?: (flush: () => void) => () => void;
+  registerDraft?: (
+    flush: () => boolean,
+    snapshot: () => SheetDraftSnapshot | null,
+    restore: (draft: SheetDraftSnapshot) => void,
+  ) => () => void;
+  onDraftChange?: () => void;
+  canPrepareDraft?: () => boolean;
   onUndo?: () => void;
   onRedo?: () => void;
   onExit?: () => void;
@@ -102,9 +106,11 @@ export function SheetGrid(props: Props) {
   const unique = useId();
   const scope = useKeyScope('sheet-grid');
   const drag = useDragGesture();
-  const [selection, select] = useState<Range>(() => single(sheetStart()));
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const draftRef = useRef<Draft | null>(null);
+  const [selection, select] = useState<Range>(() =>
+    single(props.initialDraft?.cell ?? sheetStart()),
+  );
+  const [draft, setDraft] = useState<Draft | null>(props.initialDraft ?? null);
+  const draftRef = useRef<Draft | null>(props.initialDraft ?? null);
   const [scroll, setScroll] = useState(0);
   const [busy, setBusy] = useState(false);
   const [fillPreview, setFillPreview] = useState<Range | null>(null);
@@ -150,7 +156,8 @@ export function SheetGrid(props: Props) {
       );
   const updateDraft = (next: Draft | null) => {
     draftRef.current = next;
-    setDraft(next);
+    latest.current.onDraftChange?.();
+    if (mounted.current) setDraft(next);
   };
   const choose = (next: Range) => {
     selectionRef.current = next;
@@ -160,27 +167,34 @@ export function SheetGrid(props: Props) {
   const commitMatrix = (rows: Matrix, cellSheet = props.id) => {
     const fresh = currentSources();
     const at = fresh.findIndex((sheet) => sheet.id === cellSheet);
-    if (at < 0 || !latest.current.onCommit) return;
+    if (at < 0) throw new Error('The sheet is no longer on this page.');
+    if (!latest.current.onCommit) throw new Error('The sheet is read-only.');
     const matrices = fresh.map((sheet) => {
       const parsed = parseSheetFence(sheet.source);
       if (!parsed.ok) throw new Error(parsed.message);
       return matrixOf(parsed.cells);
     });
     matrices[at] = rows.map((row) => [...row]);
-    latest.current.onCommit(changedSheets(fresh, matrices));
+    const edits = changedSheets(fresh, matrices);
+    if (edits.length > 0 && !latest.current.onCommit(edits))
+      throw new Error('The page did not accept the sheet change.');
   };
   const commitDraft = () => {
     const pending = draftRef.current;
-    if (!pending) return;
-    updateDraft(null);
+    if (!pending) return true;
+    if (latest.current.canPrepareDraft?.() === false) return false;
     try {
       const source = currentSources().find((sheet) => sheet.id === latest.current.id)?.source;
-      if (source === undefined || !latest.current.onCommit) return;
+      if (source === undefined) throw new Error('The sheet is no longer on this page.');
+      if (!latest.current.onCommit) throw new Error('The sheet is read-only.');
       const parsed = parseSheetFence(source);
       if (!parsed.ok) throw new Error(parsed.message);
       commitMatrix(setInput(matrixOf(parsed.cells), pending.cell, pending.text));
+      if (draftRef.current === pending) updateDraft(null);
+      return true;
     } catch (error) {
       fail(error);
+      return false;
     }
   };
   const commitRef = useRef(commitDraft);
@@ -189,7 +203,14 @@ export function SheetGrid(props: Props) {
     mounted.current = true;
     const life = ++generation.current;
     const stillCurrent = () => generation.current === life;
-    const unregister = latest.current.registerDraft?.(() => commitRef.current());
+    const unregister = latest.current.registerDraft?.(
+      () => commitRef.current(),
+      () => draftRef.current,
+      (restored) => {
+        updateDraft(restored);
+        choose(single(restored.cell));
+      },
+    );
     return () => {
       mounted.current = false;
       queueMicrotask(() => {
@@ -257,7 +278,7 @@ export function SheetGrid(props: Props) {
     if (event.key === 'Enter' || event.key === 'Tab') {
       event.preventDefault();
       const cell = draftRef.current?.cell ?? selectionRef.current.active;
-      commitDraft();
+      if (!commitDraft()) return;
       moveTo(
         move(
           cell,
@@ -269,7 +290,7 @@ export function SheetGrid(props: Props) {
   };
   const restructure = async (change: GridChange, at: number, count: number) => {
     if (readOnly || busy) return;
-    commitDraft();
+    if (!commitDraft()) return;
     const before = currentSources().map((sheet) => ({ ...sheet }));
     const parsed = before.map((sheet) => parseSheetFence(sheet.source));
     const broken = parsed.find((item) => !item.ok);
@@ -299,7 +320,9 @@ export function SheetGrid(props: Props) {
         count,
         result,
       );
-      latest.current.onCommit?.(changedSheets(before, matrices));
+      const edits = changedSheets(before, matrices);
+      if (edits.length > 0 && !latest.current.onCommit?.(edits))
+        throw new Error('The page did not accept the sheet change.');
       focus();
     } catch (error) {
       if (mounted.current && generation.current === life) fail(error);
@@ -309,7 +332,7 @@ export function SheetGrid(props: Props) {
   };
   const fill = async (area: ReturnType<typeof bounds>, axis: FillAxis, to: number) => {
     if (readOnly || busy) return;
-    commitDraft();
+    if (!commitDraft()) return;
     const before = currentSources().map((sheet) => ({ ...sheet }));
     const parsed = before.map((sheet) => parseSheetFence(sheet.source));
     if (parsed.some((item) => !item.ok)) return;
@@ -329,7 +352,9 @@ export function SheetGrid(props: Props) {
       }
       const matrices = inputs.map((item) => matrixOf(item.cells));
       matrices[sheet] = mergeFill(matrices[sheet], area, axis, to, result);
-      latest.current.onCommit?.(changedSheets(before, matrices));
+      const edits = changedSheets(before, matrices);
+      if (edits.length > 0 && !latest.current.onCommit?.(edits))
+        throw new Error('The page did not accept the sheet change.');
       const target = fillTarget(
         area,
         axis === 'rows' ? { row: to, column: area.column } : { row: area.row, column: to },
@@ -562,7 +587,7 @@ export function SheetGrid(props: Props) {
         }, end);
         return;
       }
-      handlers.current.commitDraft();
+      if (!handlers.current.commitDraft()) return;
       focus();
       const before = selectionRef.current;
       const target =
@@ -716,7 +741,9 @@ export function SheetGrid(props: Props) {
             open={askOpen}
             setOpen={setAskOpen}
             selection={qualified(prepared.names[index] ?? 'Sheet', selection)}
-            beforeAsk={commitDraft}
+            beforeAsk={() => {
+              if (!commitDraft()) throw new Error('Resolve the pending cell before asking.');
+            }}
             readCells={() => {
               const fresh = currentSources();
               const parsed = parseSheetFence(

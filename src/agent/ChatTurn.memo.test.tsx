@@ -27,7 +27,7 @@ afterEach(() => {
 
 const onOpen = () => undefined;
 const onOpenPath = () => undefined;
-const onRetry = () => undefined;
+const onReviewRecovery = () => undefined;
 
 const reply = (id: string, text: string, streaming = false): ChatMessage => ({
   id,
@@ -52,7 +52,7 @@ describe('a memoized turn', () => {
               message={message}
               onOpen={onOpen}
               onOpenPath={onOpenPath}
-              onRetry={onRetry}
+              onReviewRecovery={onReviewRecovery}
             />
           ))}
         </>

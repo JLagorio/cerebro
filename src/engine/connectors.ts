@@ -10,6 +10,7 @@
  */
 
 import { sha256Hex } from '@/lib/sha256';
+import { connectorOwnership } from './connectorOwnership';
 
 export interface ConnectorSpec {
   name: string;
@@ -28,13 +29,35 @@ export interface ConnectorSpec {
 const MODELED = new Set(['transport', 'url', 'command', 'args', 'enabled']);
 
 export function parseConnectors(raw: string): ConnectorSpec[] {
-  if (raw.trim() === '') return [];
+  const list = readConnectorList(raw);
+  return list.kind === 'specs' ? list.specs : [];
+}
+
+/** Rust's words for a list whose bytes do not parse
+ *  (`connectors::UNREADABLE_LIST`): a run reaches no connector meanwhile. */
+export const UNREADABLE_CONNECTOR_LIST = "this vault's connector list cannot be read";
+
+/**
+ * The list as `parseConnectors` reads it, except that bytes which are not
+ * JSON are `unreadable`, never no servers: Rust's `connector_context` pins
+ * every run to no connector for them (CV-05). No file at all ('') is no
+ * servers.
+ */
+export function readConnectorList(
+  raw: string,
+): { kind: 'specs'; specs: ConnectorSpec[] } | { kind: 'unreadable' } {
+  if (raw.trim() === '') return { kind: 'specs', specs: [] };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return [];
+    return { kind: 'unreadable' };
   }
+  return { kind: 'specs', specs: specsOf(parsed) };
+}
+
+function specsOf(parsed: unknown): ConnectorSpec[] {
+  if (parsed === null || typeof parsed !== 'object') return [];
   const servers = (parsed as { servers?: unknown }).servers;
   if (servers === null || typeof servers !== 'object') return [];
   const out: ConnectorSpec[] = [];
@@ -89,7 +112,7 @@ export function stdioEnv(spec: ConnectorSpec): Record<string, string> | null {
  * stdioApprovalKey below.
  */
 export function stdioFingerprint(spec: ConnectorSpec): string | null {
-  if (spec.transport !== 'stdio') return null;
+  if (connectorOwnership(spec.extra) !== 'cli' || spec.transport !== 'stdio') return null;
   const env = stdioEnv(spec);
   if (env === null) return null;
   const pairs = Object.entries(env).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
@@ -216,7 +239,7 @@ export function httpTimeout(spec: ConnectorSpec): number | null | undefined {
  * carried — never approvable. Never stored: see httpApprovalKey.
  */
 export function httpFingerprint(spec: ConnectorSpec): string | null {
-  if (spec.transport !== 'http') return null;
+  if (connectorOwnership(spec.extra) !== 'cli' || spec.transport !== 'http') return null;
   const headers = httpHeaders(spec);
   const oauth = httpOAuth(spec);
   if (headers === null || oauth === null || httpTimeout(spec) === null) return null;
@@ -326,7 +349,7 @@ function shellWord(word: string): string {
 const PRINTABLE_ASCII = /^[\x20-\x7E]*$/;
 
 /** Why Settings shows no sign-in command for an entry (M54.11). */
-export type SignInBlocker = 'stdio' | 'name' | 'entry';
+export type SignInBlocker = 'ownership' | 'stdio' | 'name' | 'entry';
 
 /**
  * What keeps an entry from a sign-in command, or null when nothing does. A
@@ -340,6 +363,7 @@ export type SignInBlocker = 'stdio' | 'name' | 'entry';
  * than what it runs.
  */
 export function signInBlocker(spec: ConnectorSpec): SignInBlocker | null {
+  if (connectorOwnership(spec.extra) !== 'cli') return 'ownership';
   if (spec.transport !== 'http') return 'stdio';
   if (!/^[A-Za-z0-9_-]+$/.test(spec.name)) return 'name';
   const headers = httpHeaders(spec);
@@ -474,7 +498,7 @@ export function presetHolder(
  * which signs in to nothing.
  */
 export function removalNote(spec: ConnectorSpec): string | null {
-  if (spec.transport !== 'http') return null;
+  if (connectorOwnership(spec.extra) !== 'cli' || spec.transport !== 'http') return null;
   const name = spec.name;
   return `Removed ${name}. Claude Code keeps the sign-in it stored for ${name} in your keychain; Cerebro never held it. To sign out, run claude, type /mcp, pick ${name} and clear its authentication.`;
 }

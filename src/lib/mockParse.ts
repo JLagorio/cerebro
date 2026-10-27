@@ -190,6 +190,17 @@ function makeSnippet(body: string): string {
   return [...parts.join(' ').trim()].slice(0, 160).join('');
 }
 
+/** Canonical visible bytes are body, including a leading YAML-looking block. */
+export function canonicalBodyFacts(path: string, body: string) {
+  const filename = path.split('/').at(-1) ?? path;
+  const display = body.replace(/^\uFEFF/, '');
+  return {
+    title: extractH1Title(display) ?? humanize(filename.replace(/\.md$/, '')),
+    outgoingLinks: extractOutgoingLinks(display),
+    snippet: makeSnippet(display),
+  };
+}
+
 export function parseNote(path: string, raw: string, createdAt: string, modifiedAt: string): Entry {
   const filename = path.split('/').pop() ?? path;
   if (isWhiteboardPath(path)) {

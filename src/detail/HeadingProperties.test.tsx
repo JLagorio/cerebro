@@ -91,16 +91,16 @@ describe('HeadingProperties (M45.1)', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('the toggle reads View details / Hide details and calls onToggleDetails', () => {
+  it('the toggle names the property disclosure and calls onToggleDetails', () => {
     const onToggleDetails = vi.fn();
     setup({ heading: ['status'], detailsShown: false, onToggleDetails });
     const toggle = screen.getByTestId('view-details-toggle');
-    expect(toggle.textContent).toBe('View details');
+    expect(toggle.textContent).toBe('Show all properties');
     fireEvent.click(toggle);
     expect(onToggleDetails).toHaveBeenCalledTimes(1);
     cleanup();
     setup({ heading: ['status'], detailsShown: true, onToggleDetails });
-    expect(screen.getByTestId('view-details-toggle').textContent).toBe('Hide details');
+    expect(screen.getByTestId('view-details-toggle').textContent).toBe('Hide properties');
   });
 
   it('renders no toggle when onToggleDetails is absent — the properties-tab case', () => {

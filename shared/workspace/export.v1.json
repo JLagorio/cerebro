@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "container": "directory",
+  "manifest": "manifest.json",
+  "complete_state": "complete",
+  "bodies": "bodies",
+  "metadata": "metadata",
+  "database": "workspace.db",
+  "archive": "originals",
+  "limit_sources": {
+    "selected": "shared/workspace/authority.v2.json",
+    "retained": "shared/workspace/staging.v1.json",
+    "attachments": "shared/files/kinds.v1.json",
+    "preview": "shared/files/bytes.v1.json"
+  },
+  "restored_manifest": ".cerebro/restored-manifest.json",
+  "limits": {
+    "ledger_frames": 100000,
+    "ledger_line_bytes": 8388608
+  },
+  "omitted_scopes": [
+    "credentials",
+    "operational_state",
+    "chat_run_history",
+    "private_recovery_versions"
+  ]
+}

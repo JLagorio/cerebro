@@ -1,3 +1,14 @@
+#[cfg(all(
+    feature = "native-read-smoke",
+    any(not(target_os = "macos"), not(debug_assertions))
+))]
+compile_error!("native-read-smoke is supported only by an explicit macOS debug executable");
+#[cfg(feature = "native-read-smoke")]
+mod native_read_smoke;
+#[cfg(feature = "native-read-smoke")]
+pub use native_read_smoke::main as native_read_smoke_main;
+
+mod actions;
 pub mod agent;
 pub mod app_config;
 pub mod assembly;
@@ -6,14 +17,20 @@ pub mod canvas;
 pub mod client_access;
 mod comment_tools;
 pub mod conflict;
+mod connections;
+mod conversations;
+mod conversation_commands;
 pub mod connectors;
 pub mod convergence;
 pub mod crash;
+mod credential_commands;
+mod workflow_commands;
 pub mod demo;
 #[cfg(test)]
 #[path = "../build_support/demo_resources.rs"]
 mod demo_resources;
 pub mod diagnostics;
+mod draft_recovery_commands;
 pub mod dynamics;
 #[cfg(test)]
 mod eval;
@@ -30,9 +47,13 @@ mod mail;
 pub mod maintain;
 pub mod mcp;
 pub mod monitor;
+#[cfg(test)]
+#[path = "../../conformance/outcomes/native-identity.rs"]
+mod native_producer_identity;
 pub mod policy;
 #[cfg(test)]
 mod rails;
+mod recovery_commands;
 pub mod retrieval;
 pub mod roots;
 pub mod roots_commands;
@@ -41,10 +62,15 @@ pub mod runtime;
 pub mod search;
 pub mod sheet;
 pub mod shell;
+mod source_location;
+mod source_occurrences;
 pub mod spawn;
 pub mod starter;
 pub mod trigger;
 pub mod vault;
+pub mod workspace_migration;
+mod workspace_service;
+mod workflows;
 
 use std::path::{Path, PathBuf};
 
@@ -103,7 +129,9 @@ async fn pick_vault(app: tauri::AppHandle) -> Result<Option<String>, String> {
 /// Copy the bundled demo vault somewhere writable and remember it, so a fresh
 /// install has something to open instead of a folder picker onto an empty Mac.
 #[tauri::command(async)]
-fn open_demo_vault(app: tauri::AppHandle) -> Result<String, String> {
+fn open_demo_vault(
+    app: tauri::AppHandle,
+) -> Result<String, workspace_service::types::selected::CommandReadError> {
     let path = demo::ensure(&app)?;
     remember_vault(&app, &path)?;
     Ok(path)
@@ -133,7 +161,19 @@ fn set_panel_agent(
 }
 
 #[tauri::command(async)]
-fn scan_vault(vault: String) -> Result<Vec<Entry>, String> {
+fn scan_vault(
+    vault: String,
+) -> Result<Vec<Entry>, workspace_service::types::selected::CommandReadError> {
+    use workspace_service::{authority, types::selected::CommandReadError};
+    match authority::resolve(Path::new(&vault)).map_err(CommandReadError::Authority)? {
+        authority::Authority::Selected => {
+            return workspace_service::selected::scan_presentation(Path::new(&vault))
+                .map_err(CommandReadError::Authority);
+        }
+        authority::Authority::Legacy => {}
+    }
+    workspace_service::boundary::guard_legacy_scope(Path::new(&vault), None, true)
+        .map_err(CommandReadError::Authority)?;
     // M21.1 janitor: reap atomic-write temps abandoned by a crash. Here in
     // the command rather than inside scan::scan_vault so bare library scans
     // (tests, MCP-forced rescans) stay read-only.
@@ -141,18 +181,57 @@ fn scan_vault(vault: String) -> Result<Vec<Entry>, String> {
         Path::new(&vault),
         &WriteReceipt::system(vault::receipt::SystemWriter::OrphanTemps),
     );
-    vault::scan::scan_vault(Path::new(&vault))
+    vault::scan::scan_vault(Path::new(&vault)).map_err(CommandReadError::Legacy)
 }
 
 #[tauri::command(async)]
-fn read_note(vault: String, path: String) -> Result<String, String> {
-    vault::write::read_note(Path::new(&vault), &path)
+fn read_note(
+    vault: String,
+    path: String,
+) -> Result<String, workspace_service::types::selected::CommandReadError> {
+    use workspace_service::{authority, types::selected::CommandReadError};
+    match authority::resolve(Path::new(&vault)).map_err(CommandReadError::Authority)? {
+        authority::Authority::Selected => {
+            workspace_service::selected::read_body(Path::new(&vault), &path)
+                .map_err(CommandReadError::Authority)
+        }
+        authority::Authority::Legacy => vault::write::read_note_checked(Path::new(&vault), &path),
+    }
+}
+
+/// One metadata-only human action. The expected version never grants authority.
+#[tauri::command(async)]
+fn set_page_full_width(
+    vault: String,
+    path: String,
+    expected: workspace_service::types::selected::SelectedRecordVersion,
+    mode: workspace_service::types::selected::SelectedMode,
+) -> Result<
+    workspace_service::types::selected::SelectedMetadataAck,
+    workspace_service::types::selected::AuthorityError,
+> {
+    use workspace_service::types::{selected::*, StoreErrorCode};
+    let cleared = knowledge::guard_human_write(&path).map_err(|message| AuthorityError {
+        code: StoreErrorCode::CapabilityUnavailable,
+        kind: AuthorityErrorKind::UnsupportedOperation,
+        message,
+        retryable: false,
+    })?;
+    let by = WriteReceipt::ipc(cleared);
+    workspace_service::selected::set_full_width(Path::new(&vault), &path, &expected, mode, &by)
 }
 
 /// The exact source used to prepare a checked link rewrite (M60.10).
 #[tauri::command(async)]
-fn read_note_source(vault: String, path: String) -> Result<vault::write::NoteSource, String> {
-    vault::write::read_note_source(Path::new(&vault), &path)
+fn read_note_source(
+    vault: String,
+    path: String,
+) -> Result<workspace_service::types::LegacyRecordSnapshot, String> {
+    workspace_service::legacy::read_record(
+        Path::new(&vault),
+        &workspace_service::types::LegacyRecordLocator { path },
+    )
+    .map_err(|error| error.message)
 }
 
 #[tauri::command(async)]
@@ -226,6 +305,55 @@ fn search_vault(
     search::vault_search(Path::new(&vault), &query, limit)
 }
 
+/// Human source navigation uses the existing vault identity and bounded
+/// resolver. Agent callers must supply their own admitted read scope.
+#[tauri::command(async)]
+fn resolve_source(
+    vault: String,
+    locator: source_location::SourceLocator,
+) -> Result<source_location::ResolveSourceResult, String> {
+    let root = Path::new(&vault);
+    let vault_id = runtime::scope::derive_vault_id(root);
+    source_location::resolve_source(
+        &source_location::SourceScope {
+            vault: root,
+            vault_id: &vault_id,
+            admits: &|_| true,
+        },
+        &locator,
+    )
+}
+
+/// Human occurrence navigation reads the complete legacy vault scope. Selected
+/// metadata needs its own compatible source snapshot adapter before adoption.
+#[tauri::command(async)]
+fn find_source_occurrences(
+    vault: String,
+    target_path: String,
+    mode: source_occurrences::OccurrenceMode,
+    cursor: Option<String>,
+) -> Result<source_occurrences::OccurrencePage, String> {
+    let root = Path::new(&vault);
+    workspace_service::authority::guard_legacy(root).map_err(|error| error.message)?;
+    let vault_id = runtime::scope::derive_vault_id(root);
+    let scope = source_location::SourceScope {
+        vault: root,
+        vault_id: &vault_id,
+        admits: &|_| true,
+    };
+    match mode {
+        source_occurrences::OccurrenceMode::Mention => {
+            source_occurrences::find_mentions(&scope, &target_path, cursor.as_deref())
+        }
+        source_occurrences::OccurrenceMode::Linked => source_occurrences::find_source_occurrences(
+            &scope,
+            &target_path,
+            mode,
+            cursor.as_deref(),
+        ),
+    }
+}
+
 // The write commands below are the HUMAN path — every one of them is
 // reachable from the UI, so each mints its receipt from the knowledge/
 // bundle's guard (M5, M58.1): a Human receipt from `guard_human_write` or
@@ -235,14 +363,248 @@ fn search_vault(
 // the two server-stamped tools alone, `write_concept` and `recheck_concept`
 // (M49.7). See mcp.rs.
 /// The editor omits expect_hash; outside readers carry their full-file hash.
-/// A projection capture returns None; an ordinary save returns its new hash.
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub(crate) enum NoteWriteAck {
+    File {
+        #[serde(rename = "contentHash")]
+        content_hash: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        recovery: Option<vault::recovery::Outcome>,
+    },
+    Governed {
+        #[serde(rename = "projectionHash")]
+        projection_hash: String,
+    },
+}
+
+/// Transport result includes unresolved selected operations; callers must
+/// discriminate it before creating an acknowledged DocumentOwner write.
+#[derive(Debug, serde::Serialize)]
+#[serde(untagged)]
+enum NoteSaveResult {
+    Acknowledged(NoteWriteAck),
+    Selected(workspace_service::selected::EditorSaveResult),
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(untagged)]
+enum NoteSaveError {
+    Legacy(String),
+    Selected(workspace_service::selected::EditorSaveRefusal),
+}
+impl From<String> for NoteSaveError {
+    fn from(error: String) -> Self {
+        Self::Legacy(error)
+    }
+}
+impl std::fmt::Display for NoteSaveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Legacy(message) => f.write_str(message),
+            Self::Selected(workspace_service::selected::EditorSaveRefusal::SelectedRefused {
+                error,
+            }) => f.write_str(&error.message),
+        }
+    }
+}
+
+impl From<vault::recovery::RecoveryWrite> for NoteWriteAck {
+    fn from(saved: vault::recovery::RecoveryWrite) -> Self {
+        Self::File {
+            content_hash: saved.hash,
+            recovery: Some(saved.recovery),
+        }
+    }
+}
+
 #[tauri::command(async)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "preserves the existing flat save_note IPC while adding the optional selected-editor request"
+)]
 fn save_note(
+    app: tauri::AppHandle,
     vault: String,
     path: String,
     body: String,
     expect_hash: Option<String>,
-) -> Result<Option<String>, String> {
+    body_format: Option<String>,
+    recovery_bypass: Option<String>,
+    editor_request: Option<workspace_service::selected::EditorSaveRequest>,
+) -> Result<NoteSaveResult, NoteSaveError> {
+    let journal = app.state::<recovery_commands::RecoveryState>().get(&app);
+    save_note_with_editor_journal(
+        journal.as_deref().map_err(Clone::clone),
+        NoteSaveInput {
+            vault,
+            path,
+            body,
+            expect_hash,
+            body_format,
+            recovery_bypass,
+            editor_request,
+        },
+    )
+    .map_err(|error| {
+        if let NoteSaveError::Legacy(message) = error {
+            NoteSaveError::Legacy(recovery_commands::record_refusal("save_note", message))
+        } else {
+            error
+        }
+    })
+}
+
+fn save_note_with_journal(
+    journal: Result<&vault::recovery::Journal, String>,
+    vault: String,
+    path: String,
+    body: String,
+    expect_hash: Option<String>,
+    body_format: Option<String>,
+    recovery_bypass: Option<String>,
+) -> Result<NoteWriteAck, String> {
+    match body_format.as_deref().unwrap_or("rich") {
+        "rich" => save_note_write(
+            vault,
+            path,
+            body,
+            expect_hash,
+            journal,
+            recovery_bypass.as_deref(),
+        ),
+        "source" => {
+            let by = WriteReceipt::ipc(knowledge::guard_human_write(&path)?);
+            vault::write::save_source_body_with_recovery(
+                Path::new(&vault),
+                &path,
+                &body,
+                journal?,
+                recovery_bypass.as_deref(),
+                &by,
+            )
+            .map(NoteWriteAck::from)
+            .map_err(save_note_refusal)
+        }
+        _ => Err("unsupported_body_format".into()),
+    }
+}
+
+struct NoteSaveInput {
+    vault: String,
+    path: String,
+    body: String,
+    expect_hash: Option<String>,
+    body_format: Option<String>,
+    recovery_bypass: Option<String>,
+    editor_request: Option<workspace_service::selected::EditorSaveRequest>,
+}
+
+// Shared by the existing command and the real command-boundary fixture tests.
+fn save_note_with_editor_journal(
+    journal: Result<&vault::recovery::Journal, String>,
+    input: NoteSaveInput,
+) -> Result<NoteSaveResult, NoteSaveError> {
+    let NoteSaveInput {
+        vault,
+        path,
+        body,
+        expect_hash,
+        body_format,
+        recovery_bypass,
+        editor_request,
+    } = input;
+    if let Some(request) = editor_request {
+        if expect_hash.is_some()
+            || !matches!(body_format.as_deref().unwrap_or("rich"), "rich" | "source")
+        {
+            return Err("unsupported_selected_editor_request".to_owned().into());
+        }
+        let by = WriteReceipt::ipc(knowledge::guard_human_write(&path)?);
+        let fresh = request.phase == workspace_service::selected::EditorSavePhase::Start;
+        return workspace_service::selected::save_editor_body(
+            Path::new(&vault),
+            &path,
+            body.as_bytes(),
+            &request,
+            journal?,
+            recovery_bypass.as_deref(),
+            &by,
+        )
+        .map(NoteSaveResult::Selected)
+        .map_err(|e| match e {
+            workspace_service::selected::ProtectedBodyError::Authority(error) if fresh => {
+                NoteSaveError::Selected(
+                    workspace_service::selected::EditorSaveRefusal::SelectedRefused { error },
+                )
+            }
+            other => NoteSaveError::Legacy(other.to_string()),
+        });
+    }
+    // The native command inventory admits the reviewed editor branch only.
+    // An omitted request must never reach concept/YAML composition on selected.
+    workspace_service::authority::guard_legacy(Path::new(&vault))
+        .map_err(|error| NoteSaveError::Legacy(error.message))?;
+    save_note_with_journal(
+        journal,
+        vault,
+        path,
+        body,
+        expect_hash,
+        body_format,
+        recovery_bypass,
+    )
+    .map(NoteSaveResult::Acknowledged)
+    .map_err(NoteSaveError::Legacy)
+}
+
+#[tauri::command(async)]
+fn read_editor_body(
+    vault: String,
+    path: String,
+    target: workspace_service::selected::SelectedEditorTarget,
+) -> Result<
+    workspace_service::selected::SelectedEditorSnapshot,
+    workspace_service::types::selected::AuthorityError,
+> {
+    workspace_service::selected::read_editor_snapshot(Path::new(&vault), &path, &target)
+}
+
+/// One exact requested canonical property; no legacy projection or read-time upgrade.
+#[tauri::command(async)]
+fn read_selected_property(
+    vault: String,
+    path: String,
+    target: workspace_service::selected::SelectedEditorTarget,
+    field: String,
+) -> Result<workspace_service::selected::SelectedPropertySnapshot,workspace_service::types::selected::AuthorityError> {
+    workspace_service::selected::read_property(Path::new(&vault),&path,&target,&field)
+}
+
+/// The generated original request is data, never permission to select a store.
+#[tauri::command(async)]
+fn patch_selected_metadata(
+    vault: String,
+    path: String,
+    request: workspace_service::selected::MetadataPatchRequest,
+) -> Result<workspace_service::selected::MetadataPatchResult,workspace_service::selected::MetadataPatchRefusal> {
+    use workspace_service::{selected::MetadataPatchRefusal,types::{selected::*,StoreErrorCode}};
+    let cleared=knowledge::guard_human_write(&path).map_err(|message|MetadataPatchRefusal::MetadataRefused{error:AuthorityError{
+        code:StoreErrorCode::CapabilityUnavailable,kind:AuthorityErrorKind::UnsupportedOperation,message,retryable:false,
+    }})?;
+    let by=WriteReceipt::ipc(cleared);
+    workspace_service::selected::patch_metadata(Path::new(&vault),&path,&request,&by)
+        .map_err(|error|MetadataPatchRefusal::MetadataRefused{error})
+}
+
+fn save_note_write(
+    vault: String,
+    path: String,
+    body: String,
+    expect_hash: Option<String>,
+    journal: Result<&vault::recovery::Journal, String>,
+    recovery_bypass: Option<&str>,
+) -> Result<NoteWriteAck, String> {
     let expected = expect_hash
         .as_deref()
         .map(vault::write::normalize_expect_hash)
@@ -258,13 +620,59 @@ fn save_note(
             expected.as_deref(),
             &by,
         ) {
-            return result.map(|()| None).map_err(save_note_refusal);
+            return result
+                .map(|projection_hash| NoteWriteAck::Governed { projection_hash })
+                .map_err(save_note_refusal);
         }
     }
     let by = WriteReceipt::ipc(knowledge::guard_human_write(&path)?);
-    vault::write::save_note(Path::new(&vault), &path, &body, expected.as_deref(), &by)
-        .map(Some)
-        .map_err(save_note_refusal)
+    vault::write::save_note_with_recovery(
+        Path::new(&vault),
+        &path,
+        &body,
+        expected.as_deref(),
+        journal?,
+        recovery_bypass,
+        &by,
+    )
+    .map(NoteWriteAck::from)
+    .map_err(save_note_refusal)
+}
+
+#[cfg(test)]
+fn save_note_for_test(
+    vault: String,
+    path: String,
+    body: String,
+    expect_hash: Option<String>,
+    body_format: Option<String>,
+) -> Result<NoteWriteAck, String> {
+    let config = vault::testutil::temp_vault("save-command-journal");
+    let journal = recovery_commands::RecoveryState::default().for_config(&config);
+    let result = save_note_with_journal(
+        journal.as_deref().map_err(Clone::clone),
+        vault,
+        path,
+        body,
+        expect_hash,
+        body_format,
+        None,
+    );
+    let _ = std::fs::remove_dir_all(config);
+    result
+}
+
+#[cfg(test)]
+fn save_note_legacy(
+    vault: String,
+    path: String,
+    body: String,
+    expect_hash: Option<String>,
+) -> Result<Option<String>, String> {
+    save_note_for_test(vault, path, body, expect_hash, None).map(|ack| match ack {
+        NoteWriteAck::File { content_hash, .. } => Some(content_hash),
+        NoteWriteAck::Governed { .. } => None,
+    })
 }
 
 fn save_note_refusal(error: vault::write::NoteWriteError) -> String {
@@ -437,6 +845,8 @@ pub struct RunHandle {
     pub run: u64,
     pub run_id: String,
     pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generation_id: Option<String>,
 }
 
 /// One page of the fleet's run history (M33.2).
@@ -452,6 +862,35 @@ fn fleet_runs(
 ) -> Result<Vec<runtime::fleet::FleetRun>, String> {
     let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
     runtime::fleet::runs(&ro, &filter)
+}
+
+#[tauri::command(async)]
+fn fleet_runs_page(
+    app: tauri::AppHandle,
+    scope: runtime::fleet::RunHistoryScope,
+    cursor: Option<runtime::fleet::RunCursor>,
+    limit: Option<u32>,
+) -> Result<runtime::fleet::RunsPage, String> {
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::fleet::runs_page(&ro, &scope, cursor.as_ref(), limit)
+}
+
+#[tauri::command(async)]
+fn fleet_run_lineage(
+    app: tauri::AppHandle,
+    root_run_id: String,
+) -> Result<runtime::fleet::RunLineage, String> {
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::fleet::run_lineage(&ro, &root_run_id)
+}
+
+#[tauri::command(async)]
+fn fleet_run_origin(
+    app: tauri::AppHandle,
+    vault_id: Option<String>,
+) -> Result<runtime::fleet::RunOrigin, String> {
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::fleet::run_origin(&ro, vault_id.as_deref())
 }
 
 /// Page-scoped runs, including at most two descendant hop levels.
@@ -484,6 +923,23 @@ fn fleet_run_detail(
 ) -> Result<runtime::fleet::RunDetail, String> {
     let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
     runtime::fleet::run_detail(&ro, &run_id)
+}
+
+#[tauri::command(async)]
+fn fleet_run_configuration(
+    app: tauri::AppHandle,
+    vault: String,
+    run_id: String,
+) -> runtime::run_configuration::ConfigurationReply {
+    use runtime::run_configuration::{self as configuration, ConfigurationReadError as Error};
+    let read = (|| {
+        let context = workspace_service::authority::context().map_err(|_| Error::Unavailable)?;
+        let ticket = configuration::capture_read_ticket(&context, Path::new(&vault))?;
+        let data = config_dir(&app).map_err(|_| Error::Unavailable)?;
+        let ro = runtime::ReadOnly::open(&data).map_err(|_| Error::Unavailable)?;
+        configuration::read_configuration(&ro, &ticket, &run_id)
+    })();
+    configuration::ConfigurationReply::from_read(read)
 }
 
 /// One run's transcript, folded from Claude Code's own session file (M56.9,
@@ -1327,6 +1783,8 @@ fn ask_question(
     intended_use: assembly::manifest::QueryIntendedUse,
 ) -> Result<assembly::Asked, String> {
     let vault_path = Path::new(&vault);
+    let agents = app.state::<agent::AgentState>();
+    let preparation = agents.prepare_run(vault_path)?;
     let config = config_dir(&app)?;
     let conn = runtime::open_existing(&config)?;
     let scope = runtime::open_vault(vault_path)
@@ -1348,9 +1806,9 @@ fn ask_question(
         intended_use,
         limits: assembly::manifest::Limits::ATTENDED,
     };
-    let agents = app.state::<agent::AgentState>();
     let mcp_state = app.state::<mcp::McpState>();
     let live = assembly::live::Live {
+        preparation: &preparation,
         app: &app,
         agents: agents.inner(),
         mcp: mcp_state.inner(),
@@ -2267,7 +2725,7 @@ async fn export_png(
     app: tauri::AppHandle,
     default_name: String,
     bytes_base64: String,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, workspace_service::types::selected::CommandReadError> {
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(bytes_base64)
@@ -2282,7 +2740,11 @@ async fn export_png(
         return Ok(None);
     };
     let path = picked.into_path().map_err(|e| e.to_string())?;
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    workspace_service::native_admission::publish_export(
+        &workspace_service::authority::context().map_err(|e| e.message)?,
+        &path,
+        &bytes,
+    )?;
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
@@ -2293,7 +2755,7 @@ async fn export_svg(
     app: tauri::AppHandle,
     default_name: String,
     svg: String,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, workspace_service::types::selected::CommandReadError> {
     let Some(picked) = app
         .dialog()
         .file()
@@ -2304,7 +2766,11 @@ async fn export_svg(
         return Ok(None);
     };
     let path = picked.into_path().map_err(|e| e.to_string())?;
-    std::fs::write(&path, svg).map_err(|e| e.to_string())?;
+    workspace_service::native_admission::publish_export(
+        &workspace_service::authority::context().map_err(|e| e.message)?,
+        &path,
+        svg.as_bytes(),
+    )?;
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
@@ -2315,7 +2781,7 @@ async fn export_csv(
     app: tauri::AppHandle,
     default_name: String,
     csv: String,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, workspace_service::types::selected::CommandReadError> {
     let Some(picked) = app
         .dialog()
         .file()
@@ -2326,7 +2792,11 @@ async fn export_csv(
         return Ok(None);
     };
     let path = picked.into_path().map_err(|e| e.to_string())?;
-    std::fs::write(&path, csv).map_err(|e| e.to_string())?;
+    workspace_service::native_admission::publish_export(
+        &workspace_service::authority::context().map_err(|e| e.message)?,
+        &path,
+        csv.as_bytes(),
+    )?;
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
@@ -2336,7 +2806,7 @@ async fn export_sheet_xlsx(
     app: tauri::AppHandle,
     default_name: String,
     page: String,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, workspace_service::types::selected::CommandReadError> {
     let zone = runtime::budget::system_timezone();
     let bytes =
         tauri::async_runtime::spawn_blocking(move || sheet::xlsx::workbook_xlsx(page, zone))
@@ -2352,15 +2822,24 @@ async fn export_sheet_xlsx(
         return Ok(None);
     };
     let path = picked.into_path().map_err(|e| e.to_string())?;
-    std::fs::write(&path, bytes).map_err(|e| format!("The workbook couldn't be written: {e}"))?;
+    workspace_service::native_admission::publish_export(
+        &workspace_service::authority::context().map_err(|e| e.message)?,
+        &path,
+        &bytes,
+    )?;
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
 // --- Local agent + MCP (M6) ------------------------------------------------
 
 #[tauri::command(async)]
-fn check_agent() -> agent::AgentStatus {
+fn check_agent() -> Result<agent::AgentStatus, String> {
     agent::status()
+}
+
+#[tauri::command(async)]
+fn check_cli_readiness() -> agent::readiness::CliReadiness {
+    agent::readiness::check()
 }
 
 /// The pre-run question spends under the ambient gate, with a Rust-only
@@ -2376,6 +2855,7 @@ fn check_wake(
     question: String,
 ) -> Result<agent::condition::WakeCheck, String> {
     let vault = Path::new(&vault);
+    let preparation = state.prepare_run(vault)?;
     let scope = runtime::open_vault(vault)
         .ok_or("pre-run checks need the runtime database, which is not open")?;
     let store = scope
@@ -2397,6 +2877,7 @@ fn check_wake(
             entries: &entries,
         },
         &agent::condition::Live {
+            preparation: &preparation,
             app: &app,
             agents: state.inner(),
             mcp: mcp_state.inner(),
@@ -2460,6 +2941,7 @@ pub(crate) fn start_handoff_run(
     vault: &Path,
     mut request: agent::AgentRequest,
     caller: &mcp::RunGrant,
+    preparation: &agent::RunPreparation,
 ) -> Result<String, String> {
     use tauri::Manager;
     let actor = request
@@ -2530,6 +3012,7 @@ pub(crate) fn start_handoff_run(
         &dir,
         Some(meter),
         None,
+        preparation,
     )
     .map(|_run| {
         report_outcomes(&told, &durable);
@@ -2552,6 +3035,7 @@ pub(crate) fn start_handoff_run(
 #[serde(untagged)]
 enum RunStart {
     Started(RunHandle),
+    Observed { observed_generation: runtime::chat_generations::Receipt },
     Deferred {
         deferred: Vec<String>,
         words: Vec<String>,
@@ -2587,18 +3071,54 @@ impl RunStart {
 
 /// Returns the run's id — the tag on every event this run emits.
 #[tauri::command(async)]
+#[expect(clippy::too_many_arguments, reason = "the existing start also accepts an optional idempotence key")]
 fn run_agent(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, agent::AgentState>,
-    mcp_state: tauri::State<'_, mcp::McpState>,
     vault: String,
     request: agent::AgentRequest,
     wake: Option<runtime::wakes::WakeRequest>,
     followup: Option<String>,
+    generation_request_key: Option<String>,
+    archive_binding: Option<runtime::conversations::AttemptBinding>,
 ) -> Result<RunStart, String> {
+    let mcp_state = app.state::<mcp::McpState>();
+    let preparation = state.prepare_run(Path::new(&vault))?;
+    workspace_service::boundary::guard_legacy_scope(Path::new(&vault), None, true)
+        .map_err(|e| e.message)?;
     // M56.5: the run's model and effort first, before the pause check, the
     // endpoint and any lease, so a refused run leaves no token, lease or row.
     agent::run_options::validate_request(&request)?;
+    if archive_binding.is_some() && generation_request_key.is_none() {
+        return Err("A conversation display binding requires its original generation request key.".into());
+    }
+    if generation_request_key.is_some()
+        && (request.attended!=Some(true)||request.internal||wake.is_some()||followup.is_some()) {
+        return Err("A generation request key is valid only for an attended native turn.".into());
+    }
+    // Optional app-owned provenance; the injected window is observed before
+    // authority/storage locks. Selectors alone establish no native identity.
+    let native_entry = if request.attended == Some(true)
+        && !request.internal
+        && wake.is_none()
+        && followup.is_none()
+    {
+        let entry=actions::native_owner::prepare_root_entry(
+            &app,
+            &window,
+            Path::new(&vault),
+            state.inner(),
+            &preparation,
+            mcp_state.inner(),
+        )
+        ;
+        if generation_request_key.is_some() {
+            Some(entry.map_err(|_|"Generation admission is unavailable. Nothing was started.".to_owned())?)
+        } else {entry.ok()}
+    } else {
+        None
+    };
     if followup.is_some()
         && (wake.is_some()
             || request.attended == Some(true)
@@ -2643,6 +3163,14 @@ fn run_agent(
     // M25.2: attended chat is METERED and never gated. The run is recorded
     // with its tokens; no reservation, no lease, and no ceiling can refuse it.
     let scope = runtime::open_vault(Path::new(&vault));
+    let generation=if let Some(key)=generation_request_key.as_deref() {
+        let entry=native_entry.as_ref().ok_or("Generation admission is unavailable. Nothing was started.")?;
+        let scope=scope.as_ref().ok_or("Generation admission is unavailable. Nothing was started.")?;
+        match entry.begin_generation_with_archive(scope,key,&request,archive_binding.as_ref())? {
+            actions::native_owner::GenerationStart::New(ticket)=>Some(ticket),
+            actions::native_owner::GenerationStart::Observed(receipt)=>return Ok(RunStart::Observed {observed_generation:receipt}),
+        }
+    } else {None};
     // M33b.5 — the fleet pause gate every agent-attributed run passes is not a
     // budget question. Every frontend path that starts a CLI child funnels
     // here (the job runner's schedules and triggers, and the panel addressing
@@ -2858,6 +3386,7 @@ fn run_agent(
     let result = spawn_requested_run(
         &app,
         state.inner(),
+        &preparation,
         mcp_state.inner(),
         Path::new(&vault),
         request,
@@ -2866,6 +3395,8 @@ fn run_agent(
         lease,
         also,
         parent_run_id,
+        native_entry,
+        agent::LaunchLink {generation,answer:None},
     )
     .map(RunStart::Started);
     if result.is_err() {
@@ -2915,6 +3446,144 @@ fn finish_unspawned_lease<T>(
     result
 }
 
+// Settings account metadata only. Each wrapper authenticates this injected
+// window and retains the original app owner; no vault/person/secret input exists.
+#[tauri::command]
+async fn managed_connections(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    cursor: Option<actions::ids::ConnectionId>,
+) -> Result<connections::metadata::ManagedConnectionPage, connections::ConnectionError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::native_owner::managed_list(&app, &window, cursor)
+    })
+    .await
+    .map_err(|_| connections::ConnectionError::Unavailable)?
+}
+#[tauri::command]
+async fn managed_connection_add(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    host: String,
+    login: String,
+) -> Result<connections::ConnectionStatus, connections::ConnectionError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::native_owner::managed_add(&app, &window, host, login)
+    })
+    .await
+    .map_err(|_| connections::ConnectionError::Unavailable)?
+}
+#[tauri::command]
+async fn managed_connection_disable(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    connection_id: actions::ids::ConnectionId,
+    expected_revision: u64,
+) -> Result<connections::ConnectionStatus, connections::ConnectionError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::native_owner::managed_disable(&app, &window, connection_id, expected_revision)
+    })
+    .await
+    .map_err(|_| connections::ConnectionError::Unavailable)?
+}
+
+// Fixed selectors only: all caller identity comes from actual injected state.
+#[tauri::command]
+async fn managed_connection_status(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    connection_id: actions::ids::ConnectionId,
+) -> Result<connections::ConnectionStatus, connections::ConnectionError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::native_owner::managed_status(&app, &window, connection_id)
+    })
+    .await
+    .map_err(|_| connections::ConnectionError::Unavailable)?
+}
+#[tauri::command]
+async fn chat_recovery_inspect(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    run_id: String,
+) -> Result<
+    actions::recovery_read_types::ChatRecoveryInspection,
+    actions::read_types::ActionReadError,
+> {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::native_owner::chat_recovery_inspect(&app, &window, &run_id)
+    })
+    .await
+    .map_err(|_| native_catalog_join_error())?
+}
+
+// The injected native window authenticates the original run selector. A lost
+// write acknowledgement is ambiguous even when its worker cannot be joined.
+#[tauri::command]
+async fn read_managed_action_access(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    run: u64,
+) -> Result<actions::native_owner::RunActionAccessView, actions::read_types::ActionError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::native_owner::read_managed_action_access(&app, &window, run)
+    })
+    .await
+    .map_err(|_| actions::read_types::error(
+        actions::read_types::ActionErrorCode::Unavailable,
+        "Run access is unavailable.",
+    ))?
+}
+#[tauri::command]
+async fn set_managed_action_access(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    run: u64,
+    request: actions::native_owner::SetRunActionAccess,
+) -> actions::native_owner::SetRunActionAccessResult {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::native_owner::set_managed_action_access(&app, &window, run, request)
+    })
+    .await
+    .unwrap_or_else(|_| actions::native_owner::SetRunActionAccessResult::CommitUnknown {
+        message: "Cerebro could not confirm this access change. Reload and review before trying again.".into(),
+    })
+}
+
+#[tauri::command]
+async fn native_action_catalog(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    run: u64,
+    cursor: Option<actions::read_types::CatalogCursor>,
+) -> Result<actions::read_types::ActionCatalogPage, actions::read_types::ActionReadError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::native_owner::catalog(&app, &window, run, cursor)
+    })
+    .await
+    .map_err(|_| native_catalog_join_error())?
+}
+#[tauri::command]
+async fn native_action_definition(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    run: u64,
+    id: actions::read_types::ActionId,
+    digest: actions::read_types::DefinitionDigest,
+) -> Result<actions::read_types::ActionDefinitionView, actions::read_types::ActionReadError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        actions::native_owner::definition(&app, &window, run, id, digest)
+    })
+    .await
+    .map_err(|_| native_catalog_join_error())?
+}
+fn native_catalog_join_error() -> actions::read_types::ActionReadError {
+    actions::read_types::ActionReadError {
+        code: actions::read_types::ActionReadErrorCode::Unavailable,
+        retry_disposition: actions::read_types::RetryDisposition::Never,
+        message: "Native action metadata is unavailable.".into(),
+    }
+}
+
 /// Start an admitted run (out of `run_agent` for M57.1, whose answers resume
 /// through it): the durable id, the bearer, the meter and the stream. The
 /// request's endpoint is already set, its pause gate and cause already
@@ -2928,6 +3597,7 @@ fn finish_unspawned_lease<T>(
 fn spawn_requested_run(
     app: &tauri::AppHandle,
     agents: &agent::AgentState,
+    preparation: &agent::RunPreparation,
     mcp_state: &mcp::McpState,
     vault: &Path,
     mut request: agent::AgentRequest,
@@ -2936,6 +3606,8 @@ fn spawn_requested_run(
     lease: Option<runtime::dispatch::Lease>,
     also: Vec<runtime::cause::RunCause>,
     parent_run_id: Option<String>,
+    native_entry: Option<actions::native_owner::NativeRootEntry<'_>>,
+    launch: agent::LaunchLink,
 ) -> Result<RunHandle, String> {
     let dir = config_dir(app)?;
     // M31.2a: the durable id is minted BEFORE the token so the grant and the
@@ -2945,9 +3617,10 @@ fn spawn_requested_run(
     // was minted by the CLAIM, which already opened its row; an attended
     // run's row is opened by `agent::stream` just before the child spawns
     // (M49.9), so what the run books during its life has a row to land on.
-    let run_id = lease
+    let generation_id=launch.generation.as_ref().map(|g|g.generation_id().to_owned());
+    let run_id = launch.generation.as_ref().map(|g|g.run_id().to_owned()).or_else(|| lease
         .as_ref()
-        .map(|l| l.run_id.clone())
+        .map(|l| l.run_id.clone()))
         .unwrap_or_else(ledger::new_run_id);
     // M33.7: the renderer gets this id back, so its device-local run log and
     // the durable `runs` row can finally name the same run. Cloned rather
@@ -2978,6 +3651,7 @@ fn spawn_requested_run(
         request.actor.as_deref(),
         request.ask_first,
     ));
+    let mut native_slot = None;
     request.mcp_token = Some(if let Some(parent) = parent_run_id.as_deref() {
         let conn = runtime::open_existing(&dir)?;
         let chain = runtime::dispatch::chain_actors(&conn, parent)?
@@ -2992,6 +3666,18 @@ fn spawn_requested_run(
             mcp::WriteAsks::of(&request),
             &chain,
         )?
+    } else if native_entry.is_some() {
+        let (token, witness) = mcp_state.run_token_with_native_slot(
+            request.actor.as_deref(),
+            request.scope.clone(),
+            request.read_scope.clone(),
+            grant_tools(&request),
+            run_id.clone(),
+            vault,
+            mcp::WriteAsks::of(&request),
+        )?;
+        native_slot = witness;
+        token
     } else {
         mcp_state.run_token(
             request.actor.as_deref(),
@@ -3030,7 +3716,7 @@ fn spawn_requested_run(
         // Written by the attended open; a leased run's claim already wrote it.
         cause,
     };
-    agent::stream(
+    agent::stream_linked(
         app.clone(),
         agents,
         vault,
@@ -3040,13 +3726,21 @@ fn spawn_requested_run(
         // Nothing in the app waits on an attended run: the panel follows the
         // event stream, and the person is watching it.
         None,
+        preparation,
+        launch,
     )
     .map(|spawned| {
+        // Existing stream has returned: its publication guard is released.
+        // Native finalization may retain a read-only origin; legacy start remains optional.
+        if let (Some(entry), Some(slot), Some(scope)) = (native_entry, native_slot, scope) {
+            let _ = actions::native_owner::register_published_root(entry, slot, scope);
+        }
         report_outcomes(&told, &durable);
         RunHandle {
             run: spawned.run,
             run_id: durable,
             session_id: spawned.session_id,
+            generation_id,
         }
     })
 }
@@ -3212,7 +3906,8 @@ fn agent_events_since(
 /// stops every run on quit (`RunEvent::Exit`) and the old vault's runs on a
 /// vault switch (`start_watcher`), so nothing has to call this for either.
 #[tauri::command(async)]
-fn stop_all_agents(state: tauri::State<'_, agent::AgentState>) -> Result<Vec<u64>, String> {
+fn stop_all_agents(app: tauri::AppHandle, state: tauri::State<'_, agent::AgentState>) -> Result<Vec<u64>, String> {
+    actions::native_owner::stop_action_workers(&app);
     state.stop_all()
 }
 
@@ -3221,9 +3916,15 @@ fn stop_all_agents(state: tauri::State<'_, agent::AgentState>) -> Result<Vec<u64
 /// already ended). Untagged: the renderer tells the arms apart by which field
 /// is present, as with `RunStart`.
 #[derive(Serialize)]
+struct HeldAnswered {
+    interaction_id: String,
+}
+
+#[derive(Serialize)]
 #[serde(untagged)]
 enum AnswerResult {
     Resumed(RunHandle),
+    Answered { answered: HeldAnswered },
     Refused {
         refused: agent::interaction::Refusal,
     },
@@ -3242,8 +3943,10 @@ enum AnswerResult {
 /// judges it under the grant the resume will run with (`answer_grant`); a
 /// refusal comes back to the card, which keeps waiting, and records nothing.
 #[tauri::command(async)]
+#[expect(clippy::too_many_arguments, reason = "held generation admission authenticates the injected native window")]
 fn answer_interaction(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, agent::AgentState>,
     mcp_state: tauri::State<'_, mcp::McpState>,
     vault: String,
@@ -3253,6 +3956,15 @@ fn answer_interaction(
 ) -> Result<AnswerResult, String> {
     let book = state.interactions();
     let answer = agent::interaction::PersonAnswer::from_ipc(answer);
+    if let Some(result) = actions::native_owner::answer_held_managed_interaction(
+        &app, &window, Path::new(&vault), &id, &answer, updated_input.as_ref(),
+    ) {
+        return Ok(match result {
+            Ok(()) => AnswerResult::Answered { answered: HeldAnswered { interaction_id: id } },
+            Err(refused) => AnswerResult::Refused { refused },
+        });
+    }
+    let preparation = state.prepare_run(Path::new(&vault))?;
     let check = |request: &agent::AgentRequest, tool: &str, input: &serde_json::Value| {
         let at = Path::new(&vault);
         mcp::edit_refusal(at, &answer_grant(at, request), tool, input)
@@ -3286,10 +3998,17 @@ fn answer_interaction(
         request.session_id = Some(resume.session_id.clone());
         request.attended = Some(true);
         let cause = runtime::cause::admit(true, None)?;
+        let generation=if resume.link.generation_bound() {
+            let entry=actions::native_owner::prepare_root_entry(&app,&window,vault_path,state.inner(),&preparation,mcp_state.inner())
+                .map_err(|_|"Generation admission is unavailable. Nothing was started.".to_owned())?;
+            let scope=scope.as_ref().ok_or("Generation admission is unavailable. Nothing was started.")?;
+            Some(entry.resume_generation(scope,&request,&resume.link)?)
+        } else {None};
         request.mcp_url = Some(mcp_state.ensure(&app)?.url);
         spawn_requested_run(
             &app,
             state.inner(),
+            &preparation,
             mcp_state.inner(),
             vault_path,
             request,
@@ -3298,6 +4017,8 @@ fn answer_interaction(
             None,
             Vec::new(),
             None,
+            None,
+            agent::LaunchLink {generation,answer:Some(resume.link.clone())},
         )
     })();
     match started {
@@ -3377,22 +4098,194 @@ fn ledger_status(app: tauri::AppHandle, vault: String) -> ledger::shadow::Ledger
     ledger::shadow::status(config_dir(&app).ok().as_deref(), Path::new(&vault))
 }
 
+/// Shared by the actual selected open before installing its body-only watcher.
+fn suspend_legacy_for_selected(
+    state: &WatcherState,
+    ambient: &ingest::ambient::AmbientState,
+    agents: &agent::AgentState,
+) -> Result<(), String> {
+    agents.suspend_run_admission();
+    // Request tick cancellation before terminating a CLI the tick may await.
+    ambient.request_stop()?;
+    let _ = agents.suspend_for_selected();
+    vault::watcher::stop(state)?;
+    ambient.stop()?;
+    agents.wait_opening_readers(None, std::time::Duration::from_secs(2))?;
+    client_access::listener::suspend_for_selected();
+    client_access::listener::wait_for_opening(None, std::time::Duration::from_secs(2))?;
+    runtime::sessions::close_current();
+    ledger::shadow::deactivate();
+    Ok(())
+}
+
+#[cfg(test)]
+fn finish_legacy_open(
+    context: &workspace_service::authority::AuthorityContext,
+    generation: u64,
+    root: &Path,
+    agents: &agent::AgentState,
+    bind: impl FnOnce(),
+) -> Result<(), workspace_service::types::selected::AuthorityError> {
+    let mut resumed = Ok(());
+    // ActiveRoot -> listener binding (its setup lock released on return) ->
+    // Agent admission. Stream publication never takes ActiveRoot in reverse.
+    context.publish_open_with(generation, root, || {
+        bind();
+        resumed = agents.complete_open(generation, root);
+    })?;
+    resumed.map_err(
+        |message| workspace_service::types::selected::AuthorityError {
+            code: workspace_service::types::StoreErrorCode::CapabilityUnavailable,
+            kind: workspace_service::types::selected::AuthorityErrorKind::SourceChanged,
+            message,
+            retryable: false,
+        },
+    )
+}
+
+
+/// The actual OPEN_LOCK/entry/cleanup seam shared by start_watcher and race tests.
+/// Request and agent invalidation happen before this lock. Cleanup runs before
+/// entered denial can be released, including unwinding after partial preparation.
+static OPEN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn run_open_attempt<T>(
+    context: &workspace_service::authority::AuthorityContext,
+    attempt: &workspace_service::authority::OpeningAttempt,
+    operation: impl FnOnce() -> Result<T, String>,
+    cleanup: impl FnOnce() -> Result<(), String>,
+) -> Result<T, String> {
+    let _opening = OPEN_LOCK.lock().map_err(|_| "Workspace opening is unavailable.".to_owned())?;
+    if let Err(error) = context.enter_open(attempt) {
+        let _ = context.abandon_open(attempt);
+        return Err(error.message);
+    }
+    struct Cleanup<'a, C: FnOnce() -> Result<(), String>> {
+        context: &'a workspace_service::authority::AuthorityContext,
+        attempt: &'a workspace_service::authority::OpeningAttempt,
+        cleanup: Option<C>,
+    }
+    impl<C: FnOnce() -> Result<(), String>> Drop for Cleanup<'_, C> {
+        fn drop(&mut self) {
+            if let Some(cleanup) = self.cleanup.take() {
+                if cleanup().is_ok() {
+                    let _ = self.context.abandon_open(self.attempt);
+                }
+                // Incomplete cleanup keeps entered denial. No new request can
+                // erase it, and no output treats active_root=None as absence.
+            }
+        }
+    }
+    let mut guard = Cleanup { context, attempt, cleanup: Some(cleanup) };
+    let result = operation();
+    if result.is_ok() { guard.cleanup = None; }
+    result
+}
+
+
+/// The actual opening completion callback; native observation must run after
+/// run_open_attempt has released OPEN_LOCK, against its original attempt.
+fn run_open_attempt_then<T, U>(
+    context: &workspace_service::authority::AuthorityContext,
+    attempt: &workspace_service::authority::OpeningAttempt,
+    operation: impl FnOnce() -> Result<T, String>,
+    cleanup: impl FnOnce() -> Result<(), String>,
+    complete: impl FnOnce(T) -> Result<U, String>,
+) -> Result<U, String> {
+    let result = run_open_attempt(context, attempt, operation, cleanup)?;
+    complete(result)
+}
+
+fn finish_legacy_attempt(
+    context: &workspace_service::authority::AuthorityContext,
+    attempt: &workspace_service::authority::OpeningAttempt,
+    agents: &agent::AgentState,
+    bind: impl FnOnce(),
+) -> Result<(), workspace_service::types::selected::AuthorityError> {
+    context.publish_attempt_with(attempt, || {
+        bind();
+        agents.complete_open(attempt.generation(), attempt.root()).map_err(|message| {
+            workspace_service::types::selected::AuthorityError {
+                code: workspace_service::types::StoreErrorCode::CapabilityUnavailable,
+                kind: workspace_service::types::selected::AuthorityErrorKind::SourceChanged,
+                message,
+                retryable: false,
+            }
+        })
+    })
+}
+
+/// The selected opening step after legacy suspension and before watcher startup.
+/// Keep this actual startup consumer callable by bounded native contract tests.
+fn prepare_selected_open(
+    root: &Path,
+) -> Result<(), workspace_service::types::selected::AuthorityError> {
+    workspace_migration::recovery::recover_workspace(root)?;
+    workspace_service::selected::scan_presentation(root).map(|_| ())
+}
+
+/// Setup supplies its existing service explicitly. An unavailable Journal uses
+/// strict unprotected recovery, which refuses every protected pending intent;
+/// clean v2 and old unprotected intents keep their established open behavior.
+fn prepare_selected_open_with_retention(
+    root: &Path,
+    journal: Option<&vault::recovery::Journal>,
+) -> Result<(), workspace_service::types::selected::AuthorityError> {
+    if let Some(journal) = journal {
+        workspace_migration::recovery::recover_workspace_with_retention(root, journal)?;
+        workspace_service::selected::scan_presentation(root).map(|_| ())
+    } else {
+        prepare_selected_open(root)
+    }
+}
+
 #[tauri::command(async)]
 fn start_watcher(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, WatcherState>,
     ambient: tauri::State<'_, ingest::ambient::AmbientState>,
     agents: tauri::State<'_, agent::AgentState>,
     vault: String,
-) -> Result<OpenReport, String> {
-    let vault_path = PathBuf::from(&vault);
+) -> Result<Option<OpenReport>, String> {
+    // Capture native observation before OPEN_LOCK or any authority/storage lock.
+    // An unavailable native owner remains degraded without refusing the vault.
+    let native_binding = actions::native_owner::observe_opening_binding(&app, &window);
+    let context = workspace_service::authority::context().map_err(|e| e.message)?;
+    let attempt = context.request_open(Path::new(&vault)).map_err(|e| e.message)?;
+    if let Err(error) = agents.begin_open(attempt.generation()) {
+        let _ = context.abandon_open(&attempt);
+        return Err(error);
+    }
+    let vault_path = attempt.root().to_path_buf();
+    run_open_attempt_then(&context, &attempt, || {
+    vault::watcher::stop(state.inner())?;
+    if attempt.selected() {
+        suspend_legacy_for_selected(state.inner(), ambient.inner(), agents.inner())?;
+        let journal = app.state::<recovery_commands::RecoveryState>().get(&app);
+        prepare_selected_open_with_retention(&vault_path, journal.as_deref().ok())
+            .map_err(|e| e.message)?;
+        vault::watcher::start_selected(app.clone(), state.inner(), vault_path.clone())?;
+        if let Err(error) = context.publish_attempt_with(&attempt, || Ok(())) {
+            vault::watcher::stop(state.inner())?;
+            return Err(error.message);
+        }
+        return Ok((None, None, false));
+    }
     let mut report = OpenReport::default();
+    let mut listener_scope = None;
+    let mut native_storage_ready = false;
     // M53.10: a run or client session never outlives its vault.
     // Opening one stops every run in
     // any other, Cerebro's own included; reopening this one (a webview
     // reload) stops nothing, and a run started here while it opened is kept.
+    let retarget_ambient = ambient.watching().as_deref() != Some(vault_path.as_path());
+    if retarget_ambient { ambient.request_stop()?; }
     agents.stop_other_vaults(&vault_path);
+    if retarget_ambient { ambient.stop()?; }
+    agents.wait_opening_readers(Some(&vault_path), std::time::Duration::from_secs(2))?;
     client_access::vault_opening(&vault_path);
+    client_access::listener::wait_for_opening(Some(&vault_path), std::time::Duration::from_secs(2))?;
     // M53.11: a connectors.json an older build wrote world-readable holds the
     // vault's connector credentials. Opening the vault narrows it to its
     // owner, best effort, and never stops the open.
@@ -3408,12 +4301,49 @@ fn start_watcher(
         // Failing to open the OPERATIONAL LOG must not stop the app from
         // opening the vault: it would trade a working workspace for a
         // diagnostic, and every refusal is still returned to its caller.
-        if let Err(e) = runtime::sink::arm(&dir) {
-            log::warn!("runtime db unavailable, operational refusals go unrecorded: {e}");
+        match runtime::sink::arm(&dir) {
+            Ok(()) => {
+                native_storage_ready = actions::native_owner::prepare_storage(&app).is_ok();
+                if !native_storage_ready {
+                    log::warn!("managed action runtime ownership is unavailable");
+                }
+            }
+            Err(e) => {
+                log::warn!("runtime db unavailable, operational refusals go unrecorded: {e}");
+            }
         }
         // M49.9: after the arm, which migrated the database. An attended row
         // a previous process left `running` has no finisher left; the cutoff
         // is this process's start, so a run it opened is never touched.
+        #[cfg(feature = "native-read-smoke")]
+        native_read_smoke::child_claim_profile::restart_profile::note(
+            "storage",
+            Some(native_storage_ready),
+            None,
+        );
+        if native_storage_ready {
+            let recovered = Some(
+                actions::native_owner::recover_unstarted_children(&app, process_started())
+                    .map_err(|_| ()),
+            );
+            #[cfg(feature = "native-read-smoke")]
+            native_read_smoke::child_claim_profile::restart_profile::note(
+                "child",
+                recovered.as_ref().map(Result::is_ok),
+                recovered.as_ref().and_then(|r| r.as_ref().ok().copied()),
+            );
+            if recovered.as_ref().is_some_and(Result::is_err) {
+                log::warn!("supervised child recovery unavailable; protected rows retained");
+            }
+        } else {
+            #[cfg(feature = "native-read-smoke")]
+            native_read_smoke::child_claim_profile::restart_profile::note(
+                "child",
+                Some(false),
+                None,
+            );
+            log::warn!("supervised child recovery unavailable; retained storage missing");
+        }
         agent::meter::recover_orphaned(&dir, process_started());
         // M63.1: wakes past their week expire, and a started wake whose run
         // ended without finishing it is closed. Never fails the open.
@@ -3428,7 +4358,11 @@ fn start_watcher(
         // M49.9 (K25): and the session records which PROCESS has it open.
         if let Some(scope) = runtime::open_vault(&vault_path) {
             runtime::sessions::track(&scope);
-            client_access::vault_opened(&app, &vault_path, &scope);
+            #[cfg(feature = "native-read-smoke")]
+            native_read_smoke::child_claim_profile::restart_profile::audit::session_observed(
+                &dir, &scope,
+            );
+            listener_scope = Some(scope);
         }
         // M60.6: a batch an earlier process left unfinished is put back
         // before the purge and the watcher, and the webview says so. The
@@ -3441,27 +4375,60 @@ fn start_watcher(
             restored: rolled.restored,
             kept: rolled.kept,
         };
-        // M60.8: Trash items past their days move to the OS Trash, on a
-        // thread of their own so the open never waits on the Finder.
-        let purged = vault_path.clone();
-        let by = WriteReceipt::system(vault::receipt::SystemWriter::TrashPurge);
-        std::thread::spawn(move || {
-            let report = vault::trash::purge_expired_to_os_trash(&purged, &by);
-            if report.moved + report.kept > 0 {
-                log::info!(
-                    "trash: {} old items moved to the OS Trash, {} kept",
-                    report.moved,
-                    report.kept
-                );
-            }
-        });
+
+    }
+    vault::watcher::start(app.clone(), state.inner(), vault_path.clone())?;
+    // M99 P2: purge has no join handle. Keep it synchronous while this
+    // attempt is entered; publication must never release a still-writing purge.
+    let by = WriteReceipt::system(vault::receipt::SystemWriter::TrashPurge);
+    let purged = vault::trash::purge_expired_to_os_trash(&vault_path, &by);
+    if purged.moved + purged.kept > 0 {
+        log::info!("trash: {} old items moved to the OS Trash, {} kept", purged.moved, purged.kept);
+    }
+    // Install the owned supervisor before publication. Its existing agent
+    // admission gate prevents an early tick from mutating an unpublished root;
+    // a publication failure now stops/joins this exact owner before release.
+    if let Ok(dir) = config_dir(&app) {
         // M26.4i: the ambient ingest supervisor. It reads its own switch,
         // which defaults OFF — starting the loop is not the same as
         // enabling the work, and nothing here turns it on.
-        ingest::ambient::start(&app, ambient.inner(), &vault_path, &dir);
+        ingest::ambient::start(&app, ambient.inner(), &vault_path, &dir)?;
     }
-    vault::watcher::start(app, state.inner(), vault_path)?;
+    if let Err(error) =
+        finish_legacy_attempt(&context, &attempt, agents.inner(), || {
+            if let Some(scope) = listener_scope.as_ref() {
+                client_access::vault_opened(&app, &vault_path, scope);
+            }
+        })
+    {
+        vault::watcher::stop(state.inner())?;
+        client_access::listener::suspend_for_selected();
+        return Err(error.message);
+    }
+    Ok((Some(report), listener_scope, native_storage_ready))
+    }, || suspend_legacy_for_selected(state.inner(), ambient.inner(), agents.inner()),
+    |(report, listener_scope, native_storage_ready)| {
+    if native_storage_ready {
+        if let Some(scope) = listener_scope.as_ref() {
+            let bound =
+                native_binding.and_then(|observation| actions::native_owner::bind_opening(observation, &context, &vault_path, scope, &attempt));
+            #[cfg(feature = "native-read-smoke")]
+            native_read_smoke::child_claim_profile::restart_profile::note(
+                "bind",
+                Some(bound.is_ok()),
+                None,
+            );
+            if bound.is_err() {
+                log::warn!("managed action opening ownership is unavailable");
+            } else if actions::native_owner::workflow_schedule_opened(&app, &window, &attempt).is_err() {
+                // The vault is already open. Schedule readiness is reported by
+                // its own view and may be resumed explicitly without reopening.
+                log::warn!("workflow schedule monitoring is unavailable");
+            }
+        }
+    }
     Ok(report)
+    })
 }
 
 /// What opening a vault put back (M60.6): the pages of batches an earlier
@@ -3498,6 +4465,8 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("cerebro-file", files::scheme::handle)
         .plugin(tauri_plugin_dialog::init())
         .manage(WatcherState::default())
+        .manage(recovery_commands::RecoveryState::default())
+        .manage(draft_recovery_commands::DraftExportState::default())
         .manage(forge::PrReader::default())
         .manage(agent::AgentState::default())
         .manage(mcp::McpState::default())
@@ -3510,222 +4479,342 @@ pub fn run() {
         .on_menu_event(shell::quit::on_menu_event)
         // M53.12: tauri.conf.json declares the window `create: false`, so it
         // is built here, with the link guard tauri's own path never attaches.
-        .setup(|app| shell::build_main_window(app))
-        .invoke_handler(tauri::generate_handler![
-            mail_dismissals_read,
-            mail_dismiss,
-            mail_undismiss,
-            mail_gate_read,
-            sheet::calculate_sheets,
-            sheet::sheet_restructure,
-            pick_sheet_file,
-            sheet::sheet_fill,
-            sheet::sheet_complete,
-            roots_commands::probe_file,
-            roots_commands::file_thumbnail,
-            roots_commands::read_file_bytes,
-            roots_commands::open_file_outside,
-            roots_commands::reveal_file,
-            roots_commands::quick_look_file,
-            roots_commands::save_file_copy,
-            client_access::client_tokens,
-            client_access::create_client_token,
-            client_access::revoke_client_token,
-            client_access::listener::client_access_status,
-            client_access::listener::set_client_access,
-            notification_permission,
-            request_notification_permission,
-            post_notification,
-            pick_vault,
-            open_demo_vault,
-            get_last_vault,
-            panel_agent,
-            set_panel_agent,
-            scan_vault,
-            read_note,
-            read_note_source,
-            read_canvas_file,
-            save_canvas_file,
-            create_canvas_file,
-            search_vault,
-            save_note,
-            update_frontmatter,
-            verify_concept,
-            capture_concept_edit,
-            resolve_reconciliation,
-            review_queue,
-            revertable_applications,
-            decide_proposal,
-            revert_application,
-            pipeline_overview,
-            fleet_runs,
-            fleet_subject_runs,
-            fleet_run_detail,
-            fleet_run_transcript,
-            run_knowledge_writes,
-            page_attribution,
-            commit_runs,
-            conversation_changes,
-            vault_activity,
-            page_activity,
-            fleet_actor_summary,
-            fleet_actor_summaries,
-            job_ledger_read,
-            reminder_state,
-            reminder_claim,
-            reminder_import,
-            done_marks_read,
-            done_mark,
-            done_unmark,
-            done_marks_import,
-            job_ledger_claim,
-            job_ledger_unclaim,
-            job_ledger_stamp,
-            job_ledger_import,
-            set_global_pause,
-            set_agent_paused,
-            paused_agents,
-            admit_wakes,
-            release_assigned_wakes,
-            wakes_pending,
-            cancel_wakes,
-            fleet_wakes,
-            list_followups,
-            claim_followup,
-            cancel_followup,
-            set_ambient_concurrency,
-            set_lane_enabled,
-            trigger_status,
-            trigger_run,
-            trigger_declare_r7_scope,
-            trigger_r7_scope,
-            trigger_record_pack,
-            ambient_ingest_enabled,
-            set_ambient_ingest,
-            ingest_item_state,
-            ask_question,
-            converge,
-            home_runs,
-            home_changes,
-            belief_chips,
-            attention_lanes,
-            resolve_held_items,
-            create_note,
-            set_note_title,
-            list_views,
-            save_view,
-            list_collections,
-            save_collection,
-            save_list,
-            create_folder,
-            rename_note,
-            delete_note,
-            list_trash,
-            restore_from_trash,
-            apply_batch,
-            starter_marker,
-            install_starter_kit,
-            decline_starter_kit,
-            list_comments,
-            start_comment_thread,
-            reply_to_comment_thread,
-            set_comment_thread_resolved,
-            delete_comment,
-            delete_comment_thread,
-            start_thread_turn,
-            list_folders,
-            pick_files,
-            import_attachment,
-            import_attachment_bytes,
-            inspect_dropped,
-            read_dropped_text,
-            extract_document,
-            write_text_file,
-            export_png,
-            export_svg,
-            export_csv,
-            export_sheet_xlsx,
-            ledger_head,
-            ledger_status,
-            start_watcher,
-            read_connectors,
-            save_connectors,
-            connector_status,
-            check_agent,
-            check_wake,
-            agent_workspace,
-            purge_agent_workspace,
-            read_cli_transcript,
-            run_agent,
-            stop_agent,
-            agent_events_since,
-            agent::agent_context_usage,
-            stop_all_agents,
-            answer_interaction,
-            cancel_interaction,
-            list_interactions,
-            pending_writes,
-            decide_pending_write,
-            claude_user_settings,
-            diagnostics::log_frontend,
-            forge_commands::pull_request_state,
-            // M9.4 — git tracking. Every command resolves the workspace
-            // first, so a vault nested in a larger repo scopes correctly.
-            git_commands::git_workspace_info,
-            git_commands::is_git_repo,
-            git_commands::init_git_repo,
-            git_commands::git_author_identity,
-            git_commands::get_modified_files,
-            git_commands::git_discard_file,
-            git_commands::get_file_history,
-            git_commands::get_file_diff,
-            git_commands::get_file_diff_at_commit,
-            git_commands::get_file_at_commit,
-            git_commands::restore_note_version,
-            git_commands::get_file_patch,
-            git_commands::get_commit_diff,
-            git_commands::get_vault_pulse,
-            git_commands::get_last_commit_info,
-            git_commands::git_commit,
-            git_commands::git_has_pending_changes,
-            git_commands::git_file_url,
-            git_commands::git_remote_status,
-            git_commands::git_pull,
-            git_commands::git_push,
-            git_commands::git_add_remote,
-            git_commands::git_disconnect_remote,
-            git_commands::git_clone,
-            git_commands::get_conflict_files,
-            git_commands::get_conflict_mode,
-            git_commands::git_resolve_conflict,
-            git_commands::git_commit_conflict_resolution,
-            git_commands::git_abort_conflict,
-            git_commands::git_provider_status,
-            roots_commands::list_roots,
-            roots_commands::mount_root,
-            roots_commands::unmount_root,
-            roots_commands::list_dir,
-            roots_commands::read_file_text,
-            roots_git_commands::root_git_workspace_info,
-            roots_git_commands::root_git_remote_status,
-            roots_git_commands::root_git_modified_files,
-            roots_git_commands::root_git_pulse,
-            roots_git_commands::root_git_file_url,
-            roots_git_commands::root_git_fetch,
-            roots_git_commands::root_git_pull_ff,
-            // M55.9 — Open with: Finder, the default app, agent links and
-            // the clipboard. Each target is a vault note or an artifact base.
-            shell::deep_link::take_deep_link,
-            shell::deep_link::app_link,
-            shell::open::reveal_in_finder,
-            shell::open::open_in_default_app,
-            shell::open::open_agent_link,
-            shell::open::write_clipboard,
-            // M55.10 — the webview's answer to a quit request.
-            shell::quit::finish_quit,
-            shell::quit::cancel_quit
-        ])
-        .build(tauri::generate_context!())
+        .setup(|app| {
+            workspace_service::authority::install(config_dir(app.handle())?)
+                .map_err(|error| error.message)?;
+            runtime::run_configuration::start_cleanup(config_dir(app.handle())?);
+            recovery_commands::start_cleanup(app.handle());
+            workspace_service::backup_commands::initialize(app.handle());
+            shell::build_main_window(app)
+        })
+        .invoke_handler({
+            let generated: fn(tauri::ipc::Invoke) -> bool = tauri::generate_handler![
+                workspace_service::backup_commands::workspace_backup_availability,
+                workspace_service::backup_commands::choose_workspace_backup,
+                workspace_service::backup_commands::check_workspace_backup,
+                workspace_service::backup_commands::choose_workspace_restore,
+                workspace_service::backup_commands::commit_workspace_backup,
+                workspace_service::backup_commands::commit_workspace_restore,
+                workspace_service::backup_commands::cancel_workspace_backup_choice,
+                workspace_service::backup_commands::workspace_backup_operation,
+                managed_connections,
+                managed_connection_add,
+                managed_connection_disable,
+                managed_connection_status,
+                conversation_commands::conversation_context,
+                conversation_commands::conversation_retention,
+                conversation_commands::conversation_set_retention,
+                conversation_commands::conversation_list,
+                conversation_commands::conversation_messages,
+                conversation_commands::conversation_delete,
+                conversation_commands::conversation_prune,
+                conversation_commands::conversation_export,
+                conversation_commands::conversation_import,
+                workflow_commands::workflow_context,
+                workflow_commands::workflow_catalog,
+                workflow_commands::workflow_document,
+                workflow_commands::workflow_version,
+                workflow_commands::workflow_save,
+                workflow_commands::workflow_publish,
+                workflow_commands::workflow_unpublish,
+                workflow_commands::workflow_validate,
+                workflow_commands::workflow_actions,
+            workflow_commands::workflow_start,
+            workflow_commands::workflow_continue,
+            workflow_commands::workflow_reauthorize,
+            workflow_commands::workflow_cancel,
+            workflow_commands::workflow_runs,
+            workflow_commands::workflow_run,
+            workflow_commands::workflow_access,
+            workflow_commands::workflow_value,
+            workflow_commands::workflow_action_details,
+            workflow_commands::workflow_answer_action,
+            workflow_commands::workflow_answer_wait,
+            workflow_commands::workflow_schedule,
+            workflow_commands::workflow_schedule_enable,
+            workflow_commands::workflow_schedule_pause,
+            workflow_commands::workflow_schedule_remove,
+            workflow_commands::workflow_schedule_preview,
+            workflow_commands::workflow_schedule_wake,
+                credential_commands::begin_gh_import,
+                credential_commands::credential_acquisition,
+                credential_commands::cancel_credential_acquisition,
+                chat_recovery_inspect,
+                read_managed_action_access,
+                set_managed_action_access,
+                native_action_catalog,
+                native_action_definition,
+                mail_dismissals_read,
+                mail_dismiss,
+                mail_undismiss,
+                mail_gate_read,
+                sheet::calculate_sheets,
+                sheet::sheet_restructure,
+                pick_sheet_file,
+                sheet::sheet_fill,
+                sheet::sheet_complete,
+                roots_commands::probe_file,
+                roots_commands::file_thumbnail,
+                roots_commands::read_file_bytes,
+                roots_commands::open_file_outside,
+                roots_commands::reveal_file,
+                roots_commands::quick_look_file,
+                roots_commands::save_file_copy,
+                client_access::client_tokens,
+                client_access::create_client_token,
+                client_access::revoke_client_token,
+                client_access::listener::client_access_status,
+                client_access::listener::set_client_access,
+                notification_permission,
+                request_notification_permission,
+                post_notification,
+                pick_vault,
+                open_demo_vault,
+                get_last_vault,
+                panel_agent,
+                set_panel_agent,
+                scan_vault,
+                read_note,
+                set_page_full_width,
+                read_note_source,
+                read_editor_body,
+                read_selected_property,
+                patch_selected_metadata,
+                read_canvas_file,
+                save_canvas_file,
+                create_canvas_file,
+                search_vault,
+                resolve_source,
+                find_source_occurrences,
+                save_note,
+                recovery_commands::recovery_status,
+                recovery_commands::set_recovery_enabled,
+                recovery_commands::list_recovery,
+                recovery_commands::read_recovery,
+                recovery_commands::delete_recovery,
+                recovery_commands::clear_recovery,
+                recovery_commands::recovery_failure,
+                recovery_commands::restore_recovery,
+                recovery_commands::export_recovery,
+                draft_recovery_commands::probe_draft_target,
+                draft_recovery_commands::choose_draft_export,
+                draft_recovery_commands::commit_draft_export,
+                draft_recovery_commands::cancel_draft_export,
+                draft_recovery_commands::create_recovered_page,
+                update_frontmatter,
+                verify_concept,
+                capture_concept_edit,
+                resolve_reconciliation,
+                review_queue,
+                revertable_applications,
+                decide_proposal,
+                revert_application,
+                pipeline_overview,
+                fleet_runs,
+                fleet_runs_page,
+                fleet_run_lineage,
+                fleet_run_origin,
+                fleet_subject_runs,
+                fleet_run_detail,
+                fleet_run_configuration,
+                fleet_run_transcript,
+                run_knowledge_writes,
+                page_attribution,
+                commit_runs,
+                conversation_changes,
+                vault_activity,
+                page_activity,
+                fleet_actor_summary,
+                fleet_actor_summaries,
+                job_ledger_read,
+                reminder_state,
+                reminder_claim,
+                reminder_import,
+                done_marks_read,
+                done_mark,
+                done_unmark,
+                done_marks_import,
+                job_ledger_claim,
+                job_ledger_unclaim,
+                job_ledger_stamp,
+                job_ledger_import,
+                set_global_pause,
+                set_agent_paused,
+                paused_agents,
+                admit_wakes,
+                release_assigned_wakes,
+                wakes_pending,
+                cancel_wakes,
+                fleet_wakes,
+                list_followups,
+                claim_followup,
+                cancel_followup,
+                set_ambient_concurrency,
+                set_lane_enabled,
+                trigger_status,
+                trigger_run,
+                trigger_declare_r7_scope,
+                trigger_r7_scope,
+                trigger_record_pack,
+                ambient_ingest_enabled,
+                set_ambient_ingest,
+                ingest_item_state,
+                ask_question,
+                converge,
+                home_runs,
+                home_changes,
+                belief_chips,
+                attention_lanes,
+                resolve_held_items,
+                create_note,
+                set_note_title,
+                list_views,
+                save_view,
+                list_collections,
+                save_collection,
+                save_list,
+                create_folder,
+                rename_note,
+                delete_note,
+                list_trash,
+                restore_from_trash,
+                apply_batch,
+                starter_marker,
+                install_starter_kit,
+                decline_starter_kit,
+                list_comments,
+                start_comment_thread,
+                reply_to_comment_thread,
+                set_comment_thread_resolved,
+                delete_comment,
+                delete_comment_thread,
+                start_thread_turn,
+                list_folders,
+                pick_files,
+                import_attachment,
+                import_attachment_bytes,
+                inspect_dropped,
+                read_dropped_text,
+                extract_document,
+                write_text_file,
+                export_png,
+                export_svg,
+                export_csv,
+                export_sheet_xlsx,
+                ledger_head,
+                ledger_status,
+                start_watcher,
+                read_connectors,
+                save_connectors,
+                connector_status,
+                check_agent,
+                check_cli_readiness,
+                check_wake,
+                agent_workspace,
+                purge_agent_workspace,
+                read_cli_transcript,
+                run_agent,
+                stop_agent,
+                agent_events_since,
+                agent::agent_context_usage,
+                stop_all_agents,
+                answer_interaction,
+                cancel_interaction,
+                list_interactions,
+                pending_writes,
+                decide_pending_write,
+                claude_user_settings,
+                diagnostics::log_frontend,
+                forge_commands::pull_request_state,
+                // M9.4 — git tracking. Every command resolves the workspace
+                // first, so a vault nested in a larger repo scopes correctly.
+                git_commands::git_workspace_info,
+                git_commands::is_git_repo,
+                git_commands::init_git_repo,
+                git_commands::git_author_identity,
+                git_commands::get_modified_files,
+                git_commands::git_discard_file,
+                git_commands::get_file_history,
+                git_commands::get_file_diff,
+                git_commands::get_file_diff_at_commit,
+                git_commands::get_file_at_commit,
+                git_commands::restore_note_version,
+                git_commands::get_file_patch,
+                git_commands::get_commit_diff,
+                git_commands::get_vault_pulse,
+                git_commands::get_last_commit_info,
+                git_commands::git_commit,
+                git_commands::git_has_pending_changes,
+                git_commands::git_file_url,
+                git_commands::git_remote_status,
+                git_commands::git_pull,
+                git_commands::git_push,
+                git_commands::git_add_remote,
+                git_commands::git_disconnect_remote,
+                git_commands::git_clone,
+                git_commands::get_conflict_files,
+                git_commands::get_conflict_mode,
+                git_commands::git_resolve_conflict,
+                git_commands::git_commit_conflict_resolution,
+                git_commands::git_abort_conflict,
+                git_commands::git_provider_status,
+                roots_commands::list_roots,
+                roots_commands::mount_root,
+                roots_commands::unmount_root,
+                roots_commands::list_dir,
+                roots_commands::read_file_text,
+                roots_git_commands::root_git_workspace_info,
+                roots_git_commands::root_git_remote_status,
+                roots_git_commands::root_git_modified_files,
+                roots_git_commands::root_git_pulse,
+                roots_git_commands::root_git_file_url,
+                roots_git_commands::root_git_fetch,
+                roots_git_commands::root_git_pull_ff,
+                // M55.9 — Open with: Finder, the default app, agent links and
+                // the clipboard. Each target is a vault note or an artifact base.
+                shell::deep_link::take_deep_link,
+                shell::deep_link::app_link,
+                shell::open::reveal_in_finder,
+                shell::open::open_in_default_app,
+                shell::open::open_agent_link,
+                shell::open::write_clipboard,
+                // M55.10 — the webview's answer to a quit request.
+                shell::quit::finish_quit,
+                shell::quit::cancel_quit
+            ];
+            move |invoke: tauri::ipc::Invoke| {
+                let resolver = invoke.resolver.clone();
+                let outcome = workspace_service::native_admission::request(
+                    invoke.message.command(),
+                    invoke.message.payload(),
+                )
+                .and_then(|request| {
+                    workspace_service::authority::context().and_then(|context| {
+                        workspace_service::native_admission::dispatch_checked(
+                            &context,
+                            request,
+                            || generated(invoke),
+                        )
+                    })
+                });
+                match outcome {
+                    Ok(handled) => handled,
+                    Err(error) => {
+                        resolver.reject(error);
+                        true
+                    }
+                }
+            }
+        })
+        .build({
+            // The explicit smoke executable embeds its separate macOS plist.
+            // Keep this normal context compiled without embedding a second one.
+            #[cfg(feature = "native-read-smoke")]
+            let context = tauri::generate_context!(test = true);
+            #[cfg(not(feature = "native-read-smoke"))]
+            let context = tauri::generate_context!();
+            context
+        })
         .expect("error while building tauri application")
         .run(|app, event| match event {
             // M53.24: tauri raises Ready right after `setup` (tauri-2.12.4
@@ -3743,6 +4832,9 @@ pub fn run() {
                 app.state::<agent::AgentState>().shut_down();
                 client_access::shut_down();
                 shell::open::stop_quick_look();
+                // Actual HTTP/DNS cleanup and workflow worker ownership settle
+                // before the original session is closed; no timeout detaches it.
+                actions::native_owner::shutdown_workflow_workers(app);
                 // M49.9: a clean exit closes the session exactly; anything
                 // else leaves its last heartbeat as the honest lower bound.
                 runtime::sessions::close_current();
@@ -4325,7 +5417,8 @@ mod tests {
             } else {
                 target
             };
-            let saved = save_note(v.clone(), target.into(), "pwned\n".into(), None).unwrap_err();
+            let saved =
+                save_note_legacy(v.clone(), target.into(), "pwned\n".into(), None).unwrap_err();
             assert!(saved.contains(named), "{target}: {saved}");
             let patched = update_frontmatter(v.clone(), target.into(), patch.clone()).unwrap_err();
             assert!(patched.contains(named), "{target}: {patched}");
@@ -4354,7 +5447,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rel, "records/x.md");
-        save_note(v.clone(), rel.clone(), "\n# X\n\nSaved.\n".into(), None).unwrap();
+        save_note_legacy(v.clone(), rel.clone(), "\n# X\n\nSaved.\n".into(), None).unwrap();
         let mut status = serde_json::Map::new();
         status.insert("status".into(), serde_json::json!("done"));
         update_frontmatter(v.clone(), rel.clone(), status).unwrap();
@@ -4513,7 +5606,7 @@ mod tests {
             )
             .map(drop)
             .map_err(|error| error.message),
-            "save_note" => save_note(
+            "save_note" => save_note_legacy(
                 v,
                 text("path"),
                 text("body"),
@@ -4781,7 +5874,7 @@ mod tests {
         let dir = vault::testutil::temp_vault("stale-save-command");
         runtime::sink::arm(&config).unwrap();
         vault::testutil::write(&dir, "notes/a.md", "# Outside\n");
-        let error = save_note(
+        let error = save_note_legacy(
             dir.to_string_lossy().into(),
             "notes/a.md".into(),
             "# Stale\n".into(),
@@ -4820,7 +5913,7 @@ mod tests {
             "# Outside\n"
         );
         assert_eq!(
-            save_note(
+            save_note_legacy(
                 dir.to_string_lossy().into(),
                 "notes/a.md".into(),
                 "# Bad\n".into(),
@@ -4830,7 +5923,7 @@ mod tests {
             "expectHash must be a 64-character hex hash"
         );
         let current = ledger::sha256_hex(b"# Outside\n");
-        let hash = save_note(
+        let hash = save_note_legacy(
             dir.to_string_lossy().into(),
             "notes/a.md".into(),
             "# Saved\n".into(),
@@ -4844,6 +5937,47 @@ mod tests {
             let _ = std::fs::remove_dir_all(path);
         }
     }
+    #[test]
+    fn note_ack_uses_written_hash_and_refuses_unknown_formats_or_deleted_targets() {
+        let dir = vault::testutil::temp_vault("note-ack-command");
+        std::fs::create_dir_all(dir.join("notes")).unwrap();
+        std::fs::write(dir.join("notes/a.md"), "before").unwrap();
+        let v = dir.to_string_lossy().to_string();
+        let ack =
+            save_note_for_test(v.clone(), "notes/a.md".into(), "after".into(), None, None).unwrap();
+        assert_eq!(
+            serde_json::to_value(ack).unwrap(),
+            serde_json::json!({"kind":"file", "contentHash":ledger::sha256_hex(b"after"), "recovery":{"kind":"off"}})
+        );
+        assert_eq!(
+            save_note_for_test(
+                v.clone(),
+                "notes/a.md".into(),
+                "source".into(),
+                None,
+                Some("unknown".into())
+            )
+            .unwrap_err(),
+            "unsupported_body_format"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("notes/a.md")).unwrap(),
+            "after"
+        );
+        std::fs::remove_file(dir.join("notes/a.md")).unwrap();
+        assert!(save_note_for_test(
+            v.clone(),
+            "notes/a.md".into(),
+            "must not recreate".into(),
+            None,
+            None
+        )
+        .is_err());
+        assert!(!dir.join("notes/a.md").exists());
+        assert!(save_note_for_test(v, "../bad.md".into(), "bad".into(), None, None).is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn a_hashed_knowledge_save_compares_before_the_capture() {
         use policy::commit::tests_support::seed_belief;
@@ -4861,7 +5995,7 @@ mod tests {
         .unwrap();
         let before = std::fs::read_to_string(dir.join("knowledge/seed.md")).unwrap();
         let head = ledger::head(&dir).unwrap().hash;
-        let error = save_note(
+        let error = save_note_legacy(
             dir.to_string_lossy().into(),
             "knowledge/seed.md".into(),
             "# Draft\n".into(),
@@ -4879,14 +6013,18 @@ mod tests {
         );
         assert!(door_rows(&dir).is_empty());
         let (_, body) = vault::parse::split_frontmatter(&before);
-        let saved = save_note(
+        let saved = save_note_for_test(
             dir.to_string_lossy().into(),
             "knowledge/seed.md".into(),
             format!("{body}\nAdded here.\n"),
             Some(ledger::sha256_hex(before.as_bytes())),
+            None,
         )
         .unwrap();
-        assert_eq!(saved, None);
+        let confirmed = std::fs::read(dir.join("knowledge/seed.md")).unwrap();
+        assert!(
+            matches!(saved, NoteWriteAck::Governed { projection_hash } if projection_hash == ledger::sha256_hex(&confirmed))
+        );
         assert!(std::fs::read_to_string(dir.join("knowledge/seed.md"))
             .unwrap()
             .contains("Added here."));
@@ -4895,7 +6033,7 @@ mod tests {
         runtime::sink::disarm();
         ledger::shadow::deactivate();
         assert_eq!(
-            save_note(
+            save_note_legacy(
                 dir.to_string_lossy().into(),
                 "knowledge/seed.md".into(),
                 "# Stale without writer\n".into(),

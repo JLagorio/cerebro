@@ -4,9 +4,19 @@ import { FieldEditor } from './FieldEditor';
 import { fixtureVault, makeEntry } from '@/test/factories';
 import { buildSchema } from '@/engine/schema';
 import { useVaultStore } from '@/stores/vaultStore';
+import { requestLeave } from '@/app/leaveGuard';
+import { __resetOpenPages, flushOpenPages, unresolvedOpenPages } from '@/editor/openPages';
 import * as relatedActions from '@/app/relatedActions';
 
-beforeEach(() => useVaultStore.setState({ entries: fixtureVault() }));
+beforeEach(() => {
+  __resetOpenPages();
+  useVaultStore.setState({
+    entries: fixtureVault(),
+    vaultPath: '/field-vault',
+    entriesVault: '/field-vault',
+    status: 'ready',
+  });
+});
 
 it('hands a chosen draft value to onPatch without saving the record', () => {
   const entries = fixtureVault();
@@ -203,6 +213,101 @@ it('does not carry an open scalar draft onto a different record', () => {
   expect(screen.getByRole('button', { name: 'Second' })).toBeTruthy();
 });
 
+it.each(['person', 'relation'] as const)(
+  'updates an open %s picker from live entries without losing its query',
+  (kind) => {
+    const entry = makeEntry({ path: 'tasks/owner.md', type: 'Task' });
+    const ana = makeEntry({ path: 'people/ana-rios.md', title: 'Ana Rios', type: 'Person' });
+    const bo = makeEntry({ path: 'people/bo-chen.md', title: 'Bo Chen', type: 'Person' });
+    const entries = [entry, ana];
+    const patch = vi.fn(async () => true);
+    useVaultStore.setState({ entries, patchFrontmatter: patch });
+    render(
+      <FieldEditor
+        entry={entry}
+        def={{ name: 'owner', kind, target: 'Person', limit: 1 }}
+        schema={buildSchema(entries)}
+        placeholder="blank"
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: kind === 'person' ? 'Owner' : 'Edit Owner' }),
+    );
+    const search = screen.getByRole('textbox');
+    fireEvent.change(search, { target: { value: 'Bo' } });
+    expect(screen.queryByText('Bo Chen')).toBeNull();
+
+    act(() => useVaultStore.setState({ entries: [entry, bo] }));
+
+    expect(screen.getByRole('textbox')).toBe(search);
+    expect(search).toHaveProperty('value', 'Bo');
+    expect(document.activeElement).toBe(search);
+    expect(patch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole(kind === 'person' ? 'option' : 'button', { name: /Bo Chen/ }));
+    expect(patch).toHaveBeenCalledTimes(1);
+    expect(patch).toHaveBeenCalledWith('tasks/owner.md', { owner: ['[[bo-chen]]'] });
+    expect(screen.queryByRole('textbox')).toBeNull();
+  },
+);
+
+it('keeps a focused scalar draft when the store or write action changes', async () => {
+  const entry = makeEntry({ path: 'live-action.md', properties: { summary: 'Before' } });
+  const originalPatch = vi.fn(async () => true);
+  const currentPatch = vi.fn(async () => true);
+  useVaultStore.setState({ patchFrontmatter: originalPatch });
+  render(
+    <FieldEditor
+      entry={entry}
+      def={{ name: 'summary', kind: 'text' }}
+      schema={buildSchema([entry])}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Before' }));
+  const input = screen.getByRole('textbox', { name: 'Summary' });
+  fireEvent.change(input, { target: { value: '  Keep exact draft  ' } });
+
+  act(() => useVaultStore.setState({ status: 'scanning' }));
+  expect(screen.getByRole('textbox', { name: 'Summary' })).toBe(input);
+  expect(input).toHaveProperty('value', '  Keep exact draft  ');
+  expect(document.activeElement).toBe(input);
+  act(() => useVaultStore.setState({ patchFrontmatter: currentPatch }));
+  expect(screen.getByRole('textbox', { name: 'Summary' })).toBe(input);
+  expect(input).toHaveProperty('value', '  Keep exact draft  ');
+  expect(document.activeElement).toBe(input);
+  expect(originalPatch).not.toHaveBeenCalled();
+  expect(currentPatch).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
+  expect(originalPatch).not.toHaveBeenCalled();
+  expect(currentPatch).toHaveBeenCalledTimes(1);
+  expect(currentPatch).toHaveBeenCalledWith('live-action.md', { summary: 'Keep exact draft' });
+});
+
+it('does not carry a local draft across vaults with the same path and property', () => {
+  const entry = makeEntry({ path: 'same-path.md', properties: { summary: 'Before' } });
+  const patch = vi.fn(async () => true);
+  useVaultStore.setState({ patchFrontmatter: patch });
+  render(
+    <FieldEditor
+      entry={entry}
+      def={{ name: 'summary', kind: 'text' }}
+      schema={buildSchema([entry])}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Before' }));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'First vault draft' } });
+
+  act(() =>
+    useVaultStore.setState({ vaultPath: '/other-field-vault', entriesVault: '/other-field-vault' }),
+  );
+
+  expect(screen.queryByRole('textbox')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Before' }));
+  expect(screen.getByRole('textbox')).toHaveProperty('value', 'Before');
+  expect(patch).not.toHaveBeenCalled();
+});
+
 // 2026-10-18: a `generated: {by, at}` stamp under a key its type declared as
 // text drew "[object Object]", and a click then a blur wrote that text back
 // over the map. A map under a text key is shown, never put in a field.
@@ -242,4 +347,89 @@ it('reads a map in a table cell as one line of keys and values', () => {
     />,
   );
   expect(container.textContent).toBe('by claude-code · at soon');
+});
+
+it('Save captures a focused scalar before blur and reports the actual guarded patch result', async () => {
+  const entry = makeEntry({ path: 'focused.md', properties: { summary: 'Before' } });
+  const patch = vi.fn().mockResolvedValue(true);
+  useVaultStore.setState({ patchFrontmatter: patch });
+  render(
+    <FieldEditor
+      entry={entry}
+      def={{ name: 'summary', kind: 'text' }}
+      schema={buildSchema([entry])}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Before' }));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '  Focused exact  ' } });
+  expect(unresolvedOpenPages()[0].latestDraft).toBe('  Focused exact  ');
+  let report!: Awaited<ReturnType<typeof flushOpenPages>>;
+  await act(async () => {
+    report = await flushOpenPages();
+  });
+  expect(patch).toHaveBeenCalledWith('focused.md', { summary: 'Focused exact' });
+  expect(report.outcomes[0]).toMatchObject({ kind: 'committed', source: 'guarded_field' });
+  expect(report.unresolvedOwnerIds).toEqual([]);
+});
+it('reopens a failed durable scalar with exact input and accessible Retry without another edit', async () => {
+  const entry = makeEntry({ path: 'retained.md', properties: { summary: 'Before' } });
+  const patch = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+  useVaultStore.setState({ patchFrontmatter: patch });
+  const props = {
+    entry,
+    def: { name: 'summary', kind: 'text' as const },
+    schema: buildSchema([entry]),
+  };
+  const first = render(<FieldEditor {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Before' }));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '  Refused exact  ' } });
+  await act(async () => {
+    await flushOpenPages();
+  });
+  first.unmount();
+  expect(unresolvedOpenPages()[0].latestDraft).toBe('  Refused exact  ');
+  render(<FieldEditor {...props} />);
+  expect(screen.getByRole('textbox')).toHaveProperty('value', '  Refused exact  ');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry saving Summary' }));
+  await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
+  expect(patch).toHaveBeenCalledTimes(2);
+});
+it('never registers caller-owned creation scalar edits as durable fields', async () => {
+  const entry = makeEntry({ path: '(draft)', properties: { estimate: 3 } });
+  render(
+    <FieldEditor
+      entry={entry}
+      def={{ name: 'estimate', kind: 'number' }}
+      schema={buildSchema([entry])}
+      onPatch={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '3' }));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Infinity' } });
+  expect(unresolvedOpenPages()).toEqual([]);
+  expect((await flushOpenPages()).outcomes).toEqual([]);
+});
+it('a leave action captures the focused scalar and stays mounted on a preexisting failure', async () => {
+  const entry = makeEntry({ path: 'leave.md', properties: { summary: 'Before' } });
+  const patch = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+  useVaultStore.setState({ patchFrontmatter: patch });
+  render(
+    <FieldEditor
+      entry={entry}
+      def={{ name: 'summary', kind: 'text' }}
+      schema={buildSchema([entry])}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Before' }));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '  Before blur  ' } });
+  const leave = vi.fn();
+  await act(async () => {
+    expect(requestLeave('field-leave', leave)).toBe(false);
+  });
+  expect(leave).not.toHaveBeenCalled();
+  expect(screen.getByRole('textbox')).toHaveProperty('value', '  Before blur  ');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry saving Summary' }));
+  await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
+  expect(requestLeave('field-leave', leave)).toBe(true);
+  expect(leave).toHaveBeenCalledTimes(1);
 });

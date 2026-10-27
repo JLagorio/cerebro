@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeEntry } from '@/test/factories';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
+import { DocumentOwner, type NoteWriteAck } from '@/editor/documentOwner';
+import { __resetOpenPages, onExternalWrite, registerSaveParticipant } from '@/editor/openPages';
 import { useDocTasks } from './useDocTasks';
 const { readNoteSource, saveNote } = vi.hoisted(() => ({
   readNoteSource: vi.fn(),
@@ -15,6 +17,7 @@ vi.mock('@/lib/ipc', async (original) => ({
 }));
 let version = 0;
 beforeEach(() => {
+  __resetOpenPages();
   vi.clearAllMocks();
   version++;
   useVaultStore.setState({
@@ -26,8 +29,148 @@ beforeEach(() => {
     rescan: vi.fn(async () => {}),
   });
   readNoteSource.mockResolvedValue({ content: '- [ ] Call vendor', hash: `v${version}` });
+  useUiStore.setState({ toast: vi.fn() });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function registerOwner(write: (body: string) => Promise<NoteWriteAck>) {
+  const owner = new DocumentOwner(
+    { vaultId: '/a', path: 'notes/plan.md', ownerId: 'open-page' },
+    '- [ ] Call vendor',
+    write,
+  );
+  registerSaveParticipant({
+    key: owner.key,
+    prepare: () => {},
+    snapshot: () => owner.snapshot(),
+    flush: () => owner.flush(),
+  });
+  return owner;
+}
 describe('document task reads', () => {
+  it('retains a failed open draft and refuses the dependent checkbox write', async () => {
+    const writer = vi.fn(async (): Promise<NoteWriteAck> => {
+      throw Error('disk full');
+    });
+    const owner = registerOwner(writer);
+    owner.edit('- [ ] Call vendor\n\nExact unsaved body.');
+    const { result } = renderHook(useDocTasks);
+    await waitFor(() => expect(result.current.tasks).toHaveLength(1));
+    await act(async () => result.current.toggle(result.current.tasks[0], true));
+    expect(writer).toHaveBeenCalledOnce();
+    expect(saveNote).not.toHaveBeenCalled();
+    expect(owner.snapshot()).toMatchObject({
+      latestDraft: '- [ ] Call vendor\n\nExact unsaved body.',
+      acknowledgedGeneration: 0,
+    });
+  });
+
+  it('refreshes an old checkbox after the open owner acknowledges a newer body', async () => {
+    const owner = registerOwner(async (body) => {
+      readNoteSource.mockResolvedValue({ content: body, hash: 'owner-saved' });
+      return { kind: 'file', contentHash: 'owner-saved' };
+    });
+    const { result } = renderHook(useDocTasks);
+    await waitFor(() => expect(result.current.tasks).toHaveLength(1));
+    owner.edit('- [ ] Call vendor\n\nNew paragraph.');
+    await act(async () => result.current.toggle(result.current.tasks[0], true));
+    expect(owner.snapshot().acknowledgedGeneration).toBe(1);
+    expect(saveNote).not.toHaveBeenCalled();
+    expect(useVaultStore.getState().rescan).toHaveBeenCalledOnce();
+  });
+
+  it.each(['applied', 'refused'] as const)(
+    'holds the open owner before the fresh read through completion (%s)',
+    async (outcome) => {
+      const writer = vi.fn(async (): Promise<NoteWriteAck> => ({
+        kind: 'file',
+        contentHash: 'body',
+      }));
+      const owner = registerOwner(writer);
+      const pending = vi.fn(() => owner.holdForReconcile());
+      const settled = vi.fn(() => owner.finishReconcile());
+      onExternalWrite('notes/plan.md', { pending, settled });
+      const { result } = renderHook(useDocTasks);
+      await waitFor(() => expect(result.current.tasks).toHaveLength(1));
+      const read = deferred<{ content: string; hash: string }>();
+      const scan = deferred<void>();
+      readNoteSource.mockImplementationOnce(() => read.promise);
+      useVaultStore.setState({ rescan: vi.fn(() => scan.promise) });
+      if (outcome === 'refused') saveNote.mockRejectedValueOnce(Error('refused'));
+      let toggle!: Promise<void>;
+      act(() => {
+        toggle = result.current.toggle(result.current.tasks[0], true);
+      });
+      await waitFor(() => expect(readNoteSource).toHaveBeenCalledTimes(2));
+      expect(pending).toHaveBeenCalledOnce();
+      owner.edit('- [ ] Call vendor\n\nTyped during tick.');
+      expect(await owner.flush()).toMatchObject({ kind: 'blocked', reason: 'reconcile' });
+      expect(writer).not.toHaveBeenCalled();
+      await act(async () => read.resolve({ content: '- [ ] Call vendor', hash: `v${version}` }));
+      if (outcome === 'applied') {
+        await waitFor(() => expect(useVaultStore.getState().rescan).toHaveBeenCalledOnce());
+        expect(settled).not.toHaveBeenCalled();
+      }
+      await act(async () => {
+        scan.resolve();
+        await toggle;
+      });
+      expect(settled).toHaveBeenCalledOnce();
+      expect(owner.snapshot().latestDraft).toContain('Typed during tick.');
+    },
+  );
+
+  it.each(['round-trip', 'unmount'] as const)(
+    'retires a pending checkbox read after %s',
+    async (retire) => {
+      const { result, unmount } = renderHook(useDocTasks);
+      await waitFor(() => expect(result.current.tasks).toHaveLength(1));
+      const read = deferred<{ content: string; hash: string }>();
+      readNoteSource.mockImplementationOnce(() => read.promise);
+      let toggle!: Promise<void>;
+      act(() => {
+        toggle = result.current.toggle(result.current.tasks[0], true);
+      });
+      await waitFor(() => expect(readNoteSource).toHaveBeenCalledTimes(2));
+      if (retire === 'unmount') unmount();
+      else
+        act(() => {
+          useVaultStore.setState({ vaultPath: '/b' });
+          useVaultStore.setState({ vaultPath: '/a' });
+        });
+      await act(async () => {
+        read.resolve({ content: '- [ ] Call vendor', hash: `v${version}` });
+        await toggle;
+      });
+      expect(saveNote).not.toHaveBeenCalled();
+      expect(useVaultStore.getState().rescan).not.toHaveBeenCalled();
+      expect(useUiStore.getState().toast).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps an acknowledged tick when its following refresh fails', async () => {
+    useVaultStore.setState({
+      rescan: vi.fn(async () => {
+        throw Error('scan refused');
+      }),
+    });
+    const { result } = renderHook(useDocTasks);
+    await waitFor(() => expect(result.current.tasks).toHaveLength(1));
+    await act(async () => result.current.toggle(result.current.tasks[0], true));
+    expect(saveNote).toHaveBeenCalledOnce();
+    expect(result.current.tasks[0]).toMatchObject({ done: true, version: 'saved-hash' });
+    expect(useUiStore.getState().toast).toHaveBeenCalledWith(
+      "Task saved, but the list couldn't refresh.",
+    );
+    expect(useUiStore.getState().toast).not.toHaveBeenCalledWith("Couldn't update task");
+  });
   it('keeps the whole-file version on rows and sends it with a body-only tick', async () => {
     readNoteSource.mockResolvedValue({
       content: '---\ntitle: Plan\n---\n- [ ] Call vendor',

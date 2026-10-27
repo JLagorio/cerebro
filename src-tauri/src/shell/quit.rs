@@ -28,6 +28,8 @@
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
+#[cfg(feature = "native-read-smoke")]
+use std::time::Instant;
 
 use serde::Serialize;
 use tauri::menu::{
@@ -58,6 +60,117 @@ enum Phase {
     Exiting,
 }
 
+// Closed-smoke observations come from the real gate decisions and deadline thread.
+#[cfg(feature = "native-read-smoke")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SmokePhase {
+    Idle,
+    Preparing,
+    Exiting,
+}
+
+#[cfg(feature = "native-read-smoke")]
+impl From<Phase> for SmokePhase {
+    fn from(phase: Phase) -> Self {
+        match phase {
+            Phase::Idle => Self::Idle,
+            Phase::Preparing => Self::Preparing,
+            Phase::Exiting => Self::Exiting,
+        }
+    }
+}
+
+#[cfg(feature = "native-read-smoke")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SmokePending {
+    pub epoch: u64,
+    pub armed_at: Option<Instant>,
+    pub duration: Duration,
+}
+
+#[cfg(feature = "native-read-smoke")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SmokeDecision {
+    Admitted {
+        epoch: u64,
+    },
+    Armed {
+        epoch: u64,
+    },
+    Cancel {
+        epoch: u64,
+        before: SmokePhase,
+        after: SmokePhase,
+        cancelled: bool,
+    },
+    Deadline {
+        timer_epoch: u64,
+        gate_epoch: u64,
+        before: SmokePhase,
+        after: SmokePhase,
+        exits: bool,
+    },
+}
+
+#[cfg(feature = "native-read-smoke")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SmokeEntry {
+    pub sequence: u64,
+    pub captured_at: Instant,
+    pub decision: SmokeDecision,
+}
+
+#[cfg(feature = "native-read-smoke")]
+#[derive(Debug, Clone)]
+pub(crate) struct SmokeObservation {
+    pub observed_at: Instant,
+    pub phase: SmokePhase,
+    pub epoch: u64,
+    pub pending: Option<SmokePending>,
+    pub entries: Vec<SmokeEntry>,
+    pub broken: bool,
+}
+
+#[cfg(feature = "native-read-smoke")]
+const SMOKE_ENTRY_CAP: usize = 192;
+
+#[cfg(feature = "native-read-smoke")]
+#[derive(Debug)]
+struct SmokeJournal {
+    // Keep the first bounded evidence; overflow invalidates it without blocking quit.
+    entries: [Option<SmokeEntry>; SMOKE_ENTRY_CAP],
+    next_sequence: u64,
+    broken: bool,
+}
+
+#[cfg(feature = "native-read-smoke")]
+impl Default for SmokeJournal {
+    fn default() -> Self {
+        Self {
+            entries: [None; SMOKE_ENTRY_CAP],
+            next_sequence: 0,
+            broken: false,
+        }
+    }
+}
+
+#[cfg(feature = "native-read-smoke")]
+impl SmokeJournal {
+    fn record(&mut self, decision: SmokeDecision) {
+        if self.next_sequence >= SMOKE_ENTRY_CAP as u64 {
+            self.broken = true;
+            return;
+        }
+        let index = self.next_sequence as usize;
+        self.next_sequence += 1;
+        self.entries[index] = Some(SmokeEntry {
+            sequence: self.next_sequence,
+            captured_at: Instant::now(),
+            decision,
+        });
+    }
+}
+
 /// What a quit request does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
@@ -74,6 +187,8 @@ pub enum Step {
 pub struct QuitGate {
     phase: Phase,
     epoch: u64,
+    #[cfg(feature = "native-read-smoke")]
+    smoke: SmokeJournal,
 }
 
 impl QuitGate {
@@ -83,6 +198,9 @@ impl QuitGate {
             Phase::Idle => {
                 self.phase = Phase::Preparing;
                 self.epoch += 1;
+                #[cfg(feature = "native-read-smoke")]
+                self.smoke
+                    .record(SmokeDecision::Admitted { epoch: self.epoch });
                 Step::Prepare { epoch: self.epoch }
             }
             Phase::Preparing | Phase::Exiting => Step::Wait,
@@ -101,10 +219,26 @@ impl QuitGate {
 
     /// The webview stayed open. True when a prepare was cancelled.
     pub fn cancel(&mut self) -> bool {
+        #[cfg(feature = "native-read-smoke")]
+        let before = self.phase.into();
         if self.phase == Phase::Preparing {
             self.phase = Phase::Idle;
+            #[cfg(feature = "native-read-smoke")]
+            self.smoke.record(SmokeDecision::Cancel {
+                epoch: self.epoch,
+                before,
+                after: self.phase.into(),
+                cancelled: true,
+            });
             true
         } else {
+            #[cfg(feature = "native-read-smoke")]
+            self.smoke.record(SmokeDecision::Cancel {
+                epoch: self.epoch,
+                before,
+                after: self.phase.into(),
+                cancelled: false,
+            });
             false
         }
     }
@@ -112,12 +246,36 @@ impl QuitGate {
     /// Attempt `epoch`'s deadline passed. True when that same attempt is
     /// still preparing, so the app should exit without it.
     pub fn deadline(&mut self, epoch: u64) -> bool {
+        #[cfg(feature = "native-read-smoke")]
+        let before = self.phase.into();
         if self.phase == Phase::Preparing && self.epoch == epoch {
             self.phase = Phase::Exiting;
+            #[cfg(feature = "native-read-smoke")]
+            self.smoke.record(SmokeDecision::Deadline {
+                timer_epoch: epoch,
+                gate_epoch: self.epoch,
+                before,
+                after: self.phase.into(),
+                exits: true,
+            });
             true
         } else {
+            #[cfg(feature = "native-read-smoke")]
+            self.smoke.record(SmokeDecision::Deadline {
+                timer_epoch: epoch,
+                gate_epoch: self.epoch,
+                before,
+                after: self.phase.into(),
+                exits: false,
+            });
             false
         }
+    }
+
+    /// Called only by the actual deadline thread, with its captured attempt.
+    #[cfg(feature = "native-read-smoke")]
+    fn note_deadline_arm(&mut self, epoch: u64) {
+        self.smoke.record(SmokeDecision::Armed { epoch });
     }
 }
 
@@ -133,6 +291,41 @@ impl QuitState {
     /// recovered.
     fn gate(&self) -> MutexGuard<'_, QuitGate> {
         self.gate.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Read the actual gate once. Missing producer evidence stays unavailable.
+    #[cfg(feature = "native-read-smoke")]
+    pub(crate) fn smoke_observation(&self) -> SmokeObservation {
+        let gate = self.gate();
+        let observed_at = Instant::now();
+        let phase = match gate.phase {
+            Phase::Idle => SmokePhase::Idle,
+            Phase::Preparing => SmokePhase::Preparing,
+            Phase::Exiting => SmokePhase::Exiting,
+        };
+        let entries: Vec<_> = gate.smoke.entries.iter().flatten().copied().collect();
+        let armed_at = entries.iter().rev().find_map(|entry| match entry.decision {
+            SmokeDecision::Armed { epoch } if epoch == gate.epoch => Some(entry.captured_at),
+            _ => None,
+        });
+        let pending = (gate.phase == Phase::Preparing).then_some(SmokePending {
+            epoch: gate.epoch,
+            armed_at,
+            duration: QUIT_DEADLINE,
+        });
+        let ordered = entries
+            .iter()
+            .enumerate()
+            .all(|(index, entry)| entry.sequence == index as u64 + 1);
+        let complete = gate.smoke.next_sequence == entries.len() as u64;
+        SmokeObservation {
+            observed_at,
+            phase,
+            epoch: gate.epoch,
+            pending,
+            entries,
+            broken: gate.smoke.broken || !ordered || !complete,
+        }
     }
 }
 
@@ -163,6 +356,10 @@ pub fn request<R: Runtime>(app: &AppHandle<R>) {
     let spawned = std::thread::Builder::new()
         .name("cerebro-quit-deadline".into())
         .spawn(move || {
+            #[cfg(feature = "native-read-smoke")]
+            {
+                handle.state::<QuitState>().gate().note_deadline_arm(epoch);
+            }
             std::thread::sleep(QUIT_DEADLINE);
             if handle.state::<QuitState>().gate().deadline(epoch) {
                 log::warn!(
@@ -361,6 +558,264 @@ pub fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "native-read-smoke")]
+    #[test]
+    fn smoke_actual_state_and_absent_arm_are_read_without_invention() {
+        let state = QuitState::default();
+        let before = Instant::now();
+        let idle = state.smoke_observation();
+        assert_eq!(idle.phase, SmokePhase::Idle);
+        assert_eq!(idle.epoch, 0);
+        assert_eq!(idle.pending, None);
+        assert!(idle.entries.is_empty());
+        assert!(!idle.broken);
+        assert!(before <= idle.observed_at && idle.observed_at <= Instant::now());
+
+        assert_eq!(state.gate().request(), Step::Prepare { epoch: 1 });
+        let pending = state.smoke_observation();
+        assert_eq!(pending.phase, SmokePhase::Preparing);
+        assert_eq!(pending.epoch, 1);
+        assert_eq!(
+            pending.pending,
+            Some(SmokePending {
+                epoch: 1,
+                armed_at: None,
+                duration: QUIT_DEADLINE,
+            })
+        );
+        assert!(!pending.broken);
+        // Calling the real gate directly does not create its request thread.
+        // An observed epoch must never be promoted into an invented timer arm.
+        assert!(state.gate().cancel());
+        let cancelled = state.smoke_observation();
+        assert_eq!(cancelled.phase, SmokePhase::Idle);
+        assert_eq!(cancelled.epoch, 1);
+        assert_eq!(cancelled.pending, None);
+    }
+
+    #[cfg(feature = "native-read-smoke")]
+    #[test]
+    fn smoke_returned_snapshot_cannot_mutate_or_replay_the_actual_gate() {
+        let state = QuitState::default();
+        assert_eq!(state.gate().request(), Step::Prepare { epoch: 1 });
+        let mut copy = state.smoke_observation();
+        let entries = copy.entries.clone();
+        let first_read_at = copy.observed_at;
+        copy.phase = SmokePhase::Exiting;
+        copy.epoch = 999;
+        copy.pending = None;
+        copy.entries.clear();
+        let again = state.smoke_observation();
+        assert_eq!(again.phase, SmokePhase::Preparing);
+        assert_eq!(again.epoch, 1);
+        assert_eq!(
+            again.pending,
+            Some(SmokePending {
+                epoch: 1,
+                armed_at: None,
+                duration: QUIT_DEADLINE,
+            })
+        );
+        assert_eq!(again.entries, entries);
+        assert!(again.observed_at >= first_read_at);
+        assert_eq!(state.gate().request(), Step::Wait);
+        assert!(state.gate().cancel());
+        assert_eq!(
+            copy.phase,
+            SmokePhase::Exiting,
+            "only the detached copy changed"
+        );
+        assert_eq!(copy.epoch, 999);
+        assert_eq!(copy.pending, None);
+        assert!(copy.entries.is_empty());
+    }
+
+    #[cfg(feature = "native-read-smoke")]
+    #[test]
+    fn smoke_records_actual_successful_and_refused_cancel_decisions() {
+        let state = QuitState::default();
+        let before = Instant::now();
+        assert_eq!(state.gate().request(), Step::Prepare { epoch: 1 });
+        assert!(state.gate().cancel());
+        assert!(!state.gate().cancel());
+        let observed = state.smoke_observation();
+        assert_eq!(observed.phase, SmokePhase::Idle);
+        assert_eq!(observed.pending, None);
+        assert_eq!(
+            observed
+                .entries
+                .iter()
+                .map(|entry| entry.decision)
+                .collect::<Vec<_>>(),
+            vec![
+                SmokeDecision::Admitted { epoch: 1 },
+                SmokeDecision::Cancel {
+                    epoch: 1,
+                    before: SmokePhase::Preparing,
+                    after: SmokePhase::Idle,
+                    cancelled: true
+                },
+                SmokeDecision::Cancel {
+                    epoch: 1,
+                    before: SmokePhase::Idle,
+                    after: SmokePhase::Idle,
+                    cancelled: false
+                },
+            ]
+        );
+        assert_eq!(
+            observed
+                .entries
+                .iter()
+                .map(|entry| entry.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert!(observed
+            .entries
+            .iter()
+            .all(|entry| before <= entry.captured_at && entry.captured_at <= observed.observed_at));
+        assert!(observed
+            .entries
+            .windows(2)
+            .all(|pair| pair[0].captured_at <= pair[1].captured_at));
+        assert!(!observed.broken);
+    }
+
+    #[cfg(feature = "native-read-smoke")]
+    #[test]
+    fn smoke_records_old_timer_epoch_and_actual_new_gate_epoch_separately() {
+        let state = QuitState::default();
+        {
+            let mut gate = state.gate();
+            assert_eq!(gate.request(), Step::Prepare { epoch: 1 });
+            assert!(gate.cancel());
+            assert_eq!(gate.request(), Step::Prepare { epoch: 2 });
+            assert!(!gate.deadline(1));
+            assert_eq!(gate.phase, Phase::Preparing);
+            assert!(gate.deadline(2));
+            assert_eq!(gate.phase, Phase::Exiting);
+            assert!(!gate.cancel());
+        }
+        let observed = state.smoke_observation();
+        assert_eq!(observed.phase, SmokePhase::Exiting);
+        assert_eq!(observed.epoch, 2);
+        assert_eq!(observed.pending, None);
+        assert_eq!(
+            observed
+                .entries
+                .iter()
+                .map(|entry| entry.decision)
+                .collect::<Vec<_>>(),
+            vec![
+                SmokeDecision::Admitted { epoch: 1 },
+                SmokeDecision::Cancel {
+                    epoch: 1,
+                    before: SmokePhase::Preparing,
+                    after: SmokePhase::Idle,
+                    cancelled: true
+                },
+                SmokeDecision::Admitted { epoch: 2 },
+                SmokeDecision::Deadline {
+                    timer_epoch: 1,
+                    gate_epoch: 2,
+                    before: SmokePhase::Preparing,
+                    after: SmokePhase::Preparing,
+                    exits: false
+                },
+                SmokeDecision::Deadline {
+                    timer_epoch: 2,
+                    gate_epoch: 2,
+                    before: SmokePhase::Preparing,
+                    after: SmokePhase::Exiting,
+                    exits: true
+                },
+                SmokeDecision::Cancel {
+                    epoch: 2,
+                    before: SmokePhase::Exiting,
+                    after: SmokePhase::Exiting,
+                    cancelled: false
+                },
+            ]
+        );
+        assert_eq!(
+            observed
+                .entries
+                .iter()
+                .map(|entry| entry.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5, 6]
+        );
+        assert!(!observed.broken);
+    }
+
+    #[cfg(feature = "native-read-smoke")]
+    #[test]
+    fn smoke_duplicate_requests_do_not_create_observed_admissions() {
+        let state = QuitState::default();
+        assert_eq!(state.gate().request(), Step::Prepare { epoch: 1 });
+        assert_eq!(state.gate().request(), Step::Wait);
+        assert_eq!(state.gate().request(), Step::Wait);
+        let observed = state.smoke_observation();
+        assert_eq!(observed.phase, SmokePhase::Preparing);
+        assert_eq!(observed.pending.unwrap().epoch, 1);
+        assert_eq!(
+            observed
+                .entries
+                .iter()
+                .map(|entry| entry.decision)
+                .collect::<Vec<_>>(),
+            vec![SmokeDecision::Admitted { epoch: 1 }]
+        );
+        assert_eq!(observed.entries[0].sequence, 1);
+        assert!(!observed.broken);
+    }
+
+    #[cfg(feature = "native-read-smoke")]
+    #[test]
+    fn smoke_overflow_preserves_evidence_without_blocking_quit() {
+        let state = QuitState::default();
+        for epoch in 1..=96 {
+            assert_eq!(state.gate().request(), Step::Prepare { epoch });
+            assert!(state.gate().cancel());
+        }
+        let full = state.smoke_observation();
+        assert_eq!(full.entries.len(), 192);
+        assert_eq!(full.entries.first().unwrap().sequence, 1);
+        assert_eq!(full.entries.last().unwrap().sequence, 192);
+        assert_eq!(full.phase, SmokePhase::Idle);
+        assert!(!full.broken, "the last available entry is still recorded");
+
+        assert_eq!(state.gate().request(), Step::Prepare { epoch: 97 });
+        let overflowed = state.smoke_observation();
+        assert!(
+            overflowed.broken,
+            "the first lost entry invalidates evidence"
+        );
+        assert_eq!(
+            overflowed.entries, full.entries,
+            "never overwrite old evidence"
+        );
+        assert_eq!(overflowed.phase, SmokePhase::Preparing);
+        assert_eq!(overflowed.epoch, 97);
+        assert_eq!(overflowed.pending.unwrap().armed_at, None);
+        assert_eq!(state.gate().request(), Step::Wait);
+        assert!(!state.gate().deadline(96));
+        assert!(state.gate().cancel());
+        assert_eq!(state.gate().request(), Step::Prepare { epoch: 98 });
+        assert!(state.gate().deadline(98));
+        assert!(!state.gate().cancel());
+        let after = state.smoke_observation();
+        assert!(
+            after.broken,
+            "reads and later operations cannot clear lost evidence"
+        );
+        assert_eq!(after.entries, full.entries);
+        assert_eq!(after.phase, SmokePhase::Exiting);
+        assert_eq!(after.epoch, 98);
+        assert_eq!(after.pending, None);
+    }
 
     /// A file's half before its test module.
     fn non_test_half(source: &str) -> &str {

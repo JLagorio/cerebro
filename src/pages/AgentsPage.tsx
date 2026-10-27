@@ -13,6 +13,7 @@ import { FollowupList } from '@/status/FollowupList';
 import { WakesSection } from '@/status/WakesSection';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import './workspacePages.css';
 
 export type AgentsSelection = Extract<Selection, { kind: 'agents' }>;
 
@@ -117,16 +118,20 @@ export function AgentsPage({ selection }: { selection: AgentsSelection }) {
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="agents-page">
+    <div
+      className="cb-agents-page cb-composition flex min-h-0 min-w-0 flex-1 flex-col"
+      data-testid="agents-page"
+    >
       <PageHeader
+        composition="collection"
         title="Agents"
-        icon={<Icon name="bot" size={18} />}
         description="Your agents, what they're working on, and what happens next."
         actions={
           <Button
             variant="primary"
             size="sm"
             testId="agents-new"
+            tabIndex={0}
             onClick={() => navigate({ kind: 'library', tab: 'agent' })}
           >
             New agent
@@ -134,7 +139,7 @@ export function AgentsPage({ selection }: { selection: AgentsSelection }) {
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="cb-surface-content cb-agents-content">
+        <div className="cb-composition-content cb-agents-content">
           {/* The roster's click OPENS the agent — its page, on the Runs tab
             (M55.12); on this surface an agent is a destination, not a
             filter. The fleet lives here alone since M50.5; Knowledge's old

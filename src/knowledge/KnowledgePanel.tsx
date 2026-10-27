@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { conceptSourceRow, resourceRow, type ResourceRow } from '@/agent/elements/decisionsSources';
 import { Source as SourceLine } from '@/components/ai/Sources';
-import { Trace } from '@/components/ai/Trace';
+import { Trace, TraceDescription, TraceLine, TraceTitle } from '@/components/ai/Trace';
 import { Icon } from '@/components/ui/Icon';
 import { NewRecordDialog } from '@/app/CreateMenu';
 import { InspectorSubhead } from '@/detail/InspectorParts';
@@ -173,11 +173,20 @@ function ResourceLine({
 }) {
   return (
     <Trace>
-      <SourceLine
-        source={row.ref}
-        onOpenPath={onOpenEntity}
-        isVaultPath={(path) => path === row.page}
-      />
+      {row.ref === null ? (
+        <TraceLine title={row.resource}>
+          <TraceTitle>{row.label}</TraceTitle>
+          {row.target.kind === 'MissingLocal' && (
+            <TraceDescription>Local source missing</TraceDescription>
+          )}
+        </TraceLine>
+      ) : (
+        <SourceLine
+          source={row.ref}
+          onOpenPath={onOpenEntity}
+          isVaultPath={(path) => path === row.page}
+        />
+      )}
     </Trace>
   );
 }
@@ -235,7 +244,7 @@ function SourceRow({
   return (
     <li
       data-testid="concept-source"
-      data-kind={row.ref.kind}
+      data-kind={row.ref?.kind ?? (row.target.kind === 'MissingLocal' ? 'missing' : 'descriptor')}
       data-path={row.page ?? undefined}
       className="flex gap-2 py-1"
     >

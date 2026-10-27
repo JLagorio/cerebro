@@ -16,7 +16,7 @@
 
 ## Global Constraints
 
-- **DRAFT FOR OWNER REVIEW — not approved for execution.** New paths/test names below are proposed; no listed implementation check was run in this task.
+- **Implementation authorized by the owner on 2026-10-23**, on the existing branch alongside Claude's M92 work. See the [implementation record](2026-10-23-m93-m99-implementation-record.md) for actual evidence and dependency gates. New paths/test names below remain proposed until implemented and verified; M98 is not complete.
 - The first engine is desktop-awake: local schedules and event dispatch execute only while the app, vault and runtime are ready.
 - Keep files as the current workspace authority. Proposed workflow definitions live as typed JSON under an owned `.cerebro/workflows/` directory.
 - Every run pins one version; edits, unpublishing or renaming cannot reinterpret an existing wait.

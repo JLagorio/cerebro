@@ -1668,13 +1668,19 @@ mod tests {
     }
 
     #[test]
-    fn no_tool_reaches_outside_the_app() {
-        // Every row and every generated tool stays inside the vault and the
-        // app, so none is served with openWorldHint. Connector tools reach
-        // the world; these do not.
-        for row in &manifest().tools {
-            assert!(!row.open_world, "{} reaches outside the app", row.name);
-        }
+    fn only_the_held_managed_action_tool_reaches_outside_the_app() {
+        // M96's explicitly reviewed native action is the sole external row.
+        // Mail connector denials remain separate and unchanged (CV-62).
+        let external: Vec<&str> = manifest().tools.iter()
+            .filter(|row| row.open_world).map(|row| row.name.as_str()).collect();
+        assert_eq!(external, ["prepare_action"]);
+        let row = manifest().tools.iter().find(|row| row.name == "prepare_action").unwrap();
+        assert_eq!(row.door, "managed");
+        assert_eq!(row.toolset.as_deref(), Some("managed"));
+        assert_eq!(row.kind, Kind::Additive);
+        assert_eq!(row.axis, Axis::None);
+        assert!(!row.confirmable, "managed approval is not the page-write ask seam");
+        assert!(row.fold.is_none(), "consequential action review keeps its own row");
         assert!(!generated().open_world, "the generated tools reach outside");
     }
 
@@ -2806,7 +2812,11 @@ mod tests {
                 "calculate_sheet",
                 "read_canvas",
                 "knowledge_about",
-                "list_inbox"
+                "list_inbox",
+                "list_actions",
+                "get_action_definition",
+                "get_action_effect",
+                "get_action_effect_details"
             ])
         );
         assert_eq!(

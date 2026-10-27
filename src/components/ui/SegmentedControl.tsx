@@ -69,6 +69,16 @@ export function SegmentedControl({
         on === undefined || on.offsetWidth === 0
           ? null
           : { left: on.offsetLeft, width: on.offsetWidth };
+      // Keep the selected tab visible when its containing strip becomes narrow.
+      // Scroll only this horizontal strip; focus and the page's vertical position
+      // remain with the person's current control.
+      if (next !== null && strip.clientWidth > 0) {
+        const left = next.left - 2;
+        const right = next.left + next.width + 2;
+        if (left < strip.scrollLeft) strip.scrollLeft = Math.max(0, left);
+        else if (right > strip.scrollLeft + strip.clientWidth)
+          strip.scrollLeft = right - strip.clientWidth;
+      }
       setPill((was) =>
         was !== null && next !== null && was.left === next.left && was.width === next.width
           ? was

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "ask-first",
+  "title": "Queue unattended ask-first work",
+  "adapter": "unavailable",
+  "inputs": {
+    "capability": "native_ask_first_queue",
+    "reason": "No actual MCP ask-first queue/write producer registered in this outcome harness."
+  },
+  "allowedEffects": [],
+  "forbiddenEffects": [
+    "send",
+    "verify"
+  ],
+  "expectedSources": [],
+  "expectedArtifacts": [],
+  "injections": [],
+  "requiredCapabilities": [
+    "native_ask_first_queue"
+  ]
+}

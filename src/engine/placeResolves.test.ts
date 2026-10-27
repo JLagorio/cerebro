@@ -113,3 +113,8 @@ it('keeps unscanned attachments until a byte probe proves absence', () => {
   expect(placeResolves(file, { ...snapshot, entries: [] })).toBe(true);
   expect(placeResolves(file, { ...snapshot, missingFiles: ['attachments/a.pdf'] })).toBe(false);
 });
+
+it('restores a workflow Library visit without interpreting its ID as a vault markdown path', () => {
+ expect(readSelection({ kind: 'library', tab: 'workflow', workflowId: 'example', path: 'unrelated.md' })).toEqual({ kind: 'library', tab: 'workflow', workflowId: 'example' });
+ expect(restorablePlace({ kind: 'library', tab: 'workflow', workflowId: 'example' })).toEqual({ kind: 'library', tab: 'workflow', workflowId: 'example' });
+});

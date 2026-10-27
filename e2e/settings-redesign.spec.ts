@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { boot, chooseSettingsSection, openDestination } from './boot';
 
-test('Settings lends its section navigation to the shell and keeps a readable detail column', async ({
+test('Settings lends its section navigation to the shell and aligns its utility detail', async ({
   page,
 }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -18,16 +18,25 @@ test('Settings lends its section navigation to the shell and keeps a readable de
   );
   await expect(settings.getByRole('tablist', { name: 'Theme' })).toBeVisible();
   await expect(page.getByTestId('nav-surfaces')).toBeHidden();
-  // WebKit's non-overlay scrollbar occupies the outer box. The reading
-  // column is centered in the scrollport, just like Home's content.
+  // Both edges measure the pane's content width, including on WebKit where
+  // a non-overlay vertical scrollbar occupies part of the outer box.
   const frame = await settings.evaluate((node) => ({
     x: node.getBoundingClientRect().x,
+    y: node.getBoundingClientRect().y,
     width: node.clientWidth,
   }));
-  const column = (await settings.locator('.cb-settings-content').boundingBox())!;
-  expect(column.width).toBeLessThanOrEqual(840);
-  expect(column.width).toBeGreaterThan(700);
-  expect(Math.abs(column.x + column.width / 2 - (frame.x + frame.width / 2))).toBeLessThan(2);
+  const heading = (await settings.getByTestId('settings-heading').boundingBox())!;
+  const edge = await settings
+    .locator('.cb-settings-content')
+    .evaluate(
+      (node) => node.getBoundingClientRect().x + parseFloat(getComputedStyle(node).paddingLeft),
+    );
+  const inset = frame.width < 600 ? 16 : frame.width < 960 ? 24 : 32;
+  expect(Math.abs(heading.x - frame.x - inset)).toBeLessThanOrEqual(2);
+  expect(Math.abs(heading.y - frame.y - 32)).toBeLessThanOrEqual(2);
+  expect(Math.abs(edge - heading.x)).toBeLessThanOrEqual(2);
+  const appearance = (await settings.getByRole('heading', { name: 'Appearance' }).boundingBox())!;
+  expect(Math.abs(appearance.x - heading.x)).toBeLessThanOrEqual(2);
   await page.screenshot({ path: info.outputPath('settings-general.png'), animations: 'disabled' });
 
   await chooseSettingsSection(page, 'Assistant');

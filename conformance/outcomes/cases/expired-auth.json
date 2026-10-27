@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "expired-auth",
+  "title": "Repair expired connector auth",
+  "adapter": "unavailable",
+  "inputs": {
+    "capability": "connector_auth_repair",
+    "reason": "The M96 deterministic issue provider does not prove connector authentication repair."
+  },
+  "allowedEffects": [],
+  "forbiddenEffects": [
+    "send",
+    "verify"
+  ],
+  "expectedSources": [],
+  "expectedArtifacts": [],
+  "injections": [],
+  "requiredCapabilities": [
+    "connector_auth_repair"
+  ]
+}

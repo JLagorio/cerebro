@@ -1,0 +1,1351 @@
+{
+  "version": 1,
+  "types": {
+    "AttemptBinding": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "AttemptBinding",
+      "type": "object",
+      "required": [
+        "assistantMessageId",
+        "branchMessageId",
+        "displayMessage",
+        "parentThreadId",
+        "threadId",
+        "userMessageId"
+      ],
+      "properties": {
+        "assistantMessageId": {
+          "type": "string"
+        },
+        "branchMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "displayMessage": {
+          "$ref": "#/definitions/DisplayMessage"
+        },
+        "parentThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "userMessageId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "DisplayMessage": {
+          "type": "object",
+          "required": [
+            "addressedLabel",
+            "attachmentRefs",
+            "text"
+          ],
+          "properties": {
+            "addressedLabel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "attachmentRefs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "DisplayMessage": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "DisplayMessage",
+      "type": "object",
+      "required": [
+        "addressedLabel",
+        "attachmentRefs",
+        "text"
+      ],
+      "properties": {
+        "addressedLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attachmentRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ArchiveContext": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ArchiveContext",
+      "type": "object",
+      "required": [
+        "storeUuid",
+        "vaultId"
+      ],
+      "properties": {
+        "storeUuid": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ArchiveError": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ArchiveError",
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ArchiveErrorCode"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ArchiveErrorCode": {
+          "type": "string",
+          "enum": [
+            "invalid",
+            "conflict",
+            "denied",
+            "unavailable"
+          ]
+        }
+      }
+    },
+    "ArchiveSetting": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ArchiveSetting",
+      "type": "object",
+      "required": [
+        "budgetBytes",
+        "choice",
+        "context",
+        "logicalBytes",
+        "revision"
+      ],
+      "properties": {
+        "budgetBytes": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "choice": {
+          "$ref": "#/definitions/RetentionChoice"
+        },
+        "context": {
+          "$ref": "#/definitions/ArchiveContext"
+        },
+        "logicalBytes": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "revision": {
+          "$ref": "#/definitions/SafeCounter"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ArchiveContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "RetentionChoice": {
+          "type": "string",
+          "enum": [
+            "off",
+            "days30",
+            "days90",
+            "forever"
+          ]
+        },
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        }
+      }
+    },
+    "ThreadPage": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ThreadPage",
+      "type": "object",
+      "required": [
+        "context",
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/ArchiveContext"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ArchiveThread"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ArchiveContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ArchiveThread": {
+          "type": "object",
+          "required": [
+            "branchMessageId",
+            "contentState",
+            "createdAt",
+            "id",
+            "parentThreadId",
+            "sessionId",
+            "title",
+            "titleExpiresAt",
+            "updatedAt"
+          ],
+          "properties": {
+            "branchMessageId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "contentState": {
+              "$ref": "#/definitions/ContentState"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "parentThreadId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "titleExpiresAt": {
+              "description": "Expiry of title_generation_id's exact source content, never thread max.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "updatedAt": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ContentState": {
+          "type": "string",
+          "enum": [
+            "retained",
+            "metadata_only",
+            "expired"
+          ]
+        }
+      }
+    },
+    "MessagePage": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "MessagePage",
+      "type": "object",
+      "required": [
+        "context",
+        "items",
+        "nextCursor",
+        "threadId"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/ArchiveContext"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ArchiveMessage"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ArchiveContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ArchiveMessage": {
+          "type": "object",
+          "required": [
+            "assistantMessageId",
+            "attemptId",
+            "completedAt",
+            "content",
+            "contentState",
+            "expiresAt",
+            "importedAt",
+            "origin",
+            "persistence",
+            "runId",
+            "sessionId",
+            "userMessageId"
+          ],
+          "properties": {
+            "assistantMessageId": {
+              "type": "string"
+            },
+            "attemptId": {
+              "type": "string"
+            },
+            "completedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "content": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/CompletedContent"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "contentState": {
+              "$ref": "#/definitions/ContentState"
+            },
+            "expiresAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "importedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "origin": {
+              "$ref": "#/definitions/ContentOrigin"
+            },
+            "persistence": {
+              "$ref": "#/definitions/PersistenceState"
+            },
+            "runId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "userMessageId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ArchiveTurnV1": {
+          "type": "object",
+          "required": [
+            "availability",
+            "blocks",
+            "references",
+            "version"
+          ],
+          "properties": {
+            "availability": {
+              "$ref": "#/definitions/Availability"
+            },
+            "blocks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Block"
+              }
+            },
+            "lastUuid": {
+              "description": "Actual main-thread TurnEnded identity; never inferred from text/run IDs.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "references": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Reference"
+              }
+            },
+            "version": {
+              "type": "integer",
+              "maximum": 1.0,
+              "minimum": 1.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "Availability": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "Block": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "messageId",
+                "text"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "text"
+                  ]
+                },
+                "messageId": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "name",
+                "state",
+                "toolId"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "tool"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "toolId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "summary",
+                "toolId"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "child"
+                  ]
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "toolId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "CompletedContent": {
+          "type": "object",
+          "required": [
+            "answer",
+            "completionStatus",
+            "displayMessage",
+            "version"
+          ],
+          "properties": {
+            "answer": {
+              "$ref": "#/definitions/ArchiveTurnV1"
+            },
+            "completionStatus": {
+              "type": "string"
+            },
+            "displayMessage": {
+              "$ref": "#/definitions/DisplayMessage"
+            },
+            "version": {
+              "type": "integer",
+              "maximum": 1.0,
+              "minimum": 1.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "ContentOrigin": {
+          "type": "string",
+          "enum": [
+            "native_run",
+            "browser_cache"
+          ]
+        },
+        "ContentState": {
+          "type": "string",
+          "enum": [
+            "retained",
+            "metadata_only",
+            "expired"
+          ]
+        },
+        "DisplayMessage": {
+          "type": "object",
+          "required": [
+            "addressedLabel",
+            "attachmentRefs",
+            "text"
+          ],
+          "properties": {
+            "addressedLabel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "attachmentRefs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "PersistenceState": {
+          "type": "string",
+          "enum": [
+            "retained",
+            "off",
+            "expired",
+            "unavailable",
+            "deleted"
+          ]
+        },
+        "Reference": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "toolId",
+                "url"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "source"
+                  ]
+                },
+                "toolId": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "invocationId",
+                "kind"
+              ],
+              "properties": {
+                "invocationId": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "effect"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "path"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "artifact"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    },
+    "PruneResult": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "PruneResult",
+      "type": "object",
+      "required": [
+        "cleanup",
+        "context",
+        "logicalBytesReleased",
+        "removedMessages",
+        "removedSearchRows",
+        "safeReason"
+      ],
+      "properties": {
+        "cleanup": {
+          "$ref": "#/definitions/CleanupState"
+        },
+        "context": {
+          "$ref": "#/definitions/ArchiveContext"
+        },
+        "logicalBytesReleased": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "removedMessages": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "removedSearchRows": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "safeReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ArchiveContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "CleanupState": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "deferred",
+            "failed"
+          ]
+        },
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        }
+      }
+    },
+    "DeleteResult": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "DeleteResult",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "cleanup",
+            "state"
+          ],
+          "properties": {
+            "cleanup": {
+              "$ref": "#/definitions/CleanupState"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "already_deleted"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "owners",
+            "state"
+          ],
+          "properties": {
+            "owners": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "blocked_active"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ],
+      "definitions": {
+        "CleanupState": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "deferred",
+            "failed"
+          ]
+        }
+      }
+    },
+    "ExportResult": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ExportResult",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "cancelled"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "partial",
+            "path",
+            "state"
+          ],
+          "properties": {
+            "partial": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "saved"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ExportFormat": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ExportFormat",
+      "type": "string",
+      "enum": [
+        "json",
+        "markdown"
+      ]
+    },
+    "ImportBatch": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ImportBatch",
+      "type": "object",
+      "required": [
+        "attempts",
+        "sourceVaultPath",
+        "threadId"
+      ],
+      "properties": {
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LegacyAttempt"
+          }
+        },
+        "sourceVaultPath": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ArchiveTurnV1": {
+          "type": "object",
+          "required": [
+            "availability",
+            "blocks",
+            "references",
+            "version"
+          ],
+          "properties": {
+            "availability": {
+              "$ref": "#/definitions/Availability"
+            },
+            "blocks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Block"
+              }
+            },
+            "lastUuid": {
+              "description": "Actual main-thread TurnEnded identity; never inferred from text/run IDs.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "references": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Reference"
+              }
+            },
+            "version": {
+              "type": "integer",
+              "maximum": 1.0,
+              "minimum": 1.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "Availability": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "Block": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "messageId",
+                "text"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "text"
+                  ]
+                },
+                "messageId": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "name",
+                "state",
+                "toolId"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "tool"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "toolId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "summary",
+                "toolId"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "child"
+                  ]
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "toolId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "DisplayMessage": {
+          "type": "object",
+          "required": [
+            "addressedLabel",
+            "attachmentRefs",
+            "text"
+          ],
+          "properties": {
+            "addressedLabel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "attachmentRefs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "LegacyAttempt": {
+          "type": "object",
+          "required": [
+            "answer",
+            "assistantMessageId",
+            "completedAt",
+            "displayMessage",
+            "sessionId",
+            "userMessageId"
+          ],
+          "properties": {
+            "answer": {
+              "$ref": "#/definitions/ArchiveTurnV1"
+            },
+            "assistantMessageId": {
+              "type": "string"
+            },
+            "completedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeCounter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "displayMessage": {
+              "$ref": "#/definitions/DisplayMessage"
+            },
+            "sessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "userMessageId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "Reference": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "toolId",
+                "url"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "source"
+                  ]
+                },
+                "toolId": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "invocationId",
+                "kind"
+              ],
+              "properties": {
+                "invocationId": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "effect"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "path"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "artifact"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        }
+      }
+    },
+    "ImportResult": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ImportResult",
+      "type": "object",
+      "required": [
+        "confirmed",
+        "context",
+        "items"
+      ],
+      "properties": {
+        "confirmed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ImportedIdentity"
+          }
+        },
+        "context": {
+          "$ref": "#/definitions/ArchiveContext"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ImportItem"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ArchiveContext": {
+          "type": "object",
+          "required": [
+            "storeUuid",
+            "vaultId"
+          ],
+          "properties": {
+            "storeUuid": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ImportItem": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "assistantMessageId",
+                "attemptId",
+                "state",
+                "userMessageId"
+              ],
+              "properties": {
+                "assistantMessageId": {
+                  "type": "string"
+                },
+                "attemptId": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "retained"
+                  ]
+                },
+                "userMessageId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "assistantMessageId",
+                "reason",
+                "state",
+                "userMessageId"
+              ],
+              "properties": {
+                "assistantMessageId": {
+                  "type": "string"
+                },
+                "reason": {
+                  "$ref": "#/definitions/ImportSkip"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "skipped"
+                  ]
+                },
+                "userMessageId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "ImportSkip": {
+          "type": "string",
+          "enum": [
+            "off",
+            "unknown_completion",
+            "expired",
+            "unavailable",
+            "already_recorded",
+            "conflict",
+            "blocked_active"
+          ]
+        },
+        "ImportedIdentity": {
+          "type": "object",
+          "required": [
+            "assistantMessageId",
+            "attemptId",
+            "expiresAt",
+            "importedAt",
+            "threadId",
+            "userMessageId"
+          ],
+          "properties": {
+            "assistantMessageId": {
+              "type": "string"
+            },
+            "attemptId": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "importedAt": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "userMessageId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

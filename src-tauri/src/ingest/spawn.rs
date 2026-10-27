@@ -47,6 +47,7 @@ pub const ACTOR: &str = super::driver::ACTOR;
 
 /// Everything a live spawn needs from the app.
 pub struct Live<'a> {
+    pub(crate) preparation: &'a crate::agent::RunPreparation,
     pub app: &'a AppHandle,
     pub agents: &'a AgentState,
     pub mcp: &'a McpState,
@@ -118,6 +119,7 @@ pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
                     cause: Some(RunCause::of(CauseKind::Ingest)),
                 }),
                 Some(tx),
+                live.preparation,
             )?;
             // Blocking, deliberately. See the module note.
             match rx.recv() {

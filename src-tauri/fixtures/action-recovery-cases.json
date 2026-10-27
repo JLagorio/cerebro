@@ -1,0 +1,6 @@
+[
+  { "boundary": "after_prepare", "state": "awaiting_approval" },
+  { "boundary": "after_allow", "state": "ready" },
+  { "boundary": "after_claim", "state": "outcome_unknown" },
+  { "boundary": "after_response_before_receipt", "state": "outcome_unknown" }
+]

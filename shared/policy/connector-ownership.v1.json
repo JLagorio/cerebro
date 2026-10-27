@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "owner_field": "executionOwner",
+  "owners": [
+    {
+      "value": "cerebro",
+      "disposition": "managed"
+    },
+    {
+      "value": "cli",
+      "disposition": "cli"
+    }
+  ],
+  "absent_owner": "cli",
+  "unknown_owner": "invalid",
+  "managed_only_fields": [
+    "secretRef"
+  ],
+  "cli_with_managed_field": "invalid",
+  "messages": {
+    "managed": "Managed execution is unavailable for this connector.",
+    "invalid": "Connector ownership needs correction in .cerebro/connectors.json.",
+    "unavailable": "Connector ownership policy is unavailable."
+  }
+}

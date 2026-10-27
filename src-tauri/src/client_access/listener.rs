@@ -45,6 +45,41 @@ struct Running {
     server: Arc<tiny_http::Server>,
     workers: usize,
 }
+
+/// The guard moves with the original Session through every finishing path.
+/// It is last in Session, so the RunClaim is released before scope completion.
+#[derive(Default)]
+struct ClientCompletionBook { inner: Mutex<ClientCompletionState> }
+#[derive(Default)]
+struct ClientCompletionState {
+    active: BTreeMap<PathBuf, usize>,
+    failed: std::collections::BTreeSet<PathBuf>,
+}
+struct ClientCompletion {
+    book: Arc<ClientCompletionBook>,
+    vault: PathBuf,
+    confirmed: bool,
+}
+impl ClientCompletionBook {
+    fn register(self: &Arc<Self>, vault: &Path) -> Result<ClientCompletion, String> {
+        let mut inner = self.inner.lock().map_err(|_| SESSION_UNAVAILABLE)?;
+        let count = inner.active.entry(vault.to_path_buf()).or_default();
+        *count = count.checked_add(1).ok_or(SESSION_UNAVAILABLE)?;
+        Ok(ClientCompletion { book: self.clone(), vault: vault.to_path_buf(), confirmed: false })
+    }
+}
+impl ClientCompletion { fn confirm(&mut self) { self.confirmed = true; } }
+impl Drop for ClientCompletion {
+    fn drop(&mut self) {
+        let mut inner = match self.book.inner.lock() { Ok(inner) => inner, Err(poisoned) => poisoned.into_inner() };
+        if !self.confirmed || std::thread::panicking() { inner.failed.insert(self.vault.clone()); }
+        match inner.active.get_mut(&self.vault) {
+            Some(count) if *count > 0 => { *count -= 1; if *count == 0 { inner.active.remove(&self.vault); } }
+            _ => { inner.failed.insert(self.vault.clone()); }
+        }
+    }
+}
+
 struct Session {
     run_id: String,
     token_id: String,
@@ -54,6 +89,7 @@ struct Session {
     last_call: DateTime<Utc>,
     in_flight: usize,
     closing: Option<End>,
+    completion: ClientCompletion,
 }
 #[derive(Clone, Copy)]
 struct End {
@@ -68,6 +104,7 @@ struct Finished {
 }
 #[derive(Default)]
 struct Inner {
+    completions: Arc<ClientCompletionBook>,
     config: ClientAccessConfig,
     error: Option<String>,
     data_dir: Option<PathBuf>,
@@ -234,6 +271,7 @@ impl ClientAccessState {
                 }
                 collect_finished(&mut inner, &mut finished);
             }
+            let completion = inner.completions.register(&vault.path)?;
             inner.current.insert(token_id.into(), run_id.clone());
             inner.sessions.insert(
                 run_id.clone(),
@@ -258,6 +296,7 @@ impl ClientAccessState {
                     last_call: now,
                     in_flight: 0,
                     closing: None,
+                    completion,
                 },
             );
         }
@@ -326,6 +365,14 @@ impl ClientAccessState {
     fn stop(&self, now: DateTime<Utc>, quitting: bool) {
         self.stop_inner(None, now, quitting);
     }
+    // Selected opens suspend access without turning this process into a quitting app.
+    fn suspend_for_selected(&self, now: DateTime<Utc>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.vault = None;
+        }
+        self.stop(now, false);
+    }
+
     fn stop_inner(&self, generation: Option<u64>, now: DateTime<Utc>, quitting: bool) {
         let mut finished = Vec::new();
         let running = self.inner.lock().ok().and_then(|mut inner| {
@@ -348,7 +395,7 @@ impl ClientAccessState {
         self.finish_all(finished);
     }
     fn finish_all(&self, finished: Vec<Finished>) {
-        for finished in finished {
+        for mut finished in finished {
             if let Err(error) = finish_record(&finished) {
                 log::warn!("client session could not finish: {error}");
                 if !finished.end.quitting {
@@ -361,6 +408,7 @@ impl ClientAccessState {
             }
             mcp::forget_run(&finished.session.run_id);
             if finished.end.quitting || finished.session.claim.is_none() {
+                finished.session.completion.confirm();
                 continue;
             }
             // The extra Arc retains ownership if thread creation fails, so a
@@ -374,6 +422,8 @@ impl ClientAccessState {
                     let finished = worker.lock().ok().and_then(|mut item| item.take());
                     if let Some(finished) = finished {
                         if state.inner.lock().is_ok_and(|inner| inner.quitting) {
+                            let mut finished = finished;
+                            finished.session.completion.confirm();
                             return;
                         }
                         settle(finished);
@@ -545,17 +595,21 @@ fn unblock(running: Option<Running>) {
 }
 
 fn settle(finished: Finished) {
-    let session = &finished.session;
-    let _ = crate::git::changeset::settle_run(crate::git::changeset::SettleRun {
-        vault: &session.vault.path,
-        data_dir: &finished.data_dir,
-        vault_id: Some(&session.vault.id),
-        run_id: &session.run_id,
-        actor: Some(&session.actor),
-        cli_paths: Vec::new(),
-        summary: None,
+    settle_with(finished, |finished| {
+        let session = &finished.session;
+        let _ = crate::git::changeset::settle_run(crate::git::changeset::SettleRun {
+            vault: &session.vault.path, data_dir: &finished.data_dir,
+            vault_id: Some(&session.vault.id), run_id: &session.run_id,
+            actor: Some(&session.actor), cli_paths: Vec::new(), summary: None,
+        });
     });
-    // `finished` owns the claim through settle_run, including a refusal/panic.
+}
+/// The real owned-resource kernel; tests substitute Git I/O only. The guard
+/// cannot confirm until work returns, and panic/unwind remains sticky failed.
+fn settle_with(mut finished: Finished, work: impl FnOnce(&Finished)) {
+    work(&finished);
+    finished.session.completion.confirm();
+    // Finished owns Session/RunClaim through work and drops them in field order.
 }
 
 fn match_token<'a>(
@@ -761,6 +815,10 @@ impl ClientAccessState {
     }
 }
 pub fn vault_opened(app: &tauri::AppHandle, path: &Path, scope: &runtime::VaultScope) {
+    if crate::workspace_service::boundary::guard_legacy_scope(path, None, true).is_err() {
+        global().suspend_for_selected(Utc::now());
+        return;
+    }
     use tauri::Manager;
     let Ok(_setup) = crate::agent::connector_setup_lock() else {
         return;
@@ -812,6 +870,10 @@ pub fn connector_config() -> Result<ClientAccessConfig, String> {
 pub fn shut_down() {
     global().stop(Utc::now(), true);
 }
+pub(crate) fn suspend_for_selected() {
+    global().suspend_for_selected(Utc::now());
+}
+
 pub(super) fn token_created() { /* Authentication reads durable rows on every request. */
 }
 pub(super) fn token_revoked(id: &str, recorded: bool) {
@@ -838,6 +900,12 @@ pub fn set_client_access(
     port: i64,
 ) -> Result<ClientAccessStatus, String> {
     use tauri::Manager;
+    if enabled {
+        crate::workspace_service::native_admission::guard_active_enable(
+            &crate::workspace_service::authority::context().map_err(|e| e.message)?,
+        )
+        .map_err(|e| e.message)?;
+    }
     let port = valid_port(port)?;
     let _setup = crate::agent::connector_setup_lock()?;
     if enabled {
@@ -1269,6 +1337,54 @@ mod tests {
         drop(ticket);
     }
     #[test]
+    fn selected_suspend_stops_listener_and_session_then_allows_actual_legacy_rebind() {
+        let f = Fixture::new("m99-client-selected-suspend");
+        let legacy = f.state.inner.lock().unwrap().vault.clone().unwrap();
+        let old_port = f.start();
+        assert!(TcpStream::connect(("127.0.0.1", old_port)).is_ok());
+        let ticket = f.touch("initialize", 0).unwrap();
+        let previous_run = ticket.run_id.clone();
+        drop(ticket);
+        assert_eq!(f.row(&previous_run).0, "running");
+        f.state.suspend_for_selected(at(1));
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while TcpStream::connect(("127.0.0.1", old_port)).is_ok()
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let old_listener_closed = TcpStream::connect(("127.0.0.1", old_port)).is_err();
+        let session_cancelled = f.row(&previous_run).0 == "cancelled";
+        let (binding_cleared, enabled, quitting) = {
+            let inner = f.state.inner.lock().unwrap();
+            (inner.vault.is_none(), inner.config.enabled, inner.quitting)
+        };
+        // This is the same valid legacy Vault the runtime/token fixture bound,
+        // installed at vault_opened's state seam before its real start method.
+        {
+            let mut inner = f.state.inner.lock().unwrap();
+            inner.vault = Some(legacy);
+            inner.config.port = 0;
+        }
+        f.state.start(Arc::new(|_: &RunGrant, request: &Value| {
+            json!({"jsonrpc":"2.0","id":request["id"],"result":{"legacy":true}})
+        })).unwrap();
+        let restarted = f.state.status().unwrap();
+        let legacy_rpc_ok = if restarted.url.is_some() {
+            rpc(
+                &f,
+                restarted.port,
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            )
+            .status
+                == 200
+        } else {
+            false
+        };
+        assert!(old_listener_closed && session_cancelled && binding_cleared && enabled && !quitting && legacy_rpc_ok,
+            "closed={old_listener_closed},cancelled={session_cancelled},unbound={binding_cleared},enabled={enabled},quitting={quitting},legacy_rpc={legacy_rpc_ok}");
+    }
+    #[test]
     fn a_token_whose_vault_is_closed_can_discover_but_cannot_read_data_or_open_a_session() {
         let f = Fixture::new("client-closed");
         f.state.inner.lock().unwrap().vault = None;
@@ -1556,5 +1672,155 @@ mod tests {
         mcp::note_tool_call(&run, "get_note");
         f.state.close(None, true, at(1), false);
         assert_eq!(mcp::take_tool_calls(&run), Some(BTreeMap::new()));
+    }
+}
+
+impl ClientAccessState {
+    fn wait_opening_settlement(&self, keep: Option<&Path>, timeout: Duration) -> Result<(), String> {
+        let keep = keep.map(|path| PathBuf::from(runtime::scope::canonical_path(path)));
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let snapshot = match self.inner.try_lock() {
+                Ok(inner) => {
+                    let pending = inner.sessions.values().any(|session| keep.as_ref() != Some(&session.vault.path))
+                        || inner.pending.iter().any(|finished| keep.as_ref() != Some(&finished.session.vault.path));
+                    Some((inner.completions.clone(), pending))
+                }
+                Err(std::sync::TryLockError::WouldBlock) => None,
+                Err(std::sync::TryLockError::Poisoned(_)) => return Err(SESSION_UNAVAILABLE.into()),
+            };
+            if let Some((book, pending)) = snapshot {
+                match book.inner.try_lock() {
+                    Ok(completion) => {
+                        if completion.failed.iter().any(|vault| keep.as_ref() != Some(vault)) {
+                            return Err("A previous client writer ended without confirmed cleanup. Workspace opening is unavailable.".into());
+                        }
+                        let unsettled = completion.active.iter().any(|(vault, count)| *count > 0 && keep.as_ref() != Some(vault));
+                        if !pending && !unsettled { return Ok(()); }
+                    }
+                    Err(std::sync::TryLockError::WouldBlock) => {}
+                    Err(std::sync::TryLockError::Poisoned(_)) => return Err(SESSION_UNAVAILABLE.into()),
+                };
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("Previous client requests or Git settlement are still finishing. Workspace opening is unavailable.".into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+/// Opening/cleanup only: call after closing old admission, outside ActiveRoot
+/// and native/storage locks. This waits; it never retries a session or Git work.
+pub(crate) fn wait_for_opening(keep: Option<&Path>, timeout: Duration) -> Result<(), String> {
+    global().wait_opening_settlement(keep, timeout)
+}
+
+#[cfg(test)]
+mod opening_settlement_tests {
+    use super::*;
+    fn at() -> DateTime<Utc> { DateTime::parse_from_rfc3339("2026-10-26T00:00:00Z").unwrap().with_timezone(&Utc) }
+    fn session(state: &ClientAccessState, root: &str, flight: usize) -> Session {
+        let vault = Vault { path: PathBuf::from(root), id: "synthetic-vault".into(), store: None };
+        let completion = state.inner.lock().unwrap().completions.register(&vault.path).unwrap();
+        Session { run_id: "synthetic-run".into(), token_id: "synthetic-token".into(), actor: "client:synthetic".into(),
+            vault, claim: None, last_call: at(), in_flight: flight, closing: None, completion }
+    }
+    #[test]
+    fn actual_opening_keeps_same_vault_but_waits_for_closed_inflight_session() {
+        let state = ClientAccessState::default();
+        let active = session(&state, "/synthetic/vault-a", 1);
+        {
+            let mut inner = state.inner.lock().unwrap();
+            inner.vault = Some(active.vault.clone());
+            inner.data_dir = Some(PathBuf::from("/synthetic/no-database-opened"));
+            inner.sessions.insert(active.run_id.clone(), active);
+        }
+        state.opening(Path::new("/synthetic/vault-b"), at());
+        let same = state.wait_opening_settlement(Some(Path::new("/synthetic/vault-a")), Duration::ZERO);
+        let other = state.wait_opening_settlement(Some(Path::new("/synthetic/vault-b")), Duration::ZERO);
+        let selected = state.wait_opening_settlement(None, Duration::ZERO);
+        assert!(same.is_ok());
+        assert!(other.is_err(), "closed in-flight requests retain their original vault scope");
+        assert!(selected.is_err());
+    }
+    #[test]
+    fn real_settle_kernel_retains_original_scope_after_session_map_removal() {
+        let state = ClientAccessState::default();
+        let mut ended = session(&state, "/synthetic/vault-a", 0);
+        ended.closing = Some(End { succeeded: false, at: at(), quitting: false });
+        let mut finished = Vec::new();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            inner.data_dir = Some(PathBuf::from("/synthetic/no-database-opened"));
+            inner.sessions.insert(ended.run_id.clone(), ended);
+            collect_finished(&mut inner, &mut finished);
+            assert!(inner.sessions.is_empty());
+        }
+        let ended = finished.pop().unwrap();
+        let (ready_send, ready) = std::sync::mpsc::sync_channel(0);
+        let (release, wait) = std::sync::mpsc::sync_channel(0);
+        let worker = std::thread::spawn(move || settle_with(ended, |_| { ready_send.send(()).unwrap(); let _ = wait.recv(); }));
+        ready.recv().unwrap();
+        // An unrelated current-vault change cannot relabel this original A resource.
+        state.inner.lock().unwrap().vault = Some(Vault { path: PathBuf::from("/synthetic/vault-b"), id: "other-vault".into(), store: None });
+        let held = state.wait_opening_settlement(Some(Path::new("/synthetic/vault-b")), Duration::ZERO);
+        let same = state.wait_opening_settlement(Some(Path::new("/synthetic/vault-a")), Duration::ZERO);
+        release.send(()).unwrap();
+        worker.join().unwrap();
+        let settled = state.wait_opening_settlement(None, Duration::ZERO);
+        assert!(held.is_err(), "a missing session-map row is not finished Git settlement");
+        assert!(same.is_ok());
+        assert!(settled.is_ok());
+    }
+    #[test]
+    fn panicked_settlement_remains_unavailable_after_owned_resources_unwind() {
+        let state = ClientAccessState::default();
+        let ended = Finished { session: session(&state, "/synthetic/vault-a", 0), end: End { succeeded: false, at: at(), quitting: false }, data_dir: PathBuf::from("/synthetic/no-database-opened") };
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle_with(ended, |_| panic!("synthetic settlement I/O panic"))));
+        assert!(failed.is_err());
+        assert!(state.wait_opening_settlement(Some(Path::new("/synthetic/vault-b")), Duration::ZERO).is_err());
+        assert!(state.wait_opening_settlement(Some(Path::new("/synthetic/vault-b")), Duration::ZERO).is_err());
+    }
+}
+
+#[cfg(test)]
+mod pending_settlement_tests {
+    use super::*;
+    #[test]
+    fn failed_scheduling_pending_owner_keeps_original_scope_until_actual_kernel_finishes() {
+        let state = ClientAccessState::default();
+        let vault = Vault { path: PathBuf::from("/synthetic/vault-a"), id: "synthetic".into(), store: None };
+        let completion = state.inner.lock().unwrap().completions.register(&vault.path).unwrap();
+        let at = DateTime::parse_from_rfc3339("2026-10-26T00:00:00Z").unwrap().with_timezone(&Utc);
+        let finished = Finished { session: Session { run_id: "pending-run".into(), token_id: "pending-token".into(), actor: "client:synthetic".into(), vault, claim: None, last_call: at, in_flight: 0, closing: None, completion }, end: End { succeeded: false, at, quitting: false }, data_dir: PathBuf::from("/synthetic/no-database-opened") };
+        state.inner.lock().unwrap().pending.push(finished);
+        let pending = state.wait_opening_settlement(Some(Path::new("/synthetic/vault-b")), Duration::ZERO);
+        let finished = state.inner.lock().unwrap().pending.pop().unwrap();
+        let removed_from_pending = state.wait_opening_settlement(None, Duration::ZERO);
+        settle_with(finished, |_| {});
+        let settled = state.wait_opening_settlement(None, Duration::ZERO);
+        assert!(pending.is_err());
+        assert!(removed_from_pending.is_err(), "taking a pending owner does not release its scope");
+        assert!(settled.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod completion_lock_tests {
+    use super::*;
+    #[test]
+    fn bounded_wait_refuses_held_state_or_completion_mutex_without_blocking() {
+        let state = ClientAccessState::default();
+        let state_guard = state.inner.lock().unwrap();
+        let blocked_state = state.wait_opening_settlement(None, Duration::ZERO);
+        let book = state_guard.completions.clone();
+        drop(state_guard);
+        let completion_guard = book.inner.lock().unwrap();
+        let blocked_completion = state.wait_opening_settlement(None, Duration::ZERO);
+        drop(completion_guard);
+        let settled = state.wait_opening_settlement(None, Duration::ZERO);
+        assert!(blocked_state.is_err());
+        assert!(blocked_completion.is_err());
+        assert!(settled.is_ok());
     }
 }

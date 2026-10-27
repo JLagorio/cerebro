@@ -21,7 +21,9 @@ vi.mock('@/lib/ipc', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ipc')>()),
   ...ipc,
 }));
-const pages = vi.hoisted(() => ({ flushOpenPages: vi.fn(async () => undefined) }));
+const pages = vi.hoisted(() => ({
+  flushOpenPages: vi.fn(async () => ({ outcomes: [], unresolvedOwnerIds: [] })),
+}));
 vi.mock('@/editor/openPages', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/editor/openPages')>()),
   ...pages,
@@ -69,7 +71,7 @@ beforeEach(() => {
   ipc.revealInFinder.mockResolvedValue(undefined);
   ipc.openInDefaultApp.mockResolvedValue(undefined);
   ipc.openAgentLink.mockResolvedValue('opened');
-  pages.flushOpenPages.mockResolvedValue(undefined);
+  pages.flushOpenPages.mockResolvedValue({ outcomes: [], unresolvedOwnerIds: [] });
   useVaultStore.setState({ vaultPath: VAULT, entries: [ENTRY] });
   useUiStore.setState({ toasts: [] });
 });

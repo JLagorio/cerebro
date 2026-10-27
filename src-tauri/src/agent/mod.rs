@@ -6,6 +6,21 @@
 //! into events the panel renders. Nothing about the conversation leaves the
 //! machine except through the CLI the user already installed and signed into.
 
+mod admission;
+pub(crate) mod archive_codec;
+pub(crate) mod archive_references;
+pub(crate) mod child_jobs;
+// Test-only shared transient spec for the retained-owner M95 kernel adapter.
+#[cfg(test)]
+pub(crate) use child_jobs::types::ChildJobSpec;
+mod configuration;
+mod publication;
+mod run_events;
+#[cfg(all(test, unix))]
+mod publication_tests;
+pub(crate) use admission::{EntryWitness, RetainedPublicationEntry, RunPreparation};
+pub(crate) use publication::NativePublicationReceipt;
+
 pub(crate) mod cli_agents;
 pub mod cli_writes;
 pub mod condition;
@@ -17,12 +32,14 @@ pub mod journal;
 pub(crate) mod kinds;
 pub mod meter;
 pub mod question;
+pub mod readiness;
 #[cfg(test)]
 mod recordings;
 pub mod run_options;
 mod tee;
 pub mod thread_turn;
 pub mod transcript;
+mod turn_input;
 pub mod usage;
 pub mod user_settings;
 
@@ -276,6 +293,8 @@ pub enum AgentEvent {
     Interaction {
         interaction: interaction::InteractionCard,
     },
+    /// Exact original held card closed after known commit; no run replacement.
+    InteractionClosed { interaction_id:String },
     /// The run was stopped on purpose (M57.5): a person's Stop or Steer, the
     /// run list, a vault switch, or quit. Emitted once, right before Done,
     /// and never for a run that ended on its own or one the elapsed watchdog
@@ -331,9 +350,9 @@ pub(crate) struct RunClose<'a> {
 /// Cerebro quit leaves git alone; every other run commits what it wrote
 /// (`git::changeset::settle_run`), so its Done waits on that commit, bounded
 /// by the repository's busy wait and git's local deadline.
-pub(crate) fn close_run(close: RunClose<'_>, emit: &mut dyn FnMut(AgentEvent)) {
+fn close_run_projection(close:&RunClose<'_>)->(crate::git::changeset::RunChangeset,Vec<AgentEvent>) {
     use crate::git::changeset::{self, RunChangeset, SettleRun};
-    let changeset = match close.meter {
+    let changeset=match close.meter {
         None => RunChangeset::NotRecorded {
             kept_out_of_git: Some(0),
             run_id: None,
@@ -360,8 +379,13 @@ pub(crate) fn close_run(close: RunClose<'_>, emit: &mut dyn FnMut(AgentEvent)) {
             }
         }
     };
+    (changeset,closing_events(close.cancelled,close.aborted))
+}
+#[cfg(test)]
+pub(crate) fn close_run(close: RunClose<'_>, emit: &mut dyn FnMut(AgentEvent)) {
+    let (changeset,closing)=close_run_projection(&close);
     emit(AgentEvent::Changeset { changeset });
-    for event in closing_events(close.cancelled, close.aborted) {
+    for event in closing {
         emit(event);
     }
 }
@@ -1065,6 +1089,8 @@ pub(crate) fn connector_setup_lock() -> Result<MutexGuard<'static, ()>, String> 
 
 /// One live run (M53.10), attributed until the child is reaped (M63.5).
 struct RunSlot {
+    events:Option<Arc<run_events::RunEvents>>,
+    native_action_read: Option<Arc<crate::actions::native_owner::NativeActionReadOrigin>>,
     /// The CLI, the leader of its own process group.
     handle: crate::spawn::Handle,
     /// The vault the run works in, canonical where the filesystem can say,
@@ -1100,10 +1126,12 @@ struct RunSlot {
 /// call that spawned it.
 #[derive(Default, Clone)]
 pub struct AgentState {
+    admission: admission::Admission,
     slots: Arc<Mutex<HashMap<u64, RunSlot>>>,
     /// Readers still closing their runs' books: admitted, and not yet past
     /// `Done`. Quitting waits on this, for EXIT_BOOKS_WAIT at most.
     books: Arc<AtomicUsize>,
+    book_scopes: Arc<Mutex<HashMap<PathBuf, usize>>>,
     /// Raised by `shut_down`. Nothing is admitted after it.
     closing: Arc<AtomicBool>,
     /// The ask seam's book (M57.1): seats and the calls waiting for the
@@ -1119,18 +1147,34 @@ pub struct AgentState {
 
 /// A reader's place in `AgentState::books`: taken when its run is admitted,
 /// given back when the reader is done, however it ends, a panic included.
-struct Books(Arc<AtomicUsize>);
-
+struct Books {
+    count: Arc<AtomicUsize>,
+    scope: Option<(Arc<Mutex<HashMap<PathBuf, usize>>>, PathBuf)>,
+}
 impl Books {
+    #[cfg(test)]
     fn open(count: &Arc<AtomicUsize>) -> Self {
         count.fetch_add(1, Ordering::SeqCst);
-        Self(count.clone())
+        Self { count: count.clone(), scope: None }
+    }
+    fn open_for_vault(state: &AgentState, vault: &Path) -> Self {
+        let vault = vault_key(vault);
+        state.books.fetch_add(1, Ordering::SeqCst);
+        *lock(&state.book_scopes).entry(vault.clone()).or_default() += 1;
+        Self { count: state.books.clone(), scope: Some((state.book_scopes.clone(), vault)) }
     }
 }
-
 impl Drop for Books {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
+        // This guard lives past slot removal, final Git commit and journal end.
+        if let Some((scopes, vault)) = &self.scope {
+            let mut scopes = lock(scopes);
+            if let Some(count) = scopes.get_mut(vault) {
+                *count -= 1;
+                if *count == 0 { scopes.remove(vault); }
+            }
+        }
+        self.count.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -1211,6 +1255,11 @@ impl AgentState {
     /// distill could silently eat a typed answer. A cap that is reached is a
     /// condition the caller can report; a run that vanishes is not.
     pub fn admit(&self) -> Result<(), String> {
+        self.check_run_admission()?;
+        self.admit_limits()
+    }
+
+    fn admit_limits(&self) -> Result<(), String> {
         if self.closing.load(Ordering::SeqCst) {
             return Err(QUITTING.into());
         }
@@ -1234,6 +1283,31 @@ impl AgentState {
         Ok(())
     }
 
+    #[cfg(all(feature = "native-read-smoke", target_os = "macos"))]
+    pub(crate) fn native_restart_retain(
+        &self,
+        run: u64,
+        prepared: crate::native_read_smoke::child_claim_profile::restart_profile::Prepared,
+    ) -> ! {
+        let (handle, cancelled) = {
+            let slots = self.slots.lock().unwrap_or_else(|_| {
+                crate::native_read_smoke::child_claim_profile::restart_profile::exit_rejected()
+            });
+            let slot = slots.get(&run).unwrap_or_else(|| {
+                crate::native_read_smoke::child_claim_profile::restart_profile::exit_rejected()
+            });
+            if slot.cancelled.load(Ordering::SeqCst)
+                || self.closing.load(Ordering::SeqCst)
+                || slot.native_action_read.is_none()
+            {
+                crate::native_read_smoke::child_claim_profile::restart_profile::exit_rejected();
+            }
+            (slot.handle.clone(), Arc::clone(&slot.cancelled))
+        };
+        // Slot lock is gone before taking the actual Child mutex; no inverse nesting.
+        handle.native_restart_retain(prepared, cancelled, Arc::clone(&self.closing))
+    }
+
     /// Stop ONE run, booked `cancelled` (see `end`). `Ok(false)` means it was
     /// already gone or already stopping: a normal race, not an error, since
     /// the child may have exited between the caller deciding to stop it and
@@ -1255,6 +1329,9 @@ impl AgentState {
         let Some(slot) = slots.get(&run) else {
             return false;
         };
+        if let Some(origin) = &slot.native_action_read {
+            origin.cancel_action_workers();
+        }
         let stopping = if cancelled {
             slot.cancelled.swap(true, Ordering::SeqCst)
         } else {
@@ -1286,6 +1363,9 @@ impl AgentState {
             if slot.vault == keep {
                 continue;
             }
+            if let Some(origin) = &slot.native_action_read {
+                origin.cancel_action_workers();
+            }
             if !slot.cancelled.swap(true, Ordering::SeqCst) {
                 slot.handle.terminate_later(STOP_GRACE);
                 stopped.push(*run);
@@ -1293,6 +1373,15 @@ impl AgentState {
         }
         stopped.sort_unstable();
         stopped
+    }
+
+    /// Selected opening retires every legacy conversation, including those
+    /// waiting without a live child, before the bounded process sweep.
+    pub(crate) fn suspend_for_selected(&self) -> Vec<u64> {
+        self.suspend_run_admission();
+        self.interactions.cancel_all();
+        self.journal.release_all();
+        self.stop_all_within(STOP_GRACE, EXIT_BOOKS_WAIT)
     }
 
     /// Stop everything and report the runs this stopped: the sweep
@@ -1316,6 +1405,9 @@ impl AgentState {
             let mut stopped = Vec::new();
             let mut handles = Vec::with_capacity(slots.len());
             for (run, slot) in slots.iter() {
+                if let Some(origin) = &slot.native_action_read {
+                    origin.cancel_action_workers();
+                }
                 if !slot.cancelled.swap(true, Ordering::SeqCst) {
                     stopped.push(*run);
                 }
@@ -1365,11 +1457,13 @@ impl AgentState {
 
 /// How much of its model's context window a conversation's Claude Code
 /// session has used (M91.5): its latest reading, or `not_recorded`, never a
-/// zero (CV-05). The composer pulls it when a turn ends, a thread opens or
-/// a branch starts; nothing pushes it, since no event carries a token count,
-/// and the book it reads is memory only (Q7). The id is matched, never
-/// parsed or joined to a path, so an id the book does not hold is simply
-/// not recorded.
+/// zero (CV-05). A reading a seated run filed carries Claude Code's own
+/// breakdown of it, when the run answered its context ask (M92.13,
+/// `meter::ContextBreakdown`). The composer pulls it when a turn ends, a
+/// thread opens or a branch starts; nothing pushes it, since no event
+/// carries a token count, and the book it reads is memory only (Q7). The id
+/// is matched, never parsed or joined to a path, so an id the book does not
+/// hold is simply not recorded.
 #[tauri::command(async)]
 pub fn agent_context_usage(
     state: tauri::State<'_, AgentState>,
@@ -1382,176 +1476,23 @@ pub fn agent_context_usage(
 // Discovery
 // ---------------------------------------------------------------------------
 
-/// GUI apps on macOS do not inherit the shell's PATH, so a CLI installed by
-/// Homebrew or a version manager is invisible to a plain `which`. Fall back to
-/// a login shell, then to the known install locations.
-pub fn find_binary() -> Option<PathBuf> {
-    if let Some(found) = which_on_path() {
-        return Some(found);
-    }
-    if let Some(found) = which_in_login_shell() {
-        return Some(found);
-    }
-    candidates().into_iter().find(|p| p.is_file())
-}
-
-fn which_on_path() -> Option<PathBuf> {
-    let program = if cfg!(windows) { "where" } else { "which" };
-    let output = crate::spawn::command(program).arg("claude").output().ok()?;
-    path_from_output(&output.stdout, output.status.success())
-}
-
-fn which_in_login_shell() -> Option<PathBuf> {
-    let stdout = login_shell_probe("which claude")?;
-    path_from_output(stdout.as_bytes(), true)
-}
-
-/// Run one command through the user's login+interactive shell and return its
-/// stdout, or None if the shell is unavailable or reported failure.
-///
-/// `-l` sources `.zprofile`/`.zlogin` (where Homebrew puts its PATH) and `-i`
-/// sources `.zshrc` (where nvm, fnm, and Volta put theirs); a CLI installed by
-/// any of them is invisible without both. stdin is closed (`spawn::command`
-/// closes it for every child) because an rc file that prompts would otherwise
-/// hang the app on a startup check.
-fn login_shell_probe(script: &str) -> Option<String> {
-    if cfg!(windows) {
-        return None;
-    }
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let output = crate::spawn::command(shell)
-        .args(["-lic", script])
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-fn path_from_output(stdout: &[u8], success: bool) -> Option<PathBuf> {
-    if !success {
-        return None;
-    }
-    let text = String::from_utf8_lossy(stdout);
-    let first = text.lines().map(str::trim).find(|l| !l.is_empty())?;
-    let path = PathBuf::from(first);
-    path.is_file().then_some(path)
-}
-
-fn candidates() -> Vec<PathBuf> {
-    candidates_for(&std::env::var("HOME").unwrap_or_default())
-}
-
-fn candidates_for(home: &str) -> Vec<PathBuf> {
-    [
-        "/opt/homebrew/bin/claude",
-        "/usr/local/bin/claude",
-        "/usr/bin/claude",
-    ]
-    .iter()
-    .map(PathBuf::from)
-    .chain(
-        [
-            ".local/bin/claude",
-            ".claude/local/claude",
-            ".bun/bin/claude",
-            ".volta/bin/claude",
-            ".yarn/bin/claude",
-            ".npm-global/bin/claude",
-            ".local/share/pnpm/claude",
-        ]
-        .iter()
-        .map(|rel| PathBuf::from(home).join(rel)),
-    )
-    .chain(nvm_candidates(home))
-    .collect()
-}
-
-/// nvm installs global binaries per node version, under a directory whose name
-/// is the version — so there is nothing to hard-code. Walk the versions dir.
-fn nvm_candidates(home: &str) -> Vec<PathBuf> {
-    let versions = PathBuf::from(home).join(".nvm/versions/node");
-    let Ok(entries) = std::fs::read_dir(versions) else {
-        return Vec::new();
-    };
-    entries
-        .filter_map(Result::ok)
-        .map(|e| e.path().join("bin/claude"))
-        .collect()
-}
-
-// ---------------------------------------------------------------------------
-// Environment
-// ---------------------------------------------------------------------------
-
-/// The PATH the CLI needs in order to run, not merely to be found.
-///
-/// A GUI app launched from Finder inherits launchd's PATH — `/usr/bin:/bin:
-/// /usr/sbin:/sbin` — and nothing else. Finding the binary is handled above,
-/// but finding it is not enough: an npm- or bun-installed `claude` is a script
-/// whose shebang is `#!/usr/bin/env node`, and node lives wherever Homebrew,
-/// nvm, or Volta put it. Launched from a terminal the app inherits a PATH that
-/// has node on it and everything works; launched from the Dock it does not,
-/// and the CLI exits instantly with `env: node: No such file or directory`.
-/// That difference is the whole bug, so we recover the login shell's PATH once
-/// and hand it to every process we spawn.
-fn login_shell_path() -> Option<&'static str> {
-    static CACHED: OnceLock<Option<String>> = OnceLock::new();
-    CACHED
-        .get_or_init(|| {
-            // The sentinel survives rc files that print banners of their own.
-            login_shell_probe("printf '\\n__CEREBRO_PATH__%s\\n' \"$PATH\"")
-                .as_deref()
-                .and_then(path_from_probe)
+/// Legacy status carrier. Failed discovery rejects rather than claiming the
+/// executable is missing; the richer readiness command exposes its typed cause.
+pub fn status() -> Result<AgentStatus, String> {
+    readiness::observe()
+        .map(|found| match found {
+            Some(found) => AgentStatus {
+                installed: true,
+                version: found.version,
+                path: Some(found.binary.to_string_lossy().into_owned()),
+            },
+            None => AgentStatus {
+                installed: false,
+                version: None,
+                path: None,
+            },
         })
-        .as_deref()
-}
-
-const PATH_SENTINEL: &str = "__CEREBRO_PATH__";
-
-fn path_from_probe(stdout: &str) -> Option<String> {
-    stdout
-        .lines()
-        .find_map(|line| line.trim().strip_prefix(PATH_SENTINEL))
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .map(str::to_string)
-}
-
-/// Give `command` the login shell's PATH, keeping what we already inherited so
-/// a shell that fails to answer can never make things worse than not asking.
-fn with_login_path(command: &mut Command) -> &mut Command {
-    if let Some(login) = login_shell_path() {
-        let inherited = std::env::var("PATH").unwrap_or_default();
-        let merged = if inherited.is_empty() {
-            login.to_string()
-        } else {
-            format!("{login}:{inherited}")
-        };
-        command.env("PATH", merged);
-    }
-    command
-}
-
-pub fn status() -> AgentStatus {
-    let Some(path) = find_binary() else {
-        return AgentStatus {
-            installed: false,
-            version: None,
-            path: None,
-        };
-    };
-    let version = with_login_path(crate::spawn::command(&path).arg("--version"))
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-    AgentStatus {
-        installed: true,
-        version,
-        path: Some(path.to_string_lossy().to_string()),
-    }
+        .map_err(|error| error.message().to_owned())
 }
 
 // ---------------------------------------------------------------------------
@@ -1897,13 +1838,58 @@ pub(crate) struct RunGate {
 
 /// What every run but an internal one hands its argv beside its plan
 /// (M91.2b): its settings file (`run_settings`), the gate a seated run asks
-/// through, and the agent types it may start and denies
-/// (`cli_agents::RunAgents`).
+/// through, the agent types it may start and denies
+/// (`cli_agents::RunAgents`), and how it takes its message (M92.13,
+/// `run_input`), which only a run with a setup can take on stdin.
 #[derive(Debug, Clone)]
 pub(crate) struct RunSetup {
     pub settings: PathBuf,
     pub gate: Option<RunGate>,
     pub agents: cli_agents::RunAgents,
+    pub input: RunInput,
+}
+
+/// How a run hands Claude Code its message (M92.13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunInput {
+    /// Last in argv, after a lone `--` (M92.0).
+    Argv,
+    /// On stdin, as stream-json input (`turn_input`), so that once its
+    /// result is in the run can be asked how full its context is: Claude
+    /// Code answers that ask only over stream-json input, in the run's own
+    /// process (measured).
+    Stdin,
+}
+
+/// How a run takes its message (M92.13), decided here and nowhere else: on
+/// stdin only for a run that takes a seat, on a Claude Code the gate is
+/// built for, with words to send. An answer's resume sends none and stays
+/// on argv, `--resume <id> -- ""`, since an empty user line on stdin resumes
+/// the held call and then runs a turn of its own (measured, P5). A turn
+/// that resumes a session over an open deferral (`resumes_a_deferral`: a
+/// new message sent while a card waited, or after Stop or a relaunch left
+/// one) stays on argv too: Claude Code first finishes the held call, with a
+/// result of its own, and only then runs the message as a second turn with
+/// a second result (P5, P5b), so the ask and close the first result sets off
+/// would end the person's turn as it ran. Every other run, internal,
+/// unattended, handed off, a thread's turn or a pre-run check, takes no seat
+/// and keeps its argv. Answering Argv here gives every run its argv as it
+/// was, byte for byte.
+pub(crate) fn run_input(
+    seated: bool,
+    version: Option<&str>,
+    message: &str,
+    resumes_a_deferral: bool,
+) -> RunInput {
+    if seated
+        && !resumes_a_deferral
+        && interaction::supports_gate(version)
+        && !message.trim().is_empty()
+    {
+        RunInput::Stdin
+    } else {
+        RunInput::Argv
+    }
 }
 
 /// The CLI's argv for one run. `approval` is its tool-approval plan (M57.2):
@@ -1928,7 +1914,10 @@ pub(crate) struct RunSetup {
 /// <minted>` for every other run, so the run's id is known before the CLI
 /// says a word. Only a parsed UUID reaches it, never `req.session_id` or
 /// `req.fork`. The message closes the argv, after a lone `--` (M92.0), so
-/// nothing it says is read as a flag.
+/// nothing it says is read as a flag; a run whose setup takes it on stdin
+/// (M92.13, `RunInput::Stdin`) reads stream-json input instead, and its argv
+/// carries no message at all.
+#[cfg(test)]
 pub(crate) fn build_args(
     req: &AgentRequest,
     mcp_config: &Path,
@@ -1938,23 +1927,47 @@ pub(crate) fn build_args(
     connectors: &RunConnectors,
     session: &CliSession,
 ) -> Vec<String> {
+    build_args_with_facts(
+        req, mcp_config, approval, setup, strict_mcp, connectors, session,
+    )
+    .args
+}
+struct BuiltArguments {
+    args: Vec<String>,
+    facts: configuration::DispatchFacts,
+}
+fn build_args_with_facts(
+    req: &AgentRequest,
+    mcp_config: &Path,
+    approval: &crate::policy::tool_approval::RunApproval,
+    setup: Option<&RunSetup>,
+    strict_mcp: bool,
+    connectors: &RunConnectors,
+    session: &CliSession,
+) -> BuiltArguments {
     let gate = setup.and_then(|setup| setup.gate.as_ref());
     let agents = setup
         .map(|setup| &setup.agents)
         .filter(|agents| agents.holds());
+    let input = setup.map_or(RunInput::Argv, |setup| setup.input);
     let mut tools = granted_cli_tools(req, approval, connectors);
     if let Some(gate) = gate {
         tools.retain(|tool| !gate.asks.contains(tool));
     }
-    let mut args: Vec<String> = vec![
-        "-p".into(),
+    let mut args: Vec<String> = vec!["-p".into()];
+    // M92.13: a seated run's prompt rides stdin (`turn_input`).
+    if input == RunInput::Stdin {
+        args.push("--input-format".into());
+        args.push("stream-json".into());
+    }
+    args.extend([
         "--output-format".into(),
         "stream-json".into(),
         "--verbose".into(),
         "--include-partial-messages".into(),
         "--mcp-config".into(),
         mcp_config.to_string_lossy().to_string(),
-    ];
+    ]);
     // M57.2: the tool-approval table decides the CLI's own tools. An
     // INTERNAL run (M31.1a) executes vault-authored content on cerebro's own
     // schedule, so its plan denies every one that acts, keeping only
@@ -2034,6 +2047,29 @@ pub(crate) fn build_args(
     }
     args.push("--allowedTools".into());
     args.push(tools.join(","));
+    let identity = crate::runtime::run_configuration::selector_identity;
+    let mut facts = configuration::DispatchFacts {
+        cli_tools: approval.tools.iter().map(|v| identity(v, true)).collect(),
+        allowed: tools.iter().map(|v| identity(v, true)).collect(),
+        denied: denied.iter().map(|v| identity(v, true)).collect(),
+        asked: gate
+            .map(|g| g.asks.iter().map(|v| identity(v, true)).collect())
+            .unwrap_or_default(),
+        system_prompt_sha256: None,
+        defined_subagents: agents
+            .map(|a| {
+                a.definitions
+                    .iter()
+                    .map(
+                        |(id, value)| crate::runtime::run_configuration::DefinitionIdentity {
+                            id: id.clone(),
+                            sha256: crate::ledger::sha256_hex(value.to_string().as_bytes()),
+                        },
+                    )
+                    .collect()
+            })
+            .unwrap_or_default(),
+    };
     // The vault is the child's cwd, and Claude Code walks up from cwd for
     // `.claude/` and `CLAUDE.md`. Until M17.1 nothing said otherwise, so a
     // vault could ship standing instructions into EVERY turn — verified
@@ -2099,6 +2135,9 @@ pub(crate) fn build_args(
         (Some(prompt), None) => Some(prompt.clone()),
         (None, missing) => missing,
     };
+    facts.system_prompt_sha256 = appended
+        .as_ref()
+        .map(|value| crate::ledger::sha256_hex(value.as_bytes()));
     if let Some(appended) = appended {
         args.push("--append-system-prompt".into());
         args.push(appended);
@@ -2121,9 +2160,11 @@ pub(crate) fn build_args(
     // milk" as an unknown option and printed its version for "-v …", with no
     // turn (measured). An answer-resume's empty message closes it the same
     // way: `--resume <id> -- ""` resumes the deferred call (measured).
-    args.push("--".into());
-    args.push(req.message.clone());
-    args
+    if input == RunInput::Argv {
+        args.push("--".into());
+        args.push(req.message.clone());
+    }
+    BuiltArguments { args, facts }
 }
 
 /// How many missing connectors the prompt names one by one, and how much of
@@ -2380,7 +2421,12 @@ pub fn sweep_run_configs(config_dir: &Path) {
 /// The run's bearer dies with it (M53.11). The reader revokes it once the
 /// child is reaped, with `mcp::REVOKE_GRACE` for the writes still queued at
 /// the endpoint, and a run that never got under way revokes it at once.
-pub fn stream(
+/// Native commands carry the ticket captured before their own preparation.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the preparation ticket fences the existing stream inputs to one opening"
+)]
+pub(crate) fn stream(
     app: AppHandle,
     state: &AgentState,
     vault: &Path,
@@ -2388,8 +2434,40 @@ pub fn stream(
     config_dir: &Path,
     meter: Option<meter::Meter>,
     done: Option<std::sync::mpsc::SyncSender<meter::RunEnd>>,
+    preparation: &RunPreparation,
+) -> Result<Spawned, String> {
+    stream_linked(app,state,vault,req,config_dir,meter,done,preparation,LaunchLink::default())
+}
+
+#[derive(Default)]
+pub(crate) struct LaunchLink {
+    pub generation: Option<crate::actions::native_owner::NativeGenerationRun>,
+    pub answer: Option<interaction::AnswerLink>,
+}
+
+#[expect(clippy::too_many_arguments, reason = "the launch carries its original entry and optional generation/held-answer link")]
+pub(crate) fn stream_linked(
+    app: AppHandle,
+    state: &AgentState,
+    vault: &Path,
+    req: AgentRequest,
+    config_dir: &Path,
+    meter: Option<meter::Meter>,
+    done: Option<std::sync::mpsc::SyncSender<meter::RunEnd>>,
+    preparation: &RunPreparation,
+    mut link: LaunchLink,
 ) -> Result<Spawned, String> {
     let bearer = req.mcp_token.clone();
+    // A continuation already stale at stream entry does no executable
+    // observation. Publication checks again after preparation, under its lock.
+    if let Err(refusal) = state.guard_prepared(preparation, vault) {
+        revoke_bearer(&app, bearer.as_deref(), Duration::ZERO);
+        return Err(refusal);
+    }
+    if let Err(error) = crate::workspace_service::boundary::guard_legacy_scope(vault, None, true) {
+        revoke_bearer(&app, bearer.as_deref(), Duration::ZERO);
+        return Err(error.message);
+    }
     // M56.3: the session first, before admission and before any file is
     // written. A stored id that is not a UUID never reaches argv or a path,
     // and a branch's anchor must be where a turn of its source ended
@@ -2404,6 +2482,29 @@ pub fn stream(
         }
     };
     let session_id = session.id().to_string();
+    if let Some(generation)=link.generation.as_mut() {
+        if let Err(error)=generation.bind_session(&session_id,preparation,vault) {
+            revoke_bearer(&app,bearer.as_deref(),Duration::ZERO);
+            return Err(error);
+        }
+    }
+    // M93.5: reject invalid options before any discovery subprocess. One fresh
+    // native observation supplies this run's binary, PATH and capability version.
+    let observed = run_options::validate_request(&req).and_then(|()| {
+        readiness::observe()
+            .map_err(|error| error.message().to_owned())?
+            .ok_or_else(|| {
+                "Claude Code was not found on this machine. Install it, then check again."
+                    .to_owned()
+            })
+    });
+    let cli = match observed {
+        Ok(cli) => cli,
+        Err(refusal) => {
+            revoke_bearer(&app, bearer.as_deref(), Duration::ZERO);
+            return Err(refusal);
+        }
+    };
     let expects_cerebro = holds_a_cerebro_tool(&req);
     // M57.1: a run a person watches takes a seat before it spawns, keyed by
     // the durable id its bearer carries, so its hook can ask. A resumed
@@ -2417,9 +2518,7 @@ pub fn stream(
     // its meter. Only a seated run on a Claude Code the gate is built for can
     // ask; every other run is planned as one nobody can answer, so its asks
     // and refusals ride --disallowedTools.
-    let version = seat
-        .as_ref()
-        .and_then(|_| interaction::cached_cli_version());
+    let version = seat.as_ref().and_then(|_| cli.version.clone());
     let can_ask = seat.is_some() && interaction::supports_gate(version.as_deref());
     // M91.2b: the person's own agent types are read now, before its seat
     // holds its plan.
@@ -2437,44 +2536,81 @@ pub fn stream(
             &marker.tool_use_id,
         )
     });
-    if let Some(run_id) = &seat {
-        state
-            .interactions
-            .open_seat(seat_for(run_id, vault, &req, &session, &approval), pending);
-    }
-    let Started {
-        run,
-        config_path: run_config,
-        settings_path: run_settings,
-        supervised,
-        stdout,
-        books,
-        cancelled,
-        connectors,
-        reach,
-        mut recording,
-    } = match spawn_run(
-        state,
-        vault,
-        &req,
-        &session,
-        config_dir,
-        meter.as_ref(),
-        seat.as_deref().map(|run_id| (run_id, version.as_deref())),
-        &approval,
-        &agents,
-    ) {
-        Ok(started) => started,
-        Err(refusal) => {
-            // No process ever held this bearer, or the one that did was ended
-            // before its run began: nothing can still be sending with it.
-            revoke_bearer(&app, bearer.as_deref(), Duration::ZERO);
-            if let Some(run_id) = &seat {
-                state.interactions.close_seat(run_id);
+    // M92.13: a resume over an open deferral keeps its message in argv
+    // (`run_input`), its two results each its own turn.
+    let resumes_a_deferral = pending.is_some();
+    let publication_result = {
+        use tauri::Manager;
+        let configuration_mcp = app.try_state::<crate::mcp::McpState>();
+        if meter
+            .as_ref()
+            .is_some_and(|m| m.vault_id.is_some() && m.store_uuid.is_some())
+            && configuration_mcp.is_none()
+        {
+            Err("Run configuration endpoint is unavailable. Nothing was started.".into())
+        } else {
+            let input = publication::Input {
+                state,
+                preparation,
+                vault,
+                request: &req,
+                cli: &cli,
+                session: &session,
+                config_dir,
+                meter: meter.as_ref(),
+                configuration_mcp: configuration_mcp.as_ref().map(|state| state.inner()),
+                seat: seat.as_deref().map(|run_id| (run_id, version.as_deref())),
+                pending,
+                resumes_a_deferral,
+                approval: &approval,
+                agents: &agents,
+            };
+            if link.generation.is_some() || link.answer.is_some() {
+                publication::publish_linked(input,link.answer.as_ref(),link.generation.as_ref().map(|generation|generation.tracker()))
+            } else {
+                publication::publish(input)
             }
+        }
+    };
+    let publication::Published {
+        started:
+            Started {
+                run,
+                config_path: run_config,
+                settings_path: run_settings,
+                supervised,
+                stdout,
+                input,
+                books,
+                cancelled,
+                connectors,
+                reach,
+                mut recording,
+            },
+        guard: _publication,
+        receipt: publication_receipt,
+    } = match publication_result {
+        Ok(published) => published,
+        Err(refusal) => {
+            revoke_bearer(&app, bearer.as_deref(), Duration::ZERO);
             return Err(refusal);
         }
     };
+
+    if let Some(generation)=link.generation.as_mut() {generation.published();}
+
+    // M96 publication metadata only: the same actual stream/reader remains
+    // owner. No database, account grant, action subject or opening ticket is
+    // created here, and metadata cannot change this legacy spawn's result.
+    {
+        use tauri::Manager;
+        if let (Some(receipt), Some(mcp)) = (
+            publication_receipt.as_ref(),
+            app.try_state::<crate::mcp::McpState>(),
+        ) {
+            mcp.stage_actual_publication(receipt);
+        }
+    }
 
     // M69.5: only this run's granted connector spellings may supply page
     // bytes. The reader owns the lease and drops it even on init refusal,
@@ -2553,25 +2689,14 @@ pub fn stream(
     // reads the first one.
     let journal = state.journal.clone();
     let journaled = journals(&req, meter.is_some());
-    if let (true, Some(meter)) = (journaled, meter.as_ref()) {
-        let waiting = state.waiting_sessions();
-        journal.open(
-            run,
-            &meter.run_id,
-            &vault_key(vault),
-            &session_id,
-            std::time::Instant::now(),
-            &waiting,
-        );
-    }
+    let event_app=app.clone();
+    let events=Arc::new(run_events::RunEvents::new(run,journal.clone(),journaled,move|tagged|{let _=event_app.emit(AGENT_EVENT,tagged);}));
+    // Installation precedes the actual reader. The original publication can
+    // publish a held card only through this same run/sequence/journal owner.
+    {let mut slots=lock(&state.slots);if let Some(slot)=slots.get_mut(&run){if Arc::ptr_eq(&slot.cancelled,&cancelled){slot.events=Some(events.clone());}}}
     std::thread::spawn(move || {
         let _books = books;
-        // Every event carries its run-local seq, from 1 (M57.6).
-        let mut seq: u64 = 0;
-        let mut send = |event: AgentEvent| {
-            seq += 1;
-            let _ = app.emit(AGENT_EVENT, tag(&journal, journaled, run, seq, event));
-        };
+        let mut send=|event:AgentEvent|{events.send(event);};
         // M58.3: each path the run's own Write and Edit calls wrote is noted
         // on its claim, for its commit, once the call completes, its
         // subagents' calls included (M91.3b); a resumed run starts holding
@@ -2580,10 +2705,14 @@ pub fn stream(
         // M70.4: the reply a waiter posts, read off the folded events this
         // closure emits, the stderr Error included.
         let reply = std::cell::RefCell::new(ReplyCollector::default());
+        // Observes the existing fold before any webview callback. A detached
+        // original generation retains its same bounded completion producer.
+        let archive=std::cell::RefCell::new(link.generation.as_ref().map(|_|archive_codec::Collector::default()));
         // M57.1: a deferral this run's gate registered is announced as a card
         // just before it.
         let mut emit = |event: AgentEvent| {
             reply.borrow_mut().observe(&event);
+            if let Some(archive)=archive.borrow_mut().as_mut() {archive.observe(&event);}
             if let (Some(claim), Some(path)) = (claim.as_ref(), cli_writes.observe(&event)) {
                 claim.note_cli_write(&path);
             }
@@ -2596,7 +2725,9 @@ pub fn stream(
             );
         };
         // M54.5: a run whose tools failed to load is ended at its init, and
-        // not booked cancelled, since nobody asked for that stop.
+        // not booked cancelled, since nobody asked for that stop. M92.13: a
+        // seated run's stdin is driven by what its stream says, and closes
+        // with it.
         let mut tally = read_stream_with_capture(
             stdout,
             gate,
@@ -2607,6 +2738,7 @@ pub fn stream(
             },
             capture,
             held.as_ref(),
+            input,
         );
         // M91.5: filed well before Done, so a panel that pulls it when the
         // turn ends reads this run's.
@@ -2636,9 +2768,7 @@ pub fn stream(
         if let Some(settings) = &run_settings {
             let _ = std::fs::remove_file(settings);
         }
-        if let Some(run_id) = &seat {
-            interactions.close_seat(run_id);
-        }
+        let restored_answer = seat.as_ref().is_some_and(|run_id|interactions.close_seat(run_id));
         let was_aborted = aborted.load(Ordering::SeqCst);
         let was_cancelled = cancelled.load(Ordering::SeqCst);
         if let Some(recording) = recording {
@@ -2679,6 +2809,21 @@ pub fn stream(
             // recorded before the slot frees, like the books.
             meter::record_connectors(meter, &observer.finish(tally.denied_tools()));
         }
+        // Commit through the existing run-owned changeset reader before final
+        // archive projection, so artifact refs come from actual settled files.
+        let (changeset,closing)=close_run_projection(&RunClose {
+            quitting:reaper.closing(),meter:meter.as_ref(),claim:claim.as_ref(),vault:&run_vault,
+            summary,cancelled:was_cancelled,aborted:was_aborted,
+        });
+        emit(AgentEvent::Changeset {changeset});
+        if let Some(generation)=link.generation.as_mut() {
+            let end=generation_end(&tally,was_aborted,was_cancelled);
+            let turn=archive.borrow_mut().take().map(archive_codec::Collector::finish);
+            let recorded=if restored_answer {generation.restore_waiting()} else {generation.finish_with_archive(end,turn.as_ref())};
+            if let Err(message)=recorded {
+                emit(AgentEvent::Error {message,code:None,notice:None,parent:None});
+            }
+        }
         // Free the slot BEFORE the terminal Done, so anything that reacts to
         // Done by starting the next run already sees the slot free.
         reaper.finish(run);
@@ -2698,28 +2843,27 @@ pub fn stream(
                 failure,
             });
         }
-        // M58.3: the run commits what it wrote and says so, then (M57.5) a
-        // stopped run says so before its Done, so the panel marks the reply
-        // Cancelled, whoever stopped it. The claim holds the run's paths
-        // until its commit has landed.
-        close_run(
-            RunClose {
-                quitting: reaper.closing(),
-                meter: meter.as_ref(),
-                claim: claim.as_ref(),
-                vault: &run_vault,
-                summary,
-                cancelled: was_cancelled,
-                aborted: was_aborted,
-            },
-            &mut emit,
-        );
+        for event in closing {emit(event);}
         // M57.6: the journal's retention starts once the run has said its
         // last event.
         journal.finish(run, std::time::Instant::now());
     });
 
     Ok(Spawned { run, session_id })
+}
+
+fn generation_end(tally:&meter::Tally,aborted:bool,cancelled:bool)->crate::runtime::chat_generations::End {
+    use crate::runtime::{chat_generations::End,dispatch::RunOutcome};
+    if tally.deferred().is_some() && !aborted {
+        if cancelled { End::Cancelled } else { End::Deferred }
+    } else {
+        match tally.ended(aborted,cancelled).0 {
+            RunOutcome::Succeeded=>End::Completed,
+            RunOutcome::Cancelled=>End::Cancelled,
+            RunOutcome::AbandonedUsageUnknown=>End::Interrupted,
+            _=>End::Failed,
+        }
+    }
 }
 
 /// The most characters of an error's message a failure keeps (M70.4).
@@ -2958,13 +3102,16 @@ fn run_env(seated: bool) -> impl Iterator<Item = (&'static str, &'static str)> {
 /// among them (M91.2b), set on the child alone, so they outrank whatever the
 /// app inherited; the run's settings file carries them too (`run_settings`).
 /// An internal run's plan denies the subagent tool, so it has nothing to
-/// bound.
+/// bound. A run that takes its message on stdin (M92.13) has its stdin piped
+/// for its turn input to write; every other run's stays null
+/// (`spawn::command`).
 fn cli_command(
     binary: &Path,
     args: &[String],
     vault: &Path,
     req: &AgentRequest,
     seated: bool,
+    input: RunInput,
 ) -> Command {
     let mut command = crate::spawn::command(binary);
     command
@@ -2974,6 +3121,9 @@ fn cli_command(
         .current_dir(vault);
     if !req.internal {
         command.envs(run_env(seated));
+    }
+    if input == RunInput::Stdin {
+        command.stdin(std::process::Stdio::piped());
     }
     command
 }
@@ -2987,6 +3137,9 @@ struct Started {
     settings_path: Option<PathBuf>,
     supervised: crate::spawn::Supervised,
     stdout: std::process::ChildStdout,
+    /// A seated run's stdin, its prompt already queued (M92.13); None for a
+    /// run that took its message in argv.
+    input: Option<turn_input::TurnInput>,
     books: Books,
     cancelled: Arc<AtomicBool>,
     /// The connectors the run reaches, which its stream is read against
@@ -3006,7 +3159,8 @@ struct Started {
 /// where the bearer of a run that never began is revoked. Each failure takes
 /// back what it had made: the config, the settings, the meter's row, a child
 /// spawned into a quit. `agents` is what `stream` worked out the run may
-/// start (M91.2b).
+/// start (M91.2b); `resumes_a_deferral` says its session holds an open
+/// deferral, which keeps its message in argv (M92.13, `run_input`).
 #[expect(
     clippy::too_many_arguments,
     reason = "one run's whole setup: each argument is a fact the spawn needs and none groups"
@@ -3015,24 +3169,27 @@ fn spawn_run(
     state: &AgentState,
     vault: &Path,
     req: &AgentRequest,
+    cli: &readiness::Observation,
     session: &CliSession,
     config_dir: &Path,
     meter: Option<&meter::Meter>,
     seat: Option<(&str, Option<&str>)>,
+    resumes_a_deferral: bool,
     approval: &crate::policy::tool_approval::RunApproval,
     agents: &cli_agents::RunAgents,
+    configuration_capture: Option<&configuration::PreparedCapture>,
 ) -> Result<Started, String> {
     // M56.5: checked again here, before admission, so a spawn path that
     // skipped `run_agent`'s check still never passes the CLI a value it would
     // ignore. A refusal takes no slot and writes nothing.
     run_options::validate_request(req)?;
-    let binary = find_binary().ok_or(
-        "Claude Code was not found on this machine. Install it from https://claude.com/claude-code, then reopen cerebro.",
-    )?;
+    cli.check_identity()
+        .map_err(|error| error.message().to_owned())?;
+    let binary = &cli.binary;
 
     // At the cap, or once quitting, the run is refused before anything is
     // written for it (M17.3, M53.10).
-    state.admit()?;
+    state.admit_limits()?;
 
     let (url, token) = match (req.mcp_url.as_deref(), req.mcp_token.as_deref()) {
         (Some(u), Some(t)) => (u, t),
@@ -3092,8 +3249,15 @@ fn spawn_run(
             settings,
             gate,
             agents: agents.clone(),
+            input: run_input(
+                seat.is_some(),
+                seat.and_then(|(_, version)| version),
+                &req.message,
+                resumes_a_deferral,
+            ),
         })
     };
+    let input = setup.as_ref().map_or(RunInput::Argv, |setup| setup.input);
     // The prompt tool is named in argv, so its seat lists it from now on.
     if let (Some((run_id, _)), true) = (
         seat,
@@ -3113,7 +3277,16 @@ fn spawn_run(
     // presented is after this spawn. A spawn that fails takes the row back,
     // and the config with it: no child is left to read the secrets in it.
     if let Some(meter) = meter {
-        meter::begin(meter);
+        if let Err(capture_error) = meter::begin(meter) {
+            let _ = std::fs::remove_file(&config_path);
+            forget_settings();
+            meter::publication_failed(
+                meter,
+                crate::runtime::run_configuration::PublicationFailureStage::BeforeStart,
+                Some(capture_error),
+            );
+            return Err("Run configuration is unavailable. Nothing was started.".into());
+        }
         // M58.1: the row stands now, so a plan that lets the CLI's own
         // writers or the shell run books this run's writes as partial.
         if let Ok(conn) = crate::runtime::open_existing(&meter.data_dir) {
@@ -3124,7 +3297,7 @@ fn spawn_run(
             }
         }
     }
-    let args = build_args(
+    let BuiltArguments { args, facts } = build_args_with_facts(
         req,
         &config_path,
         approval,
@@ -3141,7 +3314,7 @@ fn spawn_run(
     // and sessions stay out of the recording and it stays out of theirs.
     let recording = tee::recording(run, &args);
     let seated = setup.as_ref().is_some_and(|setup| setup.gate.is_some());
-    let mut command = cli_command(&binary, &args, vault, req, seated);
+    let mut command = cli_command(binary, &args, vault, req, seated, input);
     if let Some(recording) = &recording {
         // Recordings use the owner's own login only, never a key: the
         // sanitizer refuses any init whose API-key source is not `none`.
@@ -3150,29 +3323,92 @@ fn spawn_run(
             command.env_remove(credential);
         }
     }
-    with_login_path(&mut command);
-    // M53.10: the CLI leads its own process group, so a stop reaches the
-    // shells and tools it started, and its stderr drains while it runs.
-    let (supervised, stdout) = crate::spawn::supervise(&mut command).map_err(|e| {
+    // Required metadata commits before the observed executable can start.
+    if let Err(capture_error) = configuration::record_before_launch(configuration::CaptureInput {
+        meter,
+        prepared: configuration_capture,
+        request: req,
+        cli,
+        approval,
+        connectors: &reach,
+        setup: setup.as_ref(),
+        facts: &facts,
+        strict_mcp,
+    }) {
         let _ = std::fs::remove_file(&config_path);
         forget_settings();
         if let Some(meter) = meter {
-            meter::discard(meter);
+            meter::publication_failed(
+                meter,
+                crate::runtime::run_configuration::PublicationFailureStage::BeforeStart,
+                Some(capture_error),
+            );
+        }
+        return Err("Run configuration is unavailable. Nothing was started.".into());
+    }
+    #[cfg(test)]
+    configuration::notify_before_child_for_test();
+    // M93.5: revalidate the observed executable immediately before spawning;
+    // its locally recovered PATH is the one its version was observed with.
+    let spawned = cli
+        .configure_command(&mut command)
+        .map_err(|error| std::io::Error::other(error.message()))
+        .and_then(|()| crate::spawn::supervise(&mut command));
+    // M53.10: the CLI leads its own process group, so a stop reaches the
+    // shells and tools it started, and its stderr drains while it runs.
+    let (supervised, stdout) = spawned.map_err(|e| {
+        let _ = std::fs::remove_file(&config_path);
+        forget_settings();
+        if let Some(meter) = meter {
+            meter::publication_failed(
+                meter,
+                crate::runtime::run_configuration::PublicationFailureStage::BeforeStart,
+                None,
+            );
         }
         format!("could not start Claude Code: {e}")
     })?;
+    // M92.13: a seated run's prompt goes in on its stdin, which its turn
+    // input owns from here; a run whose input cannot start never runs.
+    let input = match input {
+        RunInput::Argv => None,
+        RunInput::Stdin => {
+            let copy = recording.as_ref().and_then(tee::Recording::stdin_copy);
+            match turn_input::open(&supervised, run, &req.message, copy) {
+                Ok(input) => Some(input),
+                Err(refusal) => {
+                    supervised.handle().terminate(Duration::ZERO);
+                    let _ = supervised.finish(TAIL_WAIT);
+                    let _ = std::fs::remove_file(&config_path);
+                    forget_settings();
+                    if let Some(meter) = meter {
+                        meter::publication_failed(
+                            meter,
+                            crate::runtime::run_configuration::PublicationFailureStage::AfterStart,
+                            None,
+                        );
+                    }
+                    return Err(format!("could not start Claude Code: {refusal}"));
+                }
+            }
+        }
+    };
 
     // Counted before the slot exists, so a quit that sweeps the slot also
     // waits for this reader's books.
-    let books = Books::open(&state.books);
+    let books = Books::open_for_vault(state, vault);
     let cancelled = Arc::new(AtomicBool::new(false));
     let slot = RunSlot {
+        native_action_read: None,
+            events:None,
         handle: supervised.handle(),
         vault: vault_key(vault),
         strict_mcp,
         actor: req.actor.clone(),
         cancelled: cancelled.clone(),
     };
+    #[cfg(test)]
+    before_insert_for_test();
     if let Err(refusal) = state.insert(run, slot) {
         // Quit landed between `admit` and here: this child never gets a run.
         supervised.handle().terminate(Duration::ZERO);
@@ -3180,7 +3416,11 @@ fn spawn_run(
         let _ = std::fs::remove_file(&config_path);
         forget_settings();
         if let Some(meter) = meter {
-            meter::discard(meter);
+            meter::publication_failed(
+                meter,
+                crate::runtime::run_configuration::PublicationFailureStage::AfterStart,
+                None,
+            );
         }
         return Err(refusal);
     }
@@ -3196,12 +3436,40 @@ fn spawn_run(
         settings_path,
         supervised,
         stdout,
+        input,
         books,
         cancelled,
         connectors: reach,
         reach: reaching,
         recording,
     })
+}
+
+#[cfg(test)]
+thread_local! {
+    static BEFORE_INSERT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+#[cfg(test)]
+fn before_insert_for_test() {
+    if let Some(action) = BEFORE_INSERT.with(|slot| slot.borrow_mut().take()) {
+        action();
+    }
+}
+#[cfg(test)]
+fn with_before_insert_for_test<T>(before: impl FnOnce() + 'static, run: impl FnOnce() -> T) -> T {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            BEFORE_INSERT.with(|slot| {
+                slot.borrow_mut().take();
+            });
+        }
+    }
+    BEFORE_INSERT.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(before));
+    });
+    let _reset = Reset;
+    run()
 }
 
 /// Read a run's stdout to its end (M53.10): every line is metered, read for
@@ -3228,12 +3496,18 @@ pub(crate) fn read_stream(
     emit: &mut dyn FnMut(AgentEvent),
     end_run: &mut dyn FnMut(),
 ) -> meter::Tally {
-    read_stream_with_capture(stdout, gate, observer, emit, end_run, None, None)
+    read_stream_with_capture(stdout, gate, observer, emit, end_run, None, None, None)
 }
 
-/// `read_stream`, with the run's capture lease (M69.5) and the call a
-/// resumed run's deferral held (M57.1): its resumed stream opens with that
-/// call's result, never its start, so the fold is told which tool it was.
+/// `read_stream`, with the run's capture lease (M69.5), the call a resumed
+/// run's deferral held (M57.1), whose resumed stream opens with that call's
+/// result, never its start, so the fold is told which tool it was, and a
+/// seated run's stdin (M92.13, `drive_input`), which closes when the run is
+/// refused at its init, on a line it cannot parse and when its stream ends.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one run's reader: its stream, gate, observer and outlets, and the three things a run may hold beside them"
+)]
 fn read_stream_with_capture(
     stdout: impl Read,
     mut gate: InitGate,
@@ -3242,6 +3516,7 @@ fn read_stream_with_capture(
     end_run: &mut dyn FnMut(),
     mut capture: Option<crate::import::capture::Lease>,
     held: Option<&cli_writes::HeldCall>,
+    mut input: Option<turn_input::TurnInput>,
 ) -> meter::Tally {
     let mut reader = BufReader::new(stdout);
     let mut fold = capture
@@ -3252,9 +3527,13 @@ fn read_stream_with_capture(
         .holding(held);
     // M25.2: what this run cost, accumulated as the stream is read. It never
     // reaches the fold or the event channel: a count on the channel is a
-    // count the journal holds and a run log keeps. The one count a panel may
-    // see, how full the session's context is, the reader files in a
-    // memory-only book once the stream ends, for the panel to pull (M91.5).
+    // count the journal holds and a run log keeps. Of what the tally reads, a
+    // panel sees how full the session's context is, with Claude Code's own
+    // breakdown of it when a seated run answered its context ask (M92.13),
+    // which the reader files in a memory-only book once the stream ends, for
+    // the panel to pull (M91.5). How long each turn worked reaches the panel
+    // apart from the tally: the fold carries the result's `duration_ms` on
+    // the turn's own event (M92.2).
     let mut tally = meter::Tally::default();
     let mut raw = Vec::new();
     loop {
@@ -3272,10 +3551,18 @@ fn read_stream_with_capture(
         // A line we cannot parse is skipped: the CLI interleaves diagnostics
         // with the stream. A parsed line of a kind this build does not
         // classify is not silent: the tally collects its kind, and the meter
-        // reports it once per run (M56.2, `kinds`).
+        // reports it once per run (M56.2, `kinds`). M92.13: a seated run's
+        // stdin closes on such a line, since the result it may be (one too
+        // deep to parse, say) would otherwise never ask, never close, and
+        // leave Claude Code waiting on stdin for ever; the turn completes on
+        // the close (P2), without its breakdown.
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            if let Some(input) = &input {
+                input.close();
+            }
             continue;
         };
+        let awaiting = tally.awaits_context();
         tally.observe(&value);
         observer.observe(&value, chrono::Utc::now());
         let (class, events) = fold.entry(&value);
@@ -3289,9 +3576,17 @@ fn read_stream_with_capture(
         if admitted.refuse {
             capture.take();
             tally.refuse_init();
+            // M92.13: a refused run's stdin closes as it is ended.
+            input = None;
             end_run();
         }
+        if let Some(input) = input.as_mut() {
+            let answered = awaiting && !tally.awaits_context();
+            drive_input(input, &value, answered, &mut tally);
+        }
     }
+    // M92.13: the stream has ended, and the run's stdin closes with it.
+    drop(input);
     for event in gate.pass(fold.finish()) {
         emit(event);
     }
@@ -3299,6 +3594,28 @@ fn read_stream_with_capture(
     // from the result's words.
     tally.record_quota(fold.is_quota());
     tally
+}
+
+/// What one line of a seated run's stream asks of its stdin (M92.13). The
+/// first result of the run's own thread asks how full its context is, under
+/// a request id the tally then waits on; that ask's answer (`answered`: the
+/// tally read it from this line) closes stdin, and so does any request the
+/// CLI makes. A request is never answered: closing stdin refuses its call
+/// and the turn goes on (measured), so nothing the CLI asks can be approved
+/// this way. Whatever else a line says asks nothing.
+fn drive_input(
+    input: &mut turn_input::TurnInput,
+    line: &Value,
+    answered: bool,
+    tally: &mut meter::Tally,
+) {
+    if answered || line.get("type").and_then(Value::as_str) == Some("control_request") {
+        input.close();
+    } else if usage::is_result(line) && !usage::from_a_subagent(line) {
+        if let Some(request_id) = input.ask() {
+            tally.asked_context(request_id);
+        }
+    }
 }
 
 /// Log why a run was planned without the subagent tool (M91.2b), once per
@@ -3747,8 +4064,13 @@ mod tests {
             settings: PathBuf::from(TEST_SETTINGS),
             gate: None,
             agents: cli_agents::RunAgents::default(),
+            input: RunInput::Argv,
         })
     }
+
+    /// The Claude Code every seated argv test plans for: one the gate is
+    /// built for.
+    const TEST_CLI: &str = "2.1.250";
 
     /// build_args for a new session, so the argv tests read as they did
     /// before every run named its session, and add only that, planned as a
@@ -3872,7 +4194,8 @@ mod tests {
     /// `person` as what reading the person's own found (`plan_with_agents`,
     /// as `stream` plans it), and every
     /// run but an internal one handed its settings file and, when seated,
-    /// the gate its seat's book writes.
+    /// the gate its seat's book writes and its input as `run_input` decides
+    /// it (M92.13).
     fn planned(
         req: &AgentRequest,
         seated: bool,
@@ -3887,7 +4210,7 @@ mod tests {
                 None,
             );
             let granted = granted_cli_tools(req, &approval, &RunConnectors::default());
-            run_gate(&book, "run-args", &granted, Some("2.1.250"))
+            run_gate(&book, "run-args", &granted, Some(TEST_CLI))
         } else {
             None
         };
@@ -3895,6 +4218,7 @@ mod tests {
             settings: PathBuf::from(TEST_SETTINGS),
             gate,
             agents,
+            input: run_input(seated, Some(TEST_CLI), &req.message, false),
         });
         (approval, setup)
     }
@@ -4375,7 +4699,8 @@ mod tests {
     // tool where its switch is on, denies the built-in agent types by name,
     // defines the researcher, briefs its subagents and asks for their text
     // and its thinking. Since M92.0 the message rides last, after a lone
-    // `--`, never after `-p`.
+    // `--`, never after `-p`, and since M92.13 a seated run's rides stdin
+    // instead, its argv reading stream-json input and carrying no message.
     #[test]
     fn off_keeps_its_argv() {
         for shell in [None, Some(ShellCeiling::Off)] {
@@ -4421,8 +4746,11 @@ mod tests {
                         cerebro_tools().join(","),
                     )
                 };
-                let mut expected = vec![
-                    "-p",
+                let mut expected = vec!["-p"];
+                if seated {
+                    expected.extend(["--input-format", "stream-json"]);
+                }
+                expected.extend([
                     "--output-format",
                     "stream-json",
                     "--verbose",
@@ -4441,7 +4769,7 @@ mod tests {
                     "user",
                     "--settings",
                     TEST_SETTINGS,
-                ];
+                ]);
                 let researcher = researcher_definitions(false);
                 let brief = cli_agents::subagent_brief();
                 if seated {
@@ -4462,10 +4790,12 @@ mod tests {
                     // M56.3: every run names its session.
                     "--session-id",
                     TEST_SESSION,
-                    // M92.0: and the message closes it, after a lone `--`.
-                    "--",
-                    "hi",
                 ]);
+                // M92.0: and the message closes it, after a lone `--`, but on
+                // a seated run, whose message rides stdin (M92.13).
+                if !seated {
+                    expected.extend(["--", "hi"]);
+                }
                 assert_eq!(args, expected, "shell={shell:?} seated={seated}");
             }
         }
@@ -4796,18 +5126,25 @@ mod tests {
     fn the_subagent_bounds_ride_every_run_but_an_internal_one() {
         type Env = std::collections::BTreeMap<String, String>;
         let bounds = |req: &AgentRequest, seated: bool| -> Env {
-            cli_command(Path::new("claude"), &[], Path::new("/tmp"), req, seated)
-                .get_envs()
-                .filter(|(name, _)| name.to_string_lossy().starts_with("CLAUDE_"))
-                .map(|(name, value)| {
-                    (
-                        name.to_string_lossy().into_owned(),
-                        value
-                            .map(|value| value.to_string_lossy().into_owned())
-                            .unwrap_or_default(),
-                    )
-                })
-                .collect()
+            cli_command(
+                Path::new("claude"),
+                &[],
+                Path::new("/tmp"),
+                req,
+                seated,
+                RunInput::Argv,
+            )
+            .get_envs()
+            .filter(|(name, _)| name.to_string_lossy().starts_with("CLAUDE_"))
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value
+                        .map(|value| value.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                )
+            })
+            .collect()
         };
         let owned = |vars: &mut dyn Iterator<Item = (&str, &str)>| -> Env {
             vars.map(|(name, value)| (name.to_string(), value.to_string()))
@@ -4851,22 +5188,30 @@ mod tests {
             assert_eq!(written["disableAutoMode"], "disable", "{label}");
             assert_eq!(written.get("hooks").is_some(), gated, "{label}");
         }
-        // The command keeps its argv in order, the message last after `--`
-        // (M92.0), and the vault as its cwd.
-        let args = planned_args(&attended_request(), true);
-        let command = cli_command(
-            Path::new("claude"),
-            &args,
-            Path::new("/v"),
-            &attended_request(),
-            true,
-        );
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            args.iter().map(String::as_str).collect::<Vec<_>>()
-        );
-        assert_eq!(args[args.len() - 2..], ["--", "hi"]);
-        assert_eq!(command.get_current_dir(), Some(Path::new("/v")));
+        // The command keeps its argv in order and the vault as its cwd, the
+        // message last after `--` (M92.0), or on a seated run, on stdin,
+        // where no argv element carries it (M92.13).
+        for seated in [false, true] {
+            let args = planned_args(&attended_request(), seated);
+            let command = cli_command(
+                Path::new("claude"),
+                &args,
+                Path::new("/v"),
+                &attended_request(),
+                seated,
+                run_input(seated, Some(TEST_CLI), "hi", false),
+            );
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                args.iter().map(String::as_str).collect::<Vec<_>>()
+            );
+            if seated {
+                assert!(!args.iter().any(|a| a == "--" || a == "hi"), "{args:?}");
+            } else {
+                assert_eq!(args[args.len() - 2..], ["--", "hi"]);
+            }
+            assert_eq!(command.get_current_dir(), Some(Path::new("/v")));
+        }
     }
 
     // --- The Subagents switch (M91.2a) ---------------------------------------
@@ -5487,6 +5832,8 @@ mod tests {
         let handle = supervised.handle();
         reaped.0.push(handle.clone());
         RunSlot {
+            native_action_read: None,
+            events:None,
             handle,
             vault: PathBuf::from(vault),
             strict_mcp: true,
@@ -5678,6 +6025,8 @@ mod tests {
             .insert(
                 1,
                 RunSlot {
+                    native_action_read: None,
+            events:None,
                     handle: supervised.handle(),
                     vault: PathBuf::from("/vaults/a"),
                     strict_mcp: true,
@@ -6623,9 +6972,11 @@ mod tests {
         "--",
     ];
 
-    // M92.0: on every run kind, seated or not, the message rides last, after
-    // the argv's one lone `--`, so whatever it starts with is the prompt and
-    // never a flag; every other element keeps its place.
+    // M92.0: on every run kind that takes its message in argv, the message
+    // rides last, after the argv's one lone `--`, so whatever it starts with
+    // is the prompt and never a flag; every other element keeps its place.
+    // M92.13: a seated run's rides stdin, so no message reaches its argv,
+    // which is the same whatever the message says.
     #[test]
     fn a_message_that_starts_with_a_dash_is_the_prompt() {
         for (label, req, seated) in every_run_kind() {
@@ -6636,6 +6987,16 @@ mod tests {
                     ..req.clone()
                 };
                 let args = planned_args(&req, seated);
+                let on_stdin = run_input(seated, Some(TEST_CLI), message, false) == RunInput::Stdin;
+                assert_eq!(on_stdin, label == "attended, seated", "{label}");
+                if on_stdin {
+                    assert_eq!(args, plain, "{label}: {message:?} never reaches argv");
+                    assert!(
+                        !args.iter().any(|a| a == "--" || a == message),
+                        "{label}: {message:?}: {args:?}"
+                    );
+                    continue;
+                }
                 let at = args.len() - 2;
                 assert_eq!(args[at..], ["--", message], "{label}: {message:?}");
                 assert!(
@@ -6676,6 +7037,9 @@ mod tests {
         assert_eq!(args[..2], ["-p", "--output-format"], "nothing rides -p");
         assert_eq!(args[args.len() - 4..], ["--resume", TEST_SESSION, "--", ""]);
         assert_eq!(args.iter().filter(|a| *a == "--").count(), 1, "{args:?}");
+        // M92.13: seated as it is, it takes no stdin: an empty user line
+        // there would run a turn of its own after the held call (P5).
+        assert_eq!(setup.map(|setup| setup.input), Some(RunInput::Argv));
     }
 
     // --- Branches (M91.6) -----------------------------------------------------
@@ -6721,50 +7085,59 @@ mod tests {
 
     // A branch's argv is the argv its turn would have in a session of its
     // own, its session named by the fork 2.1.250 measured: its source resumed
-    // up to the anchor, forked, and run as the id minted for it, with only
-    // the message after it (M92.0). Its denials are its twin's, so an agent
-    // type the turn may not start is denied on a branch as anywhere.
+    // up to the anchor, forked, and run as the id minted for it. A seated
+    // branch's message rides stdin, which a fork reads as any run does
+    // (M92.13, measured in P3), so its argv ends with the fork; an unseated
+    // one's has only the message after it (M92.0). Its denials are its
+    // twin's, so an agent type the turn may not start is denied on a branch
+    // as anywhere.
     #[test]
     fn a_branch_names_the_measured_fork_before_its_message() {
         let req = branch_request();
         let session = CliSession::for_request(None, req.fork.as_ref()).unwrap();
         assert_ne!(session.id(), BRANCH_SOURCE, "a branch runs as itself");
-        let (approval, setup) = planned(&req, true, Ok(Vec::new()));
-        let args = super::build_args(
-            &req,
-            Path::new("/tmp/x.json"),
-            &approval,
-            setup.as_ref(),
-            true,
-            &RunConnectors::default(),
-            &session,
-        );
-        let tail = args.len() - 9;
-        assert_eq!(
-            args[tail..],
-            [
-                "--resume",
-                BRANCH_SOURCE,
-                "--resume-session-at",
-                BRANCH_ANCHOR,
-                "--fork-session",
-                "--session-id",
-                session.id(),
-                "--",
-                req.message.as_str(),
-            ]
-        );
+        let fork = [
+            "--resume",
+            BRANCH_SOURCE,
+            "--resume-session-at",
+            BRANCH_ANCHOR,
+            "--fork-session",
+            "--session-id",
+            session.id(),
+        ];
+        let branch_args = |seated: bool| {
+            let (approval, setup) = planned(&req, seated, Ok(Vec::new()));
+            super::build_args(
+                &req,
+                Path::new("/tmp/x.json"),
+                &approval,
+                setup.as_ref(),
+                true,
+                &RunConnectors::default(),
+                &session,
+            )
+        };
+        let args = branch_args(true);
+        let tail = args.len() - fork.len();
+        assert_eq!(args[tail..], fork);
+        assert_eq!(args[1..3], ["--input-format", "stream-json"]);
+        assert!(!args.iter().any(|a| a == "--" || *a == req.message));
         let twin = AgentRequest {
             fork: None,
             ..req.clone()
         };
         let fresh = planned_args(&twin, true);
-        assert_eq!(args[..tail], fresh[..fresh.len() - 4]);
+        assert_eq!(args[..tail], fresh[..fresh.len() - 2]);
         let denied = listed(&args, "--disallowedTools");
         for rule in BUILTIN_AGENT_RULES {
             assert!(denied.iter().any(|d| d == rule), "{rule}: {denied:?}");
         }
         assert_eq!(args.iter().filter(|a| *a == BRANCH_SOURCE).count(), 1);
+        // Unseated, the message closes the argv, after the fork.
+        let unseated = branch_args(false);
+        let tail = unseated.len() - fork.len() - 2;
+        assert_eq!(unseated[tail..tail + fork.len()], fork);
+        assert_eq!(unseated[unseated.len() - 2..], ["--", req.message.as_str()]);
     }
 
     #[test]
@@ -6862,12 +7235,15 @@ mod tests {
             &state,
             Path::new("/tmp"),
             &req,
+            &readiness::test_support::inert_observation(),
             &session,
             &dir,
             None,
             None,
+            false,
             &plan_for(&req, false),
             &cli_agents::RunAgents::default(),
+            None,
         )
         .err()
         .expect("an effort Claude Code ignores is refused");
@@ -6881,12 +7257,15 @@ mod tests {
             &state,
             Path::new("/tmp"),
             &req,
+            &readiness::test_support::inert_observation(),
             &session,
             &dir,
             None,
             None,
+            false,
             &plan_for(&req, false),
             &cli_agents::RunAgents::default(),
+            None,
         )
         .err()
         .expect("a flag is not a model");
@@ -6898,10 +7277,12 @@ mod tests {
     fn the_login_path_survives_a_chatty_shell_profile() {
         // Plenty of .zshrc files print a banner. Reading the last line, or the
         // whole of stdout, would hand the CLI a PATH of "Welcome back!".
-        let probe =
-            format!("Welcome back!\nnvm loaded\n{PATH_SENTINEL}/opt/homebrew/bin:/usr/bin\n");
+        let probe = format!(
+            "Welcome back!\nnvm loaded\n{}/opt/homebrew/bin:/usr/bin\n",
+            readiness::PATH_SENTINEL
+        );
         assert_eq!(
-            path_from_probe(&probe).as_deref(),
+            readiness::path_from_probe(&probe).as_deref(),
             Some("/opt/homebrew/bin:/usr/bin")
         );
     }
@@ -6910,14 +7291,18 @@ mod tests {
     fn a_shell_that_answers_with_nothing_useful_leaves_path_alone() {
         // Falling back to an empty PATH would be worse than not asking: it
         // would strip the little that launchd did give us.
-        assert_eq!(path_from_probe("no sentinel here\n"), None);
-        assert_eq!(path_from_probe(&format!("{PATH_SENTINEL}   \n")), None);
-        assert_eq!(path_from_probe(""), None);
+        assert_eq!(readiness::path_from_probe("no sentinel here\n"), None);
+        assert_eq!(
+            readiness::path_from_probe(&format!("{}   \n", readiness::PATH_SENTINEL)),
+            None
+        );
+        assert_eq!(readiness::path_from_probe(""), None);
     }
 
     #[test]
     fn discovery_covers_the_installers_that_hide_from_launchd() {
-        let found: Vec<String> = candidates_for("/Users/example")
+        let found: Vec<String> = readiness::candidates_for("/Users/example")
+            .unwrap()
             .iter()
             .map(|p| p.to_string_lossy().to_string())
             .collect();
@@ -6933,7 +7318,9 @@ mod tests {
 
     #[test]
     fn nvm_discovery_is_empty_rather_than_wrong_when_nvm_is_absent() {
-        assert!(nvm_candidates("/nonexistent-home").is_empty());
+        assert!(readiness::nvm_candidates("/nonexistent-home")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -8678,6 +9065,7 @@ mod tests {
             &mut || {},
             Some(lease),
             None,
+            None,
         );
         assert!(saw_capture);
         assert!(capture::find(&run, page, std::time::Duration::ZERO).is_none());
@@ -9444,6 +9832,7 @@ mod tests {
                 matcher: vec![ASKED.into()],
             }),
             agents: cli_agents::RunAgents::default(),
+            input: RunInput::Stdin,
         };
         let shapes = [
             attended_request(),
@@ -10004,6 +10393,8 @@ mod tests {
         let card = interaction::InteractionCard {
             id: "a".repeat(32),
             kind: interaction::Kind::Permission,
+            answering: None,
+            run: None,
             tool_name: ASKED.into(),
             tool_id: "t1".into(),
             session_id: TEST_SESSION.into(),
@@ -10629,6 +11020,7 @@ mod tests {
                 window: Some(200_000),
                 model: Some("claude-sonnet-5".into()),
                 at: "2026-10-22T12:00:08.000Z".into(),
+                breakdown: None,
             },
         );
         assert_eq!(
@@ -10644,6 +11036,7 @@ mod tests {
                 window: None,
                 model: None,
                 at: "2026-10-22T12:00:09.000Z".into(),
+                breakdown: None,
             },
         );
         assert_eq!(
@@ -10654,6 +11047,55 @@ mod tests {
             answer("../not-a-session"),
             json!({ "state": "not_recorded" })
         );
+        // M92.13: a seated run's breakdown crosses beside its reading as
+        // `breakdown`, exactly the wire `context-breakdown.json` writes,
+        // which agentIpc.ts's `ContextUseRecorded.breakdown` reads back.
+        let case = &fixture_case("a seated run's whole setup");
+        state.context.record(
+            session,
+            meter::ContextUse {
+                used: 15_100,
+                window: Some(200_000),
+                model: Some("claude-haiku-4-5-20251001".into()),
+                at: "2026-10-22T12:00:10.000Z".into(),
+                breakdown: meter::breakdown_of(&case["response"]).map(Box::new),
+            },
+        );
+        let crossed = answer(session);
+        assert_eq!(crossed["state"], "recorded");
+        assert_eq!(crossed["used"], 15_100);
+        assert_eq!(crossed["breakdown"], case["wire"]);
+        let keys: Vec<&str> = crossed["breakdown"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "categories",
+                "total",
+                "max",
+                "model",
+                "autocompact",
+                "mcpServers",
+                "memoryFiles"
+            ]
+        );
+    }
+
+    /// The `context-breakdown.json` case whose name starts with `name`.
+    fn fixture_case(name: &str) -> Value {
+        let cases: Value =
+            serde_json::from_str(include_str!("../../fixtures/context-breakdown.json")).unwrap();
+        cases["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["name"].as_str().is_some_and(|n| n.starts_with(name)))
+            .cloned()
+            .unwrap_or_else(|| panic!("no case {name}"))
     }
 
     #[test]
@@ -10765,5 +11207,820 @@ mod tests {
                 );
             }
         }
+    }
+
+    // --- M92.13: a seated run's stdin -----------------------------------------
+
+    #[test]
+    fn only_a_seated_turn_with_words_takes_its_message_on_stdin() {
+        assert_eq!(
+            run_input(true, Some(TEST_CLI), "hi", false),
+            RunInput::Stdin
+        );
+        for (why, seated, version, message, resumes_a_deferral) in [
+            ("no seat", false, Some(TEST_CLI), "hi", false),
+            (
+                "a Claude Code older than the gate",
+                true,
+                Some("2.1.249"),
+                "hi",
+                false,
+            ),
+            ("a Claude Code of unknown version", true, None, "hi", false),
+            (
+                "an answer's resume, which sends nothing",
+                true,
+                Some(TEST_CLI),
+                "",
+                false,
+            ),
+            ("nothing but blanks", true, Some(TEST_CLI), " \n\t", false),
+            // P5, P5b: the held call's result comes first, then the
+            // message's own turn; an ask at the first would end the second.
+            (
+                "a new message over an open deferral",
+                true,
+                Some(TEST_CLI),
+                "hi",
+                true,
+            ),
+        ] {
+            assert_eq!(
+                run_input(seated, version, message, resumes_a_deferral),
+                RunInput::Argv,
+                "{why}"
+            );
+        }
+        // Of every run kind, only the seated turn: internal, unattended,
+        // handed-off and thread runs keep their argv, the message last.
+        for (label, req, seated) in every_run_kind() {
+            let (_, setup) = planned(&req, seated, Ok(Vec::new()));
+            let input = setup.as_ref().map_or(RunInput::Argv, |setup| setup.input);
+            let args = planned_args(&req, seated);
+            if label == "attended, seated" {
+                assert_eq!(input, RunInput::Stdin, "{label}");
+                assert_eq!(
+                    args[..3],
+                    ["-p", "--input-format", "stream-json"],
+                    "{label}"
+                );
+            } else {
+                assert_eq!(input, RunInput::Argv, "{label}");
+                assert!(!args.iter().any(|a| a == "--input-format"), "{label}");
+                assert_eq!(args[args.len() - 2..], ["--", "hi"], "{label}");
+            }
+        }
+    }
+
+    // The rollback (M92.13, §4): a seated run's argv on stdin is its argv
+    // form with the input flag added and the message taken out, so a
+    // `run_input` that answers Argv gives back the M92.0 argv byte for byte.
+    // Its tools, agents and servers are the same flags, which 2.1.250 inits
+    // alike in both modes, one init each (P15), so the init gate holds both.
+    #[test]
+    fn a_seated_runs_argv_differs_from_its_argv_form_only_in_its_input() {
+        let resumed = AgentRequest {
+            session_id: Some(TEST_SESSION.into()),
+            ..attended_request()
+        };
+        let branch = branch_request();
+        for req in [attended_request(), resumed, branch] {
+            for shell in ShellCeiling::ALL {
+                let req = AgentRequest {
+                    shell: Some(shell),
+                    ..req.clone()
+                };
+                let session =
+                    CliSession::for_request(req.session_id.as_deref(), req.fork.as_ref()).unwrap();
+                let (approval, setup) = planned(&req, true, Ok(Vec::new()));
+                let mut setup = setup.expect("a seated run's setup");
+                assert_eq!(setup.input, RunInput::Stdin);
+                let built = |setup: &RunSetup| {
+                    super::build_args(
+                        &req,
+                        Path::new("/tmp/x.json"),
+                        &approval,
+                        Some(setup),
+                        true,
+                        &RunConnectors::default(),
+                        &session,
+                    )
+                };
+                let on_stdin = built(&setup);
+                setup.input = RunInput::Argv;
+                let on_argv = built(&setup);
+                let mut expected = vec![on_argv[0].clone()];
+                expected.extend(["--input-format".to_string(), "stream-json".to_string()]);
+                expected.extend_from_slice(&on_argv[1..on_argv.len() - 2]);
+                assert_eq!(on_stdin, expected, "{shell:?}");
+                assert_eq!(on_argv[on_argv.len() - 2..], ["--", req.message.as_str()]);
+            }
+        }
+    }
+
+    /// The run tag the fake runs' asks are named by.
+    const FAKE_RUN: u64 = 13;
+
+    /// The line a fake run's stdin carries for `message`.
+    fn prompt_line(message: &str) -> String {
+        json!({ "type": "user", "message": { "role": "user", "content": message } }).to_string()
+    }
+
+    /// The context ask a fake run's stdin carries.
+    fn ask_line() -> String {
+        json!({ "type": "control_request", "request_id": format!("ctx-{FAKE_RUN}"),
+            "request": { "subtype": "get_context_usage" } })
+        .to_string()
+    }
+
+    /// A fake run's first init: one Claude Code built-in, and the version
+    /// the gate is built for.
+    fn fake_init() -> Value {
+        json!({ "type": "system", "subtype": "init", "session_id": TEST_SESSION,
+            "tools": ["Read", "ToolSearch"], "mcp_servers": [], "model": "claude-sonnet-5",
+            "permissionMode": "default", "claude_code_version": TEST_CLI })
+    }
+
+    /// A fake run's result.
+    fn fake_result() -> Value {
+        json!({ "type": "result", "subtype": "success", "is_error": false, "result": "Done.",
+            "session_id": TEST_SESSION, "duration_ms": 1_200 })
+    }
+
+    /// `lines` as the JSONL file `name` in `dir`.
+    fn put_lines(dir: &Path, name: &str, lines: &[Value]) {
+        let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
+        std::fs::write(dir.join(name), text).unwrap();
+    }
+
+    /// `name` in `dir`, or empty when nothing wrote it.
+    fn read_back(dir: &Path, name: &str) -> String {
+        std::fs::read_to_string(dir.join(name)).unwrap_or_default()
+    }
+
+    /// The answer a fake run gives its ask, `@ID@` standing for the request
+    /// id it read: the first shared case's answer, as Claude Code sends it.
+    fn put_answer(dir: &Path) {
+        let line = json!({ "type": "control_response", "response": { "subtype": "success",
+            "request_id": "@ID@",
+            "response": fixture_case("a seated run's whole setup")["response"] } });
+        put_lines(dir, "answer.jsonl", &[line]);
+    }
+
+    /// A fake Claude Code that answers its ask as 2.1.250 does: it reads its
+    /// prompt, writes its turn, reads the ask, sends `answer.jsonl` with the
+    /// ask's request id, and reads on until its stdin closes, keeping each
+    /// in a file.
+    const ANSWERS: &str = r#"IFS= read -r prompt || exit 9
+printf '%s\n' "$prompt" > prompt.jsonl
+cat turn.jsonl
+IFS= read -r ask || exit 0
+printf '%s\n' "$ask" > ask.jsonl
+id=$(printf '%s\n' "$ask" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')
+sed "s/@ID@/$id/" answer.jsonl
+cat > rest.jsonl"#;
+
+    /// What a fake run's emit heard, with when.
+    #[cfg(unix)]
+    type Heard = Arc<Mutex<Vec<(std::time::Instant, AgentEvent)>>>;
+
+    /// An emit that keeps what it hears in `heard`.
+    #[cfg(unix)]
+    fn hearing(heard: &Heard) -> impl FnMut(AgentEvent) + Send + 'static {
+        let heard = heard.clone();
+        move |event| lock(&heard).push((std::time::Instant::now(), event))
+    }
+
+    /// When `heard` first held an event `matches` takes.
+    #[cfg(unix)]
+    fn heard_at(
+        heard: &Heard,
+        matches: impl Fn(&AgentEvent) -> bool,
+    ) -> Option<std::time::Instant> {
+        lock(heard)
+            .iter()
+            .find(|(_, event)| matches(event))
+            .map(|(at, _)| *at)
+    }
+
+    /// A fake seated run under way: its child, and what its reader hands
+    /// back, the tally and when the read ended.
+    #[cfg(unix)]
+    struct Fake {
+        supervised: crate::spawn::Supervised,
+        _reaped: Reaped,
+        read: std::sync::mpsc::Receiver<(meter::Tally, std::time::Instant)>,
+    }
+
+    #[cfg(unix)]
+    impl Fake {
+        /// The tally and when the read ended, within `limit`, and how the
+        /// child exited.
+        fn end(self, limit: Duration) -> (meter::Tally, std::time::Instant, ExitStatus) {
+            let (tally, ended) = self
+                .read
+                .recv_timeout(limit)
+                .expect("the run ended within its bound");
+            let (status, _) = self.supervised.finish(TAIL_WAIT);
+            (tally, ended, status.expect("the child was reaped"))
+        }
+    }
+
+    /// A fake Claude Code for a seated run (M92.13): `script` under `sh` in
+    /// `dir`, its command built as `spawn_run` builds a seated run's, so its
+    /// stdin is piped, and its turn input opened on `prompt` as `spawn_run`
+    /// opens it, copying to `copy`. Its stream is read on a thread of its
+    /// own through `gate`, as the reader reads a seated run's.
+    #[cfg(unix)]
+    fn fake_seated(
+        dir: &Path,
+        script: &str,
+        prompt: &str,
+        gate: InitGate,
+        copy: Option<std::fs::File>,
+        mut emit: impl FnMut(AgentEvent) + Send + 'static,
+        mut end_run: impl FnMut() + Send + 'static,
+    ) -> Fake {
+        let args = ["-c".to_string(), script.to_string()];
+        let mut command = cli_command(
+            Path::new("sh"),
+            &args,
+            dir,
+            &attended_request(),
+            true,
+            RunInput::Stdin,
+        );
+        let (supervised, stdout) = crate::spawn::supervise(&mut command).unwrap();
+        let reaped = Reaped(vec![supervised.handle()]);
+        let input = turn_input::open(&supervised, FAKE_RUN, prompt, copy).unwrap();
+        let (sent, read) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let tally = read_stream_with_capture(
+                stdout,
+                gate,
+                &mut no_connectors(),
+                &mut emit,
+                &mut end_run,
+                None,
+                None,
+                Some(input),
+            );
+            let _ = sent.send((tally, std::time::Instant::now()));
+        });
+        Fake {
+            supervised,
+            _reaped: reaped,
+            read,
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_seated_run_takes_its_prompt_on_stdin_and_files_its_breakdown() {
+        let dir = crate::vault::testutil::temp_vault("m92-13-prompt");
+        put_lines(
+            &dir,
+            "turn.jsonl",
+            &[fake_init(), turn_with_usage(), fake_result()],
+        );
+        put_answer(&dir);
+        let copy = std::fs::File::create(dir.join("copy.jsonl")).unwrap();
+        let heard: Heard = Arc::default();
+        let message = "- buy milk and eggs\n\"twice\"";
+        let fake = fake_seated(
+            &dir,
+            ANSWERS,
+            message,
+            InitGate::new(FAKE_RUN, false),
+            Some(copy),
+            hearing(&heard),
+            || {},
+        );
+        let (tally, ended, status) = fake.end(Duration::from_secs(10));
+        assert!(status.success(), "{status:?}: stdin closed, so it exited 0");
+        // The prompt was the first line on stdin, the ask the second and
+        // last, sent once the result was in; nothing came after.
+        assert_eq!(
+            read_back(&dir, "prompt.jsonl"),
+            format!("{}\n", prompt_line(message))
+        );
+        assert_eq!(read_back(&dir, "ask.jsonl"), format!("{}\n", ask_line()));
+        assert_eq!(read_back(&dir, "rest.jsonl"), "");
+        assert_eq!(
+            read_back(&dir, "copy.jsonl"),
+            format!("{}\n{}\n", prompt_line(message), ask_line()),
+            "the recording copies exactly what was sent"
+        );
+        let result_at = heard_at(&heard, |e| matches!(e, AgentEvent::Result { .. }))
+            .expect("the turn's result");
+        assert!(
+            ended.duration_since(result_at) < turn_input::CONTEXT_ASK_WAIT,
+            "closed on the answer, not by the wait: {:?}",
+            ended.duration_since(result_at)
+        );
+        // The answer is the reading's breakdown, filed with it.
+        let reading = tally.context().expect("the turn's reading").clone();
+        assert_eq!(reading.used, 6_108);
+        assert_eq!(
+            serde_json::to_value(reading.breakdown.as_ref()).unwrap(),
+            fixture_case("a seated run's whole setup")["wire"]
+        );
+        let book = meter::ContextBook::default();
+        file_context(&book, &tally, TEST_SESSION);
+        assert_eq!(
+            book.usage(TEST_SESSION),
+            meter::ContextUsage::Recorded(reading)
+        );
+        // No event, so nothing the journal or a run log holds, says any of
+        // it.
+        for (_, event) in lock(&heard).iter() {
+            let wire = serde_json::to_string(event).unwrap();
+            for word in ["control", "categories", "Free space", "get_context_usage"] {
+                assert!(!wire.contains(word), "{word} in {wire}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_error_answer_closes_stdin_at_once_with_no_breakdown() {
+        // P11: what Claude Code answers a request it cannot serve.
+        let dir = crate::vault::testutil::temp_vault("m92-13-error");
+        put_lines(
+            &dir,
+            "turn.jsonl",
+            &[fake_init(), turn_with_usage(), fake_result()],
+        );
+        put_lines(
+            &dir,
+            "answer.jsonl",
+            &[
+                json!({ "type": "control_response", "response": { "subtype": "error",
+                "request_id": "@ID@", "error": "Unsupported control request subtype" } }),
+            ],
+        );
+        let heard: Heard = Arc::default();
+        let fake = fake_seated(
+            &dir,
+            ANSWERS,
+            "hi",
+            InitGate::new(FAKE_RUN, false),
+            None,
+            hearing(&heard),
+            || {},
+        );
+        let (tally, ended, status) = fake.end(Duration::from_secs(10));
+        assert!(status.success());
+        let result_at = heard_at(&heard, |e| matches!(e, AgentEvent::Result { .. })).unwrap();
+        assert!(ended.duration_since(result_at) < turn_input::CONTEXT_ASK_WAIT);
+        assert!(!tally.awaits_context(), "the answer ended the ask");
+        assert_eq!(tally.context().unwrap().breakdown, None);
+        assert_eq!(read_back(&dir, "rest.jsonl"), "");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unanswered_ask_closes_stdin_after_its_wait() {
+        let dir = crate::vault::testutil::temp_vault("m92-13-unanswered");
+        put_lines(
+            &dir,
+            "turn.jsonl",
+            &[fake_init(), turn_with_usage(), fake_result()],
+        );
+        // It reads on, the ask included, until its stdin closes.
+        const SILENT: &str = "IFS= read -r prompt || exit 9\ncat turn.jsonl\ncat > rest.jsonl";
+        let heard: Heard = Arc::default();
+        let fake = fake_seated(
+            &dir,
+            SILENT,
+            "hi",
+            InitGate::new(FAKE_RUN, false),
+            None,
+            hearing(&heard),
+            || {},
+        );
+        let (tally, ended, status) = fake.end(Duration::from_secs(10));
+        assert!(status.success());
+        assert_eq!(read_back(&dir, "rest.jsonl"), format!("{}\n", ask_line()));
+        let result_at = heard_at(&heard, |e| matches!(e, AgentEvent::Result { .. })).unwrap();
+        let waited = ended.duration_since(result_at);
+        assert!(
+            waited >= turn_input::CONTEXT_ASK_WAIT
+                && waited < turn_input::CONTEXT_ASK_WAIT + Duration::from_millis(1_500),
+            "closed once the wait ran out: {waited:?}"
+        );
+        assert!(tally.awaits_context(), "never answered");
+        assert_eq!(tally.context().unwrap().breakdown, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_request_from_the_cli_closes_stdin_unanswered() {
+        // P16: answered by a close, the call is refused, the turn completes
+        // and the run exits 0; P2: a close before the result never aborts
+        // the turn.
+        let dir = crate::vault::testutil::temp_vault("m92-13-request");
+        put_lines(
+            &dir,
+            "turn.jsonl",
+            &[
+                fake_init(),
+                json!({ "type": "control_request", "request_id": "req_000000000000000000000001",
+                    "request": { "subtype": "can_use_tool", "tool_name": "Write",
+                        "input": { "file_path": "notes/inbox.md", "content": "x" } } }),
+            ],
+        );
+        put_lines(&dir, "result.jsonl", &[turn_with_usage(), fake_result()]);
+        const REQUESTS: &str =
+            "IFS= read -r prompt || exit 9\ncat turn.jsonl\ncat > after.jsonl\ncat result.jsonl";
+        let heard: Heard = Arc::default();
+        let started = std::time::Instant::now();
+        let fake = fake_seated(
+            &dir,
+            REQUESTS,
+            "hi",
+            InitGate::new(FAKE_RUN, false),
+            None,
+            hearing(&heard),
+            || {},
+        );
+        let (_, ended, status) = fake.end(Duration::from_secs(10));
+        assert!(status.success());
+        assert_eq!(
+            read_back(&dir, "after.jsonl"),
+            "",
+            "no answer to the request, and, stdin closed, no ask after the result"
+        );
+        assert!(heard_at(&heard, |e| matches!(e, AgentEvent::Result { .. })).is_some());
+        assert!(
+            ended.duration_since(started) < turn_input::CONTEXT_ASK_WAIT,
+            "closed on the request: {:?}",
+            ended.duration_since(started)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dead_runs_stdin_closes_with_its_stream() {
+        let dir = crate::vault::testutil::temp_vault("m92-13-crash");
+        put_lines(&dir, "turn.jsonl", &[fake_init(), turn_with_usage()]);
+        // A child it leaves behind holds its stdin and says when that
+        // closes; the run itself dies before its result. Claude Code's own
+        // Bash children never inherit its stdin (P13), so this is the worst
+        // a run could leave.
+        const CRASHES: &str = "IFS= read -r prompt || exit 9
+exec 3<&0
+(cat <&3 > held.jsonl; echo closed > closed.txt) </dev/null >/dev/null 2>&1 &
+cat turn.jsonl
+exit 3";
+        let heard: Heard = Arc::default();
+        let fake = fake_seated(
+            &dir,
+            CRASHES,
+            "hi",
+            InitGate::new(FAKE_RUN, false),
+            None,
+            hearing(&heard),
+            || {},
+        );
+        // Seen before the run is reaped, whose group's KILL would end the
+        // child that says it.
+        assert!(
+            within(Duration::from_secs(5), || dir.join("closed.txt").exists()),
+            "its stdin closed when its stream ended"
+        );
+        let (tally, _, status) = fake.end(Duration::from_secs(10));
+        assert_eq!(status.code(), Some(3));
+        assert_eq!(
+            read_back(&dir, "held.jsonl"),
+            "",
+            "nothing after the prompt"
+        );
+        assert!(
+            !tally.awaits_context(),
+            "a run with no result is never asked"
+        );
+        assert!(heard_at(&heard, |e| matches!(e, AgentEvent::Result { .. })).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_result_too_deep_to_parse_closes_stdin_and_the_run_ends() {
+        // A denied call's model-written input rides the result line
+        // (`permission_denials[].tool_input`), and one nested past
+        // serde_json's recursion limit makes the line unreadable: no ask is
+        // ever sent, so the reader closes stdin on the line itself, and a
+        // run that waits on its stdin after its result still ends.
+        let dir = crate::vault::testutil::temp_vault("m92-13-too-deep");
+        let deep = format!("{}{}", "[".repeat(200), "]".repeat(200));
+        let result = format!(
+            r#"{{"type":"result","subtype":"success","is_error":false,"result":"Done.","session_id":"{TEST_SESSION}","duration_ms":1200,"permission_denials":[{{"tool_name":"Write","tool_use_id":"toolu_1","tool_input":{deep}}}]}}"#
+        );
+        assert!(serde_json::from_str::<Value>(&result).is_err(), "too deep");
+        std::fs::write(
+            dir.join("turn.jsonl"),
+            format!("{}\n{}\n{result}\n", fake_init(), turn_with_usage()),
+        )
+        .unwrap();
+        const WAITS: &str = "IFS= read -r prompt || exit 9\ncat turn.jsonl\ncat > rest.jsonl";
+        let started = std::time::Instant::now();
+        let fake = fake_seated(
+            &dir,
+            WAITS,
+            "hi",
+            InitGate::new(FAKE_RUN, false),
+            None,
+            |_| {},
+            || {},
+        );
+        let (tally, ended, status) = fake.end(Duration::from_secs(10));
+        assert!(status.success(), "{status:?}: stdin closed, so it exited 0");
+        assert_eq!(
+            read_back(&dir, "rest.jsonl"),
+            "",
+            "nothing after the prompt"
+        );
+        assert!(
+            ended.duration_since(started) < turn_input::CONTEXT_ASK_WAIT,
+            "closed on the line: {:?}",
+            ended.duration_since(started)
+        );
+        assert!(!tally.awaits_context(), "never asked");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_init_refusal_closes_the_runs_stdin() {
+        let dir = crate::vault::testutil::temp_vault("m92-13-refused");
+        let mut init = fake_init();
+        init["tools"] = json!(["Read", "NotARealTool"]);
+        put_lines(&dir, "turn.jsonl", &[init]);
+        // Nothing but its stdin closing ends this run: the test's end_run
+        // only counts.
+        const WAITS: &str = "IFS= read -r prompt || exit 9
+cat turn.jsonl
+cat > after.jsonl
+echo closed > closed.txt";
+        let ended_runs = Arc::new(AtomicUsize::new(0));
+        let counted = ended_runs.clone();
+        let heard: Heard = Arc::default();
+        let fake = fake_seated(
+            &dir,
+            WAITS,
+            "hi",
+            InitGate::new(FAKE_RUN, false),
+            None,
+            hearing(&heard),
+            move || {
+                counted.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+        let (_, _, status) = fake.end(Duration::from_secs(10));
+        assert!(status.success());
+        assert_eq!(ended_runs.load(Ordering::SeqCst), 1);
+        assert!(dir.join("closed.txt").exists());
+        assert_eq!(read_back(&dir, "after.jsonl"), "");
+        let events: Vec<AgentEvent> = lock(&heard).iter().map(|(_, e)| e.clone()).collect();
+        assert!(
+            matches!(
+                (events.first(), events.last()),
+                (
+                    Some(AgentEvent::Init { .. }),
+                    Some(AgentEvent::Error { .. })
+                )
+            ),
+            "its init, then why it stopped: {events:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_deferred_turn_asks_closes_exits_0_and_still_announces_its_card() {
+        let dir = crate::vault::testutil::temp_vault("m92-13-deferred");
+        std::fs::write(dir.join("turn.jsonl"), deferred_bytes()).unwrap();
+        put_answer(&dir);
+        let req = attended_request();
+        let book = seated(&req);
+        let call = interaction::GateCall {
+            session_id: TEST_SESSION.into(),
+            tool_use_id: DEFERRED_ID.into(),
+            tool_name: ASKED.into(),
+            tool_input: json!({ "path": "notes/inbox.md" }),
+            agent_id: String::new(),
+        };
+        assert_eq!(book.gate("run-seat", &call), interaction::GateAnswer::Defer);
+        let heard: Heard = Arc::default();
+        let mut hear = hearing(&heard);
+        let announcing = book.clone();
+        let fake = fake_seated(
+            &dir,
+            ANSWERS,
+            "Add the vendor call to my inbox.",
+            InitGate::new(FAKE_RUN, true),
+            None,
+            move |event| announce(&announcing, true, TEST_SESSION, event, &mut hear),
+            || {},
+        );
+        let (tally, _, status) = fake.end(Duration::from_secs(10));
+        assert!(status.success(), "{status:?}");
+        assert_eq!(read_back(&dir, "ask.jsonl"), format!("{}\n", ask_line()));
+        assert_eq!(read_back(&dir, "rest.jsonl"), "");
+        let events: Vec<AgentEvent> = lock(&heard).iter().map(|(_, e)| e.clone()).collect();
+        let at = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::Interaction { .. }))
+            .expect("its card");
+        assert!(
+            matches!(&events[at + 1], AgentEvent::ToolDeferred { tool_id, .. } if tool_id == DEFERRED_ID),
+            "{events:?}"
+        );
+        assert!(tally.context().unwrap().breakdown.is_some());
+        book.close_seat("run-seat");
+        assert_eq!(book.pending(Path::new("/v")).len(), 1, "the card waits on");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stopped_seated_run_ends_within_its_grace() {
+        // A prompt larger than the pipe, which the run never reads: the
+        // write blocks until the Stop ends the run, as Claude Code leaves on
+        // TERM, with 143, within 0.5 s whatever its stdin holds (P1).
+        let dir = crate::vault::testutil::temp_vault("m92-13-stop");
+        put_lines(&dir, "turn.jsonl", &[fake_init()]);
+        let heard: Heard = Arc::default();
+        let fake = fake_seated(
+            &dir,
+            "cat turn.jsonl\nexec sleep 30",
+            &"x".repeat(1 << 20),
+            InitGate::new(FAKE_RUN, false),
+            None,
+            hearing(&heard),
+            || {},
+        );
+        assert!(within(Duration::from_secs(5), || heard_at(
+            &heard,
+            |e| matches!(e, AgentEvent::Init { .. })
+        )
+        .is_some()));
+        let state = AgentState::default();
+        state
+            .insert(
+                FAKE_RUN,
+                RunSlot {
+                    native_action_read: None,
+            events:None,
+                    handle: fake.supervised.handle(),
+                    vault: dir.clone(),
+                    strict_mcp: true,
+                    actor: None,
+                    cancelled: Arc::new(AtomicBool::new(false)),
+                },
+            )
+            .unwrap();
+        let stopped = std::time::Instant::now();
+        assert!(state.stop(FAKE_RUN).unwrap());
+        let (_, ended, status) = fake.end(STOP_GRACE + Duration::from_secs(3));
+        assert!(
+            ended.duration_since(stopped) < STOP_GRACE,
+            "{:?}",
+            ended.duration_since(stopped)
+        );
+        assert!(!status.success());
+        state.finish(FAKE_RUN);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_run_that_holds_its_stdin_open_is_ended_after_the_readers_deadline() {
+        use std::os::unix::process::ExitStatusExt;
+        // It never reads its stdin again, never leaves when it closes, and
+        // ignores TERM: Claude Code waiting on input for ever, at its worst.
+        let dir = crate::vault::testutil::temp_vault("m92-13-held");
+        put_lines(
+            &dir,
+            "turn.jsonl",
+            &[fake_init(), turn_with_usage(), fake_result()],
+        );
+        const HOLDS: &str = "trap '' TERM
+IFS= read -r prompt || exit 9
+cat turn.jsonl
+exec sleep 30";
+        let heard: Heard = Arc::default();
+        let fake = fake_seated(
+            &dir,
+            HOLDS,
+            "hi",
+            InitGate::new(FAKE_RUN, false),
+            None,
+            hearing(&heard),
+            || {},
+        );
+        let wait = turn_input::CONTEXT_ASK_WAIT;
+        let (tally, ended, status) = fake.end(2 * wait + STOP_GRACE + Duration::from_secs(5));
+        let result_at = heard_at(&heard, |e| matches!(e, AgentEvent::Result { .. })).unwrap();
+        // The reader's deadline: the ask's wait, from its result.
+        let deadline = result_at + wait;
+        assert!(
+            ended >= deadline + wait,
+            "it had its time to leave once stdin closed: {:?}",
+            ended.duration_since(result_at)
+        );
+        assert!(
+            ended <= deadline + wait + STOP_GRACE + Duration::from_secs(1),
+            "ended within CONTEXT_ASK_WAIT + STOP_GRACE of the deadline: {:?}",
+            ended.duration_since(result_at)
+        );
+        assert_eq!(status.signal(), Some(libc::SIGKILL), "TERM was ignored");
+        assert_eq!(
+            tally.ended(false, false).0,
+            crate::runtime::dispatch::RunOutcome::Succeeded
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn opening_capture_survives_capacity_while_publication_still_refuses() {
+        let state = AgentState::default();
+        let mut reaped = Reaped(Vec::new());
+        let root = Path::new("/vaults/a");
+        for run in 0..MAX_CONCURRENT_RUNS as u64 {
+            state
+                .insert(run, sleeping("/vaults/a", &mut reaped))
+                .unwrap();
+        }
+        assert_eq!(state.live(), MAX_CONCURRENT_RUNS);
+        let preparation = state
+            .prepare_run(root)
+            .expect("occupied process slots must not prevent capture for deterministic work");
+        assert!(state.guard_prepared(&preparation, root).is_err());
+        assert!(state.admit().is_err());
+        assert_eq!(state.live(), MAX_CONCURRENT_RUNS);
+        assert!(state.stop(0).unwrap());
+        assert!(state.guard_prepared(&preparation, root).is_ok());
+        state.stop_all_within(Duration::ZERO, Duration::ZERO);
+    }
+    #[test]
+    fn generation_stop_after_deferred_result_cancels_the_wait_not_a_completed_answer() {
+        use crate::runtime::chat_generations::End;
+        let events:Vec<Value>=serde_json::from_str(include_str!("../../fixtures/cli-stream/transcript-deferred.stream.json")).unwrap();
+        let mut tally=meter::Tally::default();
+        for event in events {tally.observe(&event);}
+        assert!(tally.deferred().is_some());
+        assert!(matches!(generation_end(&tally,false,false),End::Deferred));
+        assert!(matches!(generation_end(&tally,false,true),End::Cancelled));
+        let mut completed=meter::Tally::default();
+        completed.observe(&serde_json::json!({"type":"result","subtype":"success","is_error":false,"result":"done"}));
+        assert!(matches!(generation_end(&completed,false,true),End::Completed));
+    }
+
+}
+
+impl AgentState {
+    pub(crate) fn wait_opening_readers(&self, keep: Option<&Path>, timeout: Duration) -> Result<(), String> {
+        let keep = keep.map(vault_key);
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let settled = {
+                let scopes = self.book_scopes.lock().map_err(|_| "Reader completion ownership is unavailable.".to_owned())?;
+                let total = scopes.values().copied().sum::<usize>();
+                total == self.books.load(Ordering::SeqCst)
+                    && scopes.iter().all(|(vault, count)| *count == 0 || keep.as_ref() == Some(vault))
+            };
+            let slots_settled = self.slots.lock().map_err(|_| "Reader process ownership is unavailable.".to_owned())?
+                .values().all(|slot| keep.as_ref() == Some(&slot.vault));
+            if settled && slots_settled { return Ok(()); }
+            if std::time::Instant::now() >= deadline {
+                return Err("The previous workspace still has readers closing their writes. Opening is unavailable until they finish.".into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+#[cfg(test)]
+mod opening_reader_lifetime_tests {
+    use super::*;
+    #[test]
+    fn opening_waits_for_full_reader_books_after_slot_removal_but_keeps_same_vault() {
+        let state = AgentState::default();
+        // The real Books guard is the one retained through close_run/journal.
+        let old = Books::open_for_vault(&state, Path::new("/old-vault"));
+        let same_vault = state.wait_opening_readers(Some(Path::new("/old-vault")), Duration::ZERO);
+        let other_vault = state.wait_opening_readers(Some(Path::new("/new-vault")), Duration::ZERO);
+        let selected = state.wait_opening_readers(None, Duration::ZERO);
+        drop(old);
+        let settled = state.wait_opening_readers(None, Duration::ZERO);
+        assert!(same_vault.is_ok(), "same-vault reload retains its runs");
+        assert!(other_vault.is_err(), "removed process slots do not prove close_run finished");
+        assert!(selected.is_err());
+        assert!(settled.is_ok());
     }
 }

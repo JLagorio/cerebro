@@ -41,6 +41,7 @@ vi.mock('./agentIpc', async (importOriginal) => {
         : { state: 'unavailable', reason: 'not_recorded', retention_days: 30 },
     ),
     agentContextUsage: vi.fn(async () => ({ state: 'not_recorded' })),
+    readChatRecovery: vi.fn(actual.readChatRecovery),
   };
 });
 
@@ -73,6 +74,7 @@ import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { resetMockFs } from '@/lib/mockIpc';
+import { mockDrop } from '@/lib/mockDropped';
 
 /**
  * The panel's body (M91.12c): the transcript is a Chat whose Message Scroller
@@ -703,4 +705,118 @@ describe('the live plan in the dock', () => {
     });
     expect(plan()).toBeNull();
   });
+});
+
+describe('failed-turn inspection', () => {
+  it('reviewing a failed labelled ask is observational and retains the newer composer', async () => {
+    const label = 'Ask to revise · Sync error rate';
+    const prompt = 'Review knowledge/metrics/sync-error-rate.md using its existing evidence.';
+    const error = 'Connection closed before the reply finished.';
+    keep([
+      { ...asked('u-failed', label), prompt },
+      { ...replied('a-failed', 'I started checking the existing evidence.'), error },
+    ]);
+    resetMockFs();
+    const { rerender } = render(<AiPanel presentation="panel" />);
+    const failed = await screen.findByTestId('turn-error');
+    expect(failed.textContent).toContain(error);
+    const composer = input();
+    const transcript = log();
+    const thread = localStorage.getItem('cerebro.activeConversation');
+    fireEvent.change(composer, { target: { value: 'Keep these newer composer words' } });
+    composer.setSelectionRange(5, 10);
+    expect(screen.getByRole('button', { name: 'Remove Home from context' })).toBeTruthy();
+    // Reuse the existing attachment fixture: an outside file is only staged
+    // here. It must not be copied or sent by inspecting a failed reply.
+    const elementFromPoint = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: () => composer,
+    });
+    try {
+      await act(async () =>
+        mockDrop({
+          at: { x: 10, y: 10 },
+          files: [{ path: '/outside/newer-context.pdf', base64: 'JVBERi0xLjcK' }],
+        }),
+      );
+    } finally {
+      if (elementFromPoint === undefined) Reflect.deleteProperty(document, 'elementFromPoint');
+      else Object.defineProperty(document, 'elementFromPoint', elementFromPoint);
+    }
+    await waitFor(() => expect(screen.getAllByTestId('composer-attachment')).toHaveLength(1));
+    const pending = () => screen.getByTestId('composer-attachment');
+    expect(within(pending()).getByText('newer-context.pdf')).toBeTruthy();
+    expect(pending().dataset.state).toBe('idle');
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(within(transcript).getAllByTestId('chat-message')).toHaveLength(2);
+
+    // The fallback deliberately reaches today's actual unsafe callback. The
+    // first failure must expose replay, not merely the missing new label.
+    const inspect =
+      within(failed).queryByRole('button', { name: 'Review what happened' }) ??
+      within(failed).getByRole('button', { name: 'Retry' });
+    await act(async () => {
+      fireEvent.click(inspect);
+    });
+    expect({
+      launches: vi.mocked(agentIpc.runAgent).mock.calls.map(([, options]) => options.message),
+      userTurns: within(log())
+        .getAllByTestId('chat-message')
+        .filter((message) => message.dataset.role === 'user').length,
+    }).toEqual({ launches: [], userTurns: 1 });
+
+    // Uncredited until the causal RED above has been observed and the
+    // approved read-only inspection is implemented.
+    expect(within(failed).getByRole('button', { name: 'Review what happened' })).toBe(inspect);
+    const review = screen.getByRole('region', { name: 'Review what happened' });
+    expect(within(review).getByText(label, { exact: true })).toBeTruthy();
+    expect(review.textContent).toContain(error);
+    expect(review.textContent).toContain('may be incomplete');
+    expect(review.textContent).not.toContain(prompt);
+    expect(agentIpc.readChatRecovery).not.toHaveBeenCalled();
+
+    const unchangedComposer = () => {
+      expect(input()).toBe(composer);
+      expect(composer.value).toBe('Keep these newer composer words');
+      expect(composer.selectionStart).toBe(5);
+      expect(composer.selectionEnd).toBe(10);
+      expect(log()).toBe(transcript);
+      expect(localStorage.getItem('cerebro.activeConversation')).toBe(thread);
+      expect(screen.getByRole('button', { name: 'Remove Home from context' })).toBeTruthy();
+      expect(screen.getAllByTestId('composer-attachment')).toHaveLength(1);
+      expect(within(pending()).getByText('newer-context.pdf')).toBeTruthy();
+      expect(pending().dataset.state).toBe('idle');
+      expect(agentIpc.runAgent).not.toHaveBeenCalled();
+      expect(agentIpc.readChatRecovery).not.toHaveBeenCalled();
+    };
+    unchangedComposer();
+    rerender(<AiPanel presentation="canvas" />);
+    await act(async () => {});
+    const canvasReview = screen.getByRole('region', { name: 'Review what happened' });
+    expect(within(canvasReview).getByText(label, { exact: true })).toBeTruthy();
+    unchangedComposer();
+    fireEvent.click(within(canvasReview).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('region', { name: 'Review what happened' })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(inspect));
+    unchangedComposer();
+    rerender(<AiPanel presentation="panel" />);
+    await act(async () => {});
+    unchangedComposer();
+    expect(within(log()).getAllByTestId('chat-message')).toHaveLength(2);
+    expect(screen.getByTestId('turn-error').textContent).toContain(error);
+  });
+});
+
+
+it('M95 reviews a genuinely started failed reply through its original native root without another send', async () => {
+  vi.mocked(agentIpc.readChatRecovery).mockRejectedValueOnce({ code: 'unavailable', message: 'Native history is unavailable.', retryDisposition: 'refresh' });
+  render(<AiPanel presentation="panel" />); send('Inspect this original turn');
+  await waitFor(() => expect(wire.deliver).not.toBeNull());
+  act(() => wire.deliver?.({ kind: 'Error', run: 8, seq: 1, message: 'Original native interruption' }));
+  stream({ kind: 'Done' });
+  const button = await screen.findByRole('button', { name: 'Review what happened' }); fireEvent.click(button);
+  await waitFor(() => expect(agentIpc.readChatRecovery).toHaveBeenCalledExactlyOnceWith('body-8'));
+  expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('region', { name: 'Review what happened' })).toBeTruthy();
 });

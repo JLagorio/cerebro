@@ -8,6 +8,7 @@ async function composer(page: Page) {
   await page.getByTestId('app-rail').getByRole('button', { name: 'New', exact: true }).click();
   await page
     .getByRole('dialog', { name: 'New', exact: true })
+    .getByRole('group', { name: 'Data', exact: true })
     .getByRole('option', { name: 'Record', exact: true })
     .click();
   const dialog = page.getByRole('dialog', { name: 'New record', exact: true });
@@ -17,7 +18,8 @@ async function composer(page: Page) {
   await expect(dialog.getByTestId('composer-title')).toBeFocused();
   const database = dialog.getByRole('button', { name: 'Database', exact: true });
   await chooseOption(database, 'Work item');
-  await expect(database).toHaveAttribute('data-value', 'Work item');
+  if ((await dialog.getByRole('button', { name: 'Resume', exact: true }).count()) === 0)
+    await expect(database).toHaveAttribute('data-value', 'Work item');
   return dialog;
 }
 async function high(page: Page) {
@@ -100,3 +102,55 @@ test('an unavailable similar search says so and never blocks creation', async ({
     '# Search unavailable\n',
   );
 });
+
+test('Cancel and database changes retain scoped drafts with explicit Resume and Discard', async ({
+  page,
+}) => {
+  const dialog = await composer(page);
+  await dialog.getByTestId('composer-title').fill('  Keep my record  ');
+  await high(page);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const reopened = await composer(page);
+  await reopened.getByRole('button', { name: 'Resume', exact: true }).click();
+  await expect(reopened.getByTestId('composer-title')).toHaveValue('  Keep my record  ');
+  await expect(reopened.getByRole('button', { name: 'High', exact: true })).toBeVisible();
+  await expect(reopened.getByTestId('creation-destination')).toContainText('records/work-items');
+  await chooseOption(reopened.getByTestId('composer-database'), 'Person');
+  await expect(reopened.getByRole('region', { name: 'Change draft destination' })).toContainText(
+    'To: In Person · records/persons',
+  );
+  await reopened.getByRole('button', { name: 'Leave draft and start here', exact: true }).click();
+  await expect(reopened.getByTestId('composer-title')).toHaveValue('');
+  await chooseOption(reopened.getByTestId('composer-database'), 'Work item');
+  await reopened.getByRole('button', { name: 'Discard', exact: true }).click();
+  await expect(reopened.getByTestId('composer-title')).toHaveValue('');
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`session controls fit a narrow host in ${theme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width: 520, height: 760 });
+    await page.evaluate(
+      (value) => document.documentElement.setAttribute('data-theme', value),
+      theme,
+    );
+    const dialog = await composer(page);
+    await dialog.getByTestId('composer-title').fill('Narrow session');
+    const box = await dialog.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(520);
+    await expect(dialog.getByTestId('creation-destination')).toBeVisible();
+    await page.screenshot({
+      path: info.outputPath(`creation-destination-${theme}.png`),
+      animations: 'disabled',
+    });
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    const recovered = await composer(page);
+    await expect(recovered.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
+    await expect(recovered.getByRole('button', { name: 'Discard', exact: true })).toBeVisible();
+    await expect(recovered).toContainText('until the app closes');
+    await page.screenshot({
+      path: info.outputPath(`creation-recovery-${theme}.png`),
+      animations: 'disabled',
+    });
+  });
+}

@@ -1,0 +1,304 @@
+{
+  "format": 1,
+  "baseSql": "\nSELECT json_object(\n 'parentRun',p.run_id,'childRun',c.run_id,'appSession',j.app_session_id,\n 'claimedAt',j.claimed_at,'parentStarted',p.started_at,'deadline',r.deadline_at,\n 'state',j.state,'ended',j.ended_at,'outcome',c.outcome,'runEnded',c.ended_at,\n 'usage',c.usage_state,'nativeClosed',n.closed_at,'closeKind',n.close_kind,\n 'revision',n.revision,'occupied',r.occupies_slot,\n 'parentOutcome',p.outcome,'parentEnded',p.ended_at,'parentUsage',p.usage_state,\n 'parentClose',pn.close_kind,'parentRevision',pn.revision,\n 'oldPrecision',ses.close_precision,'oldClosed',ses.clean_closed_at,'oldHeartbeat',ses.last_heartbeat_at,\n 'counts',json_array((SELECT count(*) FROM chat_delegation_intents),\n  (SELECT count(*) FROM child_job_reservations),(SELECT count(*) FROM child_job_grant_freezes),\n  (SELECT count(*) FROM child_job_claims),(SELECT count(*) FROM runs),\n  (SELECT count(*) FROM run_configurations),(SELECT count(*) FROM action_native_runs WHERE source_kind='job'),\n  (SELECT count(*) FROM action_account_grants),(SELECT count(*) FROM managed_connections),\n  (SELECT count(*) FROM managed_connection_attempts),(SELECT count(*) FROM managed_connections WHERE secret_ref IS NOT NULL)),\n 'joins',CASE WHEN\n  a.parent_run_id=p.run_id AND a.attempt_id=i.attempt_id AND a.authority_id=i.authority_id\n  AND pn.source_kind='run' AND pn.child_job_id IS NULL AND pn.parent_run_id IS NULL AND pn.client_id IS NULL\n  AND pn.authority_id=i.authority_id AND pn.owner_person=i.owner_person AND pn.vault_id=i.vault_id\n  AND pn.store_uuid=i.store_uuid AND pn.cli_session_id=i.parent_cli_session_id AND pn.app_session_id=i.app_session_id\n  AND p.mode='attended' AND p.vault_id=i.vault_id AND p.store_uuid=i.store_uuid AND p.cli_session_id=i.parent_cli_session_id\n  AND c.parent_run_id=p.run_id AND c.vault_id=i.vault_id AND c.store_uuid=i.store_uuid\n  AND c.cli_session_id=r.reserved_cli_session_id AND c.actor='job:'||r.job_id AND c.mode='attended'\n  AND c.configuration_capture='required' AND c.configuration_failure_code IS NULL\n  AND c.configuration_disposed_at IS NULL AND c.configuration_publication_failure IS NULL\n  AND json_extract(c.cause,'$.kind')='handoff' AND json_extract(c.cause,'$.subject')='cerebro-researcher'\n  AND c.input_tokens=0 AND c.output_tokens=0 AND c.cache_read=0 AND c.cache_write=0\n  AND n.source_kind='job' AND n.child_job_id=r.job_id AND n.parent_run_id=p.run_id AND n.client_id IS NULL\n  AND n.cli_session_id=c.cli_session_id AND n.actor_id=c.actor AND n.vault_id=i.vault_id AND n.store_uuid=i.store_uuid\n  AND n.owner_person=i.owner_person AND n.app_session_id=i.app_session_id AND n.app_session_id=j.app_session_id\n  AND n.canonical_vault_path=pn.canonical_vault_path AND n.authority_id=j.authority_id AND n.authority_id<>pn.authority_id\n  AND j.contract_digest=f.contract_digest AND c.started_at=j.claimed_at AND n.admitted_at=j.claimed_at\n  AND NOT EXISTS(SELECT 1 FROM run_configurations WHERE run_id=c.run_id)\n  THEN 1 ELSE 0 END,\n 'immutable',json_array(i.slot_id,i.request_key,i.parent_run_id,i.attempt_id,i.authority_id,i.authority_revision,\n  i.owner_person,i.vault_id,i.store_uuid,i.parent_cli_session_id,i.app_session_id,i.actor_id,i.slot_ordinal,\n  r.job_id,r.reserved_run_id,r.reserved_cli_session_id,r.request_digest,r.deadline_at,r.elapsed_seconds,r.result_bytes,\n  f.contract_digest,f.instruction_source_version,f.policy_digest,j.claim_id,j.run_id,j.authority_id,j.contract_digest,j.app_session_id,j.claimed_at,\n  n.run_id,n.authority_id,n.vault_id,n.store_uuid,n.canonical_vault_path,n.owner_person,n.actor_id,n.source_kind,n.app_session_id,n.cli_session_id,n.parent_run_id,n.client_id,n.child_job_id,n.admitted_at,\n  pn.run_id,pn.authority_id,pn.vault_id,pn.store_uuid,pn.canonical_vault_path,pn.owner_person,pn.actor_id,pn.source_kind,pn.app_session_id,pn.cli_session_id,pn.parent_run_id,pn.client_id,pn.child_job_id,pn.admitted_at,\n  a.parent_run_id,a.attempt_id,a.authority_id))\nFROM child_job_claims j\nJOIN child_job_reservations r ON r.slot_id=j.slot_id AND r.reserved_run_id=j.run_id\nJOIN child_job_grant_freezes f ON f.slot_id=r.slot_id\nJOIN chat_delegation_intents i ON i.slot_id=r.slot_id\nJOIN chat_parent_attempts a ON a.parent_run_id=i.parent_run_id\nJOIN runs p ON p.run_id=i.parent_run_id JOIN action_native_runs pn ON pn.run_id=p.run_id\nJOIN runs c ON c.run_id=j.run_id JOIN action_native_runs n ON n.run_id=c.run_id\nJOIN app_sessions ses ON ses.session_id=j.app_session_id AND ses.vault_id=i.vault_id AND ses.store_uuid=i.store_uuid\nWHERE (SELECT count(*) FROM child_job_claims)=1\n",
+  "fromSql": "FROM child_job_claims j\nJOIN child_job_reservations r ON r.slot_id=j.slot_id AND r.reserved_run_id=j.run_id\nJOIN child_job_grant_freezes f ON f.slot_id=r.slot_id\nJOIN chat_delegation_intents i ON i.slot_id=r.slot_id\nJOIN chat_parent_attempts a ON a.parent_run_id=i.parent_run_id\nJOIN runs p ON p.run_id=i.parent_run_id JOIN action_native_runs pn ON pn.run_id=p.run_id\nJOIN runs c ON c.run_id=j.run_id JOIN action_native_runs n ON n.run_id=c.run_id\nJOIN app_sessions ses ON ses.session_id=j.app_session_id AND ses.vault_id=i.vault_id AND ses.store_uuid=i.store_uuid",
+  "whereSql": "WHERE (SELECT count(*) FROM child_job_claims)=1",
+  "groups": [
+    {
+      "label": "child-run",
+      "alias": "c",
+      "table": "runs",
+      "columns": [
+        "run_id",
+        "vault_id",
+        "store_uuid",
+        "mode",
+        "lane",
+        "started_at",
+        "ended_at",
+        "outcome",
+        "usage_state",
+        "input_tokens",
+        "output_tokens",
+        "cache_read",
+        "cache_write",
+        "reserved_total_tokens",
+        "reserved_output_tokens",
+        "lease_expires_at",
+        "proposals_submitted",
+        "applied",
+        "rejected",
+        "model_id",
+        "stop_reason",
+        "service_tier",
+        "total_cost_micros",
+        "num_turns",
+        "duration_ms",
+        "duration_api_ms",
+        "cache_write_5m",
+        "cache_write_1h",
+        "server_tool_use",
+        "actor",
+        "parent_run_id",
+        "counters_booked",
+        "cli_session_id",
+        "writes_booked",
+        "cause",
+        "configuration_capture",
+        "configuration_failure_code",
+        "configuration_disposed_at",
+        "configuration_publication_failure"
+      ]
+    },
+    {
+      "label": "claim",
+      "alias": "j",
+      "table": "child_job_claims",
+      "columns": [
+        "slot_id",
+        "claim_id",
+        "run_id",
+        "authority_id",
+        "contract_digest",
+        "app_session_id",
+        "claimed_at",
+        "state",
+        "ended_at"
+      ]
+    },
+    {
+      "label": "reservation",
+      "alias": "r",
+      "table": "child_job_reservations",
+      "columns": [
+        "slot_id",
+        "job_id",
+        "reserved_run_id",
+        "reserved_cli_session_id",
+        "request_digest",
+        "deadline_at",
+        "elapsed_seconds",
+        "result_bytes",
+        "occupies_slot"
+      ]
+    },
+    {
+      "label": "freeze",
+      "alias": "f",
+      "table": "child_job_grant_freezes",
+      "columns": [
+        "slot_id",
+        "contract_digest",
+        "instruction_source_version",
+        "policy_digest"
+      ]
+    },
+    {
+      "label": "intent",
+      "alias": "i",
+      "table": "chat_delegation_intents",
+      "columns": [
+        "slot_id",
+        "request_key",
+        "parent_run_id",
+        "attempt_id",
+        "authority_id",
+        "authority_revision",
+        "owner_person",
+        "vault_id",
+        "store_uuid",
+        "parent_cli_session_id",
+        "app_session_id",
+        "actor_id",
+        "slot_ordinal"
+      ]
+    },
+    {
+      "label": "attempt",
+      "alias": "a",
+      "table": "chat_parent_attempts",
+      "columns": [
+        "parent_run_id",
+        "attempt_id",
+        "authority_id"
+      ]
+    },
+    {
+      "label": "child-native",
+      "alias": "n",
+      "table": "action_native_runs",
+      "columns": [
+        "run_id",
+        "authority_id",
+        "revision",
+        "vault_id",
+        "store_uuid",
+        "canonical_vault_path",
+        "owner_person",
+        "actor_id",
+        "source_kind",
+        "app_session_id",
+        "cli_session_id",
+        "parent_run_id",
+        "client_id",
+        "child_job_id",
+        "admitted_at",
+        "closed_at",
+        "close_kind"
+      ]
+    },
+    {
+      "label": "parent-native",
+      "alias": "pn",
+      "table": "action_native_runs",
+      "columns": [
+        "run_id",
+        "authority_id",
+        "revision",
+        "vault_id",
+        "store_uuid",
+        "canonical_vault_path",
+        "owner_person",
+        "actor_id",
+        "source_kind",
+        "app_session_id",
+        "cli_session_id",
+        "parent_run_id",
+        "client_id",
+        "child_job_id",
+        "admitted_at",
+        "closed_at",
+        "close_kind"
+      ]
+    },
+    {
+      "label": "parent-run",
+      "alias": "p",
+      "table": "runs",
+      "columns": [
+        "run_id",
+        "vault_id",
+        "store_uuid",
+        "mode",
+        "lane",
+        "started_at",
+        "ended_at",
+        "outcome",
+        "usage_state",
+        "input_tokens",
+        "output_tokens",
+        "cache_read",
+        "cache_write",
+        "reserved_total_tokens",
+        "reserved_output_tokens",
+        "lease_expires_at",
+        "proposals_submitted",
+        "applied",
+        "rejected",
+        "model_id",
+        "stop_reason",
+        "service_tier",
+        "total_cost_micros",
+        "num_turns",
+        "duration_ms",
+        "duration_api_ms",
+        "cache_write_5m",
+        "cache_write_1h",
+        "server_tool_use",
+        "actor",
+        "parent_run_id",
+        "counters_booked",
+        "cli_session_id",
+        "writes_booked",
+        "cause",
+        "configuration_capture",
+        "configuration_failure_code",
+        "configuration_disposed_at",
+        "configuration_publication_failure"
+      ]
+    },
+    {
+      "label": "old-session",
+      "alias": "ses",
+      "table": "app_sessions",
+      "columns": [
+        "session_id",
+        "vault_id",
+        "store_uuid",
+        "opened_at",
+        "last_heartbeat_at",
+        "clean_closed_at",
+        "close_precision"
+      ]
+    }
+  ],
+  "codec": "r1-sqlite-cell-v1: [null,null] | [integer,decimal-string] | [real,16-lowercase-hex-big-endian-IEEE754-bits] | [text,UTF8-hex] | [blob,byte-hex]",
+  "masks": {
+    "session": [
+      [
+        9,
+        4
+      ],
+      [
+        9,
+        5
+      ],
+      [
+        9,
+        6
+      ]
+    ],
+    "child": [
+      [
+        0,
+        6
+      ],
+      [
+        0,
+        7
+      ],
+      [
+        0,
+        8
+      ],
+      [
+        1,
+        7
+      ],
+      [
+        1,
+        8
+      ],
+      [
+        2,
+        8
+      ],
+      [
+        6,
+        2
+      ],
+      [
+        6,
+        15
+      ],
+      [
+        6,
+        16
+      ]
+    ],
+    "parent": [
+      [
+        8,
+        6
+      ],
+      [
+        8,
+        7
+      ],
+      [
+        8,
+        8
+      ]
+    ]
+  }
+}

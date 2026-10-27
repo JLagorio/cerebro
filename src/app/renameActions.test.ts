@@ -58,6 +58,17 @@ afterEach(() => {
 });
 
 describe('renameKeepingLinks', () => {
+  it('does not scan or move after a failed save report', async () => {
+    registerFlush(async () => {
+      throw new Error('disk full');
+    });
+    vi.mocked(ipc.scanVault).mockClear();
+    expect(await rename()).toBeNull();
+    expect(ipc.scanVault).not.toHaveBeenCalled();
+    expect(ipc.applyBatch).not.toHaveBeenCalled();
+    expect(fs().has(FROM)).toBe(true);
+  });
+
   it('refuses a failed initial scan even when the cached snapshot has no citers', async () => {
     useVaultStore.setState({
       entries: useVaultStore.getState().entries.filter((entry) => entry.path !== CITER),

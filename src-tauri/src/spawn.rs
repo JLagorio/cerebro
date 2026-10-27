@@ -6,8 +6,9 @@
 //!
 //! - [`command`] builds a call that is waited on: `which`, the
 //!   login-shell probe, the CLI's `--version`, the system browser, and git's
-//!   local reads. It scrubs the repo-selecting variables and nulls stdin, and
-//!   it leaves the child in our process group (its doc says why). Quick Look
+//!   local reads. It scrubs the repo-selecting variables and nulls stdin
+//!   unless its caller pipes it to write it (its doc names who), and it
+//!   leaves the child in our process group (its doc says why). Quick Look
 //!   is its one long-lived child: shell::open keeps one, ends the previous
 //!   preview on replacement or quit, and a waiter reaps it when it closes.
 //! - [`supervise`] starts a run that may have to be ended: the Claude Code
@@ -70,9 +71,15 @@ const POLL: Duration = Duration::from_millis(25);
 /// A command built the way every child Cerebro starts is built: the
 /// repo-selecting variables removed, stdin null.
 ///
-/// A null stdin because nothing Cerebro starts is interactive. A child that
-/// prompts (an rc file that asks a question, an ssh host-key check) must
-/// fail fast rather than hang the app on a read nobody will answer.
+/// A null stdin because no child Cerebro starts reads a person's typing. A
+/// child that prompts (an rc file that asks a question, an ssh host-key
+/// check) must fail fast rather than hang the app on a read nobody will
+/// answer. A caller that writes its child's stdin pipes it after this, and
+/// is the pipe's only writer: git's pathspec and credential input
+/// (`git::command`), `check-ignore`'s paths and the clipboard's bytes, and a
+/// seated Claude Code run's turn input (M92.13, `agent::turn_input`), which
+/// carries the run's prompt and the one context ask, and closes on every
+/// path the run ends by.
 ///
 /// It does NOT move the child into a process group of its own, and that is
 /// deliberate. When the app runs from a terminal, a process in a background
@@ -268,7 +275,8 @@ pub struct Supervised {
 /// reader waits on stdout.
 ///
 /// Build `cmd` with [`command`], so the child loses the repo-selecting
-/// variables and gets a null stdin.
+/// variables and gets a null stdin, unless the caller piped it to write it
+/// ([`Supervised::take_stdin`]).
 pub fn supervise(cmd: &mut Command) -> io::Result<(Supervised, ChildStdout)> {
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(cmd, 0);
@@ -325,7 +333,8 @@ pub fn supervise(cmd: &mut Command) -> io::Result<(Supervised, ChildStdout)> {
 
 impl Supervised {
     /// The child's stdin, once, when `cmd` piped it before [`supervise`]
-    /// (M58.3: git reads a pathspec list there). Dropping it closes the pipe.
+    /// (M58.3: git reads a pathspec list there; M92.13: a seated run reads
+    /// its turn input there). Dropping it closes the pipe.
     pub fn take_stdin(&self) -> Option<std::process::ChildStdin> {
         lock(&self.child).stdin.take()
     }
@@ -374,7 +383,91 @@ pub struct Handle {
     pgid: i32,
 }
 
+#[cfg(all(target_os="macos",any(test,feature="native-action-smoke")))]
+#[derive(Debug,Clone,Copy,serde::Serialize)]
+pub(crate) struct NativeActionChildIdentity{pub(crate) pid:u32,pub(crate) parent_pid:u32,pub(crate) group_pid:u32,pub(crate) uid:u32,pub(crate) start_seconds:u64,pub(crate) start_micros:u64}
+
 impl Handle {
+    /// Finite metadata from this retained owning Child only. No arbitrary PID,
+    /// waiter, signal or native/action authority is accepted or returned.
+    #[cfg(all(target_os="macos",any(test,feature="native-action-smoke")))]
+    pub(crate) fn native_action_identity(&self) -> io::Result<NativeActionChildIdentity> {
+        // This mutex retains the actual Child across the observation. Its PID is
+        // never accepted from a caller. Do not consume status via try_wait/wait.
+        let child = self.child.lock().map_err(|_| {
+            io::Error::other("Original child ownership is unavailable.")
+        })?;
+        let pid = child.id();
+        let requested = i32::try_from(pid)
+            .map_err(|_| io::Error::other("Original child identity is unavailable."))?;
+        if requested <= 1 || self.pgid != requested {
+            return Err(io::Error::other("Original child group differs."));
+        }
+        let parent = std::process::id();
+        // SAFETY: geteuid observes only this process's effective user identity.
+        let uid = unsafe { libc::geteuid() };
+        // SAFETY: proc_bsdinfo contains integer fields; zero is valid storage.
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = i32::try_from(std::mem::size_of_val(&info))
+            .map_err(|_| io::Error::other("Original child identity ABI differs."))?;
+        if size != 136 {
+            return Err(io::Error::other("Original child identity ABI differs."));
+        }
+        // SAFETY: Darwin's thread-local errno pointer is valid on this thread.
+        let errno = unsafe { libc::__error() };
+        // SAFETY: the fixed BSD flavor writes at most the declared, correctly
+        // sized buffer. Clear/copy errno immediately around this one read; no
+        // formatting/allocation/other FFI intervenes. Arg 1 includes retained
+        // exited children, whose original identity still needs later cleanup.
+        let (returned, error) = unsafe {
+            *errno = 0;
+            let returned = libc::proc_pidinfo(
+                requested,
+                libc::PROC_PIDTBSDINFO,
+                1,
+                (&mut info as *mut libc::proc_bsdinfo).cast(),
+                size,
+            );
+            (returned, *errno)
+        };
+        if returned != size {
+            return Err(if error > 0 {
+                io::Error::from_raw_os_error(error)
+            } else {
+                io::Error::other("Original child identity read was incomplete.")
+            });
+        }
+        // Decode only a full read, bound to this actual owning parent/user and
+        // the private group established by supervise. Metadata confers no
+        // process, native-origin, grant or action authority.
+        if info.pbi_pid != pid
+            || info.pbi_ppid != parent
+            || info.pbi_pgid != pid
+            || info.pbi_uid != uid
+            || info.pbi_start_tvsec == 0
+            || info.pbi_start_tvusec >= 1_000_000
+        {
+            return Err(io::Error::other("Original child identity differs."));
+        }
+        Ok(NativeActionChildIdentity {
+            pid,
+            parent_pid: info.pbi_ppid,
+            group_pid: info.pbi_pgid,
+            uid: info.pbi_uid,
+            start_seconds: info.pbi_start_tvsec,
+            start_micros: info.pbi_start_tvusec,
+        })
+    }
+    #[cfg(all(feature = "native-read-smoke", target_os = "macos"))]
+    pub(crate) fn native_restart_retain(
+        self,
+        prepared: crate::native_read_smoke::child_claim_profile::restart_profile::Prepared,
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+        closing: Arc<std::sync::atomic::AtomicBool>,
+    ) -> ! {
+        native_restart::retain(self, prepared, cancelled, closing)
+    }
+
     /// The child's pid, which is also its process group's id.
     pub fn id(&self) -> u32 {
         lock(&self.child).id()
@@ -550,6 +643,25 @@ mod tests {
         (supervised, first.trim().to_string(), reader)
     }
 
+    #[cfg(target_os="macos")]
+    #[test]
+    fn native_action_identity_observes_only_the_genuine_retained_child_without_consuming_it(){
+        let(supervised,announced,reader)=started("echo $$; exec sleep 30");
+        let handle=supervised.handle();let actual=handle.id();let first=handle.native_action_identity();let second=handle.native_action_identity();let still_alive=handle.alive();
+        // All assertions follow real owned cleanup even while the API is RED.
+        handle.terminate(Duration::from_millis(100));drop(reader);let(status,_)=supervised.finish(Duration::from_secs(1));
+        assert!(status.is_some());assert!(still_alive,"identity read must not wait/reap/stop the original child");assert_eq!(announced.parse::<u32>().unwrap(),actual);
+        let first=first.expect("owning Handle must provide exact original BSD start identity");let second=second.unwrap();
+        assert_eq!(first.pid,actual);assert_eq!(first.parent_pid,std::process::id());assert_eq!(first.group_pid,actual);assert!(first.start_seconds>0);assert!(first.start_micros<1_000_000);assert_eq!((first.pid,first.start_seconds,first.start_micros),(second.pid,second.start_seconds,second.start_micros));
+    }
+    #[cfg(target_os="macos")]
+    #[test]
+    fn native_action_identity_refuses_changed_group_metadata_without_targeting_or_stopping_it(){
+        let(supervised,_,reader)=started("echo $$; exec sleep 30");let handle=supervised.handle();let mut changed=handle.clone();changed.pgid=changed.pgid.checked_add(1).unwrap();
+        let refused=changed.native_action_identity().is_err();let alive=handle.alive();handle.terminate(Duration::from_millis(100));drop(reader);let(status,_)=supervised.finish(Duration::from_secs(1));
+        assert!(status.is_some());assert!(refused);assert!(alive,"metadata refusal must leave the genuine owner alive");
+    }
+
     #[test]
     fn the_tail_keeps_the_last_64_kib_and_counts_what_it_dropped() {
         let mut tail = StderrTail::default();
@@ -593,6 +705,41 @@ mod tests {
         let mut wide = StderrTail::with_cap(4);
         wide.push("aé€".as_bytes()); // 1 + 2 + 3 bytes: the cut lands inside é
         assert_eq!(wide.last_chars(10), "€");
+    }
+
+    // M92.13: a caller that pipes stdin writes it and closes it; every other
+    // child reads a null one, which ends a read at once.
+    #[cfg(unix)]
+    #[test]
+    fn a_piped_stdin_is_the_callers_to_write_and_to_close() {
+        use std::io::Write;
+        const ECHO: &str = "cat; echo closed";
+        let mut cmd = command("sh");
+        cmd.args(["-c", ECHO]).stdin(Stdio::piped());
+        let (supervised, mut stdout) = supervise(&mut cmd).unwrap();
+        let mut stdin = supervised.take_stdin().expect("piped before supervise");
+        assert!(supervised.take_stdin().is_none(), "taken once");
+        stdin.write_all(b"one line\n").unwrap();
+        drop(stdin);
+        let mut out = String::new();
+        stdout.read_to_string(&mut out).unwrap();
+        assert_eq!(out, "one line\nclosed\n", "the close is the child's EOF");
+        assert!(supervised
+            .finish(Duration::from_secs(1))
+            .0
+            .unwrap()
+            .success());
+
+        let (supervised, mut stdout) = supervise(command("sh").args(["-c", ECHO])).unwrap();
+        assert!(supervised.take_stdin().is_none(), "nobody's to write");
+        let mut out = String::new();
+        stdout.read_to_string(&mut out).unwrap();
+        assert_eq!(out, "closed\n");
+        assert!(supervised
+            .finish(Duration::from_secs(1))
+            .0
+            .unwrap()
+            .success());
     }
 
     #[test]
@@ -710,3 +857,18 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(feature = "native-read-smoke", target_os = "macos"))]
+#[path = "native_restart_retention.rs"]
+mod native_restart;
+#[cfg(all(feature = "native-read-smoke", target_os = "macos"))]
+pub(crate) fn native_restart_toy(root: &std::path::Path) -> ! {
+    native_restart::toy(root)
+}
+
+// M96.2 accepted private capture, used only by the native gh adapter.
+#[cfg(target_os = "macos")]
+#[path = "spawn/private_output.rs"]
+pub(crate) mod private_output;
+
+pub(crate) mod retained_thread;

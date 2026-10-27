@@ -6,6 +6,7 @@ import { placeResolves } from '@/engine/placeResolves';
 import { layoutOf, useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { forgetLastPlace, placeSnapshot, readLastPlace, rememberLastPlace } from './lastPlace';
+import { hasPendingLeaveIntent } from './leaveGuard';
 
 /** One startup choice per vault: a pending external link, saved panes, last
  * place, then Home. A person who already moved keeps their current session.
@@ -33,6 +34,9 @@ export function PaneLayoutHost() {
         checked = true;
         if (hasPendingDeepLink(vault)) return;
         const nav = useNavStore.getState();
+        // An explicit origin link carries its original intent into this new
+        // pane while the scan runs. Saved convenience state cannot replace it.
+        if (hasPendingLeaveIntent(`pane:${nav.active}`)) return;
         if (nav.history.length !== 1 || nav.selection.kind !== 'home' || nav.navSeq !== bootSeq) {
           rememberLastPlace(vault, nav.selection);
           return;

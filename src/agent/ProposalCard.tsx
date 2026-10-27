@@ -1,9 +1,10 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 import { useMemo, useState } from 'react';
 import { FILING_COPY, filingAnswers, filingState } from '@/agent/elements/decisions';
 import { Confirmation } from '@/components/ai/Confirmation';
 import type { OrganizeProposal } from '@/agent/types';
 import { humanize } from '@/detail/FieldEditor';
-import { announceExternalWrites, flushOpenPages } from '@/editor/openPages';
+import { announceExternalWrites } from '@/editor/openPages';
 import { filingPlan, type FilingPlan } from '@/engine/filing';
 import type { Entry } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
@@ -135,7 +136,7 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
   const write = async (): Promise<boolean> => {
     // A save still on its debounce would otherwise land after the H1 below
     // and write the old one back.
-    await flushOpenPages();
+    if (!(await saveBeforeAction())) return false;
     const { patch } = plan;
     // A title-only proposal has no frontmatter to write.
     const patched = Object.keys(patch).length > 0;

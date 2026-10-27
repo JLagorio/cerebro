@@ -64,6 +64,10 @@ mod mail_door;
 #[path = "import/notion_door.rs"]
 mod notion_door;
 
+#[cfg(test)]
+#[path = "../../conformance/retrieval/native.rs"]
+mod retrieval_conformance;
+
 pub const UI_ACTION_EVENT: &str = "cerebro://ui-action";
 const PROTOCOL_VERSION: &str = "2025-06-18";
 /// What every run hears whatever it was granted (M54.7), served as the
@@ -281,7 +285,7 @@ impl RunGrant {
 /// The one prefix check both axes share: `None` admits everything, an empty
 /// list admits nothing, and a folder admits itself and its descendants —
 /// matched at a path separator so `work` cannot be escaped into `workspace/`.
-fn scope_admits(scope: &Option<Vec<String>>, path: &str) -> bool {
+pub(crate) fn scope_admits(scope: &Option<Vec<String>>, path: &str) -> bool {
     let Some(scope) = scope else {
         return true;
     };
@@ -315,6 +319,18 @@ type RunTable = Arc<Mutex<Vec<(String, RunGrant)>>>;
 /// rather than by token, so no second copy of any bearer is kept, and pruned
 /// to the runs still in the table at every mint.
 type Revocations = Arc<Mutex<BTreeMap<String, Instant>>>;
+type PublicationBook = Mutex<BTreeMap<String, Arc<crate::agent::NativePublicationReceipt>>>;
+type PublicationMetadata = Arc<PublicationBook>;
+
+// One actual mint owns both insertion and its optional exact-slot witness.
+struct MintedToken {
+    token: String,
+    witness: Option<NativeSlotWitness>,
+}
+type ResolvedPublication = (
+    RunGrant,
+    Option<Arc<crate::agent::NativePublicationReceipt>>,
+);
 
 #[derive(Clone)]
 struct Running {
@@ -326,6 +342,9 @@ struct Running {
     /// Runs whose process has exited, or never started. Always locked after
     /// `run_actors`, never before, on every path.
     revoked: Revocations,
+    // Exact-token publication metadata only, pruned with the existing mint
+    // table. No bearer copies, action authority or provider data live here.
+    publications: PublicationMetadata,
 }
 
 impl Running {
@@ -333,9 +352,54 @@ impl Running {
     /// the one place that takes both locks to read: the table, then the
     /// revocations.
     fn resolve(&self, presented: &str, now: Instant) -> Option<RunGrant> {
-        let runs = self.run_actors.lock().ok()?;
-        let revoked = self.revoked.lock().ok()?;
-        resolve_grant(presented, &runs, &revoked, now)
+        self.resolve_with_publication(presented, now)
+            .map(|(grant, _metadata)| grant)
+    }
+
+    // Compatibility projection above keeps legacy permissions unchanged. This
+    // internal lookup carries only descriptive, live publication metadata.
+    fn resolve_with_publication(
+        &self,
+        presented: &str,
+        now: Instant,
+    ) -> Option<ResolvedPublication> {
+        let (grant, fingerprint, candidate, native_revoked) = {
+            let runs = self.run_actors.lock().ok()?;
+            let revoked = self.revoked.lock().ok()?;
+            let grant = resolve_grant(presented, &runs, &revoked, now)?;
+            let fingerprint = crate::ledger::sha256_hex(presented.as_bytes());
+            let native_revoked = revoked.contains_key(&grant.run_id);
+            // Metadata failure cannot change the already-validated legacy grant.
+            let candidate = self
+                .publications
+                .lock()
+                .ok()
+                .and_then(|publications| publications.get(&fingerprint).cloned());
+            (grant, fingerprint, candidate, native_revoked)
+        };
+        // Never acquire the source agent's slot lock under MCP table locks.
+        let live = !native_revoked
+            && candidate.as_ref().is_some_and(|receipt| {
+                receipt.matches_slot(
+                    &grant.run_id,
+                    &grant.actor,
+                    grant.vault.as_deref(),
+                    &fingerprint,
+                )
+            });
+        if !live {
+            if let Some(previous) = candidate.as_ref() {
+                if let Ok(mut publications) = self.publications.lock() {
+                    if publications
+                        .get(&fingerprint)
+                        .is_some_and(|current| Arc::ptr_eq(current, previous))
+                    {
+                        publications.remove(&fingerprint);
+                    }
+                }
+            }
+        }
+        Some((grant, candidate.filter(|_| live)))
     }
 }
 
@@ -917,14 +981,14 @@ impl McpState {
             port,
             run_actors: Arc::new(Mutex::new(Vec::new())),
             revoked: Arc::new(Mutex::new(BTreeMap::new())),
+            publications: Arc::new(Mutex::new(BTreeMap::new())),
         };
 
         let handler = running.clone();
         let app = app.clone();
         let dispatch = Arc::new(move |bearer: Option<&str>, body: &str| {
-            routed(bearer_grant(bearer, &handler), body, |grant, body| {
-                handle_rpc(&app, grant, body)
-            })
+            let resolved=bearer.and_then(|presented|handler.resolve_with_publication(presented,Instant::now()));
+            routed_publication(&app,resolved,body)
         });
         let workers = serve_loopback(
             Arc::new(server),
@@ -1059,6 +1123,10 @@ impl McpState {
     /// window just evicted has nothing left to refuse, so the list never holds
     /// more runs than the table does.
     fn mint(&self, grant: RunGrant) -> Result<String, String> {
+        self.mint_record(grant).map(|minted| minted.token)
+    }
+
+    fn mint_record(&self, grant: RunGrant) -> Result<MintedToken, String> {
         let guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
         let running = guard.as_ref().ok_or("the MCP endpoint is not running")?;
         let token = random_token();
@@ -1066,11 +1134,29 @@ impl McpState {
             .run_actors
             .lock()
             .map_err(|_| "run token lock poisoned")?;
+        let run_id = grant.run_id.clone();
         push_run_token(&mut runs, token.clone(), grant);
         if let Ok(mut revoked) = running.revoked.lock() {
             revoked.retain(|run_id, _| runs.iter().any(|(_, grant)| grant.run_id == *run_id));
         }
-        Ok(token)
+        let mut witness = None;
+        if let Ok(mut publications) = running.publications.lock() {
+            let retained: BTreeSet<String> = runs
+                .iter()
+                .map(|(token, _)| crate::ledger::sha256_hex(token.as_bytes()))
+                .collect();
+            publications.retain(|fingerprint, _| retained.contains(fingerprint));
+            {
+                // Capture while this exact Running and inserted token are held.
+                // Metadata poison simply leaves no witness; legacy mint succeeds.
+                witness = Some(NativeSlotWitness {
+                    book: Arc::downgrade(&running.publications),
+                    fingerprint: crate::ledger::sha256_hex(token.as_bytes()),
+                    run_id,
+                });
+            }
+        }
+        Ok(MintedToken { token, witness })
     }
 
     /// Retire a run's bearer `grace` from now (M53.11). `agent::stream` calls
@@ -1108,6 +1194,9 @@ impl McpState {
         let Ok(mut revoked) = running.revoked.lock() else {
             return;
         };
+        if let Ok(mut publications) = running.publications.lock() {
+            publications.retain(|_, receipt| receipt.run_id() != run_id);
+        }
         revoked
             .entry(run_id)
             .and_modify(|at| *at = (*at).min(until))
@@ -1221,6 +1310,9 @@ enum Reply {
     /// 200 and this JSON-RPC body. An error is a 200 too: the CLI reads a 401
     /// as an OAuth server asking it to sign in.
     Json(Value),
+    /// The exact original request keeps its cancellation/id ownership until
+    /// response serialization, synchronous write and disposal have finished.
+    Managed { answer: Value, owner: managed_call::Registration },
 }
 
 /// The grant `bearer` resolves to now, or `None` (M53.11). A worker resolves
@@ -1371,7 +1463,7 @@ fn calls_the_ask_seam(body: &str) -> bool {
     let Ok(call) = serde_json::from_str::<Call>(body) else {
         return false;
     };
-    call.method.as_deref() == Some("tools/call")
+    call.method.as_deref() == Some("notifications/cancelled") || call.method.as_deref() == Some("tools/call")
         && call
             .params
             .and_then(|params| params.name)
@@ -1471,6 +1563,9 @@ where
             let _ = request.respond(tiny_http::Response::empty(202));
         }
         Ok(Reply::Json(answer)) => respond_json(request, 200, &answer),
+        Ok(Reply::Managed { answer, owner }) => {
+            owner.respond_with(answer, |body| respond_json(request, 200, body));
+        }
         // The panic's own line is already in the diagnostic log (the hook
         // M53.24 installs). The caller hears that its call failed, under its
         // own id so it is not left waiting, and this worker serves on.
@@ -1602,17 +1697,64 @@ fn initialize_result() -> Value {
     })
 }
 
+fn parse_rpc(body: &str) -> Result<Value, Value> {
+    serde_json::from_str(body)
+        .map_err(|error| rpc_error(Value::Null, -32700, &format!("parse error: {error}")))
+}
 fn handle_rpc(app: &AppHandle, grant: &RunGrant, body: &str) -> Value {
-    let request: Value = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(e) => return rpc_error(Value::Null, -32700, &format!("parse error: {e}")),
+    let request = match parse_rpc(body) {
+        Ok(request) => request,
+        Err(error) => return error,
     };
     answer_value(app, grant, &request)
+}
+fn handle_rpc_with_publication(
+    app: &AppHandle,
+    grant: &RunGrant,
+    receipt: &Arc<crate::agent::NativePublicationReceipt>,
+    body: &str,
+) -> Reply {
+    let request = match parse_rpc(body) {
+        Ok(request) => request,
+        Err(error) => return Reply::Json(error),
+    };
+    let native = if request.get("method").and_then(Value::as_str) == Some("tools/call")
+        && request.get("params").and_then(|params| params.get("name"))
+            .and_then(Value::as_str).is_some_and(managed_tool_name)
+    {
+        NativeManagedCall::capture(app, grant, receipt, request.get("id").unwrap_or(&Value::Null))
+    } else {
+        None
+    };
+    let Some(native) = native else {
+        return Reply::Json(answer_value_with_managed(app, grant, &request, None));
+    };
+    // Catch the handler while the original registration is still held outside
+    // the unwinding frame. Even an error reply owns it through actual disposal.
+    let answer = catch_unwind(AssertUnwindSafe(|| {
+        answer_value_with_managed(app, grant, &request, Some(&native))
+    })).unwrap_or_else(|_| {
+        rpc_error(request.get("id").cloned().unwrap_or(Value::Null), -32603,
+            "internal error: the call failed inside Cerebro")
+    });
+    Reply::Managed { answer, owner: native.control }
 }
 
 /// Dispatch one parsed request under a server-minted grant. Both transports
 /// take this same path through the tool, scope and knowledge guards.
-pub(crate) fn answer_value(app: &AppHandle, grant: &RunGrant, request: &Value) -> Value {
+pub(crate) fn answer_value(app:&AppHandle,grant:&RunGrant,request:&Value)->Value{answer_value_with_managed(app,grant,request,None)}
+fn answer_value_with_managed(app:&AppHandle,grant:&RunGrant,request:&Value,native:Option<&NativeManagedCall>)->Value{
+    if let Some(vault) = grant.vault.as_deref() {
+        if let Err(error) =
+            crate::workspace_service::boundary::guard_legacy_scope(vault, None, true)
+        {
+            return rpc_error(
+                request.get("id").cloned().unwrap_or(Value::Null),
+                -32000,
+                &error.message,
+            );
+        }
+    }
     if let Some(answer) = answer_protocol(request) {
         return answer;
     }
@@ -1653,7 +1795,7 @@ pub(crate) fn answer_value(app: &AppHandle, grant: &RunGrant, request: &Value) -
             };
             match hook {
                 Some(answer) => Ok(answer),
-                None => call_tool(app, grant, name, &args),
+                None => match native{Some(native)=>call_tool_with_managed(app,grant,name,&args,Some(native)),None=>call_tool(app,grant,name,&args)},
             }
         }
         // `answer_protocol` answered every other method.
@@ -2712,6 +2854,8 @@ fn tools_list(
     book: Option<&crate::agent::interaction::Interactions>,
 ) -> Vec<Value> {
     let mut tools = listed_tools(grant, proposals_enabled);
+    let show_managed=original_attended_grant(grant)&&book.is_some_and(|book|book.lists_prompt_tool(&grant.run_id));
+    tools.retain(|tool|show_managed||!tool.get("name").and_then(Value::as_str).is_some_and(managed_tool_name));
     let client = grant
         .actor
         .starts_with(crate::client_access::CLIENT_ACTOR_PREFIX);
@@ -3072,7 +3216,7 @@ fn note_write_refusal(
 /// loopback hears is one of cerebro's, so it is tested in the spelling the
 /// CLI grants it by: a short name gains the prefix, and a caller that
 /// presented the full form keeps it.
-fn ungranted_tool_refusal(grant: &RunGrant, name: &str) -> Option<String> {
+pub(crate) fn ungranted_tool_refusal(grant: &RunGrant, name: &str) -> Option<String> {
     let tools = grant.tools.as_ref()?;
     let prefix = crate::agent::MCP_PREFIX;
     let heard = match name.get(..prefix.len()) {
@@ -3713,6 +3857,8 @@ fn admit_before_dispatch(
     name: &str,
     args: &Map<String, Value>,
 ) -> Result<Option<OwnRecord>, Value> {
+    crate::workspace_service::boundary::guard_legacy_scope(vault, None, true)
+        .map_err(|e| error_result(e.message))?;
     let own = match grant_admission(vault, grant, name, args) {
         Ok(own) => own,
         Err(Refusal::Coded(refusal)) => {
@@ -3764,12 +3910,8 @@ fn bound_vault(grant: &RunGrant) -> Result<PathBuf, String> {
         .ok_or_else(|| "This bearer is bound to no vault, so it can call no tool.".to_string())
 }
 
-fn call_tool(
-    app: &AppHandle,
-    grant: &RunGrant,
-    name: &str,
-    args: &Map<String, Value>,
-) -> Result<Value, String> {
+fn call_tool(app:&AppHandle,grant:&RunGrant,name:&str,args:&Map<String,Value>)->Result<Value,String>{call_tool_with_managed(app,grant,name,args,None)}
+fn call_tool_with_managed(app:&AppHandle,grant:&RunGrant,name:&str,args:&Map<String,Value>,native:Option<&NativeManagedCall>)->Result<Value,String>{
     // M31.2b — counted at the top so a REFUSED call is still a call the run
     // chose to make: scope- and grant-refusals are dispatches too. Counted
     // here rather than per-arm so a new tool cannot be added uncounted.
@@ -3817,6 +3959,7 @@ fn call_tool(
         books: true,
     };
     let outcome = match name {
+        name if managed_tool_name(name)=>managed_tool_result(match native{Some(native)=>crate::actions::native_owner::managed_action_tool(app,native,name,args),None=>Err(crate::actions::read_types::error(crate::actions::read_types::ActionErrorCode::Unavailable,"This action is unavailable for this call. Review recorded effects before trying again."))}),
         "get_vault_context" => tool_vault_context(&vault, grant),
         "search_notes" => tool_search(&vault, args, grant),
         "list_notes" => tool_list_notes(&vault, args, grant),
@@ -4663,7 +4806,7 @@ fn search_notes_in(
     let wanted = arg_str(args, "type");
     let typed = wanted.as_deref().is_some_and(|t| !t.trim().is_empty());
 
-    let corpus = cache.snapshot(vault)?;
+    let corpus = cache.search_snapshot(vault)?;
     let (readable, withheld) = readable_entries(&corpus, grant);
     let entries = type_filtered(&readable, wanted.as_deref())?;
     // Counted, never dropped: a note the search could not fully read is
@@ -4869,6 +5012,9 @@ fn tool_describe_database(
     zone: chrono_tz::Tz,
     today: chrono::NaiveDate,
 ) -> Result<Value, String> {
+    if matches!(crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?, crate::workspace_service::authority::Authority::Selected) {
+        return crate::workspace_service::selected::describe_database(vault, &|path| grant.may_read(path), &Value::Object(args.clone()), zone, today).map(text_result).map_err(|error| error.message);
+    }
     let corpus = cache.snapshot(vault)?;
     let (readable, withheld) = readable_entries(&corpus, grant);
     vault::query::describe_text(
@@ -4891,6 +5037,22 @@ fn tool_query_records(
     zone: chrono_tz::Tz,
     today: chrono::NaiveDate,
 ) -> Result<Value, String> {
+    scoped_query_records(cache, vault, args, grant, zone, today).map(text_result)
+}
+
+/// Shared read mechanics. Caller must hold current native run/vault authority;
+/// this helper does not mint it or bypass tool admission.
+pub(crate) fn scoped_query_records(
+    cache: &vault::corpus::CorpusCache,
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+    zone: chrono_tz::Tz,
+    today: chrono::NaiveDate,
+) -> Result<String, String> {
+    if matches!(crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?, crate::workspace_service::authority::Authority::Selected) {
+        return crate::workspace_service::selected::query_records(vault, &|path| grant.may_read(path), &Value::Object(args.clone()), zone, today).map_err(|error| error.message);
+    }
     let corpus = cache.snapshot(vault)?;
     let (readable, withheld) = readable_entries(&corpus, grant);
     vault::query::records_text(
@@ -4900,7 +5062,6 @@ fn tool_query_records(
         today,
         withheld,
     )
-    .map(text_result)
 }
 
 // A checked suggestion is data, not a UI command or a pending proposal.
@@ -4913,9 +5074,14 @@ fn tool_suggest_view(
 ) -> Result<Value, String> {
     let vocabulary = vault::views::table()?;
     let args = vault::views::parse_args(&Value::Object(args.clone()), vocabulary)?;
-    let corpus = cache.snapshot(vault)?;
-    let (readable, _) = readable_entries(&corpus, grant);
-    match vault::views::check(&readable, &args, vocabulary) {
+    let checked = if matches!(crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?, crate::workspace_service::authority::Authority::Selected) {
+        crate::workspace_service::selected::suggest_view(vault, &|path| grant.may_read(path), &args, vocabulary).map_err(|error| error.message)
+    } else {
+        let corpus = cache.snapshot(vault)?;
+        let (readable, _) = readable_entries(&corpus, grant);
+        vault::views::check(&readable, &args, vocabulary)
+    };
+    match checked {
         Ok(suggestion) => Ok(text_result(vault::views::answer_json(&suggestion))),
         Err(message) => {
             if message.starts_with("schema_invalid:") {
@@ -4947,6 +5113,9 @@ fn tool_list_agenda(
         Some(Value::String(name)) => wanted_type(Some(name)),
         Some(_) => return Err("type must be a database name".into()),
     };
+    if matches!(crate::workspace_service::authority::resolve(vault).map_err(|error| error.message)?, crate::workspace_service::authority::Authority::Selected) {
+        return crate::workspace_service::selected::agenda_text(vault, &|path| grant.may_read(path), wanted, &window, zone, limit, limit_cut).map(text_result).map_err(|error| error.message);
+    }
     let corpus = cache.snapshot(vault)?;
     let (readable, withheld) = readable_entries(&corpus, grant);
     let type_name = wanted
@@ -6063,6 +6232,9 @@ fn tool_hand_to(
     args: &Map<String, Value>,
     grant: &RunGrant,
 ) -> Result<Value, String> {
+    use tauri::Manager;
+    let agents = app.state::<crate::agent::AgentState>();
+    let preparation = agents.prepare_run(vault)?;
     let handle = arg_str(args, "agent").ok_or("hand_to needs an agent handle")?;
     let message = arg_str(args, "message").ok_or("hand_to needs a message")?;
     let entries = vault::scan::scan_vault(vault)?;
@@ -6098,7 +6270,7 @@ fn tool_hand_to(
     if records_ask_first(&entries, &agent_handle(record)) {
         request.ask_first = Some(true);
     }
-    let run_id = crate::start_handoff_run(app, vault, request, grant)?;
+    let run_id = crate::start_handoff_run(app, vault, request, grant, &preparation)?;
     Ok(text_result(format!(
         "Started {} (run {run_id}) with what you handed it. It works under its own scope and \
          writes to the vault; it cannot reply here. Its outcome lands in the fleet, billed to \
@@ -7806,6 +7978,62 @@ fn tool_ui(app: &AppHandle, action: &str, args: &Map<String, Value>) -> Result<V
 
 #[cfg(test)]
 mod tests {
+
+    // Auxiliary metadata is allowed to be unavailable; the real bearer grant
+    // and its accepted grace remain governed by the original run/revocation book.
+    #[test]
+    fn poisoned_publication_metadata_preserves_real_bearer_and_legacy_grace() {
+        let state = test_state();
+        let token = mint_in(&state, "/vaults/metadata-poison");
+        let now = Instant::now();
+        let expected = resolve_in(&state, &token, now).expect("real minted bearer");
+        let book = {
+            let guard = state.inner.lock().unwrap();
+            guard.as_ref().unwrap().publications.clone()
+        };
+        let poison_book = book.clone();
+        assert!(std::thread::spawn(move || {
+            let _held = poison_book.lock().unwrap();
+            panic!("controlled descriptive metadata poison");
+        })
+        .join()
+        .is_err());
+        assert!(book.is_poisoned());
+        let live = resolve_in(&state, &token, now);
+        let descriptive = {
+            let guard = state.inner.lock().unwrap();
+            guard
+                .as_ref()
+                .unwrap()
+                .resolve_with_publication(&token, now)
+                .map(|(grant, metadata)| (grant, metadata.is_none()))
+        };
+        let deadline = now + Duration::from_secs(2);
+        state.revoke_at(&token, deadline);
+        let in_grace = resolve_in(&state, &token, now + Duration::from_secs(1));
+        let after_grace = resolve_in(&state, &token, deadline);
+        let unknown = resolve_in(&state, "not-a-token", now);
+        assert_eq!(
+            live,
+            Some(expected.clone()),
+            "metadata poison changed valid legacy permission"
+        );
+        assert_eq!(
+            descriptive,
+            Some((expected.clone(), true)),
+            "unavailable metadata must remain absent beside the real grant"
+        );
+        assert_eq!(
+            in_grace,
+            Some(expected),
+            "metadata poison removed accepted legacy grace"
+        );
+        assert!(after_grace.is_none());
+        assert!(
+            unknown.is_none(),
+            "metadata failure must never fabricate a bearer grant"
+        );
+    }
     include!("import/door_tests.rs");
     use super::*;
     use crate::vault::testutil::{temp_vault, write};
@@ -11714,22 +11942,19 @@ mod tests {
 
     #[test]
     fn an_ungranted_notes_patch_outside_scope_stays_a_scope_refusal() {
-        // M54.10's order: the write axis speaks first, and an ungranted call
-        // never scans. The vault is missing, so a scan would have answered
-        // with the scan text instead.
+        // M54.10 still governs grant refusals after M99 admits a legacy root.
         let _sink = ArmedSink::new("mcp-notes-ungranted-sink");
-        let missing = crate::vault::testutil::temp_vault("mcp-notes-ungranted");
-        let _ = std::fs::remove_dir_all(&missing);
+        let vault = memory_vault("mcp-notes-ungranted");
         let args = args_of(json!({ "path": SCOUT_PATH, "patch": { "recent": "n" } }));
         let message =
             format!("This run is scoped to records/risks and cannot write to {SCOUT_PATH}.");
-
         let ungranted = RunGrant {
             tools: Some(vec!["get_note".into()]),
-            ..run_of(&missing, "process:release-scout", Some(&["records/risks"]))
+            ..run_of(&vault, "process:release-scout", Some(&["records/risks"]))
         };
-        let answer = refuse_before_dispatch(&missing, &ungranted, "update_frontmatter", &args);
-        assert_eq!(refused_text(answer), message);
+
+        let answer = admit_before_dispatch(&vault, &ungranted, "update_frontmatter", &args);
+        assert_eq!(refused_text(answer.err()), message);
         assert_eq!(
             rows_for_run(&ungranted.run_id),
             vec![(
@@ -11738,17 +11963,69 @@ mod tests {
                 message
             )]
         );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
 
-        // Granted, the same call scans, and says so when it cannot.
-        let granted = run_of(&missing, "process:release-scout", Some(&["records/risks"]));
-        let answer = refuse_before_dispatch(&missing, &granted, "update_frontmatter", &args);
-        assert!(refused_text(answer)
-            .starts_with("Cerebro could not read the vault to find this run's agent record ("));
+    #[test]
+    fn ungranted_notes_admission_refuses_scope_before_scanning_for_its_record() {
+        // Isolate M54.10's grant ordering from M99's earlier authority gate.
+        // A missing root makes any attempted agent-record scan fail visibly.
+        let missing = crate::vault::testutil::temp_vault("mcp-notes-ungranted-scan");
+        std::fs::remove_dir_all(&missing).unwrap();
+        let args = args_of(json!({ "path": SCOUT_PATH, "patch": { "recent": "n" } }));
+        let ungranted = RunGrant {
+            tools: Some(vec!["get_note".into()]),
+            ..run_of(&missing, "process:release-scout", Some(&["records/risks"]))
+        };
+
         assert_eq!(
-            rows_for_run(&granted.run_id),
-            vec![],
-            "a notes refusal records nothing"
+            grant_admission(&missing, &ungranted, "update_frontmatter", &args),
+            Err(Refusal::Coded(GrantRefusal {
+                code: WRITE_OUTSIDE_SCOPE,
+                target: SCOUT_PATH.to_string(),
+                message: format!(
+                    "This run is scoped to records/risks and cannot write to {SCOUT_PATH}."
+                ),
+            }))
         );
+
+        // Positive control: the same granted call reaches the real scan.
+        let granted = run_of(&missing, "process:release-scout", Some(&["records/risks"]));
+        let answer = grant_admission(&missing, &granted, "update_frontmatter", &args);
+        let Err(Refusal::Plain(message)) = answer else {
+            panic!("expected the agent-record scan refusal, got {answer:?}");
+        };
+        assert!(
+            message
+                .starts_with("Cerebro could not read the vault to find this run's agent record ("),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_missing_workspace_refuses_authority_before_legacy_notes_admission() {
+        let _sink = ArmedSink::new("mcp-notes-missing-authority-sink");
+        let missing = crate::vault::testutil::temp_vault("mcp-notes-missing-authority");
+        std::fs::remove_dir_all(&missing).unwrap();
+        let args = args_of(json!({ "path": SCOUT_PATH, "patch": { "recent": "n" } }));
+
+        for tools in [Some(vec!["get_note".into()]), None] {
+            let grant = RunGrant {
+                tools,
+                ..run_of(&missing, "process:release-scout", Some(&["records/risks"]))
+            };
+            let answer = admit_before_dispatch(&missing, &grant, "update_frontmatter", &args);
+            assert_eq!(
+                refused_text(answer.err()),
+                "Workspace folder is unavailable."
+            );
+            assert_eq!(
+                rows_for_run(&grant.run_id),
+                vec![],
+                "an authority refusal must not fabricate a grant-refusal row"
+            );
+        }
+        assert!(!missing.exists());
     }
 
     #[test]
@@ -13407,6 +13684,7 @@ mod tests {
                 port: 0,
                 run_actors: Arc::new(Mutex::new(Vec::new())),
                 revoked: Arc::new(Mutex::new(BTreeMap::new())),
+                publications: Arc::new(Mutex::new(BTreeMap::new())),
             })),
         }
     }
@@ -21105,4 +21383,590 @@ mod note_picture_tests {
         assert_eq!(count(&answer), 0);
         assert!(text(&answer).contains("1 outside this run's read scope"));
     }
+}
+
+// Find the actual server-owned slot, never reconstruct metadata from a RunGrant
+// supplied by a caller. The fingerprint is private, ephemeral and never logged.
+fn publication_grant(runs: &[(String, RunGrant)], fingerprint: &str) -> Option<RunGrant> {
+    let mut found = None;
+    for (token, grant) in runs {
+        let known = crate::ledger::sha256_hex(token.as_bytes());
+        if tokens_match(fingerprint.as_bytes(), known.as_bytes()) {
+            found = Some(grant.clone());
+        }
+    }
+    found
+}
+impl McpState {
+    /// Record only metadata emitted by the actual successful publication. This
+    /// does not create native action authority or consult any database/provider.
+    pub(crate) fn stage_actual_publication(
+        &self,
+        receipt: &crate::agent::NativePublicationReceipt,
+    ) -> bool {
+        let snapshot = (|| {
+            let guard = self.inner.lock().ok()?;
+            let running = guard.as_ref()?;
+            let runs = running.run_actors.lock().ok()?;
+            let revoked = running.revoked.lock().ok()?;
+            let grant = publication_grant(&runs, receipt.fingerprint())?;
+            if revoked.contains_key(&grant.run_id) {
+                return None;
+            }
+            Some((grant, running.publications.clone()))
+        })();
+        let Some((grant, book)) = snapshot else {
+            return false;
+        };
+        // All MCP locks are released before consulting the actual agent slot.
+        if !receipt.matches_slot(
+            &grant.run_id,
+            &grant.actor,
+            grant.vault.as_deref(),
+            receipt.fingerprint(),
+        ) {
+            return false;
+        }
+        let accepted = (|| {
+            let guard = self.inner.lock().ok()?;
+            let running = guard.as_ref()?;
+            if !Arc::ptr_eq(&book, &running.publications) {
+                return None;
+            }
+            let runs = running.run_actors.lock().ok()?;
+            let revoked = running.revoked.lock().ok()?;
+            let current = publication_grant(&runs, receipt.fingerprint())?;
+            if current != grant || revoked.contains_key(&current.run_id) {
+                return None;
+            }
+            let mut publications = book.lock().ok()?;
+            if let Some(previous) = publications.get(receipt.fingerprint()) {
+                return Some(previous.same_publication(receipt));
+            }
+            publications.insert(receipt.fingerprint().to_owned(), Arc::new(receipt.clone()));
+            Some(true)
+        })();
+        accepted.unwrap_or(false)
+    }
+}
+
+// Exact-mint provenance only; no person/window/storage/action proof.
+pub(crate) struct NativeSlotWitness {
+    book: std::sync::Weak<PublicationBook>,
+    fingerprint: String,
+    run_id: String,
+}
+impl McpState {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the exact-mint contract preserves every existing root bearer axis"
+    )]
+    pub(crate) fn run_token_with_native_slot(
+        &self,
+        actor: Option<&str>,
+        scope: Option<Vec<String>>,
+        read_scope: Option<Vec<String>>,
+        tools: Option<Vec<String>>,
+        run_id: String,
+        vault: &Path,
+        asks: WriteAsks,
+    ) -> Result<(String, Option<NativeSlotWitness>), String> {
+        let minted = self.mint_record(root_grant(
+            actor, scope, read_scope, tools, run_id, vault, asks,
+        ))?;
+        Ok((minted.token, minted.witness))
+    }
+
+    pub(crate) fn current_native_publication(
+        &self,
+        witness: &NativeSlotWitness,
+    ) -> Option<Arc<crate::agent::NativePublicationReceipt>> {
+        self.observe_native_publication(witness)
+            .map(|(_, receipt)| receipt)
+    }
+
+    // One exact-mint core for publication liveness and the internal freeze.
+    // No bearer escapes, and every MCP lock is dropped before source checks.
+    pub(crate) fn current_native_observation(
+        &self,
+        witness: &NativeSlotWitness,
+    ) -> Option<NativePublicationObservation> {
+        self.observe_native_publication(witness)
+            .map(|(grant, receipt)| NativePublicationObservation { receipt, grant })
+    }
+
+    fn observe_native_publication(
+        &self,
+        witness: &NativeSlotWitness,
+    ) -> Option<(RunGrant, Arc<crate::agent::NativePublicationReceipt>)> {
+        let book = witness.book.upgrade()?;
+        let (grant, receipt) = {
+            let guard = self.inner.lock().ok()?;
+            let running = guard.as_ref()?;
+            if !Arc::ptr_eq(&book, &running.publications) {
+                return None;
+            }
+            let runs = running.run_actors.lock().ok()?;
+            let revoked = running.revoked.lock().ok()?;
+            let grant = publication_grant(&runs, &witness.fingerprint)?;
+            if grant.run_id != witness.run_id || revoked.contains_key(&grant.run_id) {
+                return None;
+            }
+            let receipt = book.lock().ok()?.get(&witness.fingerprint).cloned()?;
+            (grant, receipt)
+        };
+        // Source slot validation must never run under any MCP state/table lock.
+        if !receipt.matches_slot(
+            &grant.run_id,
+            &grant.actor,
+            grant.vault.as_deref(),
+            &witness.fingerprint,
+        ) {
+            return None;
+        }
+        {
+            // Recheck listener, exact actual slot, revoke marker and receipt
+            // identity after source validation. Never inherit by run ID.
+            let guard = self.inner.lock().ok()?;
+            let running = guard.as_ref()?;
+            if !Arc::ptr_eq(&book, &running.publications) {
+                return None;
+            }
+            let runs = running.run_actors.lock().ok()?;
+            let revoked = running.revoked.lock().ok()?;
+            let current = publication_grant(&runs, &witness.fingerprint)?;
+            if current != grant || revoked.contains_key(&current.run_id) {
+                return None;
+            }
+            let publications = book.lock().ok()?;
+            if !publications
+                .get(&witness.fingerprint)
+                .is_some_and(|current| Arc::ptr_eq(current, &receipt))
+            {
+                return None;
+            }
+        }
+        Some((grant, receipt))
+    }
+}
+
+// Exact actual-mint observation, never a token, child subject, or durable grant.
+// The freeze consumes this only while its original owner checks stay live.
+pub(crate) struct NativePublicationObservation {
+    receipt: Arc<crate::agent::NativePublicationReceipt>,
+    grant: RunGrant,
+}
+impl NativePublicationObservation {
+    pub(crate) fn receipt(&self) -> &Arc<crate::agent::NativePublicationReceipt> {
+        &self.receipt
+    }
+    pub(crate) fn grant(&self) -> &RunGrant {
+        &self.grant
+    }
+    #[cfg(any(test, feature = "native-read-smoke"))]
+    pub(crate) fn same_as(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.receipt, &other.receipt) && self.grant == other.grant
+    }
+    // Informational, domain-separated binding of the exact observed mint and
+    // the lineage row its retained owner just verified. No bearer or body is
+    // returned or stored. This performs no source lookup and takes no MCP lock.
+    #[cfg(any(test, feature = "native-read-smoke"))]
+    pub(crate) fn binding_digest(&self, native: &crate::runtime::native_runs::NativeRun) -> String {
+        use sha2::{Digest, Sha256};
+        fn tagged(hash: &mut Sha256, tag: &[u8], bytes: &[u8]) {
+            hash.update(tag);
+            hash.update((bytes.len() as u64).to_be_bytes());
+            hash.update(bytes);
+        }
+        fn axis(hash: &mut Sha256, tag: &[u8], values: Option<&[String]>) {
+            hash.update(tag);
+            match values {
+                None => hash.update([0]),
+                Some(values) => {
+                    hash.update([1]);
+                    hash.update((values.len() as u64).to_be_bytes());
+                    for value in values {
+                        tagged(hash, b"item\0", value.as_bytes());
+                    }
+                }
+            }
+        }
+        // Exhaustive destructuring forces review when the actual grant grows.
+        let RunGrant {
+            actor,
+            run_id,
+            scope,
+            read_scope,
+            tools,
+            chain,
+            vault,
+            asks,
+        } = &self.grant;
+        let mut hash = Sha256::new();
+        hash.update(b"CEREBRO-M95-PARENT-OBSERVATION\0v1\0");
+        for (tag, value) in [
+            (b"publication-run\0".as_slice(), self.receipt.run_id()),
+            (b"publication-actor\0".as_slice(), self.receipt.actor_id()),
+            (
+                b"publication-fingerprint\0".as_slice(),
+                self.receipt.fingerprint(),
+            ),
+            (b"authority\0".as_slice(), native.authority_id.as_str()),
+            (b"native-run\0".as_slice(), native.run_id.as_str()),
+            (b"vault-id\0".as_slice(), native.vault_id.as_str()),
+            (b"store\0".as_slice(), native.store_uuid.as_str()),
+            (b"owner\0".as_slice(), native.owner_person.as_str()),
+            (b"app-session\0".as_slice(), native.app_session_id.as_str()),
+            (b"source-kind\0".as_slice(), native.source_kind.as_str()),
+            (b"grant-actor\0".as_slice(), actor.as_str()),
+            (b"grant-run\0".as_slice(), run_id.as_str()),
+            (b"ask-kind\0".as_slice(), asks.kind.as_str()),
+        ] {
+            tagged(&mut hash, tag, value.as_bytes());
+        }
+        tagged(
+            &mut hash,
+            b"authority-revision\0",
+            &native.revision.to_be_bytes(),
+        );
+        tagged(&mut hash, b"ask-first\0", &[u8::from(asks.ask_first)]);
+        for (tag, value) in [
+            (
+                b"publication-cli\0".as_slice(),
+                self.receipt.cli_session_id(),
+            ),
+            (b"native-cli\0".as_slice(), native.cli_session_id.as_deref()),
+        ] {
+            hash.update(tag);
+            match value {
+                Some(value) => {
+                    hash.update([1]);
+                    tagged(&mut hash, b"value\0", value.as_bytes());
+                }
+                None => hash.update([0]),
+            }
+        }
+        hash.update(b"grant-vault\0");
+        match vault {
+            Some(vault) => {
+                hash.update([1]);
+                tagged(&mut hash, b"path\0", vault.as_os_str().as_encoded_bytes());
+            }
+            None => hash.update([0]),
+        }
+        axis(&mut hash, b"write-scope\0", scope.as_deref());
+        axis(&mut hash, b"read-scope\0", read_scope.as_deref());
+        axis(&mut hash, b"tools\0", tools.as_deref());
+        axis(&mut hash, b"chain\0", Some(chain));
+        format!("{:x}", hash.finalize())
+    }
+}
+
+// Test support reserves/selects metadata only around the real mint and real
+// production stage/resolve methods. It maintains no independent fake state.
+#[cfg(test)]
+pub(crate) struct NativeSlotReservation {
+    fingerprint: String,
+    run_id: String,
+}
+#[cfg(test)]
+impl McpState {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the real root mint retains every existing bearer axis"
+    )]
+    fn reserve_root_publication_slot(
+        &self,
+        actor: Option<&str>,
+        scope: Option<Vec<String>>,
+        read_scope: Option<Vec<String>>,
+        tools: Option<Vec<String>>,
+        run_id: String,
+        vault: &Path,
+        asks: WriteAsks,
+    ) -> Result<(String, NativeSlotReservation), String> {
+        let token = self.run_token(actor, scope, read_scope, tools, run_id.clone(), vault, asks)?;
+        let reservation = NativeSlotReservation {
+            fingerprint: crate::ledger::sha256_hex(token.as_bytes()),
+            run_id,
+        };
+        Ok((token, reservation))
+    }
+    fn stage_native_publication(
+        &self,
+        reservation: &NativeSlotReservation,
+        receipt: &crate::agent::NativePublicationReceipt,
+    ) -> bool {
+        reservation.run_id == receipt.run_id()
+            && tokens_match(
+                reservation.fingerprint.as_bytes(),
+                receipt.fingerprint().as_bytes(),
+            )
+            && self.stage_actual_publication(receipt)
+    }
+    fn native_publication_pending(&self, presented: &str) -> bool {
+        let guard = match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => return false,
+        };
+        guard.as_ref().is_some_and(|running| {
+            running
+                .resolve_with_publication(presented, Instant::now())
+                .is_some_and(|(_, metadata)| metadata.is_some())
+        })
+    }
+}
+#[cfg(test)]
+pub(crate) mod native_publication_test_support {
+    use super::*;
+    // Raw input for secret-free projection tests only: clone the ACTUAL private
+    // token slot using the existing matcher, with no metadata/slot lock reversal.
+    pub(crate) fn actual_grant_for_configuration(
+        state: &McpState,
+        token: &str,
+    ) -> Option<RunGrant> {
+        let inner = state.inner.lock().ok()?;
+        let running = inner.as_ref()?;
+        let runs = running.run_actors.lock().ok()?;
+        let revoked = running.revoked.lock().ok()?;
+        resolve_grant(token, &runs, &revoked, Instant::now())
+    }
+
+    // Replace the actual Running instance while retaining copies of its real
+    // minted entries/receipts. Equal descriptive content must not preserve an
+    // old witness's listener identity; no RunGrant or receipt is fabricated.
+    pub(crate) fn replace_listener_preserving_entries(state: &McpState) {
+        let mut inner = state.inner.lock().unwrap();
+        let old = inner.as_ref().unwrap();
+        let runs = old.run_actors.lock().unwrap().clone();
+        let revoked = old.revoked.lock().unwrap().clone();
+        let publications = old.publications.lock().unwrap().clone();
+        *inner = Some(Running {
+            port: 0,
+            run_actors: Arc::new(Mutex::new(runs)),
+            revoked: Arc::new(Mutex::new(revoked)),
+            publications: Arc::new(Mutex::new(publications)),
+        });
+    }
+
+    // Counts the ACTUAL minted table. Test observation only, no grant constructor.
+    pub(crate) fn actual_slot_count(state: &McpState) -> usize {
+        let inner = state.inner.lock().unwrap();
+        let running = inner.as_ref().unwrap();
+        let count = running.run_actors.lock().unwrap().len();
+        count
+    }
+
+    pub(crate) fn without_socket() -> McpState {
+        McpState {
+            inner: Mutex::new(Some(Running {
+                port: 0,
+                run_actors: Arc::new(Mutex::new(Vec::new())),
+                revoked: Arc::new(Mutex::new(BTreeMap::new())),
+                publications: Arc::new(Mutex::new(BTreeMap::new())),
+            })),
+        }
+    }
+    // Fixed test fault: narrow the ACTUAL existing mint, preserving its receipt.
+    // This cannot synthesize a witness, token, publication or child grant.
+    pub(crate) fn narrow_read_axes_for_freeze_probe(
+        state: &McpState,
+        witness: &NativeSlotWitness,
+        scope: bool,
+    ) {
+        let inner = state.inner.lock().unwrap();
+        let running = inner.as_ref().unwrap();
+        let mut runs = running.run_actors.lock().unwrap();
+        let (_, grant) = runs
+            .iter_mut()
+            .find(|(token, _)| {
+                tokens_match(
+                    witness.fingerprint.as_bytes(),
+                    crate::ledger::sha256_hex(token.as_bytes()).as_bytes(),
+                )
+            })
+            .unwrap();
+        if scope {
+            grant.read_scope = Some(vec![]);
+        } else {
+            grant.tools = Some(vec![]);
+        }
+    }
+
+    // Fixed drift of the actual parent grant. Requested knowledge scope and all
+    // local preset read tools remain identical; no witness or grant is minted.
+    pub(crate) fn change_parent_with_same_child_axes_for_freeze_probe(
+        state: &McpState,
+        witness: &NativeSlotWitness,
+        scope: bool,
+    ) {
+        let inner = state.inner.lock().unwrap();
+        let running = inner.as_ref().unwrap();
+        let mut runs = running.run_actors.lock().unwrap();
+        let (_, grant) = runs
+            .iter_mut()
+            .find(|(token, _)| {
+                tokens_match(
+                    witness.fingerprint.as_bytes(),
+                    crate::ledger::sha256_hex(token.as_bytes()).as_bytes(),
+                )
+            })
+            .unwrap();
+        if scope {
+            grant.read_scope = Some(vec!["knowledge".into()]);
+        } else {
+            grant.tools = Some(
+                crate::policy::tools::manifest()
+                    .tools
+                    .iter()
+                    .map(|row| row.name.clone())
+                    .collect(),
+            );
+        }
+    }
+
+    pub(crate) fn reserve_root(
+        state: &McpState,
+        run_id: &str,
+        vault: &Path,
+    ) -> (String, NativeSlotReservation) {
+        state
+            .reserve_root_publication_slot(
+                Some(DEFAULT_ACTOR),
+                None,
+                None,
+                None,
+                run_id.into(),
+                vault,
+                WriteAsks::UNASKED,
+            )
+            .unwrap()
+    }
+    pub(crate) fn stage_publication(
+        state: &McpState,
+        reservation: &NativeSlotReservation,
+        receipt: &crate::agent::NativePublicationReceipt,
+    ) -> bool {
+        state.stage_native_publication(reservation, receipt)
+    }
+    pub(crate) fn pending_binding(state: &McpState, token: &str) -> bool {
+        state.native_publication_pending(token)
+    }
+    pub(crate) fn legacy_resolves(state: &McpState, token: &str) -> bool {
+        let guard = state.inner.lock().unwrap();
+        guard
+            .as_ref()
+            .unwrap()
+            .resolve(token, Instant::now())
+            .is_some()
+    }
+}
+
+// Informational snapshot of the exact actual mint. Private construction means
+// descriptive dispatch metadata is never reconstructed from caller fields.
+pub(crate) struct ConfigurationGrantSnapshot(RunGrant);
+impl ConfigurationGrantSnapshot {
+    pub(crate) fn grant(&self) -> &RunGrant {
+        &self.0
+    }
+}
+impl McpState {
+    pub(crate) fn snapshot_configuration_grant(
+        &self,
+        token: &str,
+    ) -> Option<ConfigurationGrantSnapshot> {
+        let inner = self.inner.lock().ok()?;
+        let running = inner.as_ref()?;
+        let runs = running.run_actors.lock().ok()?;
+        let revoked = running.revoked.lock().ok()?;
+        let grant = resolve_grant(token, &runs, &revoked, Instant::now())?;
+        if revoked.contains_key(&grant.run_id) {
+            return None;
+        }
+        Some(ConfigurationGrantSnapshot(grant))
+    }
+}
+
+#[cfg(all(test, unix))]
+#[path = "mcp_selected_semantic_tests.rs"]
+mod selected_semantic_reads;
+
+#[path="mcp_managed_call.rs"]
+mod managed_call;
+
+/// Test observations of controls bound to an actual successful publication.
+/// This returns no RunGrant, person/window/origin or action-execution capability.
+#[cfg(test)]
+pub(crate) mod managed_call_test_support{
+ use super::*;
+ pub(crate) struct Book(Arc<managed_call::ControlBook>);
+ pub(crate) struct Call(managed_call::Registration);
+ impl Book{
+  pub(crate) fn new()->Self{Self(Arc::new(managed_call::ControlBook::default()))}
+  pub(crate) fn register(&self,mcp:&McpState,slot:&NativeSlotWitness,id:&Value,deadline:Instant)->Option<Call>{let actual=mcp.current_native_observation(slot)?;self.0.register(actual.grant(),actual.receipt(),id,deadline).map(Call)}
+  pub(crate) fn cancel(&self,mcp:&McpState,slot:&NativeSlotWitness,id:&Value)->bool{let Some(actual)=mcp.current_native_observation(slot)else{return false;};self.0.cancel(actual.grant(),actual.receipt(),id)}
+  pub(crate) fn cancel_descriptive_clone(&self,mcp:&McpState,slot:&NativeSlotWitness,id:&Value)->bool{let Some(actual)=mcp.current_native_observation(slot)else{return false;};self.0.cancel(actual.grant(),&Arc::new((**actual.receipt()).clone()),id)}
+  pub(crate) fn poison(&self){self.0.poison();}
+ }
+ impl Call{pub(crate) fn flag(&self)->Arc<std::sync::atomic::AtomicBool>{self.0.flag()}pub(crate) fn stopped_at(&self,now:Instant)->bool{self.0.stopped_at(now)}pub(crate) fn respond_with<T>(self,body:Value,respond:impl FnOnce(&Value)->T)->T{self.0.respond_with(body,respond)}}
+}
+
+#[cfg(test)]
+pub(crate) fn managed_tools_list_names_for_source_probe(mcp:&McpState,slot:&NativeSlotWitness,book:&crate::agent::interaction::Interactions)->Vec<String>{
+ let Some(actual)=mcp.current_native_observation(slot)else{return Vec::new();};tools_list(actual.grant(),false,Some(book)).into_iter().filter_map(|tool|tool.get("name").and_then(Value::as_str).map(str::to_owned)).collect()
+}
+
+// Sole production constructor below receives only the actual original loopback
+// resolver result. This carrier is neither serializable nor a renderer selector.
+pub(crate) struct NativeManagedCall{grant:RunGrant,receipt:Arc<crate::agent::NativePublicationReceipt>,origin:Arc<crate::actions::native_owner::NativeActionReadOrigin>,control:managed_call::Registration}
+impl NativeManagedCall{
+ fn capture(app:&AppHandle,grant:&RunGrant,receipt:&Arc<crate::agent::NativePublicationReceipt>,id:&Value)->Option<Self>{
+  use tauri::Manager;
+  if !original_attended_grant(grant){return None;}
+  let agents=app.try_state::<crate::agent::AgentState>()?;
+  let origin=agents.native_action_read_for_publication(receipt)?;
+  let(_,lifetime)=crate::actions::native_owner::managed_call_limits();
+  let control=managed_controls().register(grant,receipt,id,Instant::now().checked_add(lifetime)?)?;
+  Some(Self{grant:grant.clone(),receipt:receipt.clone(),origin,control})
+ }
+ pub(crate) fn grant(&self)->&RunGrant{&self.grant}
+ pub(crate) fn receipt(&self)->&Arc<crate::agent::NativePublicationReceipt>{&self.receipt}
+ pub(crate) fn origin(&self)->&Arc<crate::actions::native_owner::NativeActionReadOrigin>{&self.origin}
+ pub(crate) fn rpc_key(&self)->&str{self.control.rpc_key()}
+ pub(crate) fn stopped(&self)->bool{self.control.stopped_at(Instant::now())}
+}
+fn managed_controls()->&'static Arc<managed_call::ControlBook>{static BOOK:std::sync::OnceLock<Arc<managed_call::ControlBook>>=std::sync::OnceLock::new();BOOK.get_or_init(||Arc::new(managed_call::ControlBook::default()))}
+fn original_attended_grant(grant:&RunGrant)->bool{matches!(&grant.asks.kind,crate::policy::tool_approval::RunKind::Attended)&&grant.chain.len()==1&&!grant.actor.starts_with(crate::client_access::CLIENT_ACTOR_PREFIX)}
+fn managed_tool_name(name:&str)->bool{crate::policy::tools::manifest().tools.iter().any(|row|row.name==name&&row.toolset.as_deref()==Some("managed"))}
+fn routed_publication(app:&AppHandle,resolved:Option<ResolvedPublication>,body:&str)->Reply{
+ let Some((grant,receipt))=resolved else{return Reply::Json(rpc_error(Value::Null,-32001,"unauthorized"));};
+ let Some(receipt)=receipt else{return routed(Some(grant),body,|grant,body|handle_rpc(app,grant,body));};
+ if is_notification(body){
+  if let Ok(request)=serde_json::from_str::<Value>(body){
+   if request.get("jsonrpc").and_then(Value::as_str)==Some("2.0")&&request.get("method").and_then(Value::as_str)==Some("notifications/cancelled"){
+    if let Some(id)=request.get("params").and_then(|params|params.get("requestId")){
+     if managed_controls().cancel(&grant,&receipt,id){
+      use tauri::Manager;
+      if let(Some(key),Some(agents))=(managed_call::request_key(id),app.try_state::<crate::agent::AgentState>()){agents.interactions().cancel_managed_rpc(&grant.run_id,&key);}
+     }
+    }
+   }
+  }
+  return Reply::Accepted;
+ }
+ handle_rpc_with_publication(app,&grant,&receipt,body)
+}
+fn managed_tool_result(result:Result<Value,crate::actions::read_types::ActionError>)->Result<Value,String>{
+ match result{Ok(value)=>typed_result(value),Err(error)=>{let mut result=text_result(serde_json::to_string(&serde_json::json!({"error":error})).map_err(|_|"Action response is unavailable.".to_owned())?);result["isError"]=Value::Bool(true);Ok(result)}}
+}
+
+#[cfg(test)]
+mod managed_listing_tests{
+ use super::*;
+ fn fixture()->(RunGrant,crate::agent::interaction::Interactions){let mut grant=RunGrant::unrestricted(DEFAULT_ACTOR);grant.vault=Some(std::path::PathBuf::from("/vault"));grant.asks=WriteAsks{kind:crate::policy::tool_approval::RunKind::Attended,ask_first:false};let request:crate::agent::AgentRequest=serde_json::from_value(serde_json::json!({"message":"","system_prompt":"","attended":true})).unwrap();let book=crate::agent::interaction::Interactions::with_asks(vec![]);book.open_seat(crate::agent::interaction::Seat::new(&grant.run_id,"session",std::path::Path::new("/vault"),&request),None);book.hand_prompt_tool(&grant.run_id);(grant,book)}
+ fn names(grant:&RunGrant,book:Option<&crate::agent::interaction::Interactions>)->Vec<String>{tools_list(grant,false,book).into_iter().filter_map(|tool|tool["name"].as_str().map(str::to_owned)).filter(|name|managed_tool_name(name)).collect()}
+ #[test]
+ fn managed_manifest_names_require_original_attended_seat_metadata(){let(grant,book)=fixture();let expected=crate::policy::tools::manifest().tools.iter().filter(|row|row.toolset.as_deref()==Some("managed")).map(|row|row.name.clone()).collect::<Vec<_>>();assert!(!expected.is_empty());assert_eq!(names(&grant,Some(&book)),expected);assert!(names(&grant,None).is_empty());}
+ #[test]
+ fn managed_manifest_names_are_absent_for_client_child_and_unattended_metadata(){let(mut grant,book)=fixture();let original=grant.clone();grant.actor=format!("{}fixture",crate::client_access::CLIENT_ACTOR_PREFIX);assert!(names(&grant,Some(&book)).is_empty());grant=original.clone();grant.chain.push("child".into());assert!(names(&grant,Some(&book)).is_empty());grant=original;grant.asks=WriteAsks::UNASKED;assert!(names(&grant,Some(&book)).is_empty());}
 }

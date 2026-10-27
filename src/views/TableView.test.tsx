@@ -2,6 +2,7 @@ import { navSeed } from '@/test/navSeed';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { __resetOpenPages } from '@/editor/openPages';
 import { TableView } from '@/views/TableView';
 import * as ipc from '@/lib/ipc';
 import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
@@ -32,6 +33,7 @@ function setup() {
   return { items };
 }
 
+beforeEach(__resetOpenPages);
 afterEach(cleanup);
 
 describe('TableView row opening (M9.3)', () => {
@@ -1376,7 +1378,12 @@ describe('TableView header settings (M16.18)', () => {
  */
 describe('TableView name cell and cell hit target (M19.2, M19.3)', () => {
   beforeEach(() => {
-    useVaultStore.setState({ entries: fixtureVault() });
+    useVaultStore.setState({
+      entries: fixtureVault(),
+      vaultPath: '/field-vault',
+      entriesVault: '/field-vault',
+      status: 'ready',
+    });
     useUiStore.setState({ detailPath: null });
   });
 

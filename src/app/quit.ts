@@ -16,7 +16,8 @@
  * for them. See quit.rs.
  */
 import { useEffect, useSyncExternalStore } from 'react';
-import { flushOpenPages } from '@/editor/openPages';
+import { flushOpenPages, unresolvedOpenPages } from '@/editor/openPages';
+import type { FlushReport } from '@/editor/documentOwner';
 import {
   cancelQuit,
   finishQuit,
@@ -75,18 +76,19 @@ export function useQuitting(): boolean {
 }
 
 /**
- * Leave the shell. Resolves once QuitScreen has mounted (`markLeft`), or when
- * `budgetMs` runs out first.
+ * Leave the shell. True confirms QuitScreen mounted (`markLeft`); false
+ * means the budget expired before the cleanup phase was confirmed.
  */
-export function beginLeaving(budgetMs: number): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const done = () => {
+export function beginLeaving(budgetMs: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const done = (completed: boolean) => {
       clearTimeout(timer);
-      if (onLeft === done) onLeft = null;
-      resolve();
+      if (onLeft === left) onLeft = null;
+      resolve(completed);
     };
-    const timer = setTimeout(done, budgetMs);
-    onLeft = done;
+    const left = () => done(true);
+    const timer = setTimeout(() => done(false), budgetMs);
+    onLeft = left;
     setLeaving(true);
   });
 }
@@ -102,9 +104,10 @@ export function markLeft(): void {
 export interface QuitDeps {
   blurFocused: () => void;
   pageWriteFailures: () => number;
-  flushOpenPages: (budgetMs: number) => Promise<void>;
+  flushOpenPages: (budgetMs: number) => Promise<FlushReport>;
+  hasUnresolved: () => boolean;
   settlePageWrites: (budgetMs: number) => Promise<boolean>;
-  beginLeaving: (budgetMs: number) => Promise<void>;
+  beginLeaving: (budgetMs: number) => Promise<boolean>;
   /** Undo `beginLeaving` when a prepare stays open after all. */
   endLeaving: () => void;
   finishQuit: () => Promise<void>;
@@ -123,6 +126,7 @@ export const quitDeps: QuitDeps = {
   blurFocused,
   pageWriteFailures,
   flushOpenPages,
+  hasUnresolved: () => unresolvedOpenPages().length > 0,
   settlePageWrites,
   beginLeaving,
   endLeaving: () => setLeaving(false),
@@ -134,15 +138,20 @@ export const quitDeps: QuitDeps = {
 
 const macrotask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
-/** `step`, or nothing once `budgetMs` has passed: a hung step cannot hold
- * the quit past Rust's deadline. */
-async function within(step: Promise<unknown>, budgetMs: number): Promise<void> {
+/** A timeout is an unresolved step, never a successful void return. */
+async function within<T>(
+  step: Promise<T>,
+  budgetMs: number,
+): Promise<{ completed: true; value: T } | { completed: false }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const budget = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, budgetMs);
+  const budget = new Promise<{ completed: false }>((resolve) => {
+    timer = setTimeout(() => resolve({ completed: false }), budgetMs);
   });
   try {
-    await Promise.race([step, budget]);
+    return await Promise.race([
+      step.then((value) => ({ completed: true as const, value })),
+      budget,
+    ]);
   } finally {
     clearTimeout(timer);
   }
@@ -175,15 +184,32 @@ export async function prepareQuit(
     deps.blurFocused();
     // A blur commit starts its write in its own handler: let it.
     await macrotask();
-    await within(deps.flushOpenPages(flushMs), flushMs);
-    await within(deps.settlePageWrites(settleMs), settleMs);
-    if (deps.pageWriteFailures() > before && !quitAnyway) return await stay();
-    await within(deps.beginLeaving(leaveMs), leaveMs);
-    await within(deps.settlePageWrites(settleMs), settleMs);
-    // Some saves happen only on leave (a held save, an open choice, a
-    // diagram). The page has unmounted by now, so staying can only report a
-    // failure here, not keep its text; endLeaving brings the shell back.
-    if (deps.pageWriteFailures() > before && !quitAnyway) return await stay();
+    const flushed = await within(deps.flushOpenPages(flushMs), flushMs);
+    if (!quitAnyway && (!flushed.completed || flushed.value.unresolvedOwnerIds.length > 0))
+      return await stay();
+    const settled = await within(deps.settlePageWrites(settleMs), settleMs);
+    if (
+      !quitAnyway &&
+      (!settled.completed ||
+        !settled.value ||
+        deps.hasUnresolved() ||
+        deps.pageWriteFailures() > before)
+    )
+      return await stay();
+    const left = await within(deps.beginLeaving(leaveMs), leaveMs);
+    if (!quitAnyway && (!left.completed || !left.value)) return await stay();
+    const afterLeave = await within(deps.settlePageWrites(settleMs), settleMs);
+    // Compatibility check for a legacy cleanup writer. Registered owners
+    // already prepared and acknowledged while mounted; unresolved retained
+    // owners remain recoverable if an unexpected cleanup starts another write.
+    if (
+      !quitAnyway &&
+      (!afterLeave.completed ||
+        !afterLeave.value ||
+        deps.hasUnresolved() ||
+        deps.pageWriteFailures() > before)
+    )
+      return await stay();
   } catch {
     // An unexpected throw is a save that may not have landed.
     if (!quitAnyway) {

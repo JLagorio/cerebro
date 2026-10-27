@@ -192,15 +192,15 @@ function CreateFlowHost({ flow }: { flow: CreateFlow }) {
   }, [flow, end, openPath]);
   switch (flow.id) {
     case 'page':
-      return <NewDocDialog onClose={end} />;
+      return <NewDocDialog context={flow.context} onClose={end} />;
     case 'sheet':
-      return <NewDocDialog sheet onClose={end} />;
+      return <NewDocDialog context={flow.context} sheet onClose={end} />;
     case 'sheet-file':
       return <ImportSheetDialog onClose={end} />;
     case 'whiteboard':
       return <NewBoardDialog onClose={end} />;
     case 'record':
-      return <NewRecordDialog onClose={end} />;
+      return <NewRecordDialog context={flow.context} onClose={end} />;
     case 'database':
       return <NewTypeDialog onClose={end} />;
     case 'database-csv':

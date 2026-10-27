@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useState, type ReactNode, type Ref } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { PANEL_LABELS } from '@/components/PageToolbar';
 import { useDrawerFocus } from '@/components/ui/DrawerScrim';
 import { useArrival } from '@/components/ui/motion';
@@ -13,13 +13,15 @@ import { backlinksFor, outgoingFor, type DocLink } from '@/engine/links';
 import type { Concept } from '@/engine/okf';
 import type { Entry, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
-import { typeStyle } from '@/engine/typeCatalog';
+import { useEntryScroll } from '@/app/useEntryState';
+import { isRecordEntry, typeStyle } from '@/engine/typeCatalog';
 import { ConceptDetails } from '@/knowledge/ConceptDetails';
 import { CommentsPanel } from '@/detail/CommentsPanel';
 import type { PageCommentsController } from '@/detail/usePageComments';
 import { PageHistory } from '@/history/PageHistory';
 import { PageKnowledge } from '@/knowledge/PageKnowledge';
-import type { PagePanel } from '@/stores/uiStore';
+import { MentionResults } from '@/knowledge/MentionResults';
+import { useUiStore, type PagePanel } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import './inspector.css';
 
@@ -80,37 +82,53 @@ function LinkRows({ links }: { links: DocLink[] }) {
 }
 
 /**
- * The page's connections: the pages it links to and the pages that link to
- * it, a section each, and a section only when it has a row. With neither,
- * one header says None, and its tooltip how to make one.
+ * Cheap page summaries stay in the section headers. Exact backlink context
+ * comes from a bounded query when the section is visible; mentions wait for
+ * the person's explicit search.
  */
-function LinkSections({ entry }: { entry: Entry }) {
+function LinkSections({ entry, active = true }: { entry: Entry; active?: boolean }) {
   const entries = useVaultStore((s) => s.entries);
+  const collapsed = useUiStore((s) => s.inspectorCollapsed);
   const outgoing = outgoingFor(entry, entries);
   const backlinks = backlinksFor(entry, entries);
-
+  const backlinkPages = new Set(backlinks.map((link) => link.entry.path)).size;
   return (
     <div data-testid="doc-links">
-      {outgoing.length === 0 && backlinks.length === 0 ? (
+      {outgoing.length > 0 ? (
+        <InspectorSection id="links" label="Links" count={outgoing.length}>
+          <LinkRows links={outgoing} />
+        </InspectorSection>
+      ) : (
         <InspectorSection
           id="links"
           label="Links"
           summary={<span title="Type [[ in the page to link another">None</span>}
         />
-      ) : (
-        <>
-          {outgoing.length > 0 && (
-            <InspectorSection id="links" label="Links" count={outgoing.length}>
-              <LinkRows links={outgoing} />
-            </InspectorSection>
-          )}
-          {backlinks.length > 0 && (
-            <InspectorSection id="backlinks" label="Backlinks" count={backlinks.length}>
-              <LinkRows links={backlinks} />
-            </InspectorSection>
-          )}
-        </>
       )}
+      <InspectorSection
+        id="backlinks"
+        label="Backlinks"
+        summary={
+          <span>
+            {backlinkPages} {backlinkPages === 1 ? 'page' : 'pages'}
+          </span>
+        }
+      >
+        <MentionResults
+          key={`linked:${entry.path}`}
+          targetPath={entry.path}
+          mode="linked"
+          active={active && !collapsed.includes('backlinks')}
+        />
+      </InspectorSection>
+      <InspectorSection id="mentions" label="Mentions">
+        <MentionResults
+          key={`mention:${entry.path}`}
+          targetPath={entry.path}
+          mode="mention"
+          active={active && !collapsed.includes('mentions')}
+        />
+      </InspectorSection>
     </div>
   );
 }
@@ -211,7 +229,9 @@ function DetailsPanel({
   schema,
   concept,
   organize,
+  active,
 }: {
+  active: boolean;
   entry: Entry;
   schema: Schema;
   concept: Concept | null;
@@ -222,7 +242,7 @@ function DetailsPanel({
     return (
       <>
         <ConceptDetails concept={concept} />
-        <LinkSections entry={entry} />
+        <LinkSections entry={entry} active={active} />
         {info}
       </>
     );
@@ -240,14 +260,18 @@ function DetailsPanel({
         <>
           {organize}
           {knowledge}
-          <LinkSections entry={entry} />
+          <LinkSections entry={entry} active={active} />
         </>
       ) : (
         <>
-          <InspectorSection id="properties" label={agent ? 'Agent' : 'Properties'}>
+          <InspectorSection
+            id="properties"
+            label={agent ? 'Agent' : 'Properties'}
+            sourcePath={!agent && !isRecordEntry(entry) ? entry.path : undefined}
+          >
             {agent ? <AgentInfo entry={entry} /> : <DocProperties entry={entry} schema={schema} />}
           </InspectorSection>
-          <LinkSections entry={entry} />
+          <LinkSections entry={entry} active={active} />
           {knowledge}
         </>
       )}
@@ -321,6 +345,11 @@ export function DocSidePanel({
   // A drawer takes focus as it opens — again if it is opened again on its
   // way out, when the same panel simply stays.
   const drawerRef = useDrawerFocus<HTMLElement>(overlay && !closing);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useEntryScroll(
+    bodyRef,
+    panel === 'details' && !closing ? `source.discovery.scroll:${entry.path}` : null,
+  );
   // It arrives once, as it mounts: a docked panel folding into a drawer, or
   // a pane shown again, replays nothing (pageFrame.css).
   const arrival = useArrival(true);
@@ -383,9 +412,15 @@ export function DocSidePanel({
           )}
         </div>
       )}
-      <div key={`body:${panel}`} className="cb-inspector-body">
+      <div ref={bodyRef} key={`body:${panel}`} className="cb-inspector-body">
         {panel === 'details' && (
-          <DetailsPanel entry={entry} schema={schema} concept={concept} organize={organize} />
+          <DetailsPanel
+            entry={entry}
+            schema={schema}
+            concept={concept}
+            organize={organize}
+            active={!closing}
+          />
         )}
         {/* Each pane names itself, so inspector.css fits the panel it holds
             to the slot's gutter here and nowhere else it is drawn. */}

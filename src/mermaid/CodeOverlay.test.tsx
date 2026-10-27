@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect, useRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { flushOpenPages } from '@/editor/openPages';
 import { CodeOverlay } from './CodeOverlay';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -36,6 +37,16 @@ describe('CodeOverlay', () => {
     expect(screen.getByTestId('code-overlay-dirty')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(onChangeCode).toHaveBeenCalledWith('graph TD\n  A --> C');
+  });
+
+  it('Save captures Auto-update OFF text while the panel remains mounted', async () => {
+    const onChangeCode = vi.fn();
+    render(<CodeOverlay code="graph TD" onChangeCode={onChangeCode} onClose={() => {}} />);
+    await userEvent.click(screen.getByText('Auto-update'));
+    fireEvent.change(source(), { target: { value: 'graph TD\n  EXACT[unsent]' } });
+    await flushOpenPages();
+    expect(onChangeCode).toHaveBeenCalledWith('graph TD\n  EXACT[unsent]');
+    expect(screen.getByTestId('code-overlay')).toBeTruthy();
   });
 
   it('flipping Auto-update back ON commits the buffered draft', async () => {

@@ -10,12 +10,17 @@
 
 **Spec:** [Integrated program design](../specs/2026-10-23-m93-m99-program-design.md).
 
-**Status:** Draft for owner review. This document authorizes no code changes,
-provider actions, live CLI runs, migration, installation, staging or publication.
+**Status:** Implementation authorized by the owner on 2026-10-23, on the existing
+branch alongside Claude's M92 work. See the [implementation record](2026-10-23-m93-m99-implementation-record.md)
+for completed checks, open work and concrete decisions. Phase checklists remain
+requirements, not evidence that checks passed. Conditional owner decisions and
+native/live acceptance remain explicit gates; no milestone is complete.
 
 **Final check:** [Source-backed final review](../specs/2026-10-23-m93-m99-research/final-review.md) · [Eight-repository cross-check](../specs/2026-10-23-m93-m99-research/reference-crosscheck.md).
 
 **Review entry points:** [Program spec](../specs/2026-10-23-m93-m99-program-design.md) · [Research index](../specs/2026-10-23-m93-m99-research/README.md) · [Decision register](../specs/2026-10-23-m93-m99-research/decisions.md) · [Finding-to-phase coverage](../specs/2026-10-23-m93-m99-research/traceability.md).
+
+**Current storage decision packet:** [M99 authority, consumer cutover and complete-workspace backup](../specs/2026-10-23-m99-workspace-authority-decision.md). Includes the completed disposable 5,000-record comparison. The owner selected SQLite metadata with visible Markdown bodies; implementation is underway. Production migration and conversion of the current vault remain separate and unperformed.
 
 ## Global Constraints
 
@@ -26,7 +31,7 @@ provider actions, live CLI runs, migration, installation, staging or publication
 - Mail remains drafts-only; broader send/publish/delete classes need separate decisions.
 - `outcome_unknown` never becomes an automatic retry; raw managed provider access cannot bypass ACT.
 - Documentation claims, source checks, browser/native observations and live execution evidence stay distinct.
-- Preserve all unrelated work; use isolated implementation branches/worktrees when execution is later authorized.
+- Preserve all unrelated work. The owner explicitly authorized this implementation on the existing branch alongside Claude's M92 work; coordinate shared file ownership without resetting or moving that work.
 
 ## Review Focus
 
@@ -38,7 +43,7 @@ provider actions, live CLI runs, migration, installation, staging or publication
 
 ## Milestones and paired documents
 
-Numbering identifies ownership, not a requirement to finish all of M93 before starting M94. The dependency column and release slices below determine execution order. All seven milestones are **planned for review**; conditional phases retain their explicit decision gates.
+Numbering identifies ownership, not a requirement to finish all of M93 before starting M94. The dependency column and release slices below determine execution order. All seven milestones are **in implementation**; conditional phases retain their explicit decision gates.
 
 | Milestone                                | Spec / plan                                                                                                                               | Phases       | Scope                                                                                            | Dependencies                                                                                        |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
@@ -58,7 +63,7 @@ Assign one editor at a time to IPC adapters, `agent/mod.rs`, policy artifacts,
 runtime schema, NoteBodyEditor, RecordComposer and RunDetailPanel. Parallelism
 means independent owned files or sequential integration, not concurrent edits to
 these central seams. Shared contract changes are reviewed by consuming workstreams.
-Future commits use the owning phase from M93.1–M99.8, following `type(scope): sentence (M<number>.<phase>)`. The numbered milestones organize this review; implementation remains future work.
+Future commits use the owning phase from M93.1–M99.8, following `type(scope): sentence (M<number>.<phase>)`. The numbered milestones organize implementation and acceptance; phase completion requires the evidence in the implementation record.
 
 ## Existing M91 and M92 handoff
 

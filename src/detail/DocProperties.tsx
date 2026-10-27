@@ -1,3 +1,6 @@
+import { selectedEntryIssue, selectedPropertyKeys } from '@/engine/selectedEntryProjection';
+import { isRecordEntry } from '@/engine/typeCatalog';
+import { useSourcePropertyRow } from '@/editor/sourceReveal';
 import React, { useEffect, useRef, useState } from 'react';
 import { addPropertyToEntry, moveFieldOnType, normalizeFieldName } from '@/app/typeActions';
 import { useOpenPath } from '@/app/useOpenPath';
@@ -153,6 +156,14 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
 
   // M16.10, the same split the record panel makes.
   const [revealed, setRevealed] = useState(false);
+  const sourceRoot = useRef<HTMLDivElement>(null);
+  useSourcePropertyRow(
+    entry.path,
+    entry.hash,
+    sourceRoot,
+    () => setRevealed(true),
+    !isRecordEntry(entry),
+  );
   const folds = foldsWhenUnset(entry, schema, showEmpty);
   const { shown } = splitByVisibility(allDeclared, folds);
   const declared = revealed ? allDeclared : shown;
@@ -174,7 +185,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   // not reuse this exclusion, or the heading fields render NOWHERE — the
   // M45.1 whole-slice review caught InboxPage shipping exactly that hole.
   const headingFolds = splitByVisibility(layout.heading, folds).hidden;
-  const undeclaredScalars = visibleProperties(Object.keys(entry.properties)).filter(
+  const undeclaredScalars = visibleProperties(selectedPropertyKeys(entry)).filter(
     (k) => !declaredNames.has(k) && k !== 'type',
   );
   const undeclaredRelations = visibleProperties(Object.keys(entry.relationships)).filter(
@@ -287,7 +298,13 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   const restRows = containerRows(layout.rest);
 
   return (
-    <div data-testid="doc-properties" aria-label="Document properties" className="pt-1">
+    <div
+      ref={sourceRoot}
+      data-testid="doc-properties"
+      aria-label="Document properties"
+      className="pt-1"
+    >
+      {(selectedEntryIssue(entry) ?? typeDef?.unavailableReason) && <p role="status" className="section-unavailable text-xs text-n-600">{selectedEntryIssue(entry) ?? typeDef?.unavailableReason}</p>}
       <div className="flex flex-col gap-1">
         {/* Not a property — a doc's type is the one thing on this list that
             is not in `fields:` — so it takes an explicit icon rather than a
@@ -404,7 +421,9 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
           </button>
         )}
         {undeclaredScalars.map((name) => (
-          <UndeclaredRow key={name} entry={entry} name={name} />
+          entry.authority?.kind === 'sqlite_metadata'
+            ? <PropertyRow key={name} kind="text" name={name}><FieldEditor entry={entry} def={{ name, kind: 'text' }} schema={schema} chrome="panel" /></PropertyRow>
+            : <UndeclaredRow key={name} entry={entry} name={name} />
         ))}
         {undeclaredRelations.map((name) => (
           <PropertyRow key={name} kind="relation" name={name}>

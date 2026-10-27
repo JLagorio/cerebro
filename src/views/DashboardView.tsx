@@ -1,3 +1,4 @@
+import { selectedViewIssue } from '@/engine/selectedEntryProjection';
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import {
   DndContext,
@@ -47,7 +48,7 @@ import { FilterBuilder } from '@/views/FilterBuilder';
 import { countRules } from '@/views/FilterChips';
 import { TableView } from '@/views/TableView';
 import { TimelineView } from '@/views/TimelineView';
-import { ViewCanvas } from '@/views/ViewCanvas';
+import { SelectedViewUnavailable, ViewCanvas } from '@/views/ViewCanvas';
 import { BrokenNotice } from '@/views/ViewTabEmbed';
 import { hasBlocks, viewKind } from '@/views/viewKinds';
 import { useUiStore } from '@/stores/uiStore';
@@ -1195,6 +1196,8 @@ function ViewBlock({
     schema,
     lists,
   );
+  const unavailable = surface.unavailable ?? selectedViewIssue(surface.entries, schema, surface.presentation, spec.global) ?? selectedViewIssue(surface.entries, schema, surface.presentation, widget.filter);
+  if (unavailable) return <BrokenBlock widget={widget} title={title} defaultTitle={defaultTitle} icon="circle-slash" message={unavailable.message} />;
   const fields = columnUniverse(
     list.definition.source,
     surface.entries,
@@ -1441,7 +1444,13 @@ function AddWidgetMenu({
  * here would churn every memo and context consumer downstream per render. */
 const EMPTY_SPEC: DashboardSpec = { rows: [] };
 
-export function DashboardView({
+export function DashboardView(props: DashboardViewProps) {
+  const issue = selectedViewIssue(props.entries, props.schema, props.presentation);
+  if (issue) return <SelectedViewUnavailable message={issue.message} />;
+  return <AvailableDashboardView {...props} />;
+}
+
+function AvailableDashboardView({
   entries,
   presentation,
   schema,

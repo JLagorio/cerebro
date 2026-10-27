@@ -1,3 +1,4 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 import { imageSource } from '@/engine/imageSource';
 import { RemoteImage } from '@/components/RemoteImage';
 import { FileImage } from '@/components/FileImage';
@@ -7,7 +8,6 @@ import { PageIconGlyph } from '@/components/PageIcon';
 import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
-import { flushOpenPages } from '@/editor/openPages';
 import { isKnowledgePath } from '@/engine/okf';
 import {
   isEmojiIcon,
@@ -116,7 +116,7 @@ async function writeChrome(
   current: () => boolean,
 ) {
   if (!current()) return;
-  await flushOpenPages();
+  if (!(await saveBeforeAction('body'))) return;
   if (!current()) return;
   await useVaultStore.getState().patchFrontmatter(path, { [key]: value });
 }

@@ -170,6 +170,11 @@ pub enum ExcerptAt {
 /// The text that best answers a query, and where it came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Excerpt {
+    /// Original UTF-8 window within the chosen line or flattened field,
+    /// before whitespace/chip/ellipsis normalization.
+    pub raw_range: Range<usize>,
+    /// Exact field chosen by the ranker; never guess among duplicate keys.
+    pub field_index: Option<usize>,
     pub at: ExcerptAt,
     pub text: String,
     /// Byte ranges into `text`, each one a query term's token.
@@ -402,6 +407,40 @@ pub fn searchable_fields(
     out
 }
 
+/// Conservative query-only alias: a precomposed character must canonically
+/// decompose to an ASCII letter followed only by marks. Other scripts and
+/// original source bytes stay unchanged; this is not general transliteration.
+fn latin_alias(text: &str) -> Cow<'_, str> {
+    if text.is_ascii() { return Cow::Borrowed(text); }
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_ascii() { out.push(c); continue; }
+        let mut decomposition = Vec::new();
+        unicode_normalization::char::decompose_canonical(c, |part| decomposition.push(part));
+        if decomposition.len() > 1
+            && decomposition[0].is_ascii_alphabetic()
+            && decomposition[1..].iter().all(|part| unicode_normalization::char::is_combining_mark(*part))
+        { out.push(decomposition[0]); } else { out.push(c); }
+    }
+    if out == text { Cow::Borrowed(text) } else { Cow::Owned(out) }
+}
+fn fold_words(tokens: &mut [String]) -> bool {
+    let mut changed = false;
+    for token in tokens {
+        if let Cow::Owned(alias) = latin_alias(token) { *token = alias; changed = true; }
+    }
+    changed
+}
+fn folded_query(query: &Query) -> Query {
+    let mut folded = query.clone();
+    fold_words(&mut folded.terms);
+    let mut seen = HashSet::new();
+    folded.terms.retain(|term| seen.insert(term.clone()));
+    for phrase in &mut folded.phrases { fold_words(phrase); }
+    if let Some(implicit) = &mut folded.implicit { fold_words(implicit); }
+    folded
+}
+
 fn count(tokens: &[String], term: &str) -> f32 {
     tokens.iter().filter(|t| t.as_str() == term).count() as f32
 }
@@ -539,17 +578,53 @@ pub fn rank_query(query: &Query, docs: &[Doc], limit: usize) -> Ranked {
 /// | content |       | yes  | yes         | but its title H1 | frontmatter, body |
 /// | all     | yes   | yes  | yes         | yes              | frontmatter, body |
 pub fn rank_scoped(query: &Query, docs: &[Doc], limit: usize, scope: Scope) -> Ranked {
-    let terms = &query.terms;
-    if terms.is_empty() || docs.is_empty() {
-        return Ranked::default();
-    }
-
+    if query.terms.is_empty() || docs.is_empty() { return Ranked::default(); }
     let bodies: Vec<Cow<str>> = docs.iter().map(|doc| scoped_body(doc, scope)).collect();
-    let fields: Vec<Fields> = docs
-        .iter()
-        .zip(&bodies)
-        .map(|(doc, body)| Fields::of(doc, body, scope))
-        .collect();
+    let mut fields: Vec<Fields> = docs.iter().zip(&bodies)
+        .map(|(doc, body)| Fields::of(doc, body, scope)).collect();
+    let mut ranked = score_fields(query, docs, &fields);
+    let mut exact = vec![false; docs.len()];
+    for hit in &ranked.hits { exact[hit.index] = true; }
+    // Reuse the existing transient token allocation after exact scoring. Never
+    // rescan the vault or normalize the source that locators/excerpts address.
+    let mut changed = false;
+    for field in &mut fields {
+        changed |= fold_words(&mut field.title);
+        changed |= fold_words(&mut field.kind);
+        changed |= fold_words(&mut field.body);
+        for meta in &mut field.meta { changed |= fold_words(meta); }
+    }
+    let folded = folded_query(query);
+    if changed || folded.terms != query.terms {
+        let aliases = score_fields(&folded, docs, &fields);
+        if ranked.hits.is_empty() { ranked.widened = aliases.widened; }
+        for mut hit in aliases.hits {
+            if exact[hit.index] { continue; }
+            ranked.widened |= aliases.widened;
+            hit.matched = query.terms.iter()
+                .filter(|term| hit.matched.iter().any(|matched| matched == latin_alias(term).as_ref()))
+                .cloned().collect();
+            ranked.hits.push(hit);
+        }
+    }
+    ranked.total = ranked.hits.len();
+    ranked.hits.truncate(limit);
+    if scope != Scope::Name {
+        for hit in &mut ranked.hits {
+            hit.excerpt = if exact[hit.index] {
+                excerpt(docs[hit.index].meta, &bodies[hit.index], &query.terms)
+            } else {
+                excerpt_matching(docs[hit.index].meta, &bodies[hit.index], &folded.terms, true)
+            };
+        }
+    }
+    ranked
+}
+
+/// The existing BM25/phrase scorer, over one already tokenized interpretation.
+/// Its exact pass remains the first tier without score or order changes.
+fn score_fields(query: &Query, docs: &[Doc], fields: &[Fields]) -> Ranked {
+    let terms = &query.terms;
     let n = docs.len() as f32;
     let lengths: Vec<f32> = fields.iter().map(Fields::len).collect();
     let avgdl = (lengths.iter().sum::<f32>() / n).max(1.0);
@@ -643,30 +718,18 @@ pub fn rank_scoped(query: &Query, docs: &[Doc], limit: usize, scope: Scope) -> R
     };
 
     let strict = scored(true);
-    let (mut hits, widened) = if strict.is_empty() {
+    let (hits, widened) = if strict.is_empty() {
         (scored(false), true)
     } else {
         (strict, false)
     };
-    let total = hits.len();
-    hits.truncate(limit);
-    // Only the hits shown are excerpted, and a title-only search has no
-    // candidate: the caller shows the note's snippet instead.
-    if scope != Scope::Name {
-        for hit in &mut hits {
-            hit.excerpt = excerpt(docs[hit.index].meta, &bodies[hit.index], terms);
-        }
-    }
-    Ranked {
-        hits,
-        widened,
-        total,
-    }
+    Ranked { total: hits.len(), hits, widened }
 }
 
 /// How many distinct `terms` `text` holds.
-fn distinct_held(text: &str, terms: &[String]) -> usize {
-    let tokens = words(text);
+fn distinct_held(text: &str, terms: &[String], aliases: bool) -> usize {
+    let mut tokens = words(text);
+    if aliases { fold_words(&mut tokens); }
     terms
         .iter()
         .filter(|term| tokens.iter().any(|t| t == *term))
@@ -682,23 +745,37 @@ fn distinct_held(text: &str, terms: &[String]) -> usize {
 /// ahead of its later lines. No candidate holding a term gives `None`. Then
 /// the window, `excerpt_window`.
 pub fn excerpt(meta: &[MetaField], body: &str, terms: &[String]) -> Option<Excerpt> {
-    let mut best: Option<(usize, ExcerptAt, &str)> = None;
-    let fields = meta
-        .iter()
-        .map(|m| (ExcerptAt::Field(m.key.clone()), m.text.as_str()));
+    excerpt_matching(meta, body, terms, false)
+}
+
+fn excerpt_matching(meta: &[MetaField], body: &str, terms: &[String], aliases: bool) -> Option<Excerpt> {
+    let mut best: Option<(usize, ExcerptAt, &str, Option<usize>)> = None;
+    let fields = meta.iter().enumerate().map(|(index, m)| {
+        (
+            ExcerptAt::Field(m.key.clone()),
+            m.text.as_str(),
+            Some(index),
+        )
+    });
     let lines = body
         .lines()
         .enumerate()
-        .map(|(i, line)| (ExcerptAt::Line(i + 1), line));
-    for (at, text) in fields.chain(lines) {
-        let held = distinct_held(text, terms);
-        if held > 0 && best.as_ref().is_none_or(|(most, _, _)| held > *most) {
-            best = Some((held, at, text));
+        .map(|(i, line)| (ExcerptAt::Line(i + 1), line, None));
+    for (at, text, field_index) in fields.chain(lines) {
+        let held = distinct_held(text, terms, aliases);
+        if held > 0 && best.as_ref().is_none_or(|(most, _, _, _)| held > *most) {
+            best = Some((held, at, text, field_index));
         }
     }
-    let (_, at, text) = best?;
-    let (text, ranges) = excerpt_window(text, terms);
-    Some(Excerpt { at, text, ranges })
+    let (_, at, text, field_index) = best?;
+    let (text, ranges, raw_range) = excerpt_window_matching(text, terms, aliases);
+    Some(Excerpt {
+        at,
+        text,
+        ranges,
+        raw_range,
+        field_index,
+    })
 }
 
 /// Invisible characters an excerpt drops (M59.2): soft hyphen, combining
@@ -729,8 +806,21 @@ fn invisible(c: char) -> bool {
 /// whitespace runs collapse to one space, the ends are trimmed, and each cut
 /// end gains an ellipsis. Ranges fall on token boundaries.
 pub fn excerpt_window(text: &str, terms: &[String]) -> (String, Vec<Range<usize>>) {
+    let (text, ranges, _) = excerpt_window_raw(text, terms);
+    (text, ranges)
+}
+
+fn excerpt_window_raw(text: &str, terms: &[String]) -> (String, Vec<Range<usize>>, Range<usize>) {
+    excerpt_window_matching(text, terms, false)
+}
+
+fn excerpt_window_matching(text: &str, terms: &[String], aliases: bool) -> (String, Vec<Range<usize>>, Range<usize>) {
     let matches: Vec<Token> = token_spans(text)
         .into_iter()
+        .map(|mut token| {
+            if aliases { token.text = latin_alias(&token.text).into_owned(); }
+            token
+        })
         .filter(|t| terms.iter().any(|term| term == cut_term(&t.text)))
         .collect();
     let chars: Vec<(usize, char)> = text.char_indices().collect();
@@ -814,7 +904,7 @@ pub fn excerpt_window(text: &str, terms: &[String]) -> (String, Vec<Range<usize>
     if to < n {
         shown.push('\u{2026}');
     }
-    (shown, ranges)
+    (shown, ranges, lo..hi)
 }
 
 // --- The corpus, shared by both searches (M59.4) ---------------------------
@@ -825,6 +915,7 @@ pub fn excerpt_window(text: &str, terms: &[String]) -> (String, Vec<Range<usize>
 pub struct Kept<'a> {
     pub entries: Vec<&'a Entry>,
     bodies: Vec<&'a str>,
+    sources: Vec<Option<&'a crate::source_location::SourceSnapshot>>,
     metas: Vec<Vec<MetaField>>,
     /// How many kept notes were longer than `SEARCH_BODY_CAP` and were
     /// searched in their first `SEARCH_BODY_CAP` bytes.
@@ -857,6 +948,7 @@ pub fn docs_of(corpus: &Corpus, keep: impl Fn(&Entry) -> bool) -> Kept<'_> {
     let mut kept = Kept {
         entries: Vec::new(),
         bodies: Vec::new(),
+        sources: Vec::new(),
         metas: Vec::new(),
         capped: 0,
     };
@@ -864,14 +956,15 @@ pub fn docs_of(corpus: &Corpus, keep: impl Fn(&Entry) -> bool) -> Kept<'_> {
         if !keep(entry) {
             continue;
         }
-        kept.metas.push(searchable_fields(
+        kept.metas.push(text.search_fields.clone().unwrap_or_else(|| searchable_fields(
             &entry.title,
             entry.entry_type.as_deref(),
             &entry.properties,
             &entry.relationships,
-        ));
+        )));
         kept.entries.push(entry);
         kept.bodies.push(&text.body);
+        kept.sources.push(text.source.as_ref());
         if text.capped {
             kept.capped += 1;
         }
@@ -897,6 +990,8 @@ pub struct VaultHit {
     #[serde(rename = "type")]
     pub entry_type: Option<String>,
     pub parts: Vec<ExcerptPart>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<crate::source_location::SourceLocator>,
 }
 
 /// ⌘K's page-text answer: the best hits, how many matched in all, whether
@@ -1071,6 +1166,43 @@ pub fn excerpt_parts(doc: &Doc, hit: &Hit, terms: &[String], snippet: &str) -> V
     parts
 }
 
+/// Translate the retained raw window to a body range without searching the
+/// normalized display text. Line numbering also survives the content scope's
+/// removal of the projected title line's text.
+fn source_location(
+    vault_id: &str,
+    kept: &Kept<'_>,
+    hit: &Hit,
+) -> Option<crate::source_location::SourceLocator> {
+    let snapshot = kept.sources[hit.index]?;
+    let excerpt = hit.excerpt.as_ref()?;
+    let entry = kept.entries[hit.index];
+    let (text, range, key) = match &excerpt.at {
+        ExcerptAt::Line(number) => {
+            let body = kept.bodies[hit.index];
+            let line = body.lines().nth(number.checked_sub(1)?)?;
+            let start = line.as_ptr() as usize - body.as_ptr() as usize;
+            (
+                body,
+                start + excerpt.raw_range.start..start + excerpt.raw_range.end,
+                None,
+            )
+        }
+        ExcerptAt::Field(key) => {
+            // A selected property is canonical metadata, never body YAML. Its
+            // revision-bearing locator is a separate, still unsupported carrier.
+            if entry.authority.is_some() { return None; }
+            let field = kept.metas[hit.index].get(excerpt.field_index?)?;
+            (
+                field.text.as_str(),
+                excerpt.raw_range.clone(),
+                Some(key.as_str()),
+            )
+        }
+    };
+    crate::source_location::locate_window(vault_id, &entry.path, snapshot, text, range, key)
+}
+
 /// ⌘K's page-text search (M59.4): every note in the vault's corpus, ranked
 /// by `rank_query` exactly as search_notes ranks, `limit` clamped to
 /// 1..=`VAULT_SEARCH_MAX`. It does no ledger, knowledge or label work: it
@@ -1088,11 +1220,23 @@ pub fn vault_search_in(
     limit: usize,
 ) -> Result<VaultSearch, String> {
     let limit = limit.clamp(1, VAULT_SEARCH_MAX);
-    let corpus = cache.snapshot(vault)?;
+    let vault_id = crate::runtime::scope::derive_vault_id(vault);
+    let corpus = cache.search_snapshot(vault)?;
     let kept = docs_of(&corpus, |_| true);
     let docs = kept.docs();
     let parsed = parse_query(query);
     let ranked = rank_query(&parsed, &docs, limit);
+    Ok(vault_search_result(&vault_id, &kept, &parsed, &ranked))
+}
+
+/// Build from the ranked, retained snapshot; no disk reads belong here.
+fn vault_search_result(
+    vault_id: &str,
+    kept: &Kept<'_>,
+    parsed: &Query,
+    ranked: &Ranked,
+) -> VaultSearch {
+    let docs = kept.docs();
     let hits = ranked
         .hits
         .iter()
@@ -1103,15 +1247,16 @@ pub fn vault_search_in(
                 title: entry.title.clone(),
                 entry_type: entry.entry_type.clone(),
                 parts: excerpt_parts(&docs[hit.index], hit, &parsed.terms, &entry.snippet),
+                location: source_location(vault_id, kept, hit),
             }
         })
         .collect();
-    Ok(VaultSearch {
+    VaultSearch {
         hits,
         total: ranked.total,
         widened: ranked.widened,
         capped: kept.capped,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -1776,6 +1921,115 @@ mod tests {
     }
 
     #[test]
+    fn search_location_hashes_the_same_read_as_its_range() {
+        let vault = crate::vault::testutil::temp_vault("source-search-race");
+        let raw = "---\r\nowner: Ada\r\n---\r\n# T\r\nSee [[atlas|the target]] 😀\r\n";
+        crate::vault::testutil::write(&vault, "note.md", raw);
+        let cache = CorpusCache::new(1);
+        let vault_id = crate::runtime::scope::derive_vault_id(&vault);
+        let snapshot = cache.snapshot(&vault).unwrap();
+        let kept = docs_of(&snapshot, |_| true);
+        let query = parse_query("target");
+        let docs = kept.docs();
+        let ranked = rank_query(&query, &docs, 20);
+        // A real outside edit happens after ranking, before DTO construction.
+        crate::vault::testutil::write(&vault, "note.md", "# New\nNo original passage remains.");
+        let result = vault_search_result(&vault_id, &kept, &query, &ranked);
+        let wire = serde_json::to_value(&result).unwrap();
+        let location = &wire["hits"][0]["location"];
+        assert_eq!(
+            location["sourceHash"],
+            crate::ledger::sha256_hex(raw.as_bytes())
+        );
+        assert_eq!(location["quote"], "See [[atlas|the target]] 😀");
+        assert_eq!(location["bodyUtf8Range"], json!({"start":5,"end":34}));
+        let locator: crate::source_location::SourceLocator =
+            serde_json::from_value(location.clone()).unwrap();
+        let scope = crate::source_location::SourceScope {
+            vault: &vault,
+            vault_id: &locator.vault_id,
+            admits: &|_| true,
+        };
+        assert!(matches!(
+            crate::source_location::resolve_source(&scope, &locator).unwrap(),
+            crate::source_location::ResolveSourceResult::Changed { .. }
+        ));
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn capped_body_locator_stays_in_searched_bytes() {
+        let vault = crate::vault::testutil::temp_vault("source-capped");
+        let raw = format!(
+            "{} target 😀{}",
+            "x ".repeat(corpus::SEARCH_BODY_CAP / 2 - 8),
+            "tail ".repeat(50)
+        );
+        crate::vault::testutil::write(&vault, "note.md", &raw);
+        let found = vault_search_in(&CorpusCache::new(1), &vault, "target", 20).unwrap();
+        assert_eq!(found.capped, 1);
+        let locator = found.hits[0].location.as_ref().unwrap();
+        let range = locator.body_utf8_range.as_ref().unwrap();
+        assert!(range.end as usize <= corpus::SEARCH_BODY_CAP);
+        assert_eq!(
+            raw.get(range.start as usize..range.end as usize),
+            Some(locator.quote.as_str())
+        );
+        assert_eq!(
+            locator.source_hash,
+            crate::ledger::sha256_hex(raw.as_bytes())
+        );
+        assert!(locator.quote.contains("target"));
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn non_markdown_hit_has_no_body_locator() {
+        let vault = crate::vault::testutil::temp_vault("source-carrier");
+        crate::vault::testutil::write(&vault, "diagram.mmd", "graph TD\nA[target] --> B[other]\n");
+        crate::vault::testutil::write(
+            &vault,
+            "board.canvas",
+            r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":100,"height":100,"text":"target"}],"edges":[]}"#,
+        );
+        let found = vault_search_in(&CorpusCache::new(1), &vault, "target", 20).unwrap();
+        assert_eq!(found.hits.len(), 2);
+        assert!(found.hits.iter().all(|hit| hit.location.is_none()));
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn search_location_property_uses_flattened_row_and_title_only_stays_legacy() {
+        let vault = crate::vault::testutil::temp_vault("source-property");
+        crate::vault::testutil::write(
+            &vault,
+            "note.md",
+            "---\nowner: [Ada, Bo]\n---\nUnrelated body.",
+        );
+        crate::vault::testutil::write(&vault, "UniqueTitle.md", "Unrelated body.");
+        let cache = CorpusCache::new(1);
+        let found = vault_search_in(&cache, &vault, "Ada", 20).unwrap();
+        let locator = found.hits[0].location.as_ref().unwrap();
+        assert_eq!(locator.kind, "property");
+        assert_eq!(locator.property_key.as_deref(), Some("owner"));
+        assert_eq!(locator.quote, "Ada, Bo");
+        assert!(locator.body_utf8_range.is_none());
+        let scope = crate::source_location::SourceScope {
+            vault: &vault,
+            vault_id: &locator.vault_id,
+            admits: &|_| true,
+        };
+        assert!(matches!(
+            crate::source_location::resolve_source(&scope, locator).unwrap(),
+            crate::source_location::ResolveSourceResult::Exact { .. }
+        ));
+        let title = vault_search_in(&cache, &vault, "UniqueTitle", 20).unwrap();
+        assert_eq!(title.hits[0].path, "UniqueTitle.md");
+        assert!(title.hits[0].location.is_none());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
     fn vault_search_counts_every_match_and_returns_the_limit() {
         let vault = search_vault_fixture("vault-search-total");
         let cache = CorpusCache::new(1);
@@ -1977,3 +2231,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "search_normalization_tests.rs"]
+mod normalization_tests;

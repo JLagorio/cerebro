@@ -40,7 +40,7 @@ fn refusal(code: &str) -> Refusal {
         message: match code {
             "denied" => "This looks like a program or script, so Cerebro won't open it.",
             "inside_vault" => {
-                "Save the copy outside this vault and choose a different file from the original."
+                "Choose a different file outside your vaults and Cerebro application data."
             }
             "changed" => "This file changed. Reopen it and try again.",
             "macos_only" => "This action is available on macOS only.",
@@ -226,6 +226,163 @@ fn save_with(
     })
 }
 
+/// Save one explicitly selected recovery copy outside protected application roots.
+pub(crate) fn save_recovery_copy(
+    app: &tauri::AppHandle,
+    config: &std::path::Path,
+    vault: &std::path::Path,
+    name: &str,
+    bytes: &[u8],
+) -> Result<Option<String>, Refusal> {
+    #[cfg(target_os = "macos")]
+    {
+        save_recovery_with(&NativeActions(app), config, vault, name, bytes)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, config, vault, name, bytes);
+        Err(refusal("macos_only"))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn save_recovery_with(
+    actions: &impl Actions,
+    config: &Path,
+    vault: &Path,
+    name: &str,
+    content: &[u8],
+) -> Result<Option<String>, Refusal> {
+    if content.len() as u64 > crate::vault::recovery::limits().entry_bytes as u64 {
+        return Err(refusal("desktop_failed"));
+    }
+    let protected = [
+        std::fs::canonicalize(vault).map_err(|_| refusal("changed"))?,
+        std::fs::canonicalize(config).map_err(|_| refusal("changed"))?,
+        std::fs::canonicalize(bytes::root_dir(config, "0")?)
+            .map_err(|_| bytes::refusal("no_such_root"))?,
+    ];
+    let Some(destination) = actions.choose_copy(name)? else {
+        return Ok(None);
+    };
+    copy_payload_to(config, &protected, &destination, None, |output| {
+        std::io::Write::write_all(output, content).map_err(|_| refusal("desktop_failed"))
+    })?;
+    Ok(Some(destination.to_string_lossy().into_owned()))
+}
+
+/// A native save choice is an in-memory capability, never a wire pathname.
+/// Pin the selected directory identity before returning to the webview.
+pub(crate) struct DraftCopyDestination {
+    path: std::path::PathBuf,
+    #[cfg(target_os = "macos")]
+    parent: File,
+    #[cfg(target_os = "macos")]
+    parent_path: PathBuf,
+}
+impl DraftCopyDestination {
+    pub(crate) fn extension(&self) -> Option<&str> {
+        self.path.extension().and_then(|value| value.to_str())
+    }
+}
+#[cfg(target_os = "macos")]
+fn pin_draft_destination(path: PathBuf) -> Result<DraftCopyDestination, Refusal> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let parent_path = path
+        .parent()
+        .filter(|parent| parent.is_absolute())
+        .ok_or_else(|| refusal("changed"))?
+        .canonicalize()
+        .map_err(|_| refusal("changed"))?;
+    let parent = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(&parent_path)
+        .map_err(|_| refusal("changed"))?;
+    if descriptor_path(&parent)? != parent_path { return Err(refusal("changed")); }
+    Ok(DraftCopyDestination { path, parent, parent_path })
+}
+pub(crate) fn choose_draft_copy(
+    app: &tauri::AppHandle,
+    name: &str,
+) -> Result<Option<DraftCopyDestination>, Refusal> {
+    #[cfg(target_os = "macos")]
+    {
+        NativeActions(app)
+            .choose_copy(name)?
+            .map(pin_draft_destination)
+            .transpose()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, name);
+        Err(refusal("macos_only"))
+    }
+}
+pub(crate) fn publish_draft_copy(
+    config: &std::path::Path,
+    vault: &std::path::Path,
+    choice: DraftCopyDestination,
+    content: &[u8],
+) -> Result<String, Refusal> {
+    #[cfg(target_os = "macos")]
+    {
+        let protected = [
+            vault.canonicalize().map_err(|_| refusal("changed"))?,
+            config.canonicalize().map_err(|_| refusal("changed"))?,
+        ];
+        let held_parent = choice.parent.metadata().map_err(|_| refusal("changed"))?;
+        copy_payload_to_pinned(
+            config,
+            &protected,
+            &choice.path,
+            None,
+            Some(&held_parent),
+            Some(&choice.parent_path),
+            Some(protected[0].as_path()),
+            |output| {
+                std::io::Write::write_all(output, content).map_err(|_| refusal("desktop_failed"))
+            },
+        )?;
+        Ok(choice.path.to_string_lossy().into_owned())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (config, vault, choice, content);
+        Err(refusal("macos_only"))
+    }
+}
+
+/// Stream an archive through the existing retained native save destination.
+/// The callback supplies bounded archive bytes; it creates no filesystem authority.
+pub(crate) fn publish_archive_copy(
+    config: &Path,
+    protected_roots: &[PathBuf],
+    original_vault: &Path,
+    choice: DraftCopyDestination,
+    write: impl FnOnce(&mut std::fs::File) -> Result<(), Refusal>,
+) -> Result<String, Refusal> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut protected = vec![
+            original_vault.canonicalize().map_err(|_| refusal("changed"))?,
+            config.canonicalize().map_err(|_| refusal("changed"))?,
+        ];
+        for root in protected_roots {
+            protected.push(root.canonicalize().map_err(|_| refusal("changed"))?);
+        }
+        let held_parent = choice.parent.metadata().map_err(|_| refusal("changed"))?;
+        copy_payload_to_pinned(config, &protected, &choice.path, None, Some(&held_parent),
+            Some(&choice.parent_path), Some(protected[0].as_path()), write)?;
+        Ok(choice.path.to_string_lossy().into_owned())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (config, protected_roots, original_vault, choice, write);
+        Err(refusal("macos_only"))
+    }
+}
+
 /// macOS supplies the current pathname of an owned descriptor without
 /// reopening a caller-controlled name. Used to check the save parent again
 /// immediately before publishing the fully written copy.
@@ -253,6 +410,96 @@ fn copy_to(
     source: &mut OpenedFile,
     destination: &Path,
 ) -> Result<(), Refusal> {
+    let source_meta = source.file.metadata().map_err(|_| refusal("changed"))?;
+    copy_payload_to(
+        config,
+        protected_vaults,
+        destination,
+        Some(&source_meta),
+        |output| {
+            source
+                .file
+                .rewind()
+                .map_err(|_| refusal("desktop_failed"))?;
+            std::io::copy(&mut source.file, output).map_err(|_| refusal("desktop_failed"))?;
+            Ok(())
+        },
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn copy_payload_to(
+    config: &Path,
+    protected_vaults: &[PathBuf],
+    destination: &Path,
+    source_meta: Option<&std::fs::Metadata>,
+    write: impl FnOnce(&mut File) -> Result<(), Refusal>,
+) -> Result<(), Refusal> {
+    copy_payload_to_pinned(
+        config,
+        protected_vaults,
+        destination,
+        source_meta,
+        None,
+        None,
+        None,
+        write,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn selected_copy_destination(path: &Path) -> Result<(), Refusal> {
+    let context = match crate::workspace_service::authority::context() {
+        Ok(context) => context,
+        Err(error) => {
+            // Standalone legacy desktop fixtures have no installed app context.
+            // Selected fixtures install a scoped context and exercise the same
+            // guard as production. Production never allows missing context.
+            #[cfg(test)]
+            {
+                let _ = error;
+                return Ok(());
+            }
+            #[cfg(not(test))]
+            return Err(Refusal {
+                code: "capability_unavailable".into(),
+                message: error.message,
+            });
+        }
+    };
+    crate::workspace_service::native_admission::guard_external_write(&context, path).map_err(
+        |error| Refusal {
+            code: "capability_unavailable".into(),
+            message: error.message,
+        },
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn owned_temporary(parent: &File, name: &std::ffi::CStr, created: &File) -> bool {
+    use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
+    let Ok(held) = created.metadata() else { return false; };
+    let mut named = std::mem::MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: live borrowed directory FD, single-component terminated name,
+    // and storage for one stat. No symlink is followed and no object is opened.
+    if unsafe { libc::fstatat(parent.as_raw_fd(), name.as_ptr(), named.as_mut_ptr(), libc::AT_SYMLINK_NOFOLLOW) } != 0 { return false; }
+    // SAFETY: successful fstatat initialized the complete stat object.
+    let named = unsafe { named.assume_init() };
+    held.is_file() && named.st_mode & libc::S_IFMT == libc::S_IFREG
+        && named.st_dev as u64 == held.dev() && named.st_ino == held.ino()
+}
+
+#[cfg(target_os = "macos")]
+fn copy_payload_to_pinned(
+    config: &Path,
+    protected_vaults: &[PathBuf],
+    destination: &Path,
+    source_meta: Option<&std::fs::Metadata>,
+    expected_parent: Option<&std::fs::Metadata>,
+    expected_parent_route: Option<&Path>,
+    expected_active: Option<&Path>,
+    write: impl FnOnce(&mut File) -> Result<(), Refusal>,
+) -> Result<(), Refusal> {
     use std::{
         ffi::CString,
         os::{
@@ -274,13 +521,28 @@ fn copy_to(
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(&parent_path)
         .map_err(|_| refusal("desktop_failed"))?;
-    let source_meta = source.file.metadata().map_err(|_| refusal("changed"))?;
+    if let Some(expected) = expected_parent {
+        let actual = parent.metadata().map_err(|_| refusal("changed"))?;
+        if !same_file(expected, &actual) {
+            return Err(refusal("changed"));
+        }
+    }
     let check = || -> Result<(), Refusal> {
         // The active vault may change while the native save panel is open.
         // A missing/unreadable config cannot turn off this protection.
         let vault = std::fs::canonicalize(bytes::root_dir(config, "0")?)
             .map_err(|_| bytes::refusal("no_such_root"))?;
+        if expected_active.is_some_and(|expected| expected != vault) {
+            return Err(refusal("changed"));
+        }
         let actual_parent = descriptor_path(&parent)?;
+        // Never recapture a renamed original directory or a retargeted route.
+        // The descriptor is the publication authority; names can only deny.
+        if actual_parent != parent_path
+            || expected_parent_route.is_some_and(|expected| expected != actual_parent)
+            || destination.parent().ok_or_else(|| refusal("changed"))?
+                .canonicalize().map_err(|_| refusal("changed"))? != actual_parent
+        { return Err(refusal("changed")); }
         if actual_parent.starts_with(&vault)
             || protected_vaults
                 .iter()
@@ -300,7 +562,7 @@ fn copy_to(
                         return Err(refusal("inside_vault"));
                     }
                 }
-                if same_file(&meta, &source_meta) {
+                if source_meta.is_some_and(|source| same_file(&meta, source)) {
                     return Err(refusal("inside_vault"));
                 }
                 if !meta.is_file() {
@@ -310,6 +572,7 @@ fn copy_to(
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err(refusal("desktop_failed")),
         }
+        selected_copy_destination(&target)?;
         Ok(())
     };
     check()?;
@@ -331,13 +594,10 @@ fn copy_to(
     // SAFETY: openat returned a new descriptor, owned exactly once here.
     let mut output = unsafe { File::from_raw_fd(fd) };
     let result = (|| {
-        source
-            .file
-            .rewind()
-            .map_err(|_| refusal("desktop_failed"))?;
-        std::io::copy(&mut source.file, &mut output).map_err(|_| refusal("desktop_failed"))?;
+        write(&mut output)?;
         output.sync_all().map_err(|_| refusal("desktop_failed"))?;
         check()?;
+        if !owned_temporary(&parent, &temporary, &output) { return Err(refusal("changed")); }
         // SAFETY: both names are single components within the pinned parent.
         // Rename replaces a directory entry; it never follows a destination
         // symlink or writes through an existing hard link into the vault.
@@ -355,9 +615,9 @@ fn copy_to(
         let _ = parent.sync_all();
         Ok(())
     })();
-    if result.is_err() {
-        // SAFETY: cleanup names only our unpredictable create_new temporary
-        // entry relative to its still-owned directory descriptor.
+    if result.is_err() && owned_temporary(&parent, &temporary, &output) {
+        // SAFETY: cleanup requires the exact original regular-file identity,
+        // relative to its still-owned parent; a substituted name is preserved.
         unsafe {
             libc::unlinkat(parent.as_raw_fd(), temporary.as_ptr(), 0);
         }
@@ -834,4 +1094,434 @@ mod tests {
             std::fs::remove_dir_all(dir).unwrap();
         }
     }
+    #[test]
+    fn recovery_export_preserves_bytes_cancel_and_protected_destinations() {
+        use std::os::unix::fs::symlink;
+        let origin = temp_vault("recovery-export-origin");
+        let current = temp_vault("recovery-export-current");
+        let outside = temp_vault("recovery-export-outside");
+        let config = config(&current);
+        let desktop = Recorder::default();
+        let bytes = b"\xef\xbb\xbf---\r\ntitle: Exact\r\n---\r\n# Old\r\n";
+        assert_eq!(
+            save_recovery_with(&desktop, &config, &origin, "page.md", bytes).unwrap(),
+            None
+        );
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+        let destination = outside.join("copy.md");
+        *desktop.destination.borrow_mut() = Some(destination.clone());
+        assert_eq!(
+            save_recovery_with(&desktop, &config, &origin, "page.md", bytes).unwrap(),
+            Some(destination.to_string_lossy().into_owned())
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), bytes);
+        write(&origin, "kept.md", "keep");
+        symlink(&origin, outside.join("origin-link")).unwrap();
+        symlink(origin.join("kept.md"), outside.join("target-link.md")).unwrap();
+        for target in [
+            origin.join("copy.md"),
+            current.join("copy.md"),
+            config.join("copy.md"),
+            outside.join("origin-link/copy.md"),
+            outside.join("target-link.md"),
+        ] {
+            *desktop.destination.borrow_mut() = Some(target);
+            assert!(save_recovery_with(&desktop, &config, &origin, "page.md", bytes).is_err());
+        }
+        let hardlink = outside.join("hardlink.md");
+        std::fs::hard_link(origin.join("kept.md"), &hardlink).unwrap();
+        *desktop.destination.borrow_mut() = Some(hardlink.clone());
+        save_recovery_with(&desktop, &config, &origin, "page.md", bytes).unwrap();
+        assert_eq!(std::fs::read(&hardlink).unwrap(), bytes);
+        assert_eq!(std::fs::read(origin.join("kept.md")).unwrap(), b"keep");
+        for dir in [origin, current, outside, config] {
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn recovery_export_rechecks_vault_after_dialog_and_refuses_unavailable_config() {
+        let origin = temp_vault("recovery-export-switch-origin");
+        let current = temp_vault("recovery-export-switch-current");
+        let config = config(&origin);
+        let desktop = Recorder::default();
+        *desktop.destination.borrow_mut() = Some(current.join("copy.md"));
+        let changed_config = config.clone();
+        let changed_vault = current.to_string_lossy().into_owned();
+        *desktop.on_choose.borrow_mut() = Some(Box::new(move || {
+            crate::app_config::save(
+                &changed_config,
+                &crate::app_config::AppConfig {
+                    last_vault: Some(changed_vault),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }));
+        assert!(save_recovery_with(&desktop, &config, &origin, "page.md", b"old").is_err());
+        assert!(!current.join("copy.md").exists());
+        let missing_config = temp_vault("recovery-export-missing-config");
+        *desktop.destination.borrow_mut() = Some(current.join("copy.md"));
+        assert!(save_recovery_with(&desktop, &missing_config, &origin, "page.md", b"old").is_err());
+        assert!(!current.join("copy.md").exists());
+        for dir in [origin, current, config, missing_config] {
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+    #[test]
+    fn retained_draft_choice_pins_parent_and_preserves_bytes_outside_protected_roots() {
+        use std::os::unix::fs::symlink;
+        let vault = temp_vault("draft-copy-vault");
+        let outside = temp_vault("draft-copy-outside");
+        let config = config(&vault);
+        write(&vault, "kept.md", "keep");
+        let content = b"\xef\xbb\xbfraw\r\n  text\r\n";
+        let destination = outside.join("draft.md");
+        let choice = pin_draft_destination(destination.clone()).unwrap();
+        publish_draft_copy(&config, &vault, choice, content).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), content);
+        for path in [vault.join("copy.md"), config.join("copy.md")] {
+            assert!(publish_draft_copy(
+                &config,
+                &vault,
+                pin_draft_destination(path).unwrap(),
+                content
+            )
+            .is_err());
+        }
+        let linked = outside.join("linked.md");
+        symlink(vault.join("kept.md"), &linked).unwrap();
+        assert!(publish_draft_copy(
+            &config,
+            &vault,
+            pin_draft_destination(linked.clone()).unwrap(),
+            content
+        )
+        .is_err());
+        std::fs::remove_file(&linked).unwrap();
+        std::fs::hard_link(vault.join("kept.md"), &linked).unwrap();
+        publish_draft_copy(
+            &config,
+            &vault,
+            pin_draft_destination(linked.clone()).unwrap(),
+            content,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(linked).unwrap(), content);
+        assert_eq!(std::fs::read(vault.join("kept.md")).unwrap(), b"keep");
+        let parent = outside.join("chosen");
+        std::fs::create_dir(&parent).unwrap();
+        let choice = pin_draft_destination(parent.join("draft.json")).unwrap();
+        std::fs::rename(&parent, outside.join("moved")).unwrap();
+        std::fs::create_dir(&parent).unwrap();
+        assert!(publish_draft_copy(&config, &vault, choice, content).is_err());
+        assert!(!parent.join("draft.json").exists());
+        assert!(!outside.join("moved/draft.json").exists());
+        let choice = pin_draft_destination(parent.join("draft.json")).unwrap();
+        std::fs::remove_dir(&parent).unwrap();
+        symlink(&vault, &parent).unwrap();
+        assert!(publish_draft_copy(&config, &vault, choice, content).is_err());
+        assert!(!vault.join("draft.json").exists());
+        for directory in [vault, outside, config] {
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+    #[test]
+    fn retained_draft_commit_refuses_an_active_vault_switch_after_choice() {
+        let vault = temp_vault("draft-copy-active");
+        let other = temp_vault("draft-copy-other");
+        let outside = temp_vault("draft-copy-active-outside");
+        let config = config(&vault);
+        let target = outside.join("draft.json");
+        let choice = pin_draft_destination(target.clone()).unwrap();
+        crate::app_config::save(
+            &config,
+            &crate::app_config::AppConfig {
+                last_vault: Some(other.to_string_lossy().into_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(publish_draft_copy(&config, &vault, choice, b"recovery").is_err());
+        assert!(!target.exists());
+        for directory in [vault, other, outside, config] {
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    fn register_selected_copy_fixture(config: &Path, root: &Path) {
+        use std::os::unix::fs::PermissionsExt as _;
+        let registry = config.join("workspaces/bindings.v1.json");
+        std::fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        std::fs::write(&registry,serde_json::json!({"version":1,"bindings":[{"workspaceId":"3ee5b6eb-9f80-4bac-9538-f2a0c5938a62","bodyRoot":root}]}).to_string()).unwrap();
+        std::fs::set_permissions(&registry, std::fs::Permissions::from_mode(0o600)).unwrap();
+        write(root,".cerebro/workspace-format.json",&serde_json::json!({"format":2,"authority":"sqlite_metadata","state":"activated","workspaceId":"3ee5b6eb-9f80-4bac-9538-f2a0c5938a62"}).to_string());
+    }
+    #[test]
+    fn selected_destination_copy_refuses_before_staging_through_actual_save_route() {
+        let current = temp_vault("m99-copy-current-legacy");
+        let source = temp_vault("m99-copy-source-legacy");
+        let selected = temp_vault("m99-copy-other-selected");
+        let config = config(&current);
+        write(&source, "source.pdf", "%PDF-1.4\nexact source\r\n");
+        register_selected_copy_fixture(&config, &selected);
+        crate::workspace_service::authority::with_fixture_context(
+            crate::workspace_service::authority::AuthorityContext::new(config.clone()),
+            || {
+                let desktop = Recorder::default();
+                let destination = selected.join("copy.pdf");
+                *desktop.destination.borrow_mut() = Some(destination.clone());
+                let saved = save_with(&desktop, &config, opened(&source, "source.pdf"), "external");
+                let wrote = Cell::new(false);
+                let second = selected.join("other.pdf");
+                let staged = copy_payload_to(&config, &[], &second, None, |output| {
+                    wrote.set(true);
+                    std::io::Write::write_all(output, b"must not stage")
+                        .map_err(|_| refusal("desktop_failed"))
+                });
+                assert!(
+                    saved.is_err() && staged.is_err() && !wrote.get(),
+                    "saved={saved:?}, staged={staged:?}, writer_called={}",
+                    wrote.get()
+                );
+                assert_eq!(saved.unwrap_err().code, "capability_unavailable");
+                assert!(!destination.exists() && !second.exists());
+                assert!(!std::fs::read_dir(&selected).unwrap().any(|entry| entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".cerebro-copy-")));
+            },
+        );
+        for path in [current, source, selected, config] {
+            std::fs::remove_dir_all(path).unwrap();
+        }
+    }
+    #[test]
+    fn selected_destination_copy_revalidates_after_payload_before_publication() {
+        let current = temp_vault("m99-copy-recheck-current");
+        let selected = temp_vault("m99-copy-recheck-selected");
+        let outside = temp_vault("m99-copy-recheck-outside");
+        let config = config(&current);
+        register_selected_copy_fixture(&config, &selected);
+        let destination = outside.join("keep.pdf");
+        std::fs::write(&destination, b"keep").unwrap();
+        crate::workspace_service::authority::with_fixture_context(
+            crate::workspace_service::authority::AuthorityContext::new(config.clone()),
+            || {
+                let wrote = Cell::new(false);
+                let result = copy_payload_to(&config, &[], &destination, None, |output| {
+                    wrote.set(true);
+                    std::io::Write::write_all(output, b"must not publish")
+                        .map_err(|_| refusal("desktop_failed"))?;
+                    register_selected_copy_fixture(&config, &outside);
+                    Ok(())
+                });
+                assert!(wrote.get());
+                assert!(
+                    result.is_err(),
+                    "a destination became selected while the payload was staged"
+                );
+                assert_eq!(result.unwrap_err().code, "capability_unavailable");
+                assert_eq!(std::fs::read(&destination).unwrap(), b"keep");
+                assert!(!std::fs::read_dir(&outside).unwrap().any(|entry| entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".cerebro-copy-")));
+            },
+        );
+        for path in [current, selected, outside, config] {
+            std::fs::remove_dir_all(path).unwrap();
+        }
+    }
+    #[test]
+    fn selected_destination_copy_alias_stays_closed_when_known_authority_disappears() {
+        let current = temp_vault("m99-copy-disappear-current");
+        let source = temp_vault("m99-copy-disappear-source");
+        let selected = temp_vault("m99-copy-disappear-selected");
+        let outside = temp_vault("m99-copy-disappear-alias");
+        let config = config(&current);
+        write(&source, "source.pdf", "%PDF-1.4\nexact source\n");
+        register_selected_copy_fixture(&config, &selected);
+        std::os::unix::fs::symlink(&selected, outside.join("alias")).unwrap();
+        crate::workspace_service::authority::with_fixture_context(
+            crate::workspace_service::authority::AuthorityContext::new(config.clone()),
+            || {
+                assert!(matches!(
+                    crate::workspace_service::authority::resolve(&selected).unwrap(),
+                    crate::workspace_service::authority::Authority::Selected
+                ));
+                std::fs::remove_file(config.join("workspaces/bindings.v1.json")).unwrap();
+                std::fs::remove_file(selected.join(".cerebro/workspace-format.json")).unwrap();
+                let desktop = Recorder::default();
+                *desktop.destination.borrow_mut() = Some(outside.join("alias/copy.pdf"));
+                let result =
+                    save_with(&desktop, &config, opened(&source, "source.pdf"), "external");
+                assert!(result.is_err());
+                assert_eq!(result.unwrap_err().code, "capability_unavailable");
+                assert!(!selected.join("copy.pdf").exists());
+            },
+        );
+        for path in [current, source, selected, outside, config] {
+            std::fs::remove_dir_all(path).unwrap();
+        }
+    }
+    #[test]
+    fn selected_destination_copy_preserves_explicit_legacy_outside_bytes() {
+        let current = temp_vault("m99-copy-outside-current");
+        let source = temp_vault("m99-copy-outside-source");
+        let selected = temp_vault("m99-copy-outside-selected");
+        let outside = temp_vault("m99-copy-outside-target");
+        let config = config(&current);
+        let exact = b"%PDF-1.4\nexact outside copy\r\n";
+        std::fs::write(source.join("source.pdf"), exact).unwrap();
+        register_selected_copy_fixture(&config, &selected);
+        crate::workspace_service::authority::with_fixture_context(
+            crate::workspace_service::authority::AuthorityContext::new(config.clone()),
+            || {
+                let desktop = Recorder::default();
+                let target = outside.join("copy.pdf");
+                *desktop.destination.borrow_mut() = Some(target.clone());
+                assert!(matches!(
+                    save_with(&desktop, &config, opened(&source, "source.pdf"), "external")
+                        .unwrap(),
+                    FileActionOutcome::Saved { .. }
+                ));
+                assert_eq!(std::fs::read(target).unwrap(), exact);
+                let dangling = outside.join("dangling.pdf");
+                std::os::unix::fs::symlink(selected.join("never-created.pdf"), &dangling).unwrap();
+                *desktop.destination.borrow_mut() = Some(dangling);
+                assert_eq!(
+                    save_with(&desktop, &config, opened(&source, "source.pdf"), "external")
+                        .unwrap_err()
+                        .code,
+                    "changed"
+                );
+                assert!(!selected.join("never-created.pdf").exists());
+            },
+        );
+        for path in [current, source, selected, outside, config] {
+            std::fs::remove_dir_all(path).unwrap();
+        }
+    }
+    #[test]
+    fn selected_destination_copy_cannot_overwrite_installed_canonical_database_namespace() {
+        let current = temp_vault("m99-copy-metadata-current");
+        let source = temp_vault("m99-copy-metadata-source");
+        let selected = temp_vault("m99-copy-metadata-selected");
+        let config = config(&current);
+        write(&source, "source.pdf", "%PDF-1.4\nsource bytes\r\n");
+        register_selected_copy_fixture(&config, &selected);
+        let destination =
+            config.join("workspaces/3ee5b6eb-9f80-4bac-9538-f2a0c5938a62/workspace.db");
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        std::fs::write(&destination, b"canonical database bytes").unwrap();
+        crate::workspace_service::authority::with_fixture_context(
+            crate::workspace_service::authority::AuthorityContext::new(config.clone()),
+            || {
+                let desktop = Recorder::default();
+                *desktop.destination.borrow_mut() = Some(destination.clone());
+                let result =
+                    save_with(&desktop, &config, opened(&source, "source.pdf"), "external");
+                assert!(result.is_err());
+                assert_eq!(result.unwrap_err().code, "capability_unavailable");
+                assert_eq!(
+                    std::fs::read(&destination).unwrap(),
+                    b"canonical database bytes"
+                );
+                std::fs::remove_file(config.join("workspaces/bindings.v1.json")).unwrap();
+                let result =
+                    save_with(&desktop, &config, opened(&source, "source.pdf"), "external");
+                assert!(result.is_err());
+                assert_eq!(
+                    std::fs::read(&destination).unwrap(),
+                    b"canonical database bytes"
+                );
+            },
+        );
+        for path in [current, source, selected, config] {
+            std::fs::remove_dir_all(path).unwrap();
+        }
+    }
+    // Actual retained desktop publication seams. No assertions run in Drop.
+    fn archive_temporary(parent: &Path) -> PathBuf {
+        std::fs::read_dir(parent).unwrap().map(|entry| entry.unwrap().path())
+            .find(|path| path.file_name().unwrap().to_string_lossy().starts_with(".cerebro-copy-"))
+            .expect("actual create-new publication temporary")
+    }
+    #[test]
+    fn archive_publication_stream_control_preserves_explicit_overwrite_and_exact_bytes() {
+        let vault = temp_vault("archive-publish-control-vault");
+        let outside = temp_vault("archive-publish-control-outside");
+        let config = config(&vault); let target = outside.join("conversation.json");
+        std::fs::write(&target, b"original chosen destination").unwrap();
+        let choice = pin_draft_destination(target.clone()).unwrap();
+        let result = publish_archive_copy(&config, &[], &vault, choice, |output| {
+            use std::io::Write as _; output.write_all(b"{\"literal\":\"007\"}\r\n").map_err(|_| refusal("desktop_failed"))
+        });
+        assert_eq!(result.unwrap(), target.to_string_lossy().into_owned());
+        assert_eq!(std::fs::read(&target).unwrap(), b"{\"literal\":\"007\"}\r\n");
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 1);
+        for path in [vault, outside, config] { std::fs::remove_dir_all(path).unwrap(); }
+    }
+    #[test]
+    fn archive_publication_refuses_original_parent_retarget_after_streaming() {
+        use std::os::unix::fs::symlink;
+        let vault = temp_vault("archive-publish-parent-vault");
+        let outside = temp_vault("archive-publish-parent-outside"); let config = config(&vault);
+        let parent = outside.join("chosen"); let moved = outside.join("original-moved");
+        std::fs::create_dir(&parent).unwrap(); let target = parent.join("conversation.json");
+        std::fs::write(&target, b"keep original destination").unwrap();
+        let choice = pin_draft_destination(target.clone()).unwrap();
+        let result = publish_archive_copy(&config, &[], &vault, choice, |output| {
+            use std::io::Write as _; output.write_all(b"private archive body").unwrap();
+            std::fs::rename(&parent, &moved).unwrap(); symlink(&vault, &parent).unwrap(); Ok(())
+        });
+        assert!(result.is_err(), "a moved original choice cannot be recaptured through a fresh route");
+        assert_eq!(std::fs::read(moved.join("conversation.json")).unwrap(), b"keep original destination");
+        assert!(!vault.join("conversation.json").exists());
+        assert_eq!(std::fs::read_dir(&moved).unwrap().count(), 1, "owned original temporary is cleaned through its held parent");
+        for path in [vault, outside, config] { std::fs::remove_dir_all(path).unwrap(); }
+    }
+    #[test]
+    fn archive_publication_does_not_publish_a_replaced_temporary() {
+        let vault = temp_vault("archive-publish-temp-vault");
+        let outside = temp_vault("archive-publish-temp-outside"); let config = config(&vault);
+        let target = outside.join("conversation.json"); std::fs::write(&target, b"keep chosen destination").unwrap();
+        let choice = pin_draft_destination(target.clone()).unwrap();
+        let mut replaced = None;
+        let result = publish_archive_copy(&config, &[], &vault, choice, |output| {
+            use std::io::Write as _; output.write_all(b"private archive body").unwrap();
+            let temporary = archive_temporary(&outside);
+            std::fs::rename(&temporary, outside.join("externally-displaced-original")).unwrap();
+            std::fs::write(&temporary, b"unrelated replacement").unwrap(); replaced = Some(temporary); Ok(())
+        });
+        assert!(result.is_err(), "publication must bind the temporary name to the original created FD");
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep chosen destination");
+        assert_eq!(std::fs::read(replaced.unwrap()).unwrap(), b"unrelated replacement");
+        assert_eq!(std::fs::read(outside.join("externally-displaced-original")).unwrap(), b"private archive body");
+        for path in [vault, outside, config] { std::fs::remove_dir_all(path).unwrap(); }
+    }
+    #[test]
+    fn archive_publication_failed_stream_cleanup_preserves_a_replaced_temporary() {
+        let vault = temp_vault("archive-publish-cleanup-vault");
+        let outside = temp_vault("archive-publish-cleanup-outside"); let config = config(&vault);
+        let target = outside.join("conversation.json"); std::fs::write(&target, b"keep chosen destination").unwrap();
+        let choice = pin_draft_destination(target.clone()).unwrap();
+        let mut replaced = None;
+        let result = publish_archive_copy(&config, &[], &vault, choice, |output| {
+            use std::io::Write as _; output.write_all(b"private partial archive").unwrap();
+            let temporary = archive_temporary(&outside);
+            std::fs::rename(&temporary, outside.join("externally-displaced-original")).unwrap();
+            std::fs::write(&temporary, b"unrelated replacement").unwrap(); replaced = Some(temporary);
+            Err(refusal("desktop_failed"))
+        });
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep chosen destination");
+        assert_eq!(std::fs::read(replaced.unwrap()).unwrap(), b"unrelated replacement", "failed cleanup must not unlink a replacement");
+        assert_eq!(std::fs::read(outside.join("externally-displaced-original")).unwrap(), b"private partial archive");
+        for path in [vault, outside, config] { std::fs::remove_dir_all(path).unwrap(); }
+    }
+
 }

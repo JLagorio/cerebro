@@ -176,15 +176,67 @@ enum WatchSignal {
     Force,
 }
 
-/// Managed Tauri state holding the active watcher. Replacing it drops the
-/// previous watcher, which disconnects its channel and ends its thread.
+/// The notifier and its actual callback writer are one retained lifecycle owner.
 #[derive(Default)]
-pub struct WatcherState(pub Mutex<Option<notify::RecommendedWatcher>>);
+pub struct WatcherState {
+    inner: Mutex<Option<WatcherOwner>>,
+    changing: std::sync::atomic::AtomicBool,
+}
+struct WatcherOwner {
+    // Drop order: close notify's sender, then join the callback owner.
+    watcher: Option<notify::RecommendedWatcher>,
+    worker: crate::spawn::retained_thread::RetainedThread,
+}
+struct WatcherTransition<'a>(&'a std::sync::atomic::AtomicBool);
+impl Drop for WatcherTransition<'_> {
+    fn drop(&mut self) { self.0.store(false, std::sync::atomic::Ordering::Release); }
+}
+impl WatcherState {
+    fn transition(&self) -> Result<WatcherTransition<'_>, String> {
+        self.changing.compare_exchange(false, true, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire)
+            .map_err(|_| "A watcher lifecycle transition is still running.".to_owned())?;
+        Ok(WatcherTransition(&self.changing))
+    }
+    fn stop_owned(&self, timeout: Duration) -> Result<(), String> {
+        let mut owner = self.inner.lock().map_err(|_| "watcher state poisoned".to_owned())?.take();
+        let Some(mut owner) = owner.take() else { return Ok(()); };
+        drop(owner.watcher.take());
+        if let Err(error) = owner.worker.wait_within(timeout) {
+            // Do not detach on timeout or overwrite this retained stopping slot.
+            *self.inner.lock().map_err(|_| "watcher state poisoned".to_owned())? = Some(owner);
+            return Err(error);
+        }
+        Ok(())
+    }
+}
 
-/// Start (or replace) the vault watcher: recursive notify watcher feeding a
-/// debounce thread that emits `vault-changed` (unit payload) and
-/// `comments-changed` (`{pages}`) to the frontend.
+/// Stop only succeeds once the real callback thread has joined. A timeout
+/// leaves its exact stopped owner retained, so opening denial stays live.
+pub fn stop(state: &WatcherState) -> Result<(), String> {
+    stop_within(state, Duration::from_secs(2))
+}
+fn stop_within(state: &WatcherState, timeout: Duration) -> Result<(), String> {
+    let _transition = state.transition()?;
+    state.stop_owned(timeout)
+}
+pub fn start_selected(
+    app: tauri::AppHandle,
+    state: &WatcherState,
+    vault: PathBuf,
+) -> Result<(), String> {
+    start_mode(app, state, vault, true)
+}
 pub fn start(app: tauri::AppHandle, state: &WatcherState, vault: PathBuf) -> Result<(), String> {
+    start_mode(app, state, vault, false)
+}
+fn start_mode(
+    app: tauri::AppHandle,
+    state: &WatcherState,
+    vault: PathBuf,
+    selected: bool,
+) -> Result<(), String> {
+    let _transition = state.transition()?;
+    state.stop_owned(Duration::from_secs(2))?;
     if !vault.is_dir() {
         return Err(format!("not a directory: {}", vault.display()));
     }
@@ -206,12 +258,11 @@ pub fn start(app: tauri::AppHandle, state: &WatcherState, vault: PathBuf) -> Res
         .watch(&vault, RecursiveMode::Recursive)
         .map_err(|e| e.to_string())?;
     let vault_root = normalize(&vault);
-    std::thread::spawn(move || debounce_loop(app, vault_root, rx));
-    let mut slot = state
-        .0
-        .lock()
-        .map_err(|_| "watcher state poisoned".to_string())?;
-    *slot = Some(watcher);
+    let handle = std::thread::Builder::new().name("vault-watcher".into())
+        .spawn(move || debounce_loop(app, vault_root, rx, selected)).map_err(|_| "watcher callback could not start".to_owned())?;
+    let owner = WatcherOwner { watcher: Some(watcher), worker: crate::spawn::retained_thread::RetainedThread::new(handle) };
+    let mut slot = state.inner.lock().map_err(|_| "watcher state poisoned".to_string())?;
+    *slot = Some(owner);
     Ok(())
 }
 
@@ -248,7 +299,12 @@ struct CommentsChanged {
 /// for page changes and one `comments-changed` for sidecar changes, each only
 /// when it has something to say. Exits when the watcher (and thus the
 /// channel sender) is dropped.
-fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<WatchSignal>) {
+fn debounce_loop(
+    app: tauri::AppHandle,
+    vault: PathBuf,
+    rx: mpsc::Receiver<WatchSignal>,
+    selected: bool,
+) {
     let mut pending = false;
     let mut last_event: Option<Instant> = None;
     let mut knowledge_pending: std::collections::BTreeSet<String> =
@@ -260,21 +316,28 @@ fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<Watch
         match rx.recv_timeout(POLL) {
             Ok(WatchSignal::Force) => {
                 pending = true;
-                comments_lost = true;
+                comments_lost = !selected;
                 last_event = Some(Instant::now());
             }
             Ok(WatchSignal::Paths(paths)) => {
-                if paths.iter().any(|p| relevant_change(&vault, p)) {
+                if paths.iter().any(|p| {
+                    if selected {
+                        p.extension().is_some_and(|ext| ext == "md")
+                            || p.ends_with(crate::workspace_migration::format_gate::FORMAT_MARKER)
+                    } else {
+                        relevant_change(&vault, p)
+                    }
+                }) {
                     pending = true;
                     last_event = Some(Instant::now());
                 }
-                for path in &paths {
+                for path in paths.iter().filter(|_| !selected) {
                     if let Some(page) = comment_change(&vault, path) {
                         comment_pages.insert(page);
                         last_event = Some(Instant::now());
                     }
                 }
-                for path in &paths {
+                for path in paths.iter().filter(|_| !selected) {
                     if let Ok(rel) = path.strip_prefix(&vault) {
                         let rel = rel.to_string_lossy().replace('\\', "/");
                         if rel.starts_with("knowledge/") && rel.ends_with(".md") {
@@ -537,5 +600,44 @@ mod tests {
         assert!(!is_relevant_path(Path::new("attachments/logo.png")));
         assert!(!is_relevant_path(Path::new(".obsidian/workspace.md")));
         assert!(!is_relevant_path(Path::new("items/.hidden.md")));
+    }
+}
+
+#[cfg(test)]
+mod shutdown_lifetime_tests {
+    use super::*;
+    #[test]
+    fn real_watcher_stop_refuses_until_owned_callback_thread_has_exited() {
+        let state = WatcherState::default();
+        let (entered_send, entered) = mpsc::sync_channel(0);
+        let (release, wait) = mpsc::sync_channel(0);
+        let handle = std::thread::spawn(move || { entered_send.send(()).unwrap(); let _ = wait.recv(); });
+        *state.inner.lock().unwrap() = Some(WatcherOwner { watcher: None, worker: crate::spawn::retained_thread::RetainedThread::new(handle) });
+        entered.recv().unwrap();
+        let first = stop_within(&state, Duration::ZERO);
+        let retained = state.inner.lock().unwrap().is_some();
+        release.send(()).unwrap();
+        let final_result = stop_within(&state, Duration::from_secs(2));
+        assert!(first.is_err(), "dropping notifier does not settle an in-flight callback");
+        assert!(retained, "timeout must retain exact callback owner");
+        assert!(final_result.is_ok());
+        assert!(state.inner.lock().unwrap().is_none(), "actual join precedes success");
+    }
+}
+
+#[cfg(test)]
+mod panicked_shutdown_tests {
+    use super::*;
+    #[test]
+    fn panicked_callback_owner_is_retained_across_repeated_stop() {
+        let state = WatcherState::default();
+        let handle = std::thread::spawn(|| panic!("synthetic watcher callback failure"));
+        *state.inner.lock().unwrap() = Some(WatcherOwner { watcher: None, worker: crate::spawn::retained_thread::RetainedThread::new(handle) });
+        let first = stop_within(&state, Duration::from_secs(2));
+        let second = stop_within(&state, Duration::ZERO);
+        let retained = state.inner.lock().unwrap().is_some();
+        assert!(first.is_err());
+        assert!(second.is_err());
+        assert!(retained, "failed cleanup must not be cleared by another stop");
     }
 }

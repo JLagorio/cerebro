@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { usePaneId } from '@/stores/navStore';
+import { sourceRequestFor } from '@/app/sourceOpen';
+import { useNavStore, usePaneId } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import './inspector.css';
 
@@ -29,6 +30,7 @@ export function InspectorSection({
   actions,
   testId,
   children,
+  sourcePath,
 }: {
   /** The section's identity: its fold, its reveal, and `data-section`. */
   id: string;
@@ -45,11 +47,22 @@ export function InspectorSection({
   testId?: string;
   /** None: a header that says it all (`summary`), with nothing to unfold. */
   children?: ReactNode;
+  /** A source request temporarily unfolds this existing owner; never a saved preference. */
+  sourcePath?: string;
 }) {
   const pane = usePaneId();
-  const open = useUiStore((s) =>
+  const savedOpen = useUiStore((s) =>
     defaultOpen ? !s.inspectorCollapsed.includes(id) : s.inspectorExpanded.includes(id),
   );
+  const sourceReveal = useNavStore((state) => {
+    if (!sourcePath || state.active !== pane) return false;
+    const source = sourceRequestFor(sourcePath, 'peek') ?? sourceRequestFor(sourcePath, pane);
+    return (
+      source?.locator.kind === 'property' &&
+      (source.status === undefined || source.status === 'revealed' || source.status === 'relocated')
+    );
+  });
+  const open = savedOpen || sourceReveal;
   const setOpen = useUiStore((s) => s.setInspectorSectionOpen);
   const reveal = useUiStore((s) => {
     const asked = s.inspectorReveal;

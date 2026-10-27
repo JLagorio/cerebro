@@ -108,7 +108,9 @@ export const EnvironmentCard = memo(function EnvironmentCard({
   );
 }, stillWhileFolded);
 
-/** One term and its value; the sync line leads with the SyncBadge's icon. */
+/** One term and its value; the sync line leads with the SyncBadge's icon.
+ *  Its detail is the pointer's title and hidden text, so a screen reader,
+ *  the keyboard and touch get the reason too (as RootTree's sync badge). */
 function Line({ line }: { line: RailEnvironmentLine }) {
   return (
     <div
@@ -122,6 +124,7 @@ function Line({ line }: { line: RailEnvironmentLine }) {
           <Icon name={line.icon.name} size={12} color={line.icon.color} />
         )}
         <span className="cb-rail-environment-value">{line.value}</span>
+        {line.detail !== undefined && <span className="sr-only">{` (${line.detail})`}</span>}
       </dd>
     </div>
   );

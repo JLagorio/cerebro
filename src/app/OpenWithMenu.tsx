@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { IconButton } from '@/components/ui/IconButton';
 import { MenuItem, MenuLabel, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
-import { flushOpenPages } from '@/editor/openPages';
+import { saveBeforeAction } from '@/app/leaveGuard';
 import { splitFrontmatter } from '@/engine/frontmatter';
 import { pagePrompt } from '@/engine/pagePrompt';
 import type { Entry } from '@/engine/types';
@@ -51,8 +51,8 @@ export function OpenWithMenu({ entry, knowledgeFile }: { entry: Entry; knowledge
 
   /** Flush, read, build. The entry is looked up again after the flush, so
    *  its properties are the ones the flush saved. */
-  const buildPrompt = async (): Promise<string> => {
-    await flushOpenPages();
+  const buildPrompt = async (): Promise<string | null> => {
+    if (!(await saveBeforeAction())) return null;
     const raw = await readNote(vaultPath, entry.path);
     const latest = useVaultStore.getState().entries.find((e) => e.path === entry.path) ?? entry;
     return pagePrompt({
@@ -66,7 +66,9 @@ export function OpenWithMenu({ entry, knowledgeFile }: { entry: Entry; knowledge
 
   const copyPrompt = async () => {
     try {
-      await writeClipboard(await buildPrompt());
+      const prompt = await buildPrompt();
+      if (prompt === null) return;
+      await writeClipboard(prompt);
     } catch {
       toast("Couldn't copy the prompt");
       return;
@@ -104,7 +106,7 @@ export function OpenWithMenu({ entry, knowledgeFile }: { entry: Entry; knowledge
   const openDefault = async () => {
     try {
       // The editor opens the file on disk, so the disk has to hold the page.
-      await flushOpenPages();
+      if (!(await saveBeforeAction())) return;
       await openInDefaultApp(vaultPath, entry.path);
     } catch (err) {
       toast(refusalText(err));
@@ -113,9 +115,10 @@ export function OpenWithMenu({ entry, knowledgeFile }: { entry: Entry; knowledge
 
   const handOff = async (target: { id: string; label: string }) => {
     const failed = `Couldn't open ${target.label} or copy the prompt.`;
-    let prompt: string;
+    let prompt: string | null;
     try {
       prompt = await buildPrompt();
+      if (prompt === null) return;
     } catch {
       toast(failed);
       return;

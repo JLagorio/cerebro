@@ -21,6 +21,7 @@ import { Popover } from '@/components/ui/Popover';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { Chat } from '@/components/ai/Chat';
+import { RecoverySummary } from '@/agent/RecoverySummary';
 import { Context } from '@/components/ai/Context';
 import { useMergedRefs } from '@/components/ai/mergeRefs';
 import { MessageScrollerItem, type MessageScrollerCommands } from '@/components/ai/MessageScroller';
@@ -43,7 +44,9 @@ import {
   TraceLine,
   TraceTitle,
 } from '@/components/ai/Trace';
-import { checkAgent } from '@/agent/agentIpc';
+import { useCliReadiness, refreshCliReadiness } from '@/agent/useCliReadiness';
+import { cliReadinessWords } from '@/agent/cliReadinessWords';
+import type { CliReadiness } from '@/agent/cliReadinessTypes';
 import { historyOf } from '@/agent/AiActionCard';
 import { Arrival, Presence, motionAllowed, useArrival, useDrawn } from '@/components/ui/motion';
 import { Message, TurnCheckpoint } from '@/agent/ChatTurn';
@@ -65,9 +68,13 @@ import {
   resolveChips,
   type ContextChip,
 } from '@/agent/contextChips';
+import { threadReach } from '@/agent/conversations';
 import { ConversationNavigation, ConversationSwitcher } from '@/agent/ConversationSwitcher';
 import { ConversationRail } from '@/agent/rail/ConversationRail';
 import { InteractionCard } from '@/agent/InteractionCard';
+import { ManagedActionAccess } from '@/agent/ManagedActionAccess';
+import { openRunActionAccess } from '@/agent/managedActionAccessRuntime';
+import type { AccessSession } from '@/agent/managedActionAccessBook';
 import { PermissionCard } from '@/agent/PermissionCard';
 import { WriteApprovalCard } from '@/agent/WriteApprovalCard';
 import { RunOptionsPicker } from '@/agent/RunOptionsPicker';
@@ -80,6 +87,7 @@ import { useContextUse } from '@/agent/useContextUse';
 import { composerFiles } from '@/agent/elements/attachments';
 import { contextUsageOf } from '@/agent/elements/composerContext';
 import { pageStarters, starterSend } from '@/agent/elements/composerStarters';
+import { railContext } from '@/agent/elements/contextCard';
 import { railChanges, runOfCommit, type RailChanges } from '@/agent/elements/conversationChanges';
 import { branchPoints } from '@/agent/elements/panelCheckpoints';
 import { livePlan, type LivePlan } from '@/agent/elements/panelPlan';
@@ -88,6 +96,7 @@ import {
   pullRequestSources,
   turnKnowledge,
 } from '@/agent/elements/panelSources';
+import { railHandoffs } from '@/agent/elements/railHandoffs';
 import { railPlan } from '@/agent/elements/railPlan';
 import { railSources } from '@/agent/elements/railSources';
 import { railSubagents } from '@/agent/elements/railSubagents';
@@ -96,7 +105,7 @@ import { UpNext } from '@/agent/UpNext';
 import { ReviewNotesDock } from '@/agent/ReviewNotesDock';
 import { useUpNext, type SkillResolution } from '@/agent/useUpNext';
 import { useUpNextStore } from '@/stores/upNextStore';
-import { type AgentStatus, type Conversation, type PrLink } from '@/agent/types';
+import { type Conversation, type PrLink } from '@/agent/types';
 import {
   listSkills,
   matchSkillInvocation,
@@ -137,6 +146,37 @@ import './panel-sources.css';
  * goes through cerebro's own MCP tools, so the panel shows the tool calls
  * inline: an agent that edits your vault should not do it invisibly.
  */
+
+/** The same retry stays reachable in each persistent conversation presentation. */
+function CliReadinessIndicator({ status }: { status: CliReadiness }) {
+  if (status.state === 'available') return null;
+  return (
+    <span
+      className={`flex shrink-0 items-center gap-1 text-2xs ${status.state === 'checking' ? 'text-n-500' : 'text-warn-600'}`}
+      title={cliReadinessWords(status)}
+    >
+      <span role="status">
+        {status.state === 'checking'
+          ? 'Checking CLI…'
+          : status.state === 'missing'
+            ? 'CLI not found'
+            : 'CLI check unavailable'}
+      </span>
+      {status.state !== 'checking' && (
+        <button
+          type="button"
+          aria-label="Retry checking Claude Code"
+          className="rounded-xs border border-n-300 bg-transparent px-1 py-0.5 text-n-700"
+          onClick={() => {
+            void refreshCliReadiness();
+          }}
+        >
+          Retry
+        </button>
+      )}
+    </span>
+  );
+}
 
 /** How long the composer waits after the last keystroke to save its draft. */
 const DRAFT_SAVE_MS = 300;
@@ -261,22 +301,19 @@ function PrLinks({ links }: { links: PrLink[] }) {
  * under its count. The reply's own Plan line keeps the whole list in the
  * transcript; this is the glance at it from wherever the reader is. Beside
  * a docked rail whose Plan card shows the list (Q11, M92.17), that card is
- * the glance: the dock's is hidden, kept with its folds, so the list shows
- * once.
+ * the glance: chat.css hides the dock's, kept with its folds, so the list
+ * shows once.
  */
 function DockPlan({
   plan,
   working,
   arrive,
-  inRail,
 }: {
   plan: LivePlan;
   /** The agent is at it now, not waiting on the person or stopping: the
    *  step under way carries the working light. */
   working: boolean;
   arrive: boolean;
-  /** A docked rail's Plan card shows the list. */
-  inRail: boolean;
 }) {
   // A list may name one todo twice; its place in the list is its identity.
   const items = (todos: LivePlan['todo']) =>
@@ -286,7 +323,6 @@ function DockPlan({
       <Queue
         isStreaming={working}
         className="cb-chat-plan"
-        hidden={inRail || undefined}
         render={<section data-testid="live-plan" aria-label="Plan" />}
       >
         {plan.todo.length > 0 && (
@@ -495,7 +531,7 @@ export function AiPanel({
     if (vaultPath !== null) void loadPanelAgent(vaultPath);
   }, [loadPanelAgent, vaultPath]);
 
-  const [status, setStatus] = useState<AgentStatus | null>(null);
+  const status = useCliReadiness();
   const [draft, setDraft] = useState('');
   // M15: the panel is resizable like every other panel in the shell. The
   // stored width is the one it keeps beside a record; it gives only once the
@@ -603,7 +639,24 @@ export function AiPanel({
   const [runOptionsOpen, setRunOptionsOpen] = useState(false);
   const [conversationOptionsOpen, setConversationOptionsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
-  popoverOpen.current = runOptionsOpen || conversationOptionsOpen || contextOpen;
+  const [managedAccess, setManagedAccess] = useState<{
+    run: number;
+    requestId: string | null;
+    thread: string | null;
+    vault: string | null;
+    session: AccessSession;
+  } | null>(null);
+  const managedAccessVisible =
+    managedAccess !== null &&
+    !minimized &&
+    managedAccess.run === chat.live?.run &&
+    managedAccess.thread === activeConversation &&
+    managedAccess.vault === vaultPath;
+  popoverOpen.current =
+    runOptionsOpen || conversationOptionsOpen || contextOpen || managedAccessVisible;
+  useEffect(() => {
+    setManagedAccess(null);
+  }, [minimized, presentation, activeConversation, chat.live?.run, vaultPath]);
   const conversationOptionsRef = useRef<HTMLButtonElement>(null);
   const contextRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -613,8 +666,10 @@ export function AiPanel({
   }, [minimized, presentation, conversations.activeId]);
   // M91.12a: how full this conversation's context window is, beside the
   // picker. Pulled when its session opens and when a turn ends (M91.5);
-  // shown, never kept (Q7).
-  const contextUse = contextUsageOf(useContextUse(chat.sessionId, { streaming: chat.streaming }));
+  // shown, never kept (Q7). The rail's Context card reads this same pull
+  // (M92.14), so the ring and the card never tell two figures.
+  const contextReading = useContextUse(chat.sessionId, { streaming: chat.streaming });
+  const contextUse = contextUsageOf(contextReading);
 
   // --- Context chips (M17.6) ------------------------------------------------
   //
@@ -700,6 +755,25 @@ export function AiPanel({
   // back after either changed attaches nothing.
   const captureThread = useVaultActionGuard(`${vaultPath ?? ''}\u0000${activeId ?? ''}`);
   const toast = useUiStore((s) => s.toast);
+  const chooseManagedAccess = (run: number, requestId: string | null) => {
+    if (
+      chat.live?.run !== run ||
+      (requestId !== null &&
+        (chat.interaction?.card.kind !== 'managed_access' ||
+          chat.interaction.card.id !== requestId ||
+          chat.interaction.card.run !== run ||
+          chat.interaction.stale !== null))
+    ) {
+      toast('The original run is no longer available for this access choice.');
+      return;
+    }
+    const session = openRunActionAccess(run, requestId);
+    if (session === null) {
+      toast('Run access is unavailable. Finish another access choice and try again.');
+      return;
+    }
+    setManagedAccess({ run, requestId, session, thread: activeConversation, vault: vaultPath });
+  };
   const attachFiles = (sources: readonly FileSource[]) => {
     if (sources.length === 0) return;
     const current = captureThread();
@@ -777,7 +851,8 @@ export function AiPanel({
         entries,
         schema,
         activePath,
-        visible: collection?.entries,
+        visible: collection?.unavailable ? undefined : collection?.entries,
+        visibleUnavailable: collection?.unavailable?.message,
         // M11: the open TAB's filters — what the person is actually looking at.
         filters:
           activeView === null || contextSelection === null
@@ -810,6 +885,7 @@ export function AiPanel({
       schema,
       activePath,
       collection?.entries,
+      collection?.unavailable,
       activeView,
       recordChips,
       filePaths,
@@ -862,6 +938,8 @@ export function AiPanel({
     systemPrompt: composeSystemPrompt,
     place: conversations.active?.place ?? place,
     conversationId: conversations.activeId,
+    archiveAttachmentRefs: filePaths,
+    archiveAncestry: conversations.active?.archiveAncestry ?? null,
     // M56.5: the conversation's pick, read at send like the rest.
     model: conversations.active?.model ?? null,
     effort: conversations.active?.effort ?? null,
@@ -880,7 +958,7 @@ export function AiPanel({
   sentFrom.current = chat.messages.length;
 
   // Every send goes through here so no path can leave a thread unanchored —
-  // there are three (the composer, a suggestion chip, and a retry) plus the
+  // there are the composer and suggestion chips, plus the
   // handoffs and Up next below, and "remember to call anchorNow" at every
   // call site is a convention, not a guarantee. An Up next entry carries the
   // turn it was queued in (M57.5), and its thread was anchored by the turn it
@@ -968,12 +1046,6 @@ export function AiPanel({
   useEffect(() => {
     if (vaultPath !== null) useUpNextStore.getState().keepVault(vaultPath);
   }, [vaultPath]);
-
-  useEffect(() => {
-    void checkAgent()
-      .then(setStatus)
-      .catch(() => setStatus({ installed: false, version: null, path: null }));
-  }, []);
 
   // ⌘J is "talk to the assistant", so it has to open something you can type
   // into; and closing it must not drop focus to <body> (M15). The opener has
@@ -1192,16 +1264,52 @@ export function AiPanel({
     if (entry !== null) openPath(entry.path);
   };
 
-  // M15: the failed turn's question is still in the transcript — retrying is
-  // one click rather than retyping it from memory. The failed exchange stays
-  // visible: it is what the error refers to.
-  const retry = (assistantId: string) => {
-    if (chat.busy()) return;
-    const index = chat.messages.findIndex((m) => m.id === assistantId);
-    const question = index > 0 ? chat.messages[index - 1] : undefined;
-    if (question === undefined || question.role !== 'user') return;
-    // A labelled ask retries its prompt, not its label (M52.4).
-    ask(question.text, question.prompt);
+  // A failed reply can be inspected without repeating its request. These
+  // local message IDs name display content only, never native recovery scope.
+  const [recoveryTarget, setRecoveryTarget] = useState<{
+    conversationId: string;
+    messageId: string;
+  } | null>(null);
+  const recoveryOpener = useRef<HTMLButtonElement | null>(null);
+  const recoveryVault = useRef(vaultPath);
+  useEffect(() => {
+    setRecoveryTarget(null);
+    recoveryOpener.current = null;
+  }, [vaultPath, conversations.activeId]);
+  useEffect(() => {
+    if (
+      recoveryTarget !== null &&
+      !chat.messages.some(
+        (message) => message.id === recoveryTarget.messageId && message.error !== undefined,
+      )
+    ) {
+      setRecoveryTarget(null);
+      recoveryOpener.current = null;
+    }
+  }, [chat.messages, recoveryTarget]);
+  const reviewRecovery = (messageId: string, opener: HTMLButtonElement) => {
+    const conversationId = conversations.activeId;
+    if (
+      conversationId === null ||
+      !opener.isConnected ||
+      !chat.messages.some(
+        (message) =>
+          message.id === messageId && message.role === 'assistant' && message.error !== undefined,
+      )
+    )
+      return;
+    recoveryVault.current = vaultPath;
+    recoveryOpener.current = opener;
+    setRecoveryTarget({ conversationId, messageId });
+  };
+  const closeRecovery = () => {
+    const opener = recoveryOpener.current;
+    const current =
+      recoveryTarget?.conversationId === conversations.activeId &&
+      recoveryVault.current === vaultPath;
+    setRecoveryTarget(null);
+    recoveryOpener.current = null;
+    if (current && opener?.isConnected) opener.focus({ preventScroll: true });
   };
 
   // M56.4: the fixes a failure card offers; choose_model opens the
@@ -1218,8 +1326,22 @@ export function AiPanel({
   // Message is memoized (ChatTurn): it gets stable handlers that call this
   // render's, so a streamed delta or a keystroke redraws no earlier turn.
   // Assigned during render, like every other latest-value ref here.
-  const turnHandlersRef = useRef({ openTarget, openPath, viewDiff, retry, noticeActions });
-  turnHandlersRef.current = { openTarget, openPath, viewDiff, retry, noticeActions };
+  const turnHandlersRef = useRef({
+    openTarget,
+    openPath,
+    viewDiff,
+    reviewRecovery,
+    closeRecovery,
+    noticeActions,
+  });
+  turnHandlersRef.current = {
+    openTarget,
+    openPath,
+    viewDiff,
+    reviewRecovery,
+    closeRecovery,
+    noticeActions,
+  };
   const turnHandlers = useMemo(() => {
     const current = () => turnHandlersRef.current;
     return {
@@ -1228,7 +1350,9 @@ export function AiPanel({
         current().openPath(path);
       },
       viewDiff: (path: string, commit: string | null) => current().viewDiff(path, commit),
-      retry: (messageId: string) => current().retry(messageId),
+      reviewRecovery: (messageId: string, opener: HTMLButtonElement) =>
+        current().reviewRecovery(messageId, opener),
+      closeRecovery: () => current().closeRecovery(),
       noticeActions: {
         open_settings: () => current().noticeActions.open_settings(),
         new_conversation: () => current().noticeActions.new_conversation(),
@@ -1325,6 +1449,11 @@ export function AiPanel({
   const railInDrawer = railShown && railDrawer;
   const railFolded = railShown && !railDrawer && railFits === false;
   const railVisible = railShown && !railFolded;
+  // Until the observer reports the canvas's width, a frame after it is
+  // drawn, CSS may already fold the rail away: it reads nothing until the
+  // width says it docks, or a person opens the drawer (a folded rail fetches
+  // nothing). Inert, the toggle and focus wait for the width as they did.
+  const railMeasuring = railShown && !railInDrawer && railFits === null;
   // Whether the rail docks at the aside's width now. Read from layout as a
   // person asks, since the observer's width comes a frame after a
   // presentation is drawn; with no box to read (jsdom), it is the observer's.
@@ -1385,7 +1514,7 @@ export function AiPanel({
   // its commits was made by (M92.5). While the rail can be seen, the runs no
   // reply holds are read back from Cerebro's records and folded in (M92.12).
   const changesHeal = useChangesHeal(vaultPath, chat.sessionId, {
-    visible: railVisible,
+    visible: railVisible && !railMeasuring,
     streaming: chat.streaming,
   });
   const changes = useMemo(
@@ -1409,15 +1538,30 @@ export function AiPanel({
     [chat.messages, conversations.transcript],
   );
   const railSubagentsView = useMemo(() => railSubagents(chat.messages), [chat.messages]);
+  const railHandoffsView = useMemo(() => railHandoffs(chat.messages), [chat.messages]);
+  // The composer's own pull, read into the card (M92.14): no second pull.
+  const railContextView = useMemo(
+    () => railContext(contextReading, { session: chat.sessionId, streaming: chat.streaming }),
+    [contextReading, chat.sessionId, chat.streaming],
+  );
   const railSourcesView = useMemo(
     () => railSources(chat.messages, conversations.transcript),
     [chat.messages, conversations.transcript],
   );
-  // Q11 (M92.17): a docked rail whose Plan card shows the list holds the
-  // plan, and the dock's steps aside, so the list shows once. React's word
-  // that the rail docks comes a frame after CSS's, as its inert does.
-  const railDocked = railVisible && !railInDrawer;
-  const planInRail = railDocked && railPlanView.list !== null && railPlanView.list.todos.length > 0;
+  // What the thread's runs last said they reach (M92.8), which Connectors
+  // and Environment read: its newest reply's Reach, else the fact the thread
+  // saved. The reply's own object, so a streamed word hands the rail no new
+  // one.
+  const savedReach = conversations.active?.reach;
+  const railReach = useMemo(
+    () => threadReach({ messages: chat.messages, reach: savedReach }),
+    [chat.messages, savedReach],
+  );
+  // Q11 (M92.17): while the rail is open on a plan, its Plan card holds the
+  // list. Beside it, docked, the dock's steps hide in the layout pass that
+  // docks it (chat.css, `data-rail-plan`); folded away or a drawer, the rail
+  // leaves them showing, so the list shows once.
+  const planInRail = railShown && railPlanView.list !== null && railPlanView.list.todos.length > 0;
 
   const notice =
     conversations.transcript.state === 'unavailable' ? (
@@ -1529,6 +1673,9 @@ export function AiPanel({
       data-presentation={presentation}
       data-minimized={minimized || undefined}
       data-working={chat.streaming || chat.stopping || undefined}
+      // The rail is open on a plan: where it docks, chat.css hides the
+      // dock's (Q11).
+      data-rail-plan={planInRail || undefined}
       onKeyDown={(event) => {
         // Child completion/option popovers own Escape in capture first.
         // This nonmodal companion only takes a key from its own DOM, never
@@ -1626,6 +1773,7 @@ export function AiPanel({
                 />
               )}
             </div>
+            <CliReadinessIndicator status={status} />
             <button
               ref={conversationOptionsRef}
               type="button"
@@ -1716,9 +1864,7 @@ export function AiPanel({
                 onOpen={openPath}
               />
             )}
-            {status !== null && !status.installed && (
-              <span className="text-2xs text-warn-600">not installed</span>
-            )}
+            <CliReadinessIndicator status={status} />
             <span className="flex-1" />
             {/* M92.1: the canvas rail's toggle. A plain button, as IconButton
                 takes no tab stop and says pressed, where this one discloses
@@ -1782,6 +1928,24 @@ export function AiPanel({
             />
           </>
         )}
+        {chat.live !== null && (
+          <Tooltip label="Access for this run">
+            <button
+              type="button"
+              tabIndex={0}
+              className="cb-chat-options"
+              aria-label="Access for this run"
+              aria-haspopup="dialog"
+              aria-expanded={managedAccessVisible}
+              onClick={(event) => {
+                event.currentTarget.focus();
+                chooseManagedAccess(chat.live!.run, null);
+              }}
+            >
+              <Icon name="shield-check" size={16} />
+            </button>
+          </Tooltip>
+        )}
       </header>
 
       {/* The transcript and composer keep their parents in both layouts. A
@@ -1814,9 +1978,9 @@ export function AiPanel({
                 {notice}
                 {welcoming &&
                   (floating ? (
-                    status?.installed === false && (
+                    (status.state === 'missing' || status.state === 'unavailable') && (
                       <p className="cb-chat-unavailable" role="status">
-                        Claude Code was not found on this machine. Install it and reopen cerebro.
+                        {cliReadinessWords(status)}
                       </p>
                     )
                   ) : (
@@ -1832,8 +1996,8 @@ export function AiPanel({
                             : 'A little help with this page?'}
                         </h2>
                         <p className="cb-chat-welcome-copy">
-                          {status?.installed === false
-                            ? 'Claude Code was not found on this machine. Install it and reopen cerebro.'
+                          {status.state !== 'available'
+                            ? cliReadinessWords(status)
                             : 'Find a connection, shape an idea, or work through what comes next.'}
                         </p>
                       </div>
@@ -1868,9 +2032,9 @@ export function AiPanel({
                       onOpenPath={turnHandlers.openPath}
                       onViewDiff={isRepo ? turnHandlers.viewDiff : undefined}
                       history={historyOf(ready, isRepo)}
-                      onRetry={
+                      onReviewRecovery={
                         message.error !== undefined && blocked === null
-                          ? turnHandlers.retry
+                          ? turnHandlers.reviewRecovery
                           : undefined
                       }
                       noticeActions={turnHandlers.noticeActions}
@@ -1880,6 +2044,26 @@ export function AiPanel({
                           : null
                       }
                     />
+                    {recoveryTarget !== null &&
+                      recoveryTarget.conversationId === conversations.activeId &&
+                      recoveryTarget.messageId === message.id &&
+                      recoveryVault.current === vaultPath &&
+                      message.error !== undefined && (
+                        <RecoverySummary
+                          nativeRoot={message.nativeRecoveryRoot ?? null}
+                          question={
+                            // Neighboring text is display-only, never a root selector or resend.
+                            index > 0 && chat.messages[index - 1].role === 'user'
+                              ? chat.messages[index - 1].text
+                              : null
+                          }
+                          error={message.error}
+                          changesets={message.changesets}
+                          onOpenPath={turnHandlers.openPath}
+                          onViewDiff={isRepo ? turnHandlers.viewDiff : undefined}
+                          onClose={turnHandlers.closeRecovery}
+                        />
+                      )}
                   </MessageScrollerItem>
                   {/* M91.12c: Branch from here, between this reply and the
                       turn after it. It comes in with the send that put a
@@ -1923,7 +2107,11 @@ export function AiPanel({
                     vaultPath={vaultPath}
                   />
                 ) : (
-                  <InteractionCard interaction={chat.interaction} onAnswer={chat.answer} />
+                  <InteractionCard
+                    interaction={chat.interaction}
+                    onAnswer={chat.answer}
+                    onChooseAccess={chooseManagedAccess}
+                  />
                 )}
               </MessageScrollerItem>
             </Arrival>
@@ -1941,12 +2129,7 @@ export function AiPanel({
                 what waits for after it; beside a docked rail that shows
                 them, hidden (Q11). */}
             {plan !== null && (
-              <DockPlan
-                plan={plan}
-                working={!chat.waiting && !chat.stopping}
-                arrive={onScreen}
-                inRail={planInRail}
-              />
+              <DockPlan plan={plan} working={!chat.waiting && !chat.stopping} arrive={onScreen} />
             )}
             {/* M57.5: what this conversation holds for after its turn. Each is
                 drawn with its thread, so what a thread opens holding is simply
@@ -2161,7 +2344,7 @@ export function AiPanel({
         </div>
         {/* Keyed by presentation: hidden while the conversation floats,
             the starters are drawn again where they show, and come in there. */}
-        {welcoming && status?.installed !== false && (
+        {welcoming && status.state === 'available' && (
           <div key={presentation} className="cb-chat-starters" data-testid="chat-starters">
             {/* M91.12a: Suggestions, as Cerebro draws them — borderless rows.
                 A row shows its label and sends its prompt (M52.3). */}
@@ -2215,6 +2398,7 @@ export function AiPanel({
               headingRef={railHeadingRef}
               drawer={railInDrawer}
               folded={railFolded}
+              measuring={railMeasuring}
               closing={closing}
               jump={jumpFromRail}
               waiting={railWaitingView}
@@ -2223,10 +2407,14 @@ export function AiPanel({
               scroller={chatScroller}
               plan={railPlanView}
               working={chat.streaming && !chat.waiting && !chat.stopping}
+              streaming={chat.streaming}
               subagents={railSubagentsView}
               transcript={conversations.transcript.state}
               changes={changes}
+              handoffs={railHandoffsView}
+              context={railContextView}
               sources={railSourcesView}
+              reach={railReach}
               onOpenPath={turnHandlers.openPath}
               onViewDiff={isRepo ? turnHandlers.viewDiff : undefined}
               reveal={revealInTranscript}
@@ -2234,6 +2422,17 @@ export function AiPanel({
           )}
         />
       )}
+      {managedAccessVisible &&
+        managedAccess !== null &&
+        createPortal(
+          <ManagedActionAccess
+            key={JSON.stringify([managedAccess.run, managedAccess.requestId])}
+            open
+            onClose={() => setManagedAccess(null)}
+            session={managedAccess.session}
+          />,
+          document.body,
+        )}
     </aside>
   );
 }

@@ -14,30 +14,34 @@ import { deferralText, startAgentJob } from './startAgentJob';
 const { events } = vi.hoisted(() => ({
   events: { callback: null as ((event: { kind: string }) => void) | null },
 }));
-vi.mock('./agentIpc', () => ({
-  checkWake: vi.fn(async (_vault: string, _actor: string, wakes: string[]) => ({
-    state: 'met',
-    wakes,
-  })),
-  runAgent: vi.fn(async () => ({ run: 8, durableId: 'run8', sessionId: 's', attach: 'a' })),
-  stopAgent: vi.fn(async () => true),
-  attachRun: vi.fn(async (_handle: unknown, _after: number, callback: typeof events.callback) => {
-    events.callback = callback;
-    return {
-      state: 'held',
-      done: false,
-      detach: () => {
+vi.mock('./agentIpc', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./agentIpc')>();
+  return {
+    startedOrThrow: actual.startedOrThrow,
+    checkWake: vi.fn(async (_vault: string, _actor: string, wakes: string[]) => ({
+      state: 'met',
+      wakes,
+    })),
+    runAgent: vi.fn(async () => ({ run: 8, durableId: 'run8', sessionId: 's', attach: 'a' })),
+    stopAgent: vi.fn(async () => true),
+    attachRun: vi.fn(async (_handle: unknown, _after: number, callback: typeof events.callback) => {
+      events.callback = callback;
+      return {
+        state: 'held',
+        done: false,
+        detach: () => {
+          events.callback = null;
+        },
+      };
+    }),
+    onAgentEvent: vi.fn((callback: typeof events.callback) => {
+      events.callback = callback;
+      return () => {
         events.callback = null;
-      },
-    };
-  }),
-  onAgentEvent: vi.fn((callback: typeof events.callback) => {
-    events.callback = callback;
-    return () => {
-      events.callback = null;
-    };
-  }),
-}));
+      };
+    }),
+  };
+});
 vi.mock('./systemPrompt', () => ({ buildSystemPrompt: vi.fn(() => 'system') }));
 vi.mock('@/lib/ipc', async () => ({
   ...(await vi.importActual<typeof import('@/lib/ipc')>('@/lib/ipc')),
@@ -531,4 +535,26 @@ it('a delayed follow-up deferral cannot hold or refresh the newly opened vault',
   expect(refresh).not.toHaveBeenCalledWith('/other');
   expect(useRunLogStore.getState().entries).toEqual([]);
   refresh.mockRestore();
+});
+
+it('an unexpected observed generation cannot attach an unkeyed job or report claimed wakes', async () => {
+  vi.mocked(agent.runAgent).mockResolvedValueOnce({
+    observed_generation: {
+      generationId: '11111111111111111111111111111111',
+      firstRunId: '22222222222222222222222222222222',
+      currentRunId: '33333333333333333333333333333333',
+      state: 'running',
+    },
+  });
+  const onClaimedWakes = vi.fn();
+  const result = await startAgentJob(wakeJob(), { ...ctx(), onClaimedWakes });
+  expect(result).toMatchObject({ kind: 'failed', recorded: false });
+  expect(result).not.toHaveProperty('run');
+  expect(agent.attachRun).not.toHaveBeenCalled();
+  expect(agent.stopAgent).not.toHaveBeenCalled();
+  expect(onClaimedWakes).not.toHaveBeenCalled();
+  expect(useUiStore.getState().runs).toEqual([]);
+  expect(useUiStore.getState().triggerRuns).toEqual({});
+  expect(useRunLogStore.getState().entries[0]).toMatchObject({ status: 'failed' });
+  expect(useRunLogStore.getState().entries[0]).not.toHaveProperty('durableId');
 });

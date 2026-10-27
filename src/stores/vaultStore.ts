@@ -1,10 +1,23 @@
+import SELECTED_AUTHORITY from '../../shared/workspace/authority.v2.json';
+import type {
+  AuthorityError,
+  SelectedEditorTarget,
+  SelectedRecordVersion,
+} from '@/lib/generated/workspace';
+import {
+  acceptLeaveIntent,
+  invalidatePendingLeaves,
+  LEAVE_BLOCKED,
+  type LeaveIntent,
+} from '@/app/leaveGuard';
 import { inheritedAgentsPatch } from '@/engine/assignment';
 import { create } from 'zustand';
 import {
   announceExternalWrites,
   editorHoldersOf,
   flushOpenPages,
-  heldOpenPages,
+  flushOpenPageBodies,
+  heldOpenPageBodies,
 } from '@/editor/openPages';
 import {
   batchFailureWords,
@@ -32,6 +45,18 @@ export interface BatchOptions {
   /** Hear a refusal in the backend's words instead of the store's toast:
    * undo words its own refusal. The store still rescans. */
   onRefused?: (message: string) => void;
+  /** Authoritative receipt before refresh. Observer failure cannot undo a write. */
+  onApplied?: (applied: BatchApplied) => void;
+  /** Refuse a retired caller before dispatch. An accepted write keeps its receipt and Undo. */
+  stillCurrent?: () => boolean;
+}
+
+/** A completed refresh is an observation, never a record version or a write acknowledgement. */
+export interface VaultScanObservation {
+  vault: string;
+  opening: number;
+  sequence: number;
+  outcome: 'scanned' | 'unavailable';
 }
 
 export interface VaultState {
@@ -64,7 +89,11 @@ export interface VaultState {
   folders: string[]; // all vault directories incl. empty ones (M2 Task 10 file trees)
   status: 'idle' | 'scanning' | 'ready' | 'error';
   error: string | null;
-  openVault(path: string): Promise<void>;
+  scanObservation: VaultScanObservation | null;
+  openVault(
+    path: string,
+    options?: { stillCurrent?: () => boolean; leaveIntent?: LeaveIntent },
+  ): Promise<void>;
   /**
    * Reread the open vault (M58.2). One scan runs at a time, plus at most one
    * trailing behind it, however many callers ask. Resolves once a scan that
@@ -194,6 +223,23 @@ async function readVault(vault: string): Promise<{
   return { entries, views, collections, folders };
 }
 
+/** A startup hint only: the native opener revalidates authority and recovery.
+ * Ordinary rescans keep this refusal and never dispatch recovery themselves. */
+function selectedRecoveryRequired(value: unknown): value is AuthorityError {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'code' in value &&
+    value.code === 'capability_unavailable' &&
+    'kind' in value &&
+    value.kind === 'recovery_required' &&
+    'message' in value &&
+    typeof value.message === 'string' &&
+    'retryable' in value &&
+    value.retryable === false
+  );
+}
+
 let watcherBound = false;
 
 /**
@@ -210,7 +256,14 @@ let watcherBound = false;
  * they were asked for: the backend records ONE vault, the last one started.
  */
 let openTicket = 0;
+let vaultSwitchTicket = 0;
 let watcherQueue: Promise<unknown> = Promise.resolve();
+// Also counts direct path changes, including an away/back pair batched by React.
+// This scopes presentation reads only; it is not native workspace authority.
+let vaultOpening = 0;
+export function getVaultOpening(): number {
+  return vaultOpening;
+}
 
 /**
  * Scans land newer over older, never the reverse (AUTOMATION-2b). Each scan
@@ -265,26 +318,42 @@ async function scanPass(): Promise<PassOutcome> {
   // landed during the wait look older than this read.
   const scan = ++scanTicket;
   const mark = writes.mark();
-  let read: Awaited<ReturnType<typeof readVault>>;
+  const opening = vaultOpening;
+  const ticket = openTicket;
+  let read: Awaited<ReturnType<typeof readVault>> | null = null;
   try {
     read = await readVault(vault);
   } catch {
-    // The store keeps its last good snapshot; disk truth returns on the next
-    // successful scan (watcher event, write, or vault reopen).
-    return 'failed';
+    // A failed whole-vault read retains the snapshot. Its ordered observation
+    // still lets a mounted selected owner ask its existing body reader.
   }
   // A switch mid-scan: this is the old vault's snapshot, and the open in
   // flight sets the new one's. A newer scan already landed: this one would
   // roll it back (see `landedScan`).
-  if (useVaultStore.getState().vaultPath !== vault || scan < landedScan) return 'done';
+  if (
+    useVaultStore.getState().vaultPath !== vault ||
+    opening !== vaultOpening ||
+    ticket !== openTicket ||
+    scan < landedScan
+  )
+    return 'done';
   // A write began or settled while this read: it may predate the write.
   if (writes.moved(mark)) return 'again';
-  landedScan = scan;
-  useVaultStore.setState({ ...read, entriesVault: vault, status: 'ready' });
+  const scanObservation: VaultScanObservation = {
+    vault,
+    opening,
+    sequence: scan,
+    outcome: read === null ? 'unavailable' : 'scanned',
+  };
+  if (read === null) useVaultStore.setState({ scanObservation });
+  else {
+    landedScan = scan;
+    useVaultStore.setState({ ...read, entriesVault: vault, status: 'ready', scanObservation });
+  }
   // It read past a write that outlived WRITE_WAIT_MS: that write's settle
   // scans once more.
   if (mark.pending > 0) writes.owe();
-  return 'done';
+  return read === null ? 'failed' : 'done';
 }
 
 /**
@@ -319,14 +388,39 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   folders: [],
   status: 'idle',
   error: null,
+  scanObservation: null,
 
-  async openVault(path) {
-    const ticket = ++openTicket;
+  async openVault(path, options) {
+    const current = () =>
+      options?.stillCurrent?.() !== false && options?.leaveIntent?.isCurrent() !== false;
+    if (!current()) return;
+    const requested = ++vaultSwitchTicket;
+    if (get().vaultPath !== null) {
+      const report = await flushOpenPages();
+      if (requested !== vaultSwitchTicket || !current()) return;
+      if (report.unresolvedOwnerIds.length > 0) {
+        useUiStore.getState().toast(LEAVE_BLOCKED);
+        return;
+      }
+    }
+    if (!current()) return;
+    const accept = () => {
+      invalidatePendingLeaves();
+      const ticket = ++openTicket;
+      // M60.7: undo is per vault and per session; another vault's entries
+      // would revert whatever sits at their paths here.
+      if (get().vaultPath !== path) useUndoStore.getState().clear();
+      else {
+        // A same-path reopen is a new presentation lifetime too. Different
+        // paths advance the same lifetime through the subscription below.
+        vaultOpening += 1;
+      }
+      set({ vaultPath: path, status: 'scanning', error: null, scanObservation: null });
+      return ticket;
+    };
+    const ticket = options?.leaveIntent ? acceptLeaveIntent(options.leaveIntent, accept) : accept();
+    if (ticket === undefined) return;
     const superseded = () => ticket !== openTicket;
-    // M60.7: undo is per vault and per session; another vault's entries
-    // would revert whatever sits at their paths here.
-    if (get().vaultPath !== path) useUndoStore.getState().clear();
-    set({ vaultPath: path, status: 'scanning', error: null });
     // M56.6: who answers in this vault's panel is read now, before the panel
     // can mount, so a handoff that opens the panel finds the binding.
     void useUiStore.getState().loadPanelAgent(path);
@@ -336,16 +430,23 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const scan = ++scanTicket;
     const mark = writes.mark();
     try {
-      const { entries, views, collections, folders } = await readVault(path);
+      let snapshot: Awaited<ReturnType<typeof readVault>> | null = null;
+      try {
+        snapshot = await readVault(path);
+      } catch (error) {
+        // A selected pending journal refuses all ordinary readers. Its existing
+        // startup owner must recover before this open can have a snapshot.
+        if (!selectedRecoveryRequired(error)) throw error;
+      }
       if (superseded()) return;
-      const started = watcherQueue.then(() => ipc.startWatcher(path));
+      const started = watcherQueue.then(() => (superseded() ? undefined : ipc.startWatcher(path)));
       watcherQueue = started.catch(() => undefined);
       const report = await started;
       if (superseded()) return;
       // M60.6: the open put back a change an earlier run left unfinished,
       // so the read above predates the rollback. Say so, and hand off to a
       // rescan pass, which reads the pages as they are now.
-      const putBack = report === undefined ? null : openReportWords(report);
+      const putBack = report == null ? null : openReportWords(report);
       if (putBack !== null) useUiStore.getState().toast(putBack);
       if (inTauri() && !watcherBound) {
         await ipc.listenVaultChanged(() => {
@@ -362,7 +463,18 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       }
       // A rescan inside the window already landed a newer snapshot of this
       // vault, and `status: 'ready'` with it (see `landedScan`).
-      if (scan < landedScan) return;
+      if (superseded() || scan < landedScan) return;
+      if (snapshot === null) {
+        try {
+          snapshot = await readVault(path);
+        } catch (error) {
+          // A newer successful read already owns the presentation. Otherwise
+          // this first usable read failing is an open failure, never emptiness.
+          if (superseded() || scan < landedScan) return;
+          throw error;
+        }
+        if (superseded() || scan < landedScan) return;
+      }
       // An inline edit was pending or settled while this read (a Reopen
       // racing an edit), or the open rolled a stopped change back: the read
       // may predate either, so a rescan pass, which waits for the write,
@@ -372,10 +484,18 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
         return;
       }
       landedScan = scan;
-      set({ entries, entriesVault: path, views, collections, folders, status: 'ready' });
+      set({ ...snapshot, entriesVault: path, status: 'ready' });
     } catch (err) {
       if (superseded()) return;
-      const message = err instanceof Error ? err.message : String(err);
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' &&
+              err !== null &&
+              'message' in err &&
+              typeof err.message === 'string'
+            ? err.message
+            : String(err);
       set({ status: 'error', error: message });
       // Deviation (Task 23, execution-log note 15a, reported): status:'error'
       // was displayed nowhere — a stale last-vault boot landed in a dead
@@ -410,9 +530,85 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       useUiStore.getState().toast(`Couldn't save ${garbled}: its value came through garbled`);
       return false;
     }
+    const target = get().entries.find((e) => e.path === path);
+    if (target?.authority?.kind === 'sqlite_metadata') {
+      if (
+        Object.keys(normalized).length !== 1 ||
+        !Object.hasOwn(normalized, 'full_width') ||
+        (normalized.full_width !== true && normalized.full_width !== null)
+      ) {
+        useUiStore.getState().toast('This metadata action is unavailable for this workspace');
+        return false;
+      }
+      // The body owner publishes its verified version before its callback
+      // resolves. No metadata hold may precede this existing body-only barrier.
+      const ticket = openTicket;
+      const report = await flushOpenPageBodies();
+      if (report.unresolvedOwnerIds.length > 0 || heldOpenPageBodies().includes(path)) {
+        useUiStore.getState().toast(LEAVE_BLOCKED);
+        return false;
+      }
+      if (openTicket !== ticket || get().vaultPath !== vault || refusedAcrossVaults(get()))
+        return false;
+      const current = get().entries.find((entry) => entry.path === path);
+      const expected = current?.authority;
+      if (
+        expected?.kind !== 'sqlite_metadata' ||
+        expected.workspaceId !== target.authority.workspaceId ||
+        expected.recordId !== target.authority.recordId
+      )
+        return false;
+      let ack: Awaited<ReturnType<typeof ipc.setPageFullWidth>>;
+      try {
+        ack = await fencedWrite(
+          () => undefined,
+          () =>
+            ipc.setPageFullWidth(
+              vault,
+              path,
+              expected,
+              normalized.full_width === true ? 'wide' : 'default',
+            ),
+        );
+      } catch {
+        useUiStore.getState().toast(`Couldn't save changes to ${path}`);
+        return false;
+      }
+      // The native receipt is authoritative even if the following refresh fails.
+      if (get().vaultPath === vault && get().entriesVault === vault) {
+        set({
+          entries: get().entries.map((entry) => {
+            const version = entry.authority;
+            if (
+              entry.path !== path ||
+              version?.recordId !== ack.version.recordId ||
+              version.workspaceId !== ack.version.workspaceId ||
+              (version.metadataRevision !== expected.metadataRevision &&
+                version.metadataRevision !== ack.version.metadataRevision)
+            )
+              return entry;
+            const properties = { ...entry.properties };
+            if (ack.fullWidth) properties.full_width = true;
+            else delete properties.full_width;
+            // A known width ACK does not supply a complete metadata snapshot.
+            // Keep a carrier only when its native metadata hash already matches;
+            // otherwise exact properties remain unavailable until actual rescan.
+            const canonicalProperties = version.metadataHash === ack.version.metadataHash
+              ? entry.canonicalProperties
+              : undefined;
+            return { ...entry, properties, canonicalProperties, authority: ack.version, hash: ack.version.bodyHash };
+          }),
+        });
+        try {
+          await get().rescan();
+        } catch {
+          useUiStore.getState().toast("Couldn't refresh vault");
+        }
+      }
+      return true;
+    }
     // Schema enforcement (M2.x properties engine): declared fields must
     // match their YAML-declared shape or the write never reaches disk.
-    const target = get().entries.find((e) => e.path === path);
     if (target !== undefined) {
       const type = Object.hasOwn(normalized, 'type')
         ? typeof normalized.type === 'string'
@@ -489,10 +685,14 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     // owner's existing writes before taking the title write, then hold new
     // saves through the write and rescan. Otherwise a delayed body save can
     // put the previous H1 back after the table reports success.
-    if (editorHoldersOf(path).length > 0) {
-      await flushOpenPages();
+    if (editorHoldersOf(path).length > 0 || heldOpenPageBodies().includes(path)) {
+      const report = await flushOpenPageBodies();
+      if (report.unresolvedOwnerIds.length > 0) {
+        useUiStore.getState().toast(LEAVE_BLOCKED);
+        return false;
+      }
       if (!sameVault() || refusedAcrossVaults(get())) return false;
-      if (heldOpenPages().includes(path)) {
+      if (heldOpenPageBodies().includes(path)) {
         useUiStore.getState().toast('Save or resolve the open page before renaming it');
         return false;
       }
@@ -526,6 +726,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   },
 
   async applyBatch(ops, options = {}) {
+    if (options.stillCurrent?.() === false) return null;
     const state = get();
     const vault = state.vaultPath;
     if (vault === null) return null;
@@ -539,54 +740,83 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     }
     const ticket = openTicket;
     const sameVault = () => openTicket === ticket && get().vaultPath === vault;
-    await flushOpenPages();
-    if (!sameVault() || refusedAcrossVaults(get())) return null;
-    const titleOf = (path: string) => get().entries.find((e) => e.path === path)?.title ?? path;
-    try {
-      const applied = await fencedWrite(
-        () => {
-          const patches = ops.filter((op) => op.op === 'patch');
-          if (patches.length === 0) return;
-          set({
-            entries: get().entries.map((entry) =>
-              patches
-                .filter((op) => op.path === entry.path)
-                .reduce(
-                  (shown, op) => applyEntryPatch(shown, op.set, new Date().toISOString()),
-                  entry,
-                ),
-            ),
-          });
-        },
-        () => ipc.applyBatch(vault, ops),
-      );
-      if (!sameVault()) return applied;
-      await announceExternalWrites(
-        applied.files.map((file) => file.path),
-        () => (sameVault() ? get().rescan() : Promise.resolve()),
-      );
-      if (!sameVault()) return applied;
-      const label = options.undo;
-      if (label !== undefined) {
-        const id = useUndoStore.getState().pushBatch(label, vault, applied.files);
-        useUiStore
-          .getState()
-          .toast(
-            label,
-            id === null
-              ? undefined
-              : { action: { label: UNDO, run: () => void useUndoStore.getState().undoEntry(id) } },
-          );
-      }
-      return applied;
-    } catch (err) {
-      if (!sameVault()) return null;
-      const message = err instanceof Error ? err.message : String(err);
-      if (options.onRefused !== undefined) options.onRefused(message);
-      else useUiStore.getState().toast(batchFailureWords(message, titleOf));
-      await get().rescan(); // disk truth wins: revert the optimistic update
+    const report = await flushOpenPageBodies();
+    if (report.unresolvedOwnerIds.length > 0) {
+      useUiStore.getState().toast(LEAVE_BLOCKED);
       return null;
     }
+    if (!sameVault() || options.stillCurrent?.() === false || refusedAcrossVaults(get()))
+      return null;
+    const titleOf = (path: string) => get().entries.find((e) => e.path === path)?.title ?? path;
+    // Hold existing editor owners before the IPC can replace their bytes.
+    // Import deduplication chooses its final path in Rust, so conservatively
+    // include the current corpus for an import instead of duplicating that
+    // source-identity planner in the UI.
+    const paths = new Set(ops.flatMap((op) => (op.op === 'rename' ? [op.from, op.to] : [op.path])));
+    if (ops.some((op) => op.op === 'import')) {
+      for (const entry of get().entries) paths.add(entry.path);
+    }
+    const result: { applied: BatchApplied | null } = { applied: null };
+    await announceExternalWrites([...paths], async () => {
+      try {
+        result.applied = await fencedWrite(
+          () => {
+            const patches = ops.filter((op) => op.op === 'patch');
+            if (patches.length === 0) return;
+            set({
+              entries: get().entries.map((entry) =>
+                patches
+                  .filter((op) => op.path === entry.path)
+                  .reduce(
+                    (shown, op) => applyEntryPatch(shown, op.set, new Date().toISOString()),
+                    entry,
+                  ),
+              ),
+            });
+          },
+          () => ipc.applyBatch(vault, ops),
+        );
+        try {
+          options.onApplied?.(result.applied);
+        } catch {
+          if (sameVault())
+            useUiStore.getState().toast('Changes saved, but the save status could not be updated.');
+        }
+        if (sameVault()) {
+          try {
+            await get().rescan();
+          } catch {
+            if (sameVault())
+              useUiStore.getState().toast('Changes saved, but the view could not be refreshed.');
+          }
+        }
+      } catch (err) {
+        if (!sameVault()) return;
+        const message = err instanceof Error ? err.message : String(err);
+        if (options.onRefused !== undefined) options.onRefused(message);
+        else useUiStore.getState().toast(batchFailureWords(message, titleOf));
+        try {
+          await get().rescan(); // disk truth wins: revert the optimistic update
+        } catch {
+          // The original refusal is authoritative; a failed refresh cannot replace it.
+        }
+      }
+    });
+    const applied = result.applied;
+    if (applied === null || !sameVault()) return applied;
+    const label = options.undo;
+    if (label !== undefined) {
+      const id = useUndoStore.getState().pushBatch(label, vault, applied.files);
+      useUiStore
+        .getState()
+        .toast(
+          label,
+          id === null
+            ? undefined
+            : { action: { label: UNDO, run: () => void useUndoStore.getState().undoEntry(id) } },
+        );
+    }
+    return applied;
   },
 
   // The documented EXCEPTION to the never-throw invariant (M14.8): callers
@@ -617,6 +847,12 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   },
 }));
 
+useVaultStore.subscribe((next, previous) => {
+  if (next.vaultPath === previous.vaultPath) return;
+  vaultOpening += 1;
+  if (next.scanObservation !== null) useVaultStore.setState({ scanObservation: null });
+});
+
 let schemaCache: { entries: Entry[]; schema: Schema } | null = null;
 
 /** Memoized buildSchema: recomputes only when the entries array identity changes. */
@@ -635,4 +871,69 @@ export function useEntry(path: string | null): Entry | null {
   return useVaultStore((s) =>
     path === null ? null : (s.entries.find((e) => e.path === path) ?? null),
   );
+}
+
+/** Publish only verified body-version facts onto an already matching Entry.
+ * Different metadata needs its actual reread; preserving old properties while
+ * stamping a new metadata hash would misrepresent the canonical projection. */
+export function acceptSelectedEditorVersion(
+  vault: string,
+  path: string,
+  target: SelectedEditorTarget,
+  version: SelectedRecordVersion,
+): boolean {
+  const state = useVaultStore.getState();
+  if (
+    state.vaultPath !== vault ||
+    state.entriesVault !== vault ||
+    version.kind !== 'sqlite_metadata' ||
+    version.workspaceId !== target.workspaceId ||
+    version.recordId !== target.recordId
+  )
+    return false;
+  const entry = state.entries.find((candidate) => candidate.path === path);
+  const previous = entry?.authority;
+  if (
+    entry === undefined ||
+    previous?.kind !== 'sqlite_metadata' ||
+    previous.workspaceId !== target.workspaceId ||
+    previous.recordId !== target.recordId ||
+    previous.metadataHash !== version.metadataHash
+  )
+    return false;
+  const validRevision = (value: string) =>
+    value.length <= SELECTED_AUTHORITY.revision.max.length &&
+    new RegExp(SELECTED_AUTHORITY.revision.pattern).test(value) &&
+    BigInt(value) <= BigInt(SELECTED_AUTHORITY.revision.max);
+  if (!validRevision(previous.metadataRevision) || !validRevision(version.metadataRevision))
+    return false;
+  const comparison = BigInt(version.metadataRevision) - BigInt(previous.metadataRevision);
+  if (comparison < 0n || (comparison === 0n && previous.bodyHash !== version.bodyHash))
+    return false;
+  if (comparison === 0n) return true;
+  useVaultStore.setState({
+    entries: state.entries.map((candidate): Entry =>
+      candidate === entry
+        ? {
+            ...candidate,
+            authority: { ...version },
+            // A version acknowledgement does not replace a separately read
+            // body. Keep its observed hash and re-pair only that known image.
+            hash: candidate.bodyObservation?.observedBodyHash ?? version.bodyHash,
+            ...(candidate.bodyObservation === undefined
+              ? {}
+              : {
+                  bodyObservation: {
+                    ...candidate.bodyObservation,
+                    coherence:
+                      candidate.bodyObservation.observedBodyHash === version.bodyHash
+                        ? 'paired'
+                        : 'external_change',
+                  },
+                }),
+          }
+        : candidate,
+    ),
+  });
+  return true;
 }

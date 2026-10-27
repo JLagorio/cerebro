@@ -5,7 +5,15 @@ import { deepEqual } from '@/lib/deepEqual';
 
 export const MAX_PANES = 4;
 export type PaneId = `p${number}`;
-export type EntryStateKey = 'view.search' | 'view.controls' | 'canvas.scroll' | 'pages.browser';
+export type EntryStateKey =
+  | 'view.search'
+  | 'view.controls'
+  | 'canvas.scroll'
+  | 'pages.browser'
+  | 'source.visitId'
+  | 'source.request'
+  | `source.discovery:${string}`
+  | `source.discovery.scroll:${string}`;
 export interface NavSlot {
   selection: Selection;
   byAgent: boolean;

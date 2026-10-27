@@ -2461,7 +2461,7 @@ describe('Claude Code session files, in the browser (M56.3)', () => {
         connectors: false,
         attended: true,
       });
-      if ('deferred' in start || 'settled' in start)
+      if ('deferred' in start || 'settled' in start || 'observed_generation' in start)
         throw new Error('an attended run always starts');
       const stop = onAgentEvent((event) => {
         if (event.kind === 'Done') done();
@@ -2861,7 +2861,8 @@ describe('a mock run that withheld the shell (M57.2)', () => {
       attended: false,
       actor: 'process:shell-probe',
     });
-    if ('deferred' in start || 'settled' in start) throw new Error('an unlaned run starts');
+    if ('deferred' in start || 'settled' in start || 'observed_generation' in start)
+      throw new Error('an unlaned run starts');
     expect(start.durableId).toMatch(/^mock-run-/);
     const runs = await mock.fleetRunsPage({ limit: 200 });
     expect(runs).toHaveLength(before + 1);
@@ -2883,7 +2884,8 @@ describe('a mock run that withheld the shell (M57.2)', () => {
       connectors: false,
       attended: false,
     });
-    if ('deferred' in plain || 'settled' in plain) throw new Error('never deferred');
+    if ('deferred' in plain || 'settled' in plain || 'observed_generation' in plain)
+      throw new Error('never deferred');
     expect(plain.durableId).toBeNull();
     expect(await mock.fleetRunsPage({ limit: 200 })).toHaveLength(before + 1);
     await stopAllAgents();

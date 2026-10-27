@@ -21,8 +21,10 @@
   min-width: 0;
 }
 
-/* The jump takes what its way out leaves it; its title truncates, never
-   the host after it (trace.css). */
+/* The jump takes what its way out leaves it. Its title truncates first; a
+   long host then shrinks too, held to under half the line so the title
+   keeps a floor and the line never outgrows the 300px rail. The full host
+   stays in the jump's accessible name. */
 .cb-rail-source-jump {
   display: flex;
   flex: 1 1 auto;
@@ -37,6 +39,14 @@
   cursor: pointer;
   outline: none;
   transition: background-color var(--motion-hover);
+}
+.cb-rail-source-jump .cb-ai-trace-description {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cb-rail-source-jump:hover {
   background: var(--surface-sunken);

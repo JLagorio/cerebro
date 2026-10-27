@@ -46,7 +46,12 @@ async function mounted(section: LabSection, state: LabState): Promise<HTMLElemen
 describe('the sections', () => {
   it('are registered, sorted by id, each with the five states in order', () => {
     expect(sections.map((s) => s.id)).toEqual(
-      expect.arrayContaining(['agent-spend', 'fleet-runs']),
+      expect.arrayContaining([
+        'agent-spend',
+        'fleet-runs',
+        'recovery-settings',
+        'recovery-versions',
+      ]),
     );
     expect(sections.map((s) => s.id)).toEqual([...sections.map((s) => s.id)].sort());
     for (const section of sections) {

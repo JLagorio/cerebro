@@ -1,3 +1,5 @@
+import { RecoveryBufferContext } from '@/editor/recoveryBuffers';
+import { DeletedDraftRecovery, useRecoveryHold } from '@/editor/DeletedDraftRecoveryFace';
 import { ConvertBoardDialog } from '@/whiteboard/ConvertBoardDialog';
 import { readMermaidBoard } from '@/whiteboard/mermaidBoard';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -253,32 +255,39 @@ type CanvasProps = Pick<
 > & { file: string; viewName: string };
 function CanvasBoard(props: CanvasProps) {
   const file = useCanvasFile(props.file);
+  const vault = useVaultStore((s) => s.vaultPath);
   if (file.state === 'loading')
     return <div data-testid="whiteboard-loading" className="flex-1" aria-busy="true" />;
   if (file.state === 'missing')
     return (
-      <div data-testid="whiteboard-tombstone" className="flex min-h-0 flex-1">
-        <EmptyState
-          icon="file-x"
-          title="This whiteboard's file is gone"
-          description={`${props.file} was renamed, moved, or deleted outside this tab.`}
-          className="flex-1"
-          action={
-            props.onPresentationChange && (
-              <Button
-                onClick={() =>
-                  props.onPresentationChange?.({
-                    ...props.presentation,
-                    whiteboard: { file: null },
-                  })
-                }
-              >
-                Start a new canvas
-              </Button>
-            )
-          }
-        />
-      </div>
+      <DeletedDraftRecovery
+        vaultId={vault}
+        path={props.file}
+        fallback={
+          <div data-testid="whiteboard-tombstone" className="flex min-h-0 flex-1">
+            <EmptyState
+              icon="file-x"
+              title="This whiteboard's file is gone"
+              description={`${props.file} was renamed, moved, or deleted outside this tab.`}
+              className="flex-1"
+              action={
+                props.onPresentationChange && (
+                  <Button
+                    onClick={() =>
+                      props.onPresentationChange?.({
+                        ...props.presentation,
+                        whiteboard: { file: null },
+                      })
+                    }
+                  >
+                    Start a new canvas
+                  </Button>
+                )
+              }
+            />
+          </div>
+        }
+      />
     );
   if (file.state === 'unavailable')
     return <CanvasUnavailable reason={file.reason} preview={file.preview} />;
@@ -292,11 +301,20 @@ function CanvasReady({
 }: CanvasProps & { ready: Extract<CanvasFile, { state: 'ready' }> }) {
   const board = useScene(ready.editor),
     vault = useVaultStore((s) => s.vaultPath);
+  const recoveryHeld = useRecoveryHold(vault, file);
   const handle = useRef<BoardCanvasHandle>(null),
     addRef = useRef<HTMLButtonElement>(null);
   const [adding, setAdding] = useState(false);
   const placed = placedPaths(board),
     offered = entries.filter((entry) => !placed.has(entry.path));
+  if (ready.held === 'missing' || recoveryHeld)
+    return (
+      <DeletedDraftRecovery
+        vaultId={vault}
+        path={file}
+        fallback={<CanvasHeldFace held="missing" reload={ready.reload} />}
+      />
+    );
   return (
     <>
       {ready.readOnly && <CanvasReadOnly />}
@@ -372,8 +390,18 @@ function MermaidBoard({
   onPresentationChange?: (next: Presentation) => void;
   viewName: string;
 }) {
-  const { code, loadFailed, saveState, handleChange, undo, redo, canUndo, canRedo } =
-    useDiagramFile(file);
+  const {
+    code,
+    loadFailed,
+    saveState,
+    handleChange,
+    undo,
+    redo,
+    retry,
+    canUndo,
+    canRedo,
+    recoveryCapture,
+  } = useDiagramFile(file);
   // Shared with the editor inside FullScreenDiagramEditor, so "Add record"
   // places a node exactly as `+ Node` does (M29.52).
   const placerRef = useRef<NodePlacer | null>(null);
@@ -384,6 +412,11 @@ function MermaidBoard({
   // bind a node to a record instead of being URL-only. `in-place`, not
   // `navigate`: this tab IS the backdrop the user is standing on (M9.3).
   const vaultEntries = useVaultStore((s) => s.entries);
+  const vault = useVaultStore((s) => s.vaultPath);
+  const hasEntry = vaultEntries.some((entry) => entry.path === file);
+  const recoveryHeld = useRecoveryHold(vault, file);
+  const hadEntry = useRef(hasEntry);
+  if (hasEntry) hadEntry.current = true;
   const convertible = useMemo(
     () => code !== null && readMermaidBoard(code, vaultEntries).ok,
     [code, vaultEntries],
@@ -457,7 +490,7 @@ function MermaidBoard({
     handleChange(placed === null ? result.code : serialize(placed));
   };
 
-  if (loadFailed) {
+  if (loadFailed || (hadEntry.current && !hasEntry) || recoveryHeld) {
     // The pointer outlived its file: renamed folder, trashed file, hand-edited
     // YAML. Nothing in the app rewrites path references inside files on a
     // folder rename (navStore remaps SELECTIONS only), so this face is the
@@ -465,32 +498,38 @@ function MermaidBoard({
     // "Start a new canvas" clears the pointer to the in-memory null state,
     // which re-arms create-on-open.
     return (
-      <div data-testid="whiteboard-tombstone" className="flex min-h-0 flex-1">
-        <EmptyState
-          icon="file-x"
-          title="This whiteboard's file is gone"
-          description={`${file} was renamed, moved, or deleted outside this tab.`}
-          className="flex-1"
-          action={
-            onPresentationChange && (
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  onPresentationChange({ ...presentation, whiteboard: { file: null } })
-                }
-              >
-                Start a new canvas
-              </Button>
-            )
-          }
-        />
-      </div>
+      <DeletedDraftRecovery
+        vaultId={vault}
+        path={file}
+        fallback={
+          <div data-testid="whiteboard-tombstone" className="flex min-h-0 flex-1">
+            <EmptyState
+              icon="file-x"
+              title="This whiteboard's file is gone"
+              description={`${file} was renamed, moved, or deleted outside this tab.`}
+              className="flex-1"
+              action={
+                onPresentationChange && (
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      onPresentationChange({ ...presentation, whiteboard: { file: null } })
+                    }
+                  >
+                    Start a new canvas
+                  </Button>
+                )
+              }
+            />
+          </div>
+        }
+      />
     );
   }
   if (code === null) {
     return <div data-testid="whiteboard-loading" className="flex-1" aria-busy="true" />;
   }
-  return (
+  const content = (
     <div ref={diagramHost} className="flex min-h-0 flex-1 flex-col">
       {/* The whiteboard's own bar — NOT part of FullScreenDiagramEditor.
           Add record lists the view's entries; conversion creates a separate file. */}
@@ -517,6 +556,15 @@ function MermaidBoard({
             className="rounded-md border border-n-200 px-2 py-0.5 text-xs text-n-700 hover:bg-n-50"
           >
             Convert to whiteboard
+          </button>
+        )}
+        {saveState === 'failed' && (
+          <button
+            type="button"
+            className="rounded-md border border-n-200 px-2 py-1 text-xs text-n-700 hover:bg-n-50"
+            onClick={() => void retry()}
+          >
+            Retry save
           </button>
         )}
         {SAVE_LABEL[saveState] !== null && (
@@ -560,24 +608,27 @@ function MermaidBoard({
           }
         />
       )}
-      <FullScreenDiagramEditor
-        code={code}
-        onChangeCode={handleChange}
-        title={viewName}
-        embedded
-        // The one surface that gets the dot grid (M29.52): a whiteboard is a
-        // place you arrange things on, and every tool that offers one — Miro,
-        // Lucidchart, ClickUp — says so with dots. A `.mmd` file does not get
-        // them; that surface is a document that happens to pan.
-        dots
-        history={{ undo, redo, canUndo, canRedo }}
-        placerRef={placerRef}
-        entries={vaultEntries}
-        onOpenPath={openPath}
-        overlay={<RecordChipOverlay code={code} entries={vaultEntries} schema={schema} />}
-      />
+      <RecoveryBufferContext.Provider value={recoveryCapture}>
+        <FullScreenDiagramEditor
+          code={code}
+          onChangeCode={handleChange}
+          title={viewName}
+          embedded
+          // The one surface that gets the dot grid (M29.52): a whiteboard is a
+          // place you arrange things on, and every tool that offers one — Miro,
+          // Lucidchart, ClickUp — says so with dots. A `.mmd` file does not get
+          // them; that surface is a document that happens to pan.
+          dots
+          history={{ undo, redo, canUndo, canRedo }}
+          placerRef={placerRef}
+          entries={vaultEntries}
+          onOpenPath={openPath}
+          overlay={<RecordChipOverlay code={code} entries={vaultEntries} schema={schema} />}
+        />
+      </RecoveryBufferContext.Provider>
     </div>
   );
+  return content;
 }
 
 /** The record's key (`FLD-7`), or ''. The alias QuickOpen ranks against. */

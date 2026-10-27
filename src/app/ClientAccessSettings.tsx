@@ -158,6 +158,7 @@ function ClientAccessBody({ vault }: { vault: string | null }) {
           size="sm"
           variant="secondary"
           disabled={store.accessStatus !== 'ready' || store.busy}
+          tabIndex={0}
           onClick={() => void store.setAccess(store.access?.enabled ?? false, Number(port))}
         >
           Save port

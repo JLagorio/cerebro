@@ -467,6 +467,54 @@ deliberately does not do — with your machine is most of its security story.
   The check runs before any token, lease or run row exists, again before a
   handed-to run starts, and again before the child is admitted. Each value
   is its own argv element, never passed through a shell.
+- **A message is always the prompt, never a flag** (M92.0). Every run that
+  takes its message in argv puts it last, after a lone `--`, so a message
+  that starts with `-` (a markdown bullet, a negative number, `-v`) cannot be
+  read as an option. Before this, Claude Code 2.1.250 refused "- buy milk"
+  as an unknown option and printed its version for "-v …" (measured). An
+  answer's resume ends `--resume <session> -- ""`.
+- **A conversation you watch takes its prompt on stdin, and stdin carries
+  nothing else** (M92.13). A run you watch, on a Claude Code new enough for
+  Cerebro's gate, reads your message from stdin
+  (`--input-format stream-json`), because Claude Code says how full a
+  session's context is only there, in the run's own process. One thread in
+  Cerebro owns that pipe. It writes your message as one user line; once the
+  turn's result is in, one `get_context_usage` request; and then it closes
+  the pipe. It never sends a permission answer, an interrupt, a mode change
+  or an approval: your answers still enter only through the app's answer
+  commands. A request Claude Code makes of the run (a permission ask, say)
+  is answered by closing stdin, which refuses that call while the turn goes
+  on. Stdin closes on the context answer, on any such request, 2 s after an
+  ask nobody answers, and on every way a run ends: the end of its stream, a
+  crash, a refused start, Stop and quit. Once the ask is written, a run still
+  there 2 s after its stdin closed is ended, TERM then KILL. Every other run,
+  an answer's resume included, keeps its message in argv.
+- **How full a conversation's context is stays in memory** (M91.5, M92.13).
+  The composer's Context and the conversation's Context card show Claude
+  Code's own numbers for a session: how much of its window the latest turn
+  used and, from a watched run's answer to the context ask, the breakdown by
+  category (system prompt, tools, messages, free space and the like), the
+  model, autocompact, how many memory files it holds, and each MCP server's
+  name, its tool count and what its loaded tools take. Cerebro keeps the latest reading per session in memory only:
+  it is never sent on the event channel, journaled, logged or stored, and
+  the app reads it when a turn ends, a thread opens or a branch starts.
+  Everything else in Claude Code's answer is dropped, the memory files'
+  paths and the tools' names among it, and a breakdown's debug form prints
+  only how many rows it held. How long Claude Code worked on each turn, its
+  result's `duration_ms`, does travel with the turn's events and is saved
+  with the conversation for its "Worked for" line (M92.2); it is a duration,
+  never a token count or a cost.
+- **What a run reaches is said in facts it already had** (M92.8). Once its
+  first start is admitted, every run but Cerebro's internal ones sends one
+  Reach event, built from the same values as its argv: the connectors from
+  the vault's list it loads, each with the status its start named; the ones
+  its record named that it does not get, as its prompt already names them;
+  whether it also loads your own Claude Code servers, which it never names;
+  its permission mode; whether it holds Cerebro's tools; and how its plan
+  decided each family of tools. It carries no token, URL, header or command.
+  The reply keeps it in memory, and a conversation saves its newest one with
+  the thread in the app's own storage, so the conversation's Connectors and
+  Environment cards can say what it reached after a restart.
 - **A vault cannot choose who the panel answers as** (M56.6). Settings binds
   a vault's assistant panel to an Agent record by its handle, and the binding
   is the app's own `config.json`, keyed by vault path, never a file in the
@@ -935,11 +983,22 @@ This is an exact-name boundary, not a claim that arbitrary connectors are safe.
 A third-party server can expose another spelling or a general execution tool;
 those are outside this inventory. Legacy attended runs that inherit global CLI
 connectors without a vault connector list do not disclose their server names to
-Cerebro, so this argv join cannot bind them. A shell-granted run can also reach
+Cerebro before they start, so this argv join cannot bind them; a watched run's
+context breakdown names those servers only after its turn, in memory (M92.13).
+A shell-granted run can also reach
 external services through its shell. Use configured, approved connectors and
 least privilege; the prompt alone is not the boundary. The owner still owes the
 isolated toy-server check proving the pinned CLI hides denied send tools while
 leaving draft creation available. No test sends mail or calls an owner's account.
+
+The conversation's Connectors card says this in one line when the
+conversation's latest run loaded a connector (M92.9): "Mail is drafted, never
+sent: Cerebro blocks the known send tools by name." "By name" is the
+exact-name boundary above. The line does not
+repeat its exceptions (another spelling, a general execution tool, legacy runs
+and the shell); this section states them. Where a vault has no connector list,
+the card says instead that a turn you watch also loads your own Claude Code
+connectors, whose send tools Cerebro cannot block by name.
 
 Foreign transcript calls show the CLI server spelling and a connector chip;
 they are never styled as vault changes and offer no vault diff. The structured

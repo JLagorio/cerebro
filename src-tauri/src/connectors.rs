@@ -36,6 +36,7 @@
 //! embeds env and header VALUES, which are credential material, and app
 //! storage must not become a second plaintext home for them.
 
+use crate::policy::connector_ownership::{self, Ownership};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -270,7 +271,9 @@ const HEARD_ALIKE: &str = "the CLI hears its name the same as another connector'
 /// is not merged, once, in the record's order, with the first reason that
 /// holds: connectors are off in Settings, the vault has no list or its list
 /// cannot be read, or the entry is absent, switched off, refused by name,
-/// malformed or not approved here. A record that names none misses none. A
+/// malformed or not approved here. Explicit ownership is checked before its
+/// switch or raw spec: a managed/invalid entry cannot be a CLI route. A
+/// record that names none misses none. A
 /// merged connector the record's own declared tools then leave out is not
 /// missing: the record asked for that (`agent::run_connectors`).
 pub fn connector_context(
@@ -397,6 +400,9 @@ fn why_unmerged(config: &Value, name: &str) -> String {
     else {
         return NOT_LISTED.to_string();
     };
+    if let Some(reason) = connector_ownership::refusal(spec) {
+        return reason.to_string();
+    }
     if !is_enabled(spec) {
         return OFF_IN_LIST.to_string();
     }
@@ -780,8 +786,11 @@ fn enabled_servers(config: &Value, approved: &[String]) -> Map<String, Value> {
 }
 
 /// One entry as the run's mcp-config would hold it, with the approval key
-/// its exact spec needs, or `None` when it is malformed.
+/// its exact spec needs, or `None` when ownership denies it or it is malformed.
 fn spec_entry(name: &str, spec: &Value) -> Option<(Map<String, Value>, String)> {
+    if connector_ownership::ownership(spec) != Ownership::Cli {
+        return None;
+    }
     let mut entry = Map::new();
     let key = match spec.get("transport").and_then(Value::as_str) {
         // What reaches the run is type, url, headers, oauth and timeout,
@@ -875,13 +884,15 @@ pub fn status_rows(
         return Ok(Vec::new());
     };
     Ok(servers
-        .keys()
-        .map(|name| {
+        .iter()
+        .map(|(name, spec)| {
             let seen = observations.iter().find(|row| row.connector == *name);
             StatusRow {
                 connector: name.clone(),
                 cli_name: cli_name(name),
-                refused: refused.get(name).map(|reason| reason.to_string()),
+                refused: connector_ownership::refusal(spec)
+                    .map(str::to_string)
+                    .or_else(|| refused.get(name).map(|reason| reason.to_string())),
                 state: seen.map(|row| row.state.clone()),
                 signal: seen.map(|row| row.signal.clone()),
                 seen_at: seen.map(|row| row.seen_at.clone()),
@@ -2192,5 +2203,359 @@ mod tests {
         assert!(status_rows(&vault, &seen).is_err());
         std::fs::write(vault.join(CONFIG_PATH), [0xff, 0xfe, 0xfd]).unwrap();
         assert!(status_rows(&vault, &seen).is_err());
+    }
+
+    // M96.4a: synthetic explicit ownership admission, with exact-spec CLI controls.
+    // These helpers only build JSON; connector_context/spec_entry cannot execute it.
+    fn m96_owner_legacy_specs() -> Vec<(&'static str, Value, Value)> {
+        vec![
+            (
+                "m96-http",
+                json!({
+                    "transport": "http", "url": "https://m96-route.example.test/mcp",
+                    "headers": {"Authorization": "m96-header-sentinel"},
+                    "oauth": {"scopes": "read write"}, "timeout": 5000, "enabled": true
+                }),
+                json!({
+                    "type": "http", "url": "https://m96-route.example.test/mcp",
+                    "headers": {"Authorization": "m96-header-sentinel"},
+                    "oauth": {"scopes": "read write"}, "timeout": 5000
+                }),
+            ),
+            (
+                "m96-stdio",
+                json!({
+                    "transport": "stdio", "command": "m96-unexecuted-command",
+                    "args": ["m96-arg-sentinel"], "env": {"TOKEN": "m96-env-sentinel"},
+                    "enabled": true
+                }),
+                json!({
+                    "type": "stdio", "command": "m96-unexecuted-command",
+                    "args": ["m96-arg-sentinel"], "env": {"TOKEN": "m96-env-sentinel"}
+                }),
+            ),
+        ]
+    }
+
+    fn m96_owner_assert_safe_reason(reason: &str, managed: bool) {
+        let words = reason.to_ascii_lowercase();
+        if managed {
+            assert!(
+                words.contains("managed") && words.contains("unavailable"),
+                "{reason}"
+            );
+        } else {
+            assert!(words.contains("ownership"), "{reason}");
+            assert!(
+                words.contains("file") || words.contains("correct"),
+                "{reason}"
+            );
+        }
+        for payload in [
+            "https://m96-route.example.test/mcp",
+            "m96-header-sentinel",
+            "m96-unexecuted-command",
+            "m96-arg-sentinel",
+            "m96-env-sentinel",
+            "m96-reference-sentinel",
+        ] {
+            assert!(
+                !reason.contains(payload),
+                "refusal disclosed synthetic route payload"
+            );
+        }
+    }
+
+    fn m96_owner_assert_named_denial(
+        vault: &Path,
+        name: &str,
+        spec: &Value,
+        approval: &str,
+        managed: bool,
+    ) {
+        save_raw(vault, &json!({"servers": {(name): spec}}).to_string()).unwrap();
+        let named = vec![name.to_string()];
+        let approved = vec![approval.to_string()];
+        for attended in [false, true] {
+            let context = connector_context(vault, true, Some(&named), attended, &approved);
+            assert!(context.strict);
+            assert!(
+                context.servers.is_empty(),
+                "ownership must deny an otherwise approved route"
+            );
+            assert_eq!(context.missing.len(), 1);
+            assert_eq!(context.missing[0].name, name);
+            m96_owner_assert_safe_reason(&context.missing[0].reason, managed);
+            let rows = status_rows(vault, &[]).unwrap();
+            assert_eq!(rows.len(), 1, "a refused route is still a configured row");
+            assert_eq!(
+                rows[0].refused.as_deref(),
+                Some(context.missing[0].reason.as_str())
+            );
+        }
+        let unnamed = connector_context(vault, true, None, true, &approved);
+        assert!(unnamed.strict && unnamed.servers.is_empty() && unnamed.missing.is_empty());
+        assert_eq!(
+            read_raw(vault).unwrap(),
+            json!({"servers": {(name): spec}}).to_string()
+        );
+        assert_eq!(
+            approved,
+            [approval.to_string()],
+            "selection must not rewrite old approvals"
+        );
+    }
+
+    #[test]
+    fn m96_owner_http_marked_route_denied_with_matching_approval() {
+        let vault = temp_vault("m96-owner-http");
+        let (name, legacy, expected) = m96_owner_legacy_specs().remove(0);
+        let (entry, approval) = spec_entry(name, &legacy).unwrap();
+        assert_eq!(Value::Object(entry), expected);
+        save_raw(&vault, &json!({"servers": {(name): legacy}}).to_string()).unwrap();
+        let control = connector_context(&vault, true, None, true, std::slice::from_ref(&approval));
+        assert_eq!(control.servers.get(name), Some(&expected));
+        let mut marked = legacy;
+        marked["executionOwner"] = json!("cerebro");
+        marked["secretRef"] = json!({"opaque": "m96-reference-sentinel"});
+        m96_owner_assert_named_denial(&vault, name, &marked, &approval, true);
+    }
+
+    #[test]
+    fn m96_owner_stdio_marked_route_denied_with_matching_approval() {
+        let vault = temp_vault("m96-owner-stdio");
+        let (name, legacy, expected) = m96_owner_legacy_specs().remove(1);
+        let (entry, approval) = spec_entry(name, &legacy).unwrap();
+        assert_eq!(Value::Object(entry), expected);
+        save_raw(&vault, &json!({"servers": {(name): legacy}}).to_string()).unwrap();
+        let control = connector_context(&vault, true, None, true, std::slice::from_ref(&approval));
+        assert_eq!(control.servers.get(name), Some(&expected));
+        let mut marked = legacy;
+        marked["executionOwner"] = json!("cerebro");
+        m96_owner_assert_named_denial(&vault, name, &marked, &approval, true);
+    }
+
+    #[test]
+    fn m96_owner_direct_spec_cannot_bypass_ownership() {
+        for (name, legacy, expected) in m96_owner_legacy_specs() {
+            assert_eq!(
+                Value::Object(spec_entry(name, &legacy).unwrap().0),
+                expected
+            );
+            for marker in [
+                json!({"executionOwner": "cerebro"}),
+                json!({"executionOwner": "unknown"}),
+                json!({"secretRef": null}),
+                json!({"executionOwner": "cli", "secretRef": "m96-reference-sentinel"}),
+            ] {
+                let mut marked = legacy.clone();
+                marked
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(marker.as_object().unwrap().clone());
+                assert!(
+                    spec_entry(name, &marked).is_none(),
+                    "raw spec builder must enforce ownership"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn m96_owner_invalid_marker_values_fail_closed() {
+        let vault = temp_vault("m96-owner-invalid");
+        for (name, legacy, _) in m96_owner_legacy_specs() {
+            let approval = spec_entry(name, &legacy).unwrap().1;
+            for owner in [
+                Value::Null,
+                json!(7),
+                json!(true),
+                json!(""),
+                json!("Cerebro"),
+                json!("CLI"),
+                json!("unknown"),
+                json!([]),
+                json!({}),
+            ] {
+                let mut marked = legacy.clone();
+                marked["executionOwner"] = owner;
+                m96_owner_assert_named_denial(&vault, name, &marked, &approval, false);
+            }
+        }
+    }
+
+    #[test]
+    fn m96_owner_orphan_reference_never_falls_back_to_cli() {
+        let vault = temp_vault("m96-owner-orphan");
+        for (name, legacy, _) in m96_owner_legacy_specs() {
+            let approval = spec_entry(name, &legacy).unwrap().1;
+            for owner in [None, Some(json!("cli"))] {
+                for reference in [
+                    Value::Null,
+                    json!(7),
+                    json!(false),
+                    json!(""),
+                    json!("m96-reference-sentinel"),
+                    json!([]),
+                    json!({"opaque": "m96-reference-sentinel"}),
+                ] {
+                    let mut marked = legacy.clone();
+                    if let Some(value) = &owner {
+                        marked["executionOwner"] = value.clone();
+                    }
+                    marked["secretRef"] = reference;
+                    m96_owner_assert_named_denial(&vault, name, &marked, &approval, false);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn m96_owner_managed_incomplete_reference_and_disabled_entries_remain_denied() {
+        let vault = temp_vault("m96-owner-managed-reference");
+        for (name, legacy, _) in m96_owner_legacy_specs() {
+            let approval = spec_entry(name, &legacy).unwrap().1;
+            for enabled in [true, false] {
+                for reference in [
+                    None,
+                    Some(Value::Null),
+                    Some(json!(7)),
+                    Some(json!({
+                        "version": 1, "service": "m96-reference-sentinel", "account": "synthetic"
+                    })),
+                ] {
+                    let mut marked = legacy.clone();
+                    marked["executionOwner"] = json!("cerebro");
+                    marked["enabled"] = json!(enabled);
+                    if let Some(value) = reference {
+                        marked["secretRef"] = value;
+                    }
+                    assert!(spec_entry(name, &marked).is_none());
+                    m96_owner_assert_named_denial(&vault, name, &marked, &approval, true);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn m96_owner_status_refusal_agrees_without_claiming_managed_capability() {
+        let vault = temp_vault("m96-owner-status");
+        let (name, mut marked, _) = m96_owner_legacy_specs().remove(0);
+        marked["executionOwner"] = json!("cerebro");
+        save_raw(&vault, &json!({"servers": {(name): marked}}).to_string()).unwrap();
+        let rows = status_rows(&vault, &[]).unwrap();
+        assert_eq!(rows.len(), 1);
+        m96_owner_assert_safe_reason(rows[0].refused.as_deref().expect("managed refusal"), true);
+        assert!(rows[0].state.is_none() && rows[0].seen_at.is_none());
+        std::fs::write(vault.join(CONFIG_PATH), "{not json").unwrap();
+        let named = vec![name.to_string()];
+        let context = connector_context(&vault, true, Some(&named), true, &[]);
+        assert!(context.strict && context.servers.is_empty());
+        assert_eq!(context.missing[0].reason, UNREADABLE_LIST);
+        assert!(status_rows(&vault, &[]).is_err());
+    }
+
+    #[test]
+    fn m96_owner_mixed_list_filters_only_non_cli_rows() {
+        let vault = temp_vault("m96-owner-mixed");
+        let mut servers = Map::new();
+        let mut approved = Vec::new();
+        for (name, marker) in [
+            ("legacy", None),
+            ("explicit-cli", Some("cli")),
+            ("managed", Some("cerebro")),
+            ("invalid", Some("unknown")),
+        ] {
+            let mut spec = json!({"transport": "http", "url": "https://mixed.example.test/mcp", "enabled": true});
+            approved.push(spec_entry(name, &spec).unwrap().1);
+            if let Some(owner) = marker {
+                spec["executionOwner"] = json!(owner);
+            }
+            servers.insert(name.to_string(), spec);
+        }
+        save_raw(&vault, &json!({"servers": servers}).to_string()).unwrap();
+        let named = vec![
+            "legacy".into(),
+            "explicit-cli".into(),
+            "managed".into(),
+            "invalid".into(),
+        ];
+        for (attended, allow) in [
+            (true, None),
+            (true, Some(named.as_slice())),
+            (false, Some(named.as_slice())),
+        ] {
+            let context = connector_context(&vault, true, allow, attended, &approved);
+            assert!(context.strict);
+            let mut names = merged_names(&context.servers);
+            names.sort();
+            assert_eq!(names, ["explicit-cli", "legacy"]);
+            if allow.is_some() {
+                assert_eq!(
+                    context
+                        .missing
+                        .iter()
+                        .map(|row| row.name.as_str())
+                        .collect::<Vec<_>>(),
+                    ["managed", "invalid"]
+                );
+                m96_owner_assert_safe_reason(&context.missing[0].reason, true);
+                m96_owner_assert_safe_reason(&context.missing[1].reason, false);
+            }
+        }
+        let unattended = connector_context(&vault, true, None, false, &approved);
+        assert!(unattended.strict && unattended.servers.is_empty());
+        let none: Vec<String> = Vec::new();
+        assert!(
+            connector_context(&vault, true, Some(&none), true, &approved)
+                .servers
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn m96_owner_explicit_cli_preserves_exact_legacy_output_and_requires_approval() {
+        let vault = temp_vault("m96-owner-cli-control");
+        for (name, legacy, expected) in m96_owner_legacy_specs() {
+            let (entry, approval) = spec_entry(name, &legacy).unwrap();
+            assert_eq!(Value::Object(entry), expected);
+            let mut explicit = legacy;
+            explicit["executionOwner"] = json!("cli");
+            let (entry, key) = spec_entry(name, &explicit).unwrap();
+            assert_eq!(Value::Object(entry), expected);
+            assert_eq!(key, approval);
+            save_raw(&vault, &json!({"servers": {(name): explicit}}).to_string()).unwrap();
+            assert_eq!(
+                connector_context(&vault, true, None, true, &[key])
+                    .servers
+                    .get(name),
+                Some(&expected)
+            );
+            assert!(connector_context(&vault, true, None, true, &[])
+                .servers
+                .is_empty());
+        }
+    }
+
+    #[test]
+    fn m96_owner_absent_list_inheritance_remains_bounded_legacy_behavior() {
+        let vault = temp_vault("m96-owner-absent-control");
+        let unnamed = connector_context(&vault, true, None, true, &[]);
+        assert!(!unnamed.strict && unnamed.servers.is_empty());
+        let unattended = connector_context(&vault, true, None, false, &[]);
+        assert!(unattended.strict && unattended.servers.is_empty());
+        let named = vec!["legacy".to_string()];
+        let pinned = connector_context(&vault, true, Some(&named), true, &[]);
+        assert!(pinned.strict && pinned.servers.is_empty());
+        assert_eq!(pinned.missing[0].reason, NO_LIST);
+        let isolated = isolate_client_access(
+            unnamed,
+            &crate::app_config::ClientAccessConfig {
+                enabled: true,
+                port: 37500,
+            },
+            None,
+        );
+        assert!(isolated.strict && isolated.servers.is_empty());
     }
 }

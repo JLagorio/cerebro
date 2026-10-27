@@ -686,8 +686,8 @@ const notRecordedRun = (runId: string, reason: string): RunChangeset => ({
 /** A run in a vault with no history, as `conversation::without_history`
  *  reads it: the paths its booked writes name, mail left out. */
 async function readBackWithoutHistory(runId: string): Promise<RunChangeset> {
-  // A listed run with no detail booked no writes: Rust reads its row's
-  // `writes_booked`, and a row that says nothing is not recorded.
+  // A listed run the mock holds no detail for has no writes the mock booked,
+  // so they read not recorded, as a row whose `writes_booked` is 0 does.
   const wrote = await fleetRunDetail(runId).then(
     (detail): RunPageWrites => detail.wrote,
     (): RunPageWrites => ({ state: 'not_recorded' }),

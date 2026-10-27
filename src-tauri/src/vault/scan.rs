@@ -66,7 +66,7 @@ fn iso_or_now(t: Option<std::time::SystemTime>) -> String {
     chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-fn timestamps(meta: Option<&std::fs::Metadata>) -> (String, String) {
+pub(crate) fn timestamps(meta: Option<&std::fs::Metadata>) -> (String, String) {
     let modified = meta.and_then(|m| m.modified().ok());
     let created = meta.and_then(|m| m.created().ok()).or(modified);
     (iso_or_now(created), iso_or_now(modified))
@@ -79,6 +79,7 @@ pub(crate) struct NoteFile {
     pub rel: String,
     pub path: PathBuf,
     pub meta: Option<std::fs::Metadata>,
+    boundary: std::sync::Arc<crate::workspace_service::boundary::Inspection>,
 }
 
 /// The scan's walk (M59.4): every page, diagram and whiteboard, in
@@ -86,7 +87,14 @@ pub(crate) struct NoteFile {
 /// ([`is_hidden`]), and `views/` and `attachments/` are skipped. The scan
 /// and search's corpus (`vault/corpus.rs`) both walk with it, so the two
 /// can never list different notes.
-pub(crate) fn note_files(vault: &Path) -> Result<Vec<NoteFile>, String> {
+pub(crate) struct NoteInventory {
+    pub files: Vec<NoteFile>,
+    pub boundary: std::sync::Arc<crate::workspace_service::boundary::Inspection>,
+}
+pub(crate) fn note_files(vault: &Path) -> Result<NoteInventory, String> {
+    let boundary = std::sync::Arc::new(
+        crate::workspace_service::boundary::inspect_legacy_tree(vault).map_err(|e| e.message)?,
+    );
     if !vault.is_dir() {
         return Err(format!("not a directory: {}", vault.display()));
     }
@@ -112,36 +120,45 @@ pub(crate) fn note_files(vault: &Path) -> Result<Vec<NoteFile>, String> {
             rel: rel_path(vault, item.path())?,
             path: item.path().to_path_buf(),
             meta: std::fs::metadata(item.path()).ok(),
+            boundary: boundary.clone(),
         });
     }
-    Ok(files)
+    boundary.revalidate().map_err(|e| e.message)?;
+    Ok(NoteInventory { files, boundary })
 }
 
 /// A board's size is checked on the opened file before allocating its body;
 /// the bounded read also closes a growth race after metadata. Scan and search
 /// share this one read, including unavailable UTF-8 and over-limit boards.
-pub(crate) fn read_content(file: &NoteFile) -> std::io::Result<String> {
-    if !crate::files::kinds::is_whiteboard(&file.rel) {
-        return std::fs::read_to_string(&file.path);
-    }
-    let limit = crate::canvas::format::table().limits.max_bytes;
-    let source = std::fs::File::open(&file.path)?;
-    let too_large =
-        || std::io::Error::other(format!("This whiteboard is over the {limit} byte limit."));
-    if source.metadata()?.len() > limit as u64 {
-        return Err(too_large());
-    }
-    let mut bytes = Vec::new();
-    source.take(limit as u64 + 1).read_to_end(&mut bytes)?;
-    if bytes.len() > limit {
-        return Err(too_large());
-    }
-    String::from_utf8(bytes).map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "This whiteboard is not valid UTF-8 text.",
-        )
-    })
+pub(crate) fn read_content(
+    file: &NoteFile,
+) -> Result<std::io::Result<String>, crate::workspace_service::types::selected::AuthorityError> {
+    let mut source = file.boundary.open_file(&file.path)?;
+    let read = (|| -> std::io::Result<String> {
+        if !crate::files::kinds::is_whiteboard(&file.rel) {
+            let mut text = String::new();
+            source.read_to_string(&mut text)?;
+            return Ok(text);
+        }
+        let limit = crate::canvas::format::table().limits.max_bytes;
+        let too_large =
+            || std::io::Error::other(format!("This whiteboard is over the {limit} byte limit."));
+        if source.metadata()?.len() > limit as u64 {
+            return Err(too_large());
+        }
+        let mut bytes = Vec::new();
+        source.take(limit as u64 + 1).read_to_end(&mut bytes)?;
+        if bytes.len() > limit {
+            return Err(too_large());
+        }
+        String::from_utf8(bytes).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "This whiteboard is not valid UTF-8 text.",
+            )
+        })
+    })();
+    Ok(read)
 }
 
 /// One note's Entry from what reading it gave (M59.4): the scan and search's
@@ -179,11 +196,24 @@ pub(crate) fn scan_vault_filtered(
     vault: &Path,
     include: impl Fn(&str) -> bool,
 ) -> Result<Vec<Entry>, String> {
-    let mut entries: Vec<Entry> = note_files(vault)?
+    if matches!(
+        crate::workspace_service::authority::resolve(vault).map_err(|e| e.message)?,
+        crate::workspace_service::authority::Authority::Selected
+    ) {
+        return crate::workspace_service::selected::scan_filtered(vault, include)
+            .map_err(|e| e.message);
+    }
+    let inventory = note_files(vault)?;
+    let mut entries: Vec<Entry> = inventory
+        .files
         .iter()
         .filter(|file| include(&file.rel))
-        .map(|file| entry_from_read(&file.rel, &read_content(file), file.meta.as_ref()))
-        .collect();
+        .map(|file| {
+            let read = read_content(file).map_err(|e| e.message)?;
+            Ok(entry_from_read(&file.rel, &read, file.meta.as_ref()))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    inventory.boundary.revalidate().map_err(|e| e.message)?;
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     assign_projects(&mut entries);
     Ok(entries)
@@ -214,6 +244,14 @@ pub(crate) fn assign_projects(entries: &mut [Entry]) {
 /// All directories in the vault (vault-relative, sorted), skipping the same
 /// dirs the scanner skips. Feeds folder trees — empty folders included.
 pub fn list_folders(vault: &Path) -> Result<Vec<String>, String> {
+    if matches!(
+        crate::workspace_service::authority::resolve(vault).map_err(|e| e.message)?,
+        crate::workspace_service::authority::Authority::Selected
+    ) {
+        return crate::workspace_service::selected::folders(vault).map_err(|e| e.message);
+    }
+    crate::workspace_service::boundary::guard_legacy_scope(vault, None, true)
+        .map_err(|e| e.message)?;
     if !vault.is_dir() {
         return Err(format!("not a directory: {}", vault.display()));
     }

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Cerebro native read smoke",
+  "version": "0.1.0",
+  "identifier": "com.cerebro.native-read-smoke",
+  "build": { "frontendDist": "../../conformance/native-read-smoke/web" },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "Disposable native read smoke",
+        "width": 700,
+        "height": 340,
+        "incognito": true,
+        "backgroundThrottling": "disabled"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; script-src 'self'; style-src 'self'"
+    }
+  },
+  "bundle": { "active": false, "icon": ["../icons/32x32.png", "../icons/icon.icns"] }
+}

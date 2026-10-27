@@ -1,4 +1,26 @@
+import type { RecoveryStatus, RecoveryVersion, RecoveryFailure } from '@/engine/recovery';
 import type { Extraction } from '@/engine/extracted';
+import type {
+  MetadataPatchRequest,
+  MetadataPatchResult,
+  SelectedPropertySnapshot,
+  AuthorityError,
+  WorkspaceBackupAvailability,
+  WorkspaceBackupChoiceResult,
+  WorkspaceBackupCommitResult,
+  WorkspaceBackupCancelResult,
+  WorkspaceBackupOperation,
+  EditorSaveRefusal,
+  EditorSaveRequest,
+  EditorSaveResult,
+  LegacyRecordSnapshot,
+  SelectedMetadataAck,
+  SelectedEditorSnapshot,
+  SelectedEditorTarget,
+  SelectedMode,
+  SelectedRecordVersion,
+} from './generated/workspace';
+import { setSelectedFullWidth } from './selectedMock';
 import type { Followup, FollowupClaim } from '@/engine/followups';
 import type {
   ClientTokenRequest,
@@ -34,6 +56,11 @@ import * as mock from './mockIpc';
 
 function inTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+/** Transport availability only; the native snapshot and writer still admit each page. */
+export function supportsSelectedEditor(): boolean {
+  return inTauri();
 }
 
 async function invokeTauri<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -104,6 +131,18 @@ export function scanVault(vault: string): Promise<Entry[]> {
     : faulted('scan_vault', () => mock.scanVault(vault));
 }
 
+/** Dedicated selected one-key metadata action; no general patch/body writer. */
+export async function setPageFullWidth(
+  vault: string,
+  path: string,
+  expected: SelectedRecordVersion,
+  mode: SelectedMode,
+): Promise<SelectedMetadataAck> {
+  return inTauri()
+    ? invokeTauri('set_page_full_width', { vault, path, expected, mode })
+    : setSelectedFullWidth(vault, path, expected, mode);
+}
+
 export interface MailGateRead {
   state: 'closed' | 'other_vault' | 'open';
   kinds: string[];
@@ -120,11 +159,29 @@ export function readNote(vault: string, path: string): Promise<string> {
     : faulted('read_note', () => mock.readNote(vault, path));
 }
 
-/** Whole bytes and their hash from one read, for a save that compares versions. */
-export function readNoteSource(
+/** One native selected snapshot returns the complete file without legacy
+ * frontmatter splitting or newline normalization. */
+export function readEditorBody(
   vault: string,
   path: string,
-): Promise<{ content: string; hash: string }> {
+  target: SelectedEditorTarget,
+): Promise<SelectedEditorSnapshot> {
+  return inTauri()
+    ? invokeTauri('read_editor_body', { vault, path, target })
+    : Promise.reject(selectedBrowserUnavailable());
+}
+
+/** Guarded native canonical value only; the browser has no selected store. */
+export function readSelectedProperty(vault:string,path:string,target:SelectedEditorTarget,field:string):Promise<SelectedPropertySnapshot>{
+ return inTauri()?invokeTauri<SelectedPropertySnapshot>('read_selected_property',{vault,path,target,field}):Promise.reject(selectedBrowserUnavailable());
+}
+/** Retain the real invoke through quit/leave; timeout never cancels its owner. */
+export function patchSelectedMetadata(vault:string,path:string,request:MetadataPatchRequest):Promise<MetadataPatchResult>{
+ return pageWrite<MetadataPatchResult>(inTauri()?invokeTauri<MetadataPatchResult>('patch_selected_metadata',{vault,path,request}):Promise.reject({kind:'metadata_refused',error:selectedBrowserUnavailable()}));
+}
+
+/** Whole bytes and their hash from one read, for a save that compares versions. */
+export function readNoteSource(vault: string, path: string): Promise<LegacyRecordSnapshot> {
   return inTauri()
     ? invokeTauri('read_note_source', { vault, path })
     : faulted('read_note_source', () => mock.readNoteSource(vault, path));
@@ -142,6 +199,29 @@ export function searchVault(vault: string, query: string, limit: number): Promis
   return inTauri()
     ? invokeTauri('search_vault', { vault, query, limit })
     : mock.searchVault(vault, query, limit);
+}
+
+export function resolveSource(
+  vault: string,
+  locator: import('@/engine/sourceLocation').SourceLocator,
+): Promise<import('@/engine/sourceLocation').ResolveSourceResult> {
+  return inTauri()
+    ? invokeTauri('resolve_source', { vault, locator })
+    : mock.resolveSource(vault, locator);
+}
+
+/** Contextual raw-source occurrences; mentions are explicitly requested. */
+export function findSourceOccurrences(
+  vault: string,
+  targetPath: string,
+  mode: import('@/engine/sourceOccurrences').OccurrenceMode,
+  cursor: string | null = null,
+): Promise<import('@/engine/sourceOccurrences').OccurrencePage> {
+  return inTauri()
+    ? invokeTauri('find_source_occurrences', { vault, targetPath, mode, cursor })
+    : faulted('find_source_occurrences', () =>
+        mock.findSourceOccurrences(vault, targetPath, mode, cursor),
+      );
 }
 
 // --- Page writes (M55.10) ---------------------------------------------------
@@ -211,17 +291,222 @@ export function __resetPageWrites(): void {
   pageWriteFailureCount = 0;
 }
 
-export function saveNote(
+export type { NoteWriteAck } from '@/editor/documentOwner';
+
+interface NoteBodySaveInput {
+  vault: string;
+  path: string;
+  body: string;
+  bodyFormat?: 'rich' | 'source';
+  recoveryBypass?: string;
+}
+class SelectedEditorSaveError extends Error {
+  readonly kind = 'selected_refused';
+  constructor(readonly error: EditorSaveRefusal['error']) {
+    super(error.message);
+    this.name = 'SelectedEditorSaveError';
+  }
+}
+function selectedBrowserUnavailable(): AuthorityError {
+  return {
+    code: 'capability_unavailable',
+    kind: 'unsupported_operation',
+    message: 'Selected page editing is unavailable here.',
+    retryable: false,
+  };
+}
+function selectedSaveError(value: unknown): unknown {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('kind' in value) ||
+    value.kind !== 'selected_refused' ||
+    !('error' in value) ||
+    typeof value.error !== 'object' ||
+    value.error === null
+  )
+    return value;
+  const detail = value.error;
+  if (
+    !('code' in detail) ||
+    detail.code !== 'capability_unavailable' ||
+    !('kind' in detail) ||
+    typeof detail.kind !== 'string' ||
+    !('message' in detail) ||
+    typeof detail.message !== 'string' ||
+    !('retryable' in detail) ||
+    typeof detail.retryable !== 'boolean'
+  )
+    return value;
+  // The closed native envelope is the discriminant; its inner kind is detail,
+  // never a permission. Transport and legacy string failures remain unchanged.
+  return new SelectedEditorSaveError(detail as AuthorityError);
+}
+export function saveNoteBody(
+  input: NoteBodySaveInput & { editorRequest: EditorSaveRequest },
+): Promise<EditorSaveResult>;
+export function saveNoteBody(
+  input: NoteBodySaveInput & { editorRequest?: undefined },
+): Promise<import('@/editor/documentOwner').NoteWriteAck>;
+export function saveNoteBody(
+  input: NoteBodySaveInput & { editorRequest?: EditorSaveRequest },
+): Promise<import('@/editor/documentOwner').DocumentWriteResult>;
+export function saveNoteBody({
+  vault,
+  path,
+  body,
+  bodyFormat = 'rich',
+  recoveryBypass,
+  editorRequest,
+}: NoteBodySaveInput & { editorRequest?: EditorSaveRequest }): Promise<
+  import('@/editor/documentOwner').DocumentWriteResult
+> {
+  if (editorRequest === undefined)
+    return pageWrite(
+      inTauri()
+        ? invokeTauri('save_note', { vault, path, body, bodyFormat, recoveryBypass })
+        : mock.saveNoteBody({ vault, path, body, bodyFormat, recoveryBypass }),
+    );
+  const write = inTauri()
+    ? invokeTauri<EditorSaveResult>('save_note', {
+        vault,
+        path,
+        body,
+        bodyFormat,
+        recoveryBypass,
+        editorRequest,
+      })
+    : Promise.reject<EditorSaveResult>(new SelectedEditorSaveError(selectedBrowserUnavailable()));
+  return pageWrite(
+    write.catch((error: unknown) => {
+      throw selectedSaveError(error);
+    }),
+  );
+}
+
+export function recoveryStatus(vault: string): Promise<RecoveryStatus> {
+  return inTauri()
+    ? invokeTauri('recovery_status', { vault })
+    : faulted('recovery_status', () => mock.recoveryStatus(vault));
+}
+export function setRecoveryEnabled(vault: string, enabled: boolean): Promise<RecoveryStatus> {
+  return inTauri()
+    ? invokeTauri('set_recovery_enabled', { vault, enabled })
+    : mock.setRecoveryEnabled(vault, enabled);
+}
+export function listRecovery(vault: string, path: string): Promise<RecoveryVersion[]> {
+  return inTauri()
+    ? invokeTauri('list_recovery', { vault, path })
+    : faulted('list_recovery', () => mock.listRecovery(vault, path));
+}
+export function readRecovery(vault: string, path: string, recoveryId: string): Promise<string> {
+  return inTauri()
+    ? invokeTauri('read_recovery', { vault, path, recoveryId })
+    : mock.readRecovery(vault, path, recoveryId);
+}
+export function deleteRecovery(vault: string, path: string, recoveryId: string): Promise<boolean> {
+  return inTauri()
+    ? invokeTauri('delete_recovery', { vault, path, recoveryId })
+    : mock.deleteRecovery(vault, path, recoveryId);
+}
+export function clearRecovery(vault: string): Promise<number> {
+  return inTauri() ? invokeTauri('clear_recovery', { vault }) : mock.clearRecovery(vault);
+}
+export function recoveryFailure(
+  vault: string,
+  path: string,
+  nonce: string,
+): Promise<RecoveryFailure> {
+  return inTauri()
+    ? invokeTauri('recovery_failure', { vault, path, nonce })
+    : mock.recoveryFailure(vault, path, nonce);
+}
+export function restoreRecovery(
+  vault: string,
+  path: string,
+  recoveryId: string,
+  expectHash: string,
+  recoveryBypass?: string,
+): Promise<import('@/editor/documentOwner').NoteWriteAck> {
+  return pageWrite(
+    inTauri()
+      ? invokeTauri('restore_recovery', { vault, path, recoveryId, expectHash, recoveryBypass })
+      : mock.restoreRecovery(vault, path, recoveryId, expectHash, recoveryBypass),
+  );
+}
+export function exportRecovery(
+  vault: string,
+  path: string,
+  recoveryId: string,
+): Promise<string | null> {
+  return inTauri()
+    ? invokeTauri('export_recovery', { vault, path, recoveryId })
+    : mock.exportRecovery(vault, path, recoveryId);
+}
+
+/** Session-only draft recovery. These doors never flush or acknowledge the source. */
+export type DraftTargetProbe =
+  { kind: 'present' | 'missing' } | { kind: 'unavailable'; code: string };
+export type DraftExportFormat = 'json' | 'md' | 'mmd' | 'canvas';
+export type DraftExportChoice = { kind: 'chosen'; token: string } | { kind: 'cancelled' };
+export type DraftExportResult = { kind: 'exported'; destination: string };
+export type RecoveredPage = { path: string; contentHash: string; batch: BatchApplied };
+
+export function probeDraftTarget(vault: string, path: string): Promise<DraftTargetProbe> {
+  return inTauri()
+    ? invokeTauri('probe_draft_target', { vault, path })
+    : faulted('probe_draft_target', () => mock.probeDraftTarget(vault, path));
+}
+export function chooseDraftExport(
+  vault: string,
+  path: string,
+  defaultName: string,
+  format: DraftExportFormat,
+  contentHash: string,
+): Promise<DraftExportChoice> {
+  return inTauri()
+    ? invokeTauri('choose_draft_export', { vault, path, defaultName, format, contentHash })
+    : faulted('choose_draft_export', () =>
+        mock.chooseDraftExport(vault, path, defaultName, format, contentHash),
+      );
+}
+export function commitDraftExport(
+  vault: string,
+  token: string,
+  content: string,
+): Promise<DraftExportResult> {
+  return inTauri()
+    ? invokeTauri('commit_draft_export', { vault, token, content })
+    : faulted('commit_draft_export', () => mock.commitDraftExport(vault, token, content));
+}
+export function cancelDraftExport(token: string): Promise<void> {
+  return inTauri() ? invokeTauri('cancel_draft_export', { token }) : mock.cancelDraftExport(token);
+}
+export function createRecoveredPage(
+  vault: string,
+  originalPath: string,
+  destinationPath: string,
+  content: string,
+): Promise<RecoveredPage> {
+  return inTauri()
+    ? invokeTauri('create_recovered_page', { vault, originalPath, destinationPath, content })
+    : faulted('create_recovered_page', () =>
+        mock.createRecoveredPage(vault, originalPath, destinationPath, content),
+      );
+}
+
+export async function saveNote(
   vault: string,
   path: string,
   body: string,
   expectHash?: string,
 ): Promise<string | null> {
-  return pageWrite(
+  const ack: import('@/editor/documentOwner').NoteWriteAck = await pageWrite(
     inTauri()
       ? invokeTauri('save_note', { vault, path, body, expectHash })
-      : mock.saveNote(vault, path, body, expectHash),
+      : mock.saveNoteBody({ vault, path, body, expectHash }),
   );
+  return ack.kind === 'file' ? ack.contentHash : null;
 }
 
 /**
@@ -339,9 +624,9 @@ export function saveList(vault: string, folder: string, id: string, yaml: string
     : mock.saveList(vault, folder, id, yaml);
 }
 
-/** Start watching `vault`. Resolves what the open put back from a change an
- * earlier run left unfinished (M60.6): all zero on an ordinary open. */
-export function startWatcher(vault: string): Promise<OpenReport> {
+/** Legacy opens report measured recovery. Selected opens return null: the
+ * legacy recovery protocol is unadopted, so its counts were not recorded. */
+export function startWatcher(vault: string): Promise<OpenReport | null> {
   return inTauri() ? invokeTauri('start_watcher', { vault }) : mock.startWatcher(vault);
 }
 
@@ -976,6 +1261,47 @@ export function fleetRuns(filter: FleetFilter = {}): Promise<FleetRun[]> {
   return inTauri()
     ? invokeTauri('fleet_runs', { filter })
     : faulted('fleet_runs', () => mock.fleetRunsPage(filter));
+}
+
+import type {
+  RunCursor,
+  RunHistoryPage,
+  RunHistoryScope,
+  RunLineage,
+  RunOrigin,
+} from './runHistory';
+export type { RunCursor, RunHistoryPage, RunHistoryScope, RunLineage, RunOrigin };
+
+export function fleetRunsPage(
+  scope: RunHistoryScope,
+  cursor?: RunCursor,
+  limit?: number,
+): Promise<RunHistoryPage> {
+  return inTauri()
+    ? invokeTauri('fleet_runs_page', { scope, cursor, limit })
+    : faulted('fleet_runs_page', () => mock.scopedFleetRunsPage(scope, cursor, limit));
+}
+
+export function fleetRunLineage(rootRunId: string): Promise<RunLineage> {
+  return inTauri()
+    ? invokeTauri('fleet_run_lineage', { rootRunId })
+    : faulted('fleet_run_lineage', () => mock.fleetRunLineage(rootRunId));
+}
+
+/** Captured historical configuration; caller supplies the run's actual open vault. */
+export function fleetRunConfiguration(
+  vault: string,
+  runId: string,
+): Promise<import('./runConfiguration').RunConfigurationRead> {
+  return inTauri()
+    ? invokeTauri('fleet_run_configuration', { vault, runId })
+    : faulted('fleet_run_configuration', () => mock.fleetRunConfiguration(vault, runId));
+}
+
+export function fleetRunOrigin(vaultId: string | null): Promise<RunOrigin> {
+  return inTauri()
+    ? invokeTauri('fleet_run_origin', { vaultId })
+    : faulted('fleet_run_origin', () => mock.fleetRunOrigin(vaultId));
 }
 
 /** Who last changed one page (M58.1b), from runtime.db's write log, read
@@ -1726,4 +2052,201 @@ export function mailUndismiss(
   return inTauri()
     ? invokeTauri('mail_undismiss', { vault, kind, value })
     : mock.mailUndismiss(vault, kind, value);
+}
+
+/** Managed app-owned account metadata; no vault/run/person or credential crosses this door. */
+export function managedConnections(
+  cursor: string | null,
+): Promise<import('./generated/actions').ManagedConnectionPage> {
+  return inTauri()
+    ? invokeTauri('managed_connections', { cursor })
+    : mock.managedConnections(cursor);
+}
+export function managedConnectionStatus(
+  connectionId: string,
+): Promise<import('./generated/actions').ConnectionStatus> {
+  return inTauri()
+    ? invokeTauri('managed_connection_status', { connectionId })
+    : mock.managedConnectionStatus(connectionId);
+}
+export function managedConnectionAdd(
+  host: string,
+  login: string,
+): Promise<import('./generated/actions').ConnectionStatus> {
+  return inTauri()
+    ? invokeTauri('managed_connection_add', { host, login })
+    : mock.managedConnectionAdd(host, login);
+}
+export function managedConnectionDisable(
+  connectionId: string,
+  expectedRevision: number,
+): Promise<import('./generated/actions').ConnectionStatus> {
+  return inTauri()
+    ? invokeTauri('managed_connection_disable', { connectionId, expectedRevision })
+    : mock.managedConnectionDisable(connectionId, expectedRevision);
+}
+
+/** Browser preview never starts a native credential acquisition. */
+export function hasNativeCredentialImport(): boolean {
+  return inTauri();
+}
+
+/** Safe account selectors; credential bytes remain entirely in Rust. */
+export function beginGhImport(
+  connectionId: string,
+  host: string,
+  login: string,
+  expectedRevision: number,
+): Promise<import('./generated/actions').CredentialAcquisitionView> {
+  return inTauri()
+    ? invokeTauri('begin_gh_import', { connectionId, host, login, expectedRevision })
+    : Promise.reject('unavailable');
+}
+export function credentialAcquisition(
+  attemptId: string,
+): Promise<import('./generated/actions').CredentialAcquisitionView> {
+  return inTauri()
+    ? invokeTauri('credential_acquisition', { attemptId })
+    : Promise.reject('unavailable');
+}
+export function cancelCredentialAcquisition(
+  attemptId: string,
+): Promise<import('./generated/actions').CredentialAcquisitionView> {
+  return inTauri()
+    ? invokeTauri('cancel_credential_acquisition', { attemptId })
+    : Promise.reject('unavailable');
+}
+
+// Native backups use only original-owner nonces; renderer paths never authorize output.
+export function workspaceBackupAvailability(
+  expectedVault: string | null,
+): Promise<WorkspaceBackupAvailability> {
+  return inTauri()
+    ? invokeTauri('workspace_backup_availability', { expectedVault })
+    : mock.workspaceBackupAvailability(expectedVault);
+}
+export function chooseWorkspaceBackup(expectedVault: string): Promise<WorkspaceBackupChoiceResult> {
+  return inTauri()
+    ? invokeTauri('choose_workspace_backup', { expectedVault })
+    : mock.chooseWorkspaceBackup(expectedVault);
+}
+export function checkWorkspaceBackup(): Promise<WorkspaceBackupChoiceResult> {
+  return inTauri() ? invokeTauri('check_workspace_backup') : mock.checkWorkspaceBackup();
+}
+export function chooseWorkspaceRestore(token: string): Promise<WorkspaceBackupChoiceResult> {
+  return inTauri()
+    ? invokeTauri('choose_workspace_restore', { token })
+    : mock.chooseWorkspaceRestore(token);
+}
+export function commitWorkspaceBackup(token: string): Promise<WorkspaceBackupCommitResult> {
+  return inTauri()
+    ? invokeTauri('commit_workspace_backup', { token })
+    : mock.commitWorkspaceBackup(token);
+}
+export function commitWorkspaceRestore(token: string): Promise<WorkspaceBackupCommitResult> {
+  return inTauri()
+    ? invokeTauri('commit_workspace_restore', { token })
+    : mock.commitWorkspaceRestore(token);
+}
+export function cancelWorkspaceBackupChoice(token: string): Promise<WorkspaceBackupCancelResult> {
+  return inTauri()
+    ? invokeTauri('cancel_workspace_backup_choice', { token })
+    : mock.cancelWorkspaceBackupChoice(token);
+}
+export function workspaceBackupOperation(): Promise<WorkspaceBackupOperation> {
+  return inTauri() ? invokeTauri('workspace_backup_operation') : mock.workspaceBackupOperation();
+}
+/** Payload-free notification; always reread the original owner's status. */
+export async function onWorkspaceBackupChanged(handler: () => void): Promise<() => void> {
+  if (!inTauri()) return () => undefined;
+  const { listen } = await import('@tauri-apps/api/event');
+  return listen('workspace-backup-changed', () => handler());
+}
+
+/** Workflow selectors are data; native commands bind the actual authenticated opening. */
+function workflowUnavailable(): Promise<never> {
+  return Promise.reject({ code: 'unavailable', diagnostics: [] } satisfies import('./generated/workflows').WorkflowError);
+}
+export function workflowContext(): Promise<import('./generated/workflows').WorkflowContext> {
+  return inTauri() ? invokeTauri('workflow_context') : workflowUnavailable();
+}
+export function workflowCatalog(context: import('./generated/workflows').WorkflowContext, after: string | null): Promise<import('./generated/workflows').WorkflowCatalog> {
+  return inTauri() ? invokeTauri('workflow_catalog', { context, after }) : workflowUnavailable();
+}
+export function workflowDocument(context: import('./generated/workflows').WorkflowContext, workflowId: string): Promise<import('./generated/workflows').WorkflowDocument> {
+  return inTauri() ? invokeTauri('workflow_document', { context, workflowId }) : workflowUnavailable();
+}
+export function workflowVersion(context: import('./generated/workflows').WorkflowContext, version: import('./generated/workflows').WorkflowVersionRef): Promise<import('./generated/workflows').WorkflowDraft> {
+  return inTauri() ? invokeTauri('workflow_version', { context, version }) : workflowUnavailable();
+}
+export function workflowSave(request: import('./generated/workflows').WorkflowSaveRequest): Promise<import('./generated/workflows').WorkflowDraftSnapshot> {
+  return inTauri() ? invokeTauri('workflow_save', { request }) : workflowUnavailable();
+}
+export function workflowPublish(request: import('./generated/workflows').WorkflowPublishRequest): Promise<import('./generated/workflows').WorkflowPublication> {
+  return inTauri() ? invokeTauri('workflow_publish', { request }) : workflowUnavailable();
+}
+export function workflowUnpublish(request: import('./generated/workflows').WorkflowUnpublishRequest): Promise<import('./generated/workflows').WorkflowUnpublishAck> {
+  return inTauri() ? invokeTauri('workflow_unpublish', { request }) : workflowUnavailable();
+}
+export function workflowValidate(context: import('./generated/workflows').WorkflowContext, draft: import('./generated/workflows').WorkflowDraft): Promise<import('./generated/workflows').WorkflowValidation> {
+  return inTauri() ? invokeTauri('workflow_validate', { context, draft }) : workflowUnavailable();
+}
+export function workflowActions(context: import('./generated/workflows').WorkflowContext): Promise<import('./generated/actions').ActionDefinition[]> {
+  return inTauri() ? invokeTauri('workflow_actions', { context }) : workflowUnavailable();
+}
+
+export function workflowStart(request: import('./generated/workflows').WorkflowStartRequest): Promise<import('./generated/workflows').WorkflowStartAck> {
+  return inTauri() ? invokeTauri('workflow_start', { request }) : workflowUnavailable();
+}
+export function workflowContinue(request: import('./generated/workflows').WorkflowRunRequest): Promise<import('./generated/workflows').WorkflowStartAck> {
+  return inTauri() ? invokeTauri('workflow_continue', { request }) : workflowUnavailable();
+}
+export function workflowReauthorize(request: import('./generated/workflows').WorkflowReauthorizeRequest): Promise<import('./generated/workflows').WorkflowStartAck> {
+  return inTauri() ? invokeTauri('workflow_reauthorize', { request }) : workflowUnavailable();
+}
+export function workflowCancel(request: import('./generated/workflows').WorkflowRunRequest): Promise<import('./generated/workflows').WorkflowRunView> {
+  return inTauri() ? invokeTauri('workflow_cancel', { request }) : workflowUnavailable();
+}
+export function workflowRuns(context: import('./generated/workflows').WorkflowContext, after: string | null): Promise<import('./generated/workflows').WorkflowRunCatalog> {
+  return inTauri() ? invokeTauri('workflow_runs', { context, after }) : workflowUnavailable();
+}
+export function workflowRun(context: import('./generated/workflows').WorkflowContext, runId: string): Promise<import('./generated/workflows').WorkflowRunView> {
+  return inTauri() ? invokeTauri('workflow_run', { context, runId }) : workflowUnavailable();
+}
+export function workflowValue(request: import('./generated/workflows').WorkflowValueRequest): Promise<import('./generated/workflows').WorkflowValueDetail> {
+  return inTauri() ? invokeTauri('workflow_value', { request }) : workflowUnavailable();
+}
+export function workflowActionDetails(context: import('./generated/workflows').WorkflowContext, runId: string, invocationId: string): Promise<import('./generated/actions').ActionEffectDetails> {
+  return inTauri() ? invokeTauri('workflow_action_details', { context, runId, invocationId }) : workflowUnavailable();
+}
+export function workflowAnswerAction(request: import('./generated/workflows').WorkflowActionAnswer): Promise<import('./generated/workflows').WorkflowRunView> {
+  return inTauri() ? invokeTauri('workflow_answer_action', { request }) : workflowUnavailable();
+}
+export function workflowAnswerWait(request: import('./generated/workflows').WorkflowWaitAnswer): Promise<import('./generated/workflows').WorkflowRunView> {
+  return inTauri() ? invokeTauri('workflow_answer_wait', { request }) : workflowUnavailable();
+}
+
+/** Recorded original ceiling and current selection; metadata is never native authority. */
+export function workflowAccess(context: import('./generated/workflows').WorkflowContext, runId: string): Promise<import('./generated/workflows').WorkflowAccessView> {
+  return inTauri() ? invokeTauri('workflow_access', { context, runId }) : workflowUnavailable();
+}
+
+/** Explicit schedule configuration and monitoring; browser preview never executes. */
+export function workflowSchedule(context: import('./generated/workflows').WorkflowContext, workflow: string): Promise<import('./generated/workflows').WorkflowScheduleView> {
+ return inTauri() ? invokeTauri('workflow_schedule', { context, workflow }) : workflowUnavailable();
+}
+export function workflowScheduleEnable(request: import('./generated/workflows').WorkflowScheduleEnableRequest): Promise<import('./generated/workflows').WorkflowScheduleAck> {
+ return inTauri() ? invokeTauri('workflow_schedule_enable', { request }) : workflowUnavailable();
+}
+export function workflowSchedulePause(request: import('./generated/workflows').WorkflowScheduleChangeRequest): Promise<import('./generated/workflows').WorkflowScheduleAck> {
+ return inTauri() ? invokeTauri('workflow_schedule_pause', { request }) : workflowUnavailable();
+}
+export function workflowScheduleRemove(request: import('./generated/workflows').WorkflowScheduleChangeRequest): Promise<import('./generated/workflows').WorkflowScheduleAck> {
+ return inTauri() ? invokeTauri('workflow_schedule_remove', { request }) : workflowUnavailable();
+}
+export function workflowSchedulePreview(context: import('./generated/workflows').WorkflowContext, workflow: string): Promise<import('./generated/workflows').WorkflowSchedulePreview> {
+ return inTauri() ? invokeTauri('workflow_schedule_preview', { context, workflow }) : workflowUnavailable();
+}
+export function workflowScheduleWake(context: import('./generated/workflows').WorkflowContext): Promise<import('./generated/workflows').WorkflowScheduleMonitorAck> {
+ return inTauri() ? invokeTauri('workflow_schedule_wake', { context }) : workflowUnavailable();
 }

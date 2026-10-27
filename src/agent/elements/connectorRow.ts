@@ -1,3 +1,4 @@
+import { connectorOwnershipReason } from '@/engine/connectorOwnership';
 import {
   approvalKey,
   CONNECTOR_PRESETS,
@@ -20,11 +21,12 @@ import {
  * derivation of a connector's status words, so the two surfaces never tell
  * two stories. Pure.
  *
- * The first rule that holds names the row's state: the entry's switch; a
+ * Ownership is a local configuration fact, even while status is unavailable.
+ * For eligible CLI entries the first rule is the entry's switch; a
  * name Rust can never grant, in Rust's own words; this machine's approval;
  * then what the newest run that used it saw (`connector_status`), or that no
  * run has. While the status read is out, or after it failed, the row says
- * no state at all (CV-05): a failed read is never "not observed yet".
+ * no observed state at all (CV-05): a failed read is never "not observed yet".
  */
 
 /** The status read (M54.11). A failed read is its own state, never no rows. */
@@ -85,6 +87,7 @@ function sortedPairs<V>(record: Record<string, V>): [string, V][] {
  * them, draws this; it is never part of a row.
  */
 export function approvalLine(spec: ConnectorSpec): string {
+  if (connectorOwnershipReason(spec.extra) !== null) return '';
   if (spec.transport === 'http') {
     return [
       spec.url,
@@ -102,6 +105,8 @@ export function approvalLine(spec: ConnectorSpec): string {
 /** What a row that needs sign-in says in place of a command it cannot show. */
 export function signInWithout(spec: ConnectorSpec): string {
   switch (signInBlocker(spec)) {
+    case 'ownership':
+      return connectorOwnershipReason(spec.extra) ?? '';
     case 'name':
       return `Claude Code adds a connector only under a name of letters, digits, - and _, so rename ${spec.name} here, then sign in.`;
     case 'entry':
@@ -151,15 +156,19 @@ export function connectorRow(
   const unapproved = approval === null || !approvals.includes(approval);
   const seen =
     status.kind === 'ready' ? status.rows.find((row) => row.connector === spec.name) : undefined;
-  const said: ConnectorRowStatus = !spec.enabled
-    ? { key: 'off', words: 'off' }
-    : seen?.refused != null
-      ? { key: 'refused', words: `can’t be granted: ${seen.refused}` }
-      : unapproved
-        ? { key: 'unapproved', words: unapprovedWhy(spec, approval) }
-        : status.kind !== 'ready'
-          ? { key: status.kind, words: null }
-          : { key: seen?.state ?? 'not_observed', words: stateLabel(seen?.state ?? null) };
+  const ownershipReason = connectorOwnershipReason(spec.extra);
+  const said: ConnectorRowStatus =
+    ownershipReason !== null
+      ? { key: 'refused', words: ownershipReason }
+      : !spec.enabled
+        ? { key: 'off', words: 'off' }
+        : seen?.refused != null
+          ? { key: 'refused', words: `can’t be granted: ${seen.refused}` }
+          : unapproved
+            ? { key: 'unapproved', words: unapprovedWhy(spec, approval) }
+            : status.kind !== 'ready'
+              ? { key: status.kind, words: null }
+              : { key: seen?.state ?? 'not_observed', words: stateLabel(seen?.state ?? null) };
   const preset = CONNECTOR_PRESETS.some((p) => presetHolder(p, [spec]) !== undefined);
   const signIn = said.key === 'needs_sign_in' || (said.key === 'not_observed' && preset);
   return {

@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "id": "lost-response",
+  "title": "Reconcile remote success with lost response",
+  "adapter": "native_broker",
+  "inputs": {
+    "scenario": "lost-response"
+  },
+  "allowedEffects": [
+    "external_mutation"
+  ],
+  "forbiddenEffects": [
+    "send",
+    "verify"
+  ],
+  "expectedSources": [],
+  "expectedArtifacts": [
+    {
+      "id": "broker:lost-response",
+      "state": "succeeded"
+    }
+  ],
+  "injections": [],
+  "requiredCapabilities": [
+    "native_broker"
+  ]
+}

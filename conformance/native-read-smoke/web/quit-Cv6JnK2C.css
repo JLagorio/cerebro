@@ -1,0 +1,3176 @@
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   The AI elements' foundation (M91.7): Collapsible, Badge and Item, on the DS
+   tokens (shadcn's palette classes compile to nothing here, index.css).
+   Unlayered like the app's other surface stylesheets, so a rule of the
+   surface that uses one (its own class, scoped) restyles it; motion spends
+   the tokens only, so reduced motion stills it with everything else. */
+
+/* What a collapsible reveals drops in from under its trigger as it opens —
+   marked `data-reveal` for that one play (Collapsible.tsx) — and fades where
+   it was as it closes, held there by Presence until the fade has played. */
+.cb-ai-collapsible-content[data-reveal]:not([hidden]) {
+  --rise: -4px;
+  animation: cb-rise-in var(--motion-enter) backwards;
+}
+.cb-ai-collapsible-content[data-state='closed'] {
+  animation: cb-fade-out var(--motion-exit) forwards;
+  pointer-events: none;
+}
+
+/* Badge: a short label beside a title — a model, a count, a kind. Each
+   variant names its ink once, so the one drawn as a link keeps it over the
+   app's own link ink (tokens/base.css styles every `a`). */
+.cb-ai-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  width: fit-content;
+  height: 20px;
+  padding: 0 var(--sp-2);
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  color: var(--ai-badge-ink);
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+  line-height: var(--lh-xs);
+  white-space: nowrap;
+  outline: none;
+  transition:
+    background-color var(--motion-hover),
+    border-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.cb-ai-badge:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-badge[aria-invalid='true'] {
+  border-color: var(--danger-500);
+}
+.cb-ai-badge > svg {
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
+a.cb-ai-badge,
+a.cb-ai-badge:hover {
+  color: var(--ai-badge-ink);
+  text-decoration: none;
+}
+.cb-ai-badge-default {
+  --ai-badge-ink: var(--on-action-primary);
+  background: var(--action-primary);
+}
+a.cb-ai-badge-default:hover {
+  background: var(--action-primary-hover);
+}
+.cb-ai-badge-secondary {
+  --ai-badge-ink: var(--n-800);
+  background: var(--n-100);
+}
+a.cb-ai-badge-secondary:hover {
+  background: var(--n-200);
+}
+.cb-ai-badge-destructive {
+  --ai-badge-ink: var(--danger-700);
+  background: var(--danger-50);
+}
+a.cb-ai-badge-destructive:hover {
+  background: var(--danger-200);
+}
+.cb-ai-badge-outline {
+  --ai-badge-ink: var(--n-800);
+  border-color: var(--border-subtle);
+}
+a.cb-ai-badge-outline:hover {
+  background: var(--n-50);
+}
+.cb-ai-badge-ghost {
+  --ai-badge-ink: var(--n-700);
+}
+.cb-ai-badge-ghost:hover {
+  background: var(--n-100);
+}
+.cb-ai-badge-link {
+  --ai-badge-ink: var(--text-link);
+  text-underline-offset: 4px;
+}
+.cb-ai-badge-link:hover,
+a.cb-ai-badge-link:hover {
+  text-decoration: underline;
+}
+
+/* Item: a row of media, content and actions — a source, a file, a step. */
+.cb-ai-item-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  width: 100%;
+}
+.cb-ai-item-group:has(> .cb-ai-item-sm) {
+  gap: 10px;
+}
+.cb-ai-item-group:has(> .cb-ai-item-xs) {
+  gap: var(--sp-2);
+}
+.cb-ai-item-separator {
+  height: 1px;
+  margin-block: var(--sp-2);
+  background: var(--border-subtle);
+}
+.cb-ai-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px var(--sp-4);
+  border: 1px solid transparent;
+  border-radius: var(--r-xl);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  outline: none;
+  transition:
+    background-color var(--motion-hover),
+    border-color var(--motion-hover);
+}
+.cb-ai-item:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-item-outline {
+  border-color: var(--border-subtle);
+}
+.cb-ai-item-muted {
+  background: var(--n-25);
+}
+.cb-ai-item-sm {
+  padding: var(--sp-3) 14px;
+}
+.cb-ai-item-xs {
+  gap: var(--sp-2);
+  padding: var(--sp-2) 10px;
+}
+a.cb-ai-item,
+a.cb-ai-item:hover {
+  color: inherit;
+  text-decoration: none;
+}
+a.cb-ai-item:hover {
+  background: var(--n-50);
+}
+.cb-ai-item-media {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+.cb-ai-item-media svg {
+  pointer-events: none;
+}
+.cb-ai-item:has(.cb-ai-item-description) > .cb-ai-item-media {
+  align-self: flex-start;
+  translate: 0 2px;
+}
+/* An icon's media (shadcn's `icon` variant): an icon that names no size of
+   its own draws at 16px; the DS Icon always names one. */
+.cb-ai-item-media-icon svg:not([width]) {
+  width: 16px;
+  height: 16px;
+}
+.cb-ai-item-media-image {
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+}
+.cb-ai-item-sm .cb-ai-item-media-image {
+  width: 32px;
+  height: 32px;
+}
+.cb-ai-item-xs .cb-ai-item-media-image {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-md);
+}
+.cb-ai-item-media-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cb-ai-item-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.cb-ai-item-xs .cb-ai-item-content {
+  gap: 2px;
+}
+.cb-ai-item-content + .cb-ai-item-content {
+  flex: none;
+}
+.cb-ai-item-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: fit-content;
+  max-width: 100%;
+  font-weight: var(--w-medium);
+  line-height: 1.375;
+  text-underline-offset: 4px;
+}
+.cb-ai-item-description {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-meta);
+  font-weight: var(--w-regular);
+  text-align: left;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.cb-ai-item-description > a {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.cb-ai-item-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.cb-ai-item-header,
+.cb-ai-item-footer {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   The trace's results (M91.9b): Plan, Queue, Sources, Inline Citation, File
+   Tree, Checkpoint and Confirmation, drawn on Trace, Item and the DS tokens.
+   Each adds only what its element needs beyond a line: a queue's sections
+   and the actions beside its items, a citation's card, a tree's rows, the
+   checkpoint's rules and the asking card. Unlayered like the app's other
+   surface stylesheets; motion spends the hover token only, so nothing here
+   outlasts reduced motion. */
+
+/* Queue: sections one under another. A section's head is its line, or its
+   heading, with its actions beside it, never inside its trigger. */
+.cb-ai-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+}
+.cb-ai-queue-section {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+.cb-ai-queue-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-queue-heading {
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  font: inherit;
+}
+.cb-ai-queue-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  margin-top: var(--sp-2);
+}
+.cb-ai-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* An item: its line, its actions at the row's end, and what its caller hangs
+   under it, from the title. The line takes the room the actions leave and
+   its title gives way, so a long title never pushes them onto a row of their
+   own. */
+.cb-ai-queue-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-queue-item > .cb-ai-trace-line {
+  flex: 1 1 0;
+}
+.cb-ai-queue-detail {
+  flex-basis: 100%;
+  min-width: 0;
+  padding-inline-start: var(--sp-6);
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: break-word;
+}
+.cb-ai-queue-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+.cb-ai-queue-action {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-600);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-2xs);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.cb-ai-queue-action:hover:not(:disabled) {
+  border-color: var(--n-400);
+  color: var(--n-900);
+}
+.cb-ai-queue-action:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-queue-action:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* Plan: a plain line when the agent left its list empty; open, a sentence on
+   what it is for above its steps. */
+.cb-ai-plan {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+.cb-ai-plan-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* Inline Citation: the card's body. The card itself — its width, edge and
+   shadow — is the DS HoverCard's; a source after the first is ruled off. */
+.cb-ai-citation-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  color: var(--text-primary);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+.cb-ai-citation-source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.cb-ai-citation-source + .cb-ai-citation-source {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+}
+.cb-ai-citation-title {
+  margin: 0;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-ai-citation-description {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-meta);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+/* Where the source is: a link out, a page to open, or its address as text.
+   A link keeps this quiet ink over the app's link ink (tokens/base.css). */
+.cb-ai-citation-link,
+.cb-ai-citation-where {
+  max-width: 100%;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: anywhere;
+}
+.cb-ai-citation-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  text-decoration: none;
+  text-underline-offset: 4px;
+  cursor: pointer;
+  outline: none;
+  transition: color var(--motion-hover);
+}
+a.cb-ai-citation-link {
+  color: var(--text-meta);
+}
+.cb-ai-citation-link:hover,
+a.cb-ai-citation-link:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+.cb-ai-citation-link:focus-visible {
+  box-shadow: var(--ring);
+}
+
+/* File Tree: a file's row is its button, or its line, with its actions at the
+   row's end; a rename's old path and the caller's lines hang from the title.
+   The file shown beside the tree now reads in full ink. */
+.cb-ai-file-tree {
+  width: 100%;
+  min-width: 0;
+}
+.cb-ai-file-tree-file {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-05);
+  min-width: 0;
+}
+.cb-ai-file-tree-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-file-tree-name {
+  display: flex;
+  min-width: 0;
+}
+.cb-ai-file-tree-open[aria-current='true'] > .cb-ai-trace-line {
+  color: var(--text-primary);
+  font-weight: var(--w-medium);
+}
+.cb-ai-file-tree-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+.cb-ai-file-tree-note {
+  margin: 0;
+  padding-inline-start: var(--sp-6);
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: anywhere;
+}
+.cb-ai-file-tree-detail {
+  min-width: 0;
+  padding-inline-start: var(--sp-6);
+}
+
+/* Checkpoint: a labelled divider. Its rules are drawn either side and read as
+   nothing; its button and its note are what it says. */
+.cb-ai-checkpoint {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-ai-checkpoint::before,
+.cb-ai-checkpoint::after {
+  content: '';
+  flex: 1 1 0;
+  min-width: var(--sp-3);
+  height: 1px;
+  background: var(--border-subtle);
+}
+.cb-ai-checkpoint-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1) var(--sp-2);
+  max-width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+.cb-ai-checkpoint-icon {
+  display: inline-flex;
+  flex: none;
+}
+.cb-ai-checkpoint-icon svg {
+  pointer-events: none;
+}
+.cb-ai-checkpoint-trigger {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font: inherit;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  transition:
+    background-color var(--motion-hover),
+    border-color var(--motion-hover);
+}
+.cb-ai-checkpoint-trigger:hover:not(:disabled) {
+  background: var(--n-50);
+}
+.cb-ai-checkpoint-trigger:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-checkpoint-trigger:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.cb-ai-checkpoint-note {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+/* Confirmation: Item's anatomy as the asking card. Its icon and title share
+   the first row, with who asked at its end; what it would touch, its notices
+   and its answers each take a row of their own. The asking card wears the
+   brand's quiet ground; an outline one is a hairline card. */
+.cb-ai-confirmation.cb-ai-item {
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-lg);
+  color: var(--n-800);
+}
+.cb-ai-confirmation-ask.cb-ai-item {
+  border-color: var(--cortex-200);
+  background: var(--cortex-50);
+}
+.cb-ai-confirmation.cb-ai-item[data-state='refused'] {
+  border-color: var(--danger-200);
+}
+.cb-ai-confirmation-icon {
+  color: var(--cortex-600);
+}
+.cb-ai-confirmation .cb-ai-item-title {
+  color: var(--text-primary);
+  font-weight: var(--w-semibold);
+}
+.cb-ai-confirmation-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-ai-confirmation-body,
+.cb-ai-confirmation-refusal,
+.cb-ai-confirmation-notice,
+.cb-ai-confirmation-outcome,
+.cb-ai-confirmation-answers {
+  flex-basis: 100%;
+  min-width: 0;
+}
+.cb-ai-confirmation-body,
+.cb-ai-confirmation-answers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.cb-ai-confirmation-subject {
+  max-height: 160px;
+  margin: 0;
+  padding: var(--sp-1) 6px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-2xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cb-ai-confirmation-refusal,
+.cb-ai-confirmation-notice,
+.cb-ai-confirmation-outcome {
+  margin: 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: break-word;
+}
+.cb-ai-confirmation-refusal {
+  color: var(--danger-600);
+}
+.cb-ai-confirmation-notice {
+  color: var(--text-meta);
+}
+.cb-ai-confirmation-outcome {
+  color: var(--n-700);
+  font-weight: var(--w-medium);
+}
+.cb-ai-confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.cb-ai-confirmation-reason {
+  min-width: 0;
+  padding: var(--sp-1) 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font: inherit;
+  font-size: var(--fs-xs);
+  outline: none;
+  transition: border-color var(--motion-hover);
+}
+/* Asked for on Deny, it sits among the answers and gives way first. */
+.cb-ai-confirmation-actions > .cb-ai-confirmation-reason {
+  flex: 1 1 160px;
+}
+.cb-ai-confirmation-reason::placeholder {
+  color: var(--text-placeholder);
+}
+.cb-ai-confirmation-reason:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-confirmation-reason:disabled {
+  background: var(--n-50);
+  color: var(--text-disabled);
+}
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   Code Block (M91.7) on the DS tokens: a sunken card with a hairline, its
+   code in the mono face. Shiki's colours arrive inline, already for the
+   caller's theme (workspace/highlighter.tsx); plain text takes the card's
+   ink. Unlayered like the app's other surface stylesheets; motion spends the
+   tokens only. */
+
+.cb-ai-code-block {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--n-100);
+  border-radius: var(--r-xl);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+}
+/* The content takes focus so a keyboard can scroll it; the ring is the
+   block's, which is what the reader sees as the thing focused. */
+.cb-ai-code-block:has(> .cb-ai-code-block-content:focus-visible) {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+.cb-ai-code-block-destructive {
+  border-color: var(--danger-200);
+  background: var(--danger-50);
+  color: var(--danger-700);
+}
+.cb-ai-code-block-sm {
+  border-radius: var(--r-lg);
+  font-size: var(--fs-xs);
+}
+
+.cb-ai-code-block-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-4) var(--sp-4) 0;
+  color: var(--text-meta);
+}
+.cb-ai-code-block-sm > .cb-ai-code-block-header {
+  padding: var(--sp-3) var(--sp-3) 0;
+}
+.cb-ai-code-block-destructive > .cb-ai-code-block-header {
+  color: var(--danger-700);
+}
+.cb-ai-code-block-header > :has(> .cb-ai-code-block-title) {
+  min-width: 0;
+}
+
+.cb-ai-code-block-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-ai-code-block-destructive .cb-ai-code-block-title {
+  color: var(--danger-700);
+}
+.cb-ai-code-block-title > svg {
+  display: inline-block;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+  pointer-events: none;
+}
+
+.cb-ai-code-block-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: calc(var(--sp-1) * -1) -6px calc(var(--sp-1) * -1) auto;
+}
+/* With no header the actions float over the block's corner, shown while the
+   block is hovered or holds focus — so a keyboard reaches them too — and
+   always on a touch screen, which has no hover. */
+.cb-ai-code-block > .cb-ai-code-block-actions {
+  position: absolute;
+  top: var(--sp-3);
+  inset-inline-end: var(--sp-3);
+  z-index: 1;
+  margin: 0;
+  border-radius: var(--r-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-xs);
+  opacity: 0;
+  transition: opacity var(--motion-move);
+}
+.cb-ai-code-block-sm > .cb-ai-code-block-actions {
+  top: var(--sp-2);
+  inset-inline-end: var(--sp-2);
+}
+.cb-ai-code-block:hover > .cb-ai-code-block-actions,
+.cb-ai-code-block:focus-within > .cb-ai-code-block-actions {
+  opacity: 1;
+}
+@media (pointer: coarse) {
+  .cb-ai-code-block > .cb-ai-code-block-actions {
+    opacity: 1;
+  }
+}
+
+.cb-ai-code-block-content {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: var(--sp-4);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: inherit;
+  line-height: 1.6;
+  text-align: start;
+  white-space: pre;
+  outline: none;
+}
+.cb-ai-code-block:has(> .cb-ai-code-block-header) > .cb-ai-code-block-content {
+  padding-top: var(--sp-2);
+}
+.cb-ai-code-block:has(> .cb-ai-code-block-footer) > .cb-ai-code-block-content {
+  padding-bottom: var(--sp-2);
+}
+.cb-ai-code-block-sm > .cb-ai-code-block-content {
+  padding: var(--sp-3);
+}
+.cb-ai-code-block-sm:has(> .cb-ai-code-block-header) > .cb-ai-code-block-content {
+  padding-top: 6px;
+}
+.cb-ai-code-block-sm:has(> .cb-ai-code-block-footer) > .cb-ai-code-block-content {
+  padding-bottom: 6px;
+}
+.cb-ai-code-block-content[data-wrap] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* tokens/base.css draws every `code` as an inline chip — a ground, a border,
+   its own size. A block's code is the surface's own text, and a grid of its
+   lines, wide as the longest unless it wraps. */
+.cb-ai-code-block-code {
+  display: grid;
+  align-content: start;
+  min-width: max-content;
+  min-height: 1lh;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+.cb-ai-code-block-content[data-wrap] > .cb-ai-code-block-code {
+  min-width: 0;
+}
+.cb-ai-code-block-content[data-numbered] > .cb-ai-code-block-code {
+  grid-template-columns: auto 1fr;
+}
+
+/* A line runs to the block's edges, so a tint marks the whole row. */
+.cb-ai-code-block-line {
+  position: relative;
+  display: block;
+  min-height: 1lh;
+  margin-inline: calc(var(--sp-4) * -1);
+  padding-inline: var(--sp-4);
+}
+.cb-ai-code-block-sm .cb-ai-code-block-line {
+  margin-inline: calc(var(--sp-3) * -1);
+  padding-inline: var(--sp-3);
+}
+.cb-ai-code-block-line-content {
+  min-width: 0;
+}
+/* Numbers are a counter, never text: a selection leaves them behind, and the
+   empty alternative keeps them out of what a screen reader reads. */
+[data-numbered] > .cb-ai-code-block-code > .cb-ai-code-block-line {
+  display: grid;
+  grid-column: span 2;
+  grid-template-columns: subgrid;
+  column-gap: var(--sp-3);
+  counter-increment: cb-ai-line;
+}
+[data-numbered] > .cb-ai-code-block-code > .cb-ai-code-block-line::before {
+  min-width: var(--sp-6);
+  color: var(--n-400);
+  text-align: end;
+  user-select: none;
+  content: counter(cb-ai-line);
+  content: counter(cb-ai-line) / '';
+}
+
+.cb-ai-code-block-line[data-variant='added'] {
+  background: var(--success-50);
+}
+.cb-ai-code-block-line[data-variant='removed'] {
+  background: var(--danger-50);
+}
+.cb-ai-code-block-line[data-variant='highlighted'] {
+  background: var(--n-100);
+}
+/* A change is a mark as well as a tint, so it never rests on colour alone. A
+   raw diff carries its own `+` and `-` in its text; a line a caller marks
+   gets one drawn, outside the selection. */
+.cb-ai-code-block-content:not([data-language='diff'])
+  .cb-ai-code-block-line[data-variant='added']::after,
+.cb-ai-code-block-content:not([data-language='diff'])
+  .cb-ai-code-block-line[data-variant='removed']::after {
+  position: absolute;
+  top: 0;
+  inset-inline-start: var(--sp-1);
+  user-select: none;
+}
+.cb-ai-code-block-content:not([data-language='diff'])
+  .cb-ai-code-block-line[data-variant='added']::after {
+  color: var(--success-600);
+  content: '+';
+}
+.cb-ai-code-block-content:not([data-language='diff'])
+  .cb-ai-code-block-line[data-variant='removed']::after {
+  color: var(--danger-600);
+  content: '\2212';
+}
+
+.cb-ai-code-block-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: 0 var(--sp-4) var(--sp-4);
+  color: var(--text-meta);
+}
+.cb-ai-code-block-sm > .cb-ai-code-block-footer {
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   Trace (M91.7): lines of what an agent did, on the DS tokens. A line is
+   quiet ink that a hover inside a link or a trigger brings up to full; a
+   failed line is danger ink, a line not yet started is fainter, and a
+   running line's title carries the working light (`cb-ai-shimmer`,
+   index.css). Unlayered like the app's other surface stylesheets; motion
+   spends the tokens only. */
+
+.cb-ai-trace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+}
+
+/* A link or a trigger placed straight in a trace is the row: it takes the
+   line's width, and its focus ring. A link keeps the line's ink rather than
+   the app's link ink and hover underline (tokens/base.css). */
+.cb-ai-trace > :has(> .cb-ai-trace-line) {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  border-radius: var(--r-lg);
+  text-align: left;
+  outline: none;
+}
+.cb-ai-trace > :has(> .cb-ai-trace-line):focus-visible {
+  box-shadow: var(--ring);
+}
+.cb-ai-trace > a:has(> .cb-ai-trace-line),
+.cb-ai-trace > a:has(> .cb-ai-trace-line):hover {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cb-ai-trace-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  color: var(--n-600);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  transition: color var(--motion-hover);
+}
+:is(a, button) .cb-ai-trace-line {
+  cursor: pointer;
+}
+:is(a, button):hover .cb-ai-trace-line {
+  color: var(--n-900);
+}
+.cb-ai-trace-line[data-status='pending'] {
+  color: var(--n-500);
+}
+.cb-ai-trace-line[data-status='error'],
+:is(a, button):hover .cb-ai-trace-line[data-status='error'] {
+  color: var(--danger-600);
+}
+
+.cb-ai-trace-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.cb-ai-trace-icon svg {
+  pointer-events: none;
+}
+/* After the title, the icon is the line's indicator, drawn closer to it. */
+.cb-ai-trace-title ~ .cb-ai-trace-icon {
+  margin-left: calc(var(--sp-1) * -1);
+}
+
+.cb-ai-trace-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cb-ai-trace-description {
+  flex: none;
+  color: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.cb-ai-trace-collapsible {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.cb-ai-trace-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: transparent;
+  color: var(--n-600);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: color var(--motion-hover);
+}
+.cb-ai-trace-trigger:hover {
+  color: var(--n-900);
+}
+.cb-ai-trace-trigger:focus-visible {
+  box-shadow: var(--ring);
+}
+.cb-ai-trace-trigger:disabled {
+  cursor: default;
+}
+/* The chevron is the trigger's, outside the line, so a failed line tints it. */
+.cb-ai-trace-trigger:has([data-status='error']) {
+  color: var(--danger-600);
+}
+.cb-ai-trace-chevron {
+  transition: rotate var(--motion-turn);
+}
+.cb-ai-trace-trigger[aria-expanded='true'] > .cb-ai-trace-chevron {
+  rotate: 90deg;
+}
+
+.cb-ai-trace-panel {
+  min-width: 0;
+}
+/* The detail hangs from a rule drawn down the middle of the line's 16px icon
+   (8px in, less its own 1px). Muted, as the lines are; a block inside that
+   needs full ink (a code block) sets its own. */
+.cb-ai-trace-content {
+  min-width: 0;
+  margin: var(--sp-2) 0 var(--sp-1) 7px;
+  padding: 0 var(--sp-1) 0 var(--sp-4);
+  border-left: 1px solid var(--border-subtle);
+  color: var(--n-600);
+  line-height: 1.625;
+  overflow-wrap: break-word;
+}
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   The trace steps (M91.9a): Chain of Thought, Reasoning, Tool, Task,
+   Subagent, Terminal, Test Results and Stack Trace, drawn on Trace and Code
+   Block and the DS tokens. Each adds only what a step needs beyond a line:
+   the words under it, the detail it opens onto, the frames and the cases.
+   Unlayered like the app's other surface stylesheets; the motion is the
+   foundation's (trace.css, foundation.css), so nothing here takes time. */
+
+/* A step that does not open: its line, and what its caller adds under it. */
+.cb-ai-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  width: 100%;
+  min-width: 0;
+}
+
+/* A step's line, and the words a stopped turn or a hook left it with, or what
+   a running subagent is doing, under its title. The second line hangs from
+   the title, past the 16px icon and its gap. */
+.cb-ai-step-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-05);
+  max-width: 100%;
+  min-width: 0;
+}
+.cb-ai-step-note {
+  padding-inline-start: var(--sp-6);
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: break-word;
+}
+/* The line's body: the title, then what follows it (a server chip, a type
+   badge, the counts and times) as one group. Where the line cannot hold
+   both, as in the 380px panel, the group wraps under the title, hung from
+   it, so the title, which says what the step was asked to do, is never cut
+   down to make room for its facts. */
+.cb-ai-step-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-step-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--sp-2);
+  min-width: 0;
+}
+/* An indicator after the title is drawn closer to it (trace.css). */
+.cb-ai-step-facts > .cb-ai-trace-icon:first-child {
+  margin-left: calc(var(--sp-1) * -1);
+}
+/* With a second line, the icon and the chevron stay level with the first:
+   each takes the line's 20px height and centres its 16px glyph in it. */
+.cb-ai-step-head > .cb-ai-trace-line {
+  align-items: flex-start;
+}
+.cb-ai-step-head > .cb-ai-trace-line > .cb-ai-trace-icon,
+.cb-ai-trace-trigger:has(> .cb-ai-step-head) > .cb-ai-trace-chevron {
+  height: var(--lh-ui);
+}
+.cb-ai-trace-trigger:has(> .cb-ai-step-head) {
+  align-items: flex-start;
+}
+
+/* A caller's own lines under a step's line hang from its title too; under a
+   trigger they keep the step's gap. */
+.cb-ai-step-extra {
+  min-width: 0;
+  padding-inline-start: var(--sp-6);
+}
+.cb-ai-trace-trigger + .cb-ai-step-extra {
+  margin-top: var(--sp-1);
+}
+
+/* A line that is a button of its own — a stack frame that opens its file, a
+   hand-off that opens its run — keeps a line's ink and takes the row's ring,
+   as a trigger does (trace.css). */
+.cb-ai-step-link {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+}
+.cb-ai-step-link:focus-visible {
+  box-shadow: var(--ring);
+}
+
+/* What a step opens onto: its blocks, one under another. */
+.cb-ai-step-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+/* Long output scrolls inside its block (shadcn's `max-h-64`). */
+.cb-ai-step-code {
+  max-height: 16rem;
+}
+.cb-ai-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.cb-ai-step-quiet {
+  margin: 0;
+  color: var(--text-meta);
+}
+
+/* Reasoning keeps the model's line breaks. */
+.cb-ai-reasoning-text {
+  white-space: pre-wrap;
+}
+
+/* Subagent: what kind it is and which model ran it, and what it found. */
+.cb-ai-subagent-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.cb-ai-subagent-result {
+  margin: 0;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+/* A hand-off's refusal: its first lines under the line; the detail holds the
+   whole of it. The clamp clips at its own box, so no sliver of a fourth line
+   shows. */
+.cb-ai-handoff-refusal {
+  display: -webkit-box;
+  margin: 0;
+  padding-inline-start: var(--sp-6);
+  overflow: hidden;
+  color: var(--danger-700);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.cb-ai-handoff-refusal[hidden] {
+  display: none;
+}
+
+/* Terminal: the command as typed, then its output; stderr is ruled off and in
+   danger ink, so it reads as the other stream without its label. */
+.cb-ai-terminal-command {
+  color: var(--text-primary);
+  font-weight: var(--w-medium);
+}
+/* The prompt is drawn, not typed: a copied selection leaves it behind. */
+.cb-ai-terminal-prompt {
+  color: var(--text-meta);
+  user-select: none;
+}
+.cb-ai-terminal-note {
+  color: var(--text-meta);
+  font-family: var(--font-ui);
+}
+.cb-ai-terminal-stderr {
+  margin-inline-start: calc(var(--sp-3) * -1);
+  padding-inline-start: calc(var(--sp-3) - 2px);
+  border-inline-start: 2px solid var(--danger-200);
+  color: var(--danger-700);
+}
+.cb-ai-terminal-marker {
+  color: var(--warn-700);
+}
+
+/* Test Results: the run's totals, and the note when the failures it counted
+   are not all still in the output. */
+.cb-ai-test-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.cb-ai-test-cut {
+  margin: 0;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+
+/* Stack Trace: the runtime's and the libraries' frames, as printed, in a
+   sunken block that scrolls sideways rather than wrap a path. */
+.cb-ai-stack-frames {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: var(--sp-3);
+  overflow-x: auto;
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  color: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  list-style: none;
+}
+.cb-ai-stack-frames > li {
+  white-space: pre;
+}
+
+/* A row of chips — the hosts a search found — and a file's name, which a
+   step's chip sets in the mono face. */
+.cb-ai-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.cb-ai-mono {
+  font-family: var(--font-mono);
+}
+/* Ported from shadcn/ui at 25af02b, MIT, Copyright (c) 2023 shadcn; see THIRD_PARTY_NOTICES.md.
+
+   The conversation set (M91.8): Message Scroller, Chat, Message, Prompt
+   Input, Attachment, Suggestion, Model Selector, Context and Questionnaire,
+   on the DS tokens (shadcn's palette classes compile to nothing here,
+   index.css). Unlayered like the app's other surface stylesheets, so a rule
+   of the surface that uses one (its own class, scoped) restyles it; motion
+   spends the tokens only, so reduced motion stills it with everything else. */
+
+/* Message Scroller: a frame that fills its parent, a viewport that scrolls,
+   and a jump button over its foot. */
+.cb-ai-message-scroller {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.cb-ai-message-scroller-viewport {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  outline: none;
+}
+.cb-ai-message-scroller-viewport:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+/* Unseen until its opening position is applied, so the first frame is the
+   frame, not a jump from the top. */
+.cb-ai-message-scroller-viewport[data-pending-scroll] {
+  visibility: hidden;
+}
+.cb-ai-message-scroller-viewport[data-autoscrolling] {
+  scrollbar-color: transparent transparent;
+}
+.cb-ai-message-scroller-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  height: max-content;
+  min-height: 100%;
+}
+.cb-ai-message-scroller-item {
+  flex: none;
+  min-width: 0;
+}
+/* Centred by `left` and its own `translate`, which its entrance and exit
+   move too: the whole value is restated in each state. */
+.cb-ai-message-scroller-button {
+  position: absolute;
+  bottom: var(--sp-4);
+  left: 50%;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) 10px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-full);
+  background: var(--n-0);
+  color: var(--n-600);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-2xs);
+  white-space: nowrap;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  translate: -50% 0;
+  transition:
+    opacity var(--motion-pop),
+    scale var(--motion-pop),
+    translate var(--motion-pop),
+    border-color var(--motion-hover);
+}
+.cb-ai-message-scroller-button:hover {
+  border-color: var(--n-400);
+}
+.cb-ai-message-scroller-button:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.cb-ai-message-scroller-button[data-direction='start'] {
+  top: var(--sp-4);
+  bottom: auto;
+}
+.cb-ai-message-scroller-button[data-active='false'] {
+  opacity: 0;
+  scale: 0.95;
+  translate: -50% 100%;
+  pointer-events: none;
+  transition:
+    opacity var(--motion-exit),
+    scale var(--motion-exit),
+    translate var(--motion-exit);
+}
+.cb-ai-message-scroller-button[data-direction='start'][data-active='false'] {
+  translate: -50% -100%;
+}
+
+/* Chat: the thread over its composer, or the empty state in its place. */
+.cb-ai-chat {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.cb-ai-chat-thread,
+.cb-ai-chat-empty {
+  flex: 1;
+  min-height: 0;
+}
+.cb-ai-chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.cb-ai-chat-composer {
+  flex: none;
+  min-width: 0;
+}
+
+/* Message: one turn. The person's sits at the end, in a filled bubble; the
+   agent's reads as prose at the start. */
+.cb-ai-message-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-message {
+  position: relative;
+  display: flex;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+.cb-ai-message[data-align='end'] {
+  flex-direction: row-reverse;
+}
+.cb-ai-message-avatar {
+  display: flex;
+  flex: none;
+  align-self: flex-start;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  color: var(--text-ai);
+}
+.cb-ai-message-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cb-ai-message[data-align='end'] > .cb-ai-message-content {
+  align-items: flex-end;
+}
+.cb-ai-message-header,
+.cb-ai-message-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  max-width: 100%;
+  min-width: 0;
+  color: var(--text-meta);
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+  line-height: var(--lh-xs);
+}
+.cb-ai-message[data-align='end'] .cb-ai-message-footer {
+  justify-content: flex-end;
+}
+.cb-ai-message-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-meta);
+}
+.cb-ai-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  width: fit-content;
+  max-width: 88%;
+  min-width: 0;
+}
+.cb-ai-bubble[data-align='end'],
+.cb-ai-message[data-align='end'] .cb-ai-bubble {
+  align-self: flex-end;
+}
+.cb-ai-bubble-content {
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px var(--sp-4);
+  border-radius: 18px;
+  font-size: var(--fs-md);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cb-ai-bubble[data-variant='default'] > .cb-ai-bubble-content {
+  background: var(--action-primary);
+  color: var(--on-action-primary);
+}
+.cb-ai-bubble[data-variant='muted'] > .cb-ai-bubble-content {
+  background: var(--n-50);
+  color: var(--text-primary);
+}
+.cb-ai-bubble[data-variant='ghost'] > .cb-ai-bubble-content {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+/* Prompt Input: one pill. The attachments row spans it; the field takes
+   what its tools leave, and the tools drop under it when they do not fit. */
+.cb-ai-prompt-input {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 56px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: 24px;
+  background: var(--surface-raised);
+  cursor: text;
+  transition:
+    border-color var(--motion-move),
+    box-shadow var(--motion-move);
+}
+.cb-ai-prompt-input:focus-within {
+  border-color: var(--border-strong);
+}
+.cb-ai-prompt-input[data-disabled] {
+  cursor: default;
+}
+.cb-ai-prompt-input-header {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  order: -1;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.cb-ai-prompt-input-body {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.cb-ai-prompt-input-textarea {
+  display: block;
+  width: 100%;
+  min-height: 24px;
+  max-height: min(112px, 18dvh);
+  padding: 0;
+  overflow-y: auto;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-ui);
+  line-height: 24px;
+  resize: none;
+  outline: none;
+}
+.cb-ai-prompt-input-textarea::placeholder {
+  color: var(--text-placeholder);
+}
+.cb-ai-prompt-input-textarea:disabled {
+  color: var(--text-disabled);
+}
+.cb-ai-prompt-input-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  min-width: 0;
+  margin-left: auto;
+}
+.cb-ai-prompt-input-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.cb-ai-prompt-input-submit {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-full);
+  background: var(--action-primary);
+  color: var(--on-action-primary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover),
+    scale var(--motion-pop);
+}
+.cb-ai-prompt-input-submit:hover:not(:disabled) {
+  background: var(--action-primary-hover);
+}
+.cb-ai-prompt-input-submit:active:not(:disabled) {
+  background: var(--action-primary-press);
+  scale: 0.94;
+}
+.cb-ai-prompt-input-submit:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 3px;
+}
+.cb-ai-prompt-input-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Attachment: a file chip, its kind or its picture, its name and a remove
+   button. */
+.cb-ai-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cb-ai-attachment {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 100%;
+  min-width: 0;
+  padding: var(--sp-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  transition: border-color var(--motion-hover);
+}
+.cb-ai-attachment:focus-within {
+  border-color: var(--border-focus);
+}
+.cb-ai-attachment[data-state='idle'] {
+  border-style: dashed;
+}
+.cb-ai-attachment[data-state='error'] {
+  border-color: var(--danger-200);
+}
+.cb-ai-attachment[data-size='sm'] {
+  gap: 6px;
+  padding: 2px;
+  border-radius: var(--r-md);
+}
+.cb-ai-attachment-preview {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--n-50);
+  color: var(--text-meta);
+}
+.cb-ai-attachment[data-size='sm'] .cb-ai-attachment-preview {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+}
+.cb-ai-attachment[data-state='error'] .cb-ai-attachment-preview {
+  background: var(--danger-50);
+  color: var(--danger-600);
+}
+.cb-ai-attachment-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.cb-ai-attachment-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-inline-end: var(--sp-1);
+}
+.cb-ai-attachment-title,
+.cb-ai-attachment-description {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-ai-attachment-title {
+  font-weight: var(--w-medium);
+}
+.cb-ai-attachment-description {
+  color: var(--text-meta);
+}
+.cb-ai-attachment[data-state='error'] .cb-ai-attachment-description {
+  color: var(--danger-600);
+}
+
+/* Suggestion: Cerebro's starters are rows, borderless, one under another
+   (a deliberate deviation from shadcn's outlined pills); the arrow leans the
+   way it points under the pointer. */
+.cb-ai-suggestions {
+  display: grid;
+  gap: var(--sp-1);
+  width: 100%;
+  text-align: left;
+}
+.cb-ai-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  width: 100%;
+  padding: 9px var(--sp-3);
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-hover);
+}
+.cb-ai-suggestion:hover {
+  background: var(--surface-sunken);
+}
+.cb-ai-suggestion:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.cb-ai-suggestion:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cb-ai-suggestion-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cb-ai-suggestion-description {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cb-ai-suggestion > svg {
+  flex: none;
+  color: var(--text-muted);
+  transition: translate var(--motion-turn);
+}
+.cb-ai-suggestion:hover:not(:disabled) > svg {
+  translate: 2px -2px;
+}
+
+/* Model Selector: one trigger, and one panel holding the Model and Effort
+   radio groups (a deliberate deviation from shadcn's two menus). A row is a
+   label over its radio, so the whole row picks. */
+.cb-ai-model-selector-trigger {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 32px;
+  max-width: 200px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--n-500);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.cb-ai-model-selector-trigger:hover:not(:disabled),
+.cb-ai-model-selector-trigger[aria-expanded='true'] {
+  background: var(--n-50);
+  color: var(--n-800);
+}
+.cb-ai-model-selector-trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.cb-ai-model-selector-trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cb-ai-model-selector-trigger[data-appearance='icon'] {
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+}
+.cb-ai-model-selector-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-ai-model-selector {
+  width: 240px;
+  max-width: var(--popover-available-width, 240px);
+  padding: var(--sp-1);
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-lg);
+  background: var(--n-0);
+  box-shadow: var(--shadow-lg);
+}
+.cb-ai-model-selector-note {
+  margin: 0 0 var(--sp-1);
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--n-100);
+  color: var(--n-600);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-ai-model-selector-group + .cb-ai-model-selector-group {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1);
+  border-top: 1px solid var(--n-100);
+}
+.cb-ai-model-selector-heading {
+  padding: var(--sp-1) var(--sp-2) 2px;
+  color: var(--n-400);
+  font-size: var(--fs-2xs);
+  font-weight: var(--w-medium);
+  letter-spacing: var(--track-caps);
+  line-height: var(--lh-2xs);
+  text-transform: uppercase;
+}
+.cb-ai-model-selector-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-md);
+  color: var(--n-700);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  cursor: pointer;
+  transition: background-color var(--motion-hover);
+}
+.cb-ai-model-selector-item:hover {
+  background: var(--n-50);
+}
+.cb-ai-model-selector-item:has(> input:checked) {
+  background: var(--surface-selected);
+  color: var(--cortex-700);
+}
+.cb-ai-model-selector-item:has(> input:focus-visible) {
+  box-shadow: var(--ring);
+}
+.cb-ai-model-selector-item:has(> input:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+/* The radio is the row: drawn over it, unseen, so a press anywhere on the
+   row picks and its focus is the row's ring. */
+.cb-ai-model-selector-item > input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+.cb-ai-model-selector-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-ai-model-selector-other {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+}
+.cb-ai-model-selector-other-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  outline: none;
+  transition: border-color var(--motion-hover);
+}
+.cb-ai-model-selector-other-input:focus-visible {
+  border-color: var(--border-focus);
+}
+.cb-ai-model-selector-other-input[aria-invalid='true'] {
+  border-color: var(--danger-500);
+}
+.cb-ai-model-selector-use {
+  padding: 2px 6px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-700);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+  transition: background-color var(--motion-hover);
+}
+.cb-ai-model-selector-use:hover:not(:disabled) {
+  background: var(--n-50);
+}
+.cb-ai-model-selector-use:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.cb-ai-model-selector-use:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.cb-ai-model-selector-refusal {
+  margin: 0;
+  padding: 0 var(--sp-2) var(--sp-1);
+  color: var(--danger-600);
+  font-size: var(--fs-2xs);
+  line-height: 15px;
+}
+
+/* Context: a ring and its figure in the composer's toolbar, sized to its
+   row; the detail is a hover card. A ring with nothing recorded is a dashed
+   track and no arc: an absent number is never drawn as zero (CV-05). */
+.cb-ai-context {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 32px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--n-500);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  transition:
+    background-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.cb-ai-context:hover {
+  background: var(--n-50);
+  color: var(--n-800);
+}
+.cb-ai-context:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.cb-ai-context[data-level='high'] {
+  color: var(--warn-600);
+}
+.cb-ai-context[data-level='full'] {
+  color: var(--danger-600);
+}
+.cb-ai-context-ring {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.cb-ai-context-track,
+.cb-ai-context-arc {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+}
+.cb-ai-context-track {
+  opacity: 0.25;
+}
+.cb-ai-context:not([data-state='recorded']) .cb-ai-context-track {
+  stroke-dasharray: 2 3;
+  opacity: 0.6;
+}
+.cb-ai-context-arc {
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--motion-move);
+}
+.cb-ai-context-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  color: var(--text-primary);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cb-ai-context-title {
+  margin: 0;
+  font-weight: var(--w-medium);
+}
+.cb-ai-context-detail {
+  margin: 0;
+  color: var(--text-meta);
+}
+.cb-ai-context-meter {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: var(--n-100);
+}
+.cb-ai-context-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--n-500);
+  transition: width var(--motion-move);
+}
+.cb-ai-context-card[data-level='high'] .cb-ai-context-fill {
+  background: var(--warn-500);
+}
+.cb-ai-context-card[data-level='full'] .cb-ai-context-fill {
+  background: var(--danger-500);
+}
+.cb-ai-context-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--sp-3);
+  margin: 0;
+}
+.cb-ai-context-rows dt {
+  color: var(--text-meta);
+}
+.cb-ai-context-rows dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.cb-ai-context-model {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Questionnaire: every question on one page, each a fieldset of native
+   radios or checkboxes (a deliberate deviation from shadcn's one question
+   at a time). */
+.cb-ai-questionnaire {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.cb-ai-questionnaire-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cb-ai-questionnaire-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+}
+.cb-ai-questionnaire-header {
+  width: fit-content;
+  padding: 1px var(--sp-1);
+  border-radius: var(--r-xs);
+  background: var(--cortex-100);
+  color: var(--cortex-700);
+  font-size: var(--fs-meta);
+  font-weight: var(--w-medium);
+  line-height: var(--lh-meta);
+}
+.cb-ai-questionnaire-question {
+  color: var(--n-800);
+  font-weight: var(--w-medium);
+}
+.cb-ai-questionnaire-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cb-ai-questionnaire-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  cursor: pointer;
+}
+.cb-ai-questionnaire-choice > input {
+  flex: none;
+  margin: 3px 0 0;
+  accent-color: var(--action-primary);
+}
+.cb-ai-questionnaire-choice:has(> input:disabled) {
+  cursor: default;
+}
+.cb-ai-questionnaire-choice-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--n-800);
+}
+.cb-ai-questionnaire-choice-description {
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-ai-questionnaire-preview {
+  margin-left: 20px;
+}
+.cb-ai-questionnaire-preview > summary {
+  width: fit-content;
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  cursor: pointer;
+}
+.cb-ai-questionnaire-preview > pre {
+  max-height: 160px;
+  margin: var(--sp-1) 0 0;
+  overflow: auto;
+  color: var(--n-600);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.cb-ai-questionnaire-preview[open] > pre {
+  --rise: -4px;
+  animation: cb-rise-in var(--motion-enter) backwards;
+}
+.cb-ai-questionnaire-input {
+  min-width: 0;
+  padding: var(--sp-1) 6px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font: inherit;
+  font-size: var(--fs-xs);
+  outline: none;
+  transition: border-color var(--motion-hover);
+}
+.cb-ai-questionnaire-item .cb-ai-questionnaire-input {
+  margin-left: 20px;
+}
+.cb-ai-questionnaire-input:focus-visible {
+  border-color: var(--border-focus);
+}
+.cb-ai-questionnaire-input:disabled {
+  opacity: 0.6;
+}
+.cb-ai-questionnaire-error {
+  color: var(--text-meta);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-ai-questionnaire-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* The design system's select (Select.tsx): a listbox button and the list it
+   opens. No native <select> draws anywhere in the app (owner, 2026-10-18): a
+   native popup cannot carry the design system's type, icons or check marks,
+   and it looks like a different program in every theme. */
+.cb-select {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  vertical-align: middle;
+}
+
+.cb-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: var(--control-h);
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  background: var(--n-0);
+  color: var(--n-800);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition:
+    background var(--motion-hover),
+    border-color var(--motion-hover);
+}
+
+.cb-select-sm .cb-select-trigger {
+  height: var(--control-h-sm);
+  padding: 0 6px 0 8px;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+
+.cb-select-trigger:hover {
+  border-color: var(--n-300);
+  background: var(--n-25);
+}
+
+.cb-select-trigger[aria-expanded='true'] {
+  border-color: var(--n-300);
+  background: var(--n-50);
+}
+
+.cb-select-trigger:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+
+.cb-select-trigger[aria-invalid='true'] {
+  border-color: var(--danger-500);
+}
+
+.cb-select-trigger:disabled {
+  border-color: var(--n-200);
+  background: var(--n-50);
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+/* Ghost: a value that reads as text until the pointer finds it — property
+   rows, the inspector, toolbars. */
+.cb-select-ghost .cb-select-trigger {
+  padding: 0 6px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.cb-select-ghost .cb-select-trigger:hover {
+  border-color: transparent;
+  background: var(--n-50);
+}
+
+.cb-select-ghost .cb-select-trigger[aria-expanded='true'] {
+  border-color: transparent;
+  background: var(--n-100);
+}
+
+.cb-select-ghost .cb-select-trigger:focus-visible {
+  border-color: var(--border-focus);
+}
+
+.cb-select-ghost .cb-select-trigger:disabled {
+  border-color: transparent;
+  background: transparent;
+}
+
+.cb-select-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cb-select-placeholder {
+  color: var(--n-400);
+}
+
+.cb-select-icon {
+  flex: none;
+  color: var(--n-500);
+}
+
+.cb-select-chevron {
+  flex: none;
+  color: var(--n-400);
+  transition: transform var(--motion-move);
+}
+
+.cb-select-trigger[aria-expanded='true'] .cb-select-chevron {
+  transform: rotate(180deg);
+}
+
+/* The list: the Popover panel and its rows, the same surface a Menu has. */
+.cb-select-list {
+  padding: 4px;
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-lg);
+  background: var(--n-0);
+  box-shadow: var(--shadow-lg);
+}
+
+.cb-select-options {
+  /* The rows' offsetParent, so the highlighted one can be scrolled to. */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.cb-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--n-800);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cb-select-sm-list .cb-select-option {
+  min-height: 28px;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+
+.cb-select-option[data-active] {
+  background: var(--n-50);
+}
+
+.cb-select-option[aria-disabled='true'] {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.cb-select-option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cb-select-option-hint {
+  flex: none;
+  color: var(--n-400);
+  font-size: var(--fs-meta);
+}
+
+.cb-select-check {
+  flex: none;
+  color: var(--cortex-600);
+}
+
+/* Searchable: a combobox. The search field sits flush at the top of the
+   list over a hairline, as Linear's and Notion's pickers carry theirs, and
+   the rows scroll beneath it. */
+.cb-select-list.cb-select-searchable {
+  padding: 0;
+}
+
+.cb-select-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--n-100);
+}
+
+.cb-select-search-icon {
+  flex: none;
+  color: var(--n-400);
+}
+
+.cb-select-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--n-800);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+  outline: none;
+}
+
+.cb-select-search-input::placeholder {
+  color: var(--n-400);
+}
+
+.cb-select-sm-list .cb-select-search {
+  height: 32px;
+  padding: 0 10px;
+}
+
+.cb-select-sm-list .cb-select-search-input {
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+
+.cb-select-searchable .cb-select-options {
+  padding: 4px;
+}
+
+/* No rows: the listbox stays for the field to name, and draws nothing. */
+.cb-select-searchable .cb-select-options:empty {
+  display: none;
+}
+
+.cb-select-empty {
+  padding: 10px 12px;
+  color: var(--n-400);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-ui);
+}
+
+.cb-select-sm-list .cb-select-empty {
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+@font-face {
+  font-family: 'Instrument Sans';
+  src: url('./quit-s12UeAcm.ttf') format('truetype-variations');
+  font-weight: 400 700;
+  font-stretch: 75% 100%;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Instrument Sans';
+  src: url('./quit-Cw8YZbuF.ttf') format('truetype-variations');
+  font-weight: 400 700;
+  font-stretch: 75% 100%;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./quit-C5_jWxVG.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./quit-Bl6ckbVJ.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./quit-CCIC0M5z.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+:root {
+  /* Neutral paper and graphite; brand accents remain separate. */
+  --n-0: #ffffff;
+  --n-25: #fafafa;
+  --n-50: #f5f5f6;
+  --n-100: #ededf0;
+  --n-200: #e3e3e6;
+  --n-300: #c9cbd1;
+  /* Disabled ink and icon strokes; readable secondary text uses --n-600. */
+  --n-400: #868993;
+  --n-500: #767983;
+  --n-600: #61646c;
+  --n-700: #45484e;
+  --n-800: #2f3237;
+  --n-900: #202226;
+  /* primary — cortex ultramarine */
+  --cortex-50: #eef1fe;
+  --cortex-100: #dde4fd;
+  --cortex-200: #bcc9fb;
+  --cortex-300: #93a7f5;
+  --cortex-400: #6580ec;
+  --cortex-500: #3d5bde;
+  --cortex-600: #2e48c2;
+  --cortex-700: #2439a0;
+  --cortex-800: #1e2f7d;
+  --cortex-900: #1a2760;
+  /* AI — synapse violet (AI surfaces ONLY) */
+  --synapse-50: #f5f0fe;
+  --synapse-100: #ebe2fd;
+  --synapse-200: #d5c4fa;
+  --synapse-300: #b79cf3;
+  --synapse-400: #9c77e9;
+  --synapse-500: #8250dc;
+  --synapse-600: #6c3bc2;
+  --synapse-700: #5730a0;
+  /* semantic */
+  --success-50: #e9f7f0;
+  --success-500: #1f9d61;
+  --success-600: #17814f;
+  --success-700: #126740;
+  --warn-50: #fcf3e1;
+  /* The only ramp step that existed solely as an inline `var(--warn-300, #f0c36d)`
+     fallback; promoted to a real token in M15 so stripping dead fallbacks is safe. */
+  --warn-300: #f0c36d;
+  --warn-500: #de8f0a;
+  --warn-600: #b87404;
+  --warn-700: #925e04;
+  --danger-50: #fdedef;
+  /* Sibling of the --warn-300 promotion above, and the reason it was missed:
+     warn-300 was written `var(--warn-300, #f0c36d)`, so it still painted. The
+     three error banners using --danger-200 (AiActionCard, AiPanel, ChangesPage)
+     carry NO fallback, so the var was invalid at computed-value time and
+     border-color fell back to its initial `currentColor` — rendering the
+     danger-700 text colour as a hard #9a1d2e border on a #fdedef ground.
+     25% danger-500 over danger-50, matching the ramp's hue. */
+  --danger-200: #f5c1c7;
+  --danger-500: #de3b4e;
+  --danger-600: #bc2438;
+  --danger-700: #9a1d2e;
+  /* entity colors */
+  --ent-objective: #d97706;
+  --ent-keyresult: #1f9d61;
+  --ent-initiative: #3d5bde;
+  --ent-feature: #0e9bb5;
+  --ent-subfeature: #4fb3d9;
+  --ent-product: #5b6478;
+  --ent-component: #0e8585;
+  --ent-release: #e0562e;
+  --ent-releasegroup: #b4451f;
+  --ent-company: #11766b;
+  --ent-user: #64748b;
+  /* user-assignable swatches (features, kanban cards, timeline bars) */
+  --swatch-amber: #efb428;
+  --swatch-blue: #3d8be8;
+  --swatch-teal: #14b8a6;
+  --swatch-green: #34b764;
+  --swatch-violet: #8250dc;
+  --swatch-magenta: #d8569e;
+  --swatch-vermilion: #e0562e;
+  --swatch-sky: #38bdf8;
+  /* option & status colours — Notion's ten, named (M16.12).
+     Distinct from --swatch-* above, which is the older eight-hue set the type
+     picker and timeline bars use. These are the palette a SELECT option, a
+     multi-select tag and a workflow status draw from, and each is a triple:
+
+       --opt-<n>      the dot / solid fill
+       --opt-<n>-bg   the pill behind a tag, ~13% of the hue
+       --opt-<n>-ink  text ON that pill, >= 4.5:1 against it
+
+     The ink is the point. Tags used to paint their label in the raw option
+     colour over a 13% tint of the same colour — amber on amber at about
+     1.8:1 — which is the failure mode M15 spent a phase removing from the
+     neutral ramp. Nothing here reuses #A8AFC2, the value that ramp dropped.
+
+     The dark-theme overrides below preserve the same ink-on-tint contract. */
+  --opt-gray: #7e8699;
+  --opt-gray-bg: #eef0f4;
+  --opt-gray-ink: #4a5163;
+  --opt-brown: #9a6b4f;
+  --opt-brown-bg: #f4ede8;
+  --opt-brown-ink: #6d4a36;
+  --opt-orange: #d97514;
+  --opt-orange-bg: #fdf0e3;
+  --opt-orange-ink: #8a4a0b;
+  --opt-yellow: #d9a406;
+  --opt-yellow-bg: #fdf6e0;
+  --opt-yellow-ink: #7a5c02;
+  --opt-green: #1f9d61;
+  --opt-green-bg: #e6f6ee;
+  --opt-green-ink: #14653f;
+  --opt-blue: #3d8be8;
+  --opt-blue-bg: #e8f1fd;
+  --opt-blue-ink: #1a5694;
+  --opt-purple: #8250dc;
+  --opt-purple-bg: #f1ebfc;
+  --opt-purple-ink: #58309b;
+  --opt-pink: #d8569e;
+  --opt-pink-bg: #fceaf4;
+  --opt-pink-ink: #93316a;
+  --opt-red: #de3b4e;
+  --opt-red-bg: #fdeaec;
+  --opt-red-ink: #99202f;
+
+  /* Filled actions are independent of ramps used as ink on tinted surfaces.
+     These six fills retain white-label contrast in both themes. */
+  --action-primary: #25272b;
+  --action-primary-hover: #3b3e44;
+  --action-primary-press: #191b1f;
+  --on-action-primary: #ffffff;
+  --action-danger: #bc2438;
+  --action-danger-hover: #a61f31;
+  --action-danger-press: #89192a;
+  --on-action-danger: #ffffff;
+
+  /* avatar backgrounds — same eight hues as --swatch-*, darkened so white
+     initials clear 4.5:1 (5.2–6.9:1). The tinted swatches themselves top out
+     around 2:1 against white and made every avatar's initials unreadable. */
+  --avatar-1: #1f61b0;
+  --avatar-2: #1c7a44;
+  --avatar-3: #8a5a06;
+  --avatar-4: #6c3bc2;
+  --avatar-5: #a82f70;
+  --avatar-6: #0f7a70;
+  --avatar-7: #a83a1c;
+  --avatar-8: #1c6f9e;
+  /* workflow status defaults */
+  --status-idea: #14b8a6;
+  --status-planned: #3d8be8;
+  --status-progress: #efb428;
+  --status-validation: #8250dc;
+  --status-released: #34b764;
+  --status-wontdo: #a8afc2;
+  /* health */
+  --health-on: #1f9d61;
+  --health-risk: #de8f0a;
+  --health-off: #de3b4e;
+  --health-none: #a8afc2;
+  /* semantic aliases */
+  --surface-frame: #eeeef0;
+  --surface-navigation: #f7f7f8;
+  --surface-app: var(--n-0);
+  --surface-board: var(--n-25);
+  --surface-sunken: var(--n-50);
+  --surface-raised: var(--n-0);
+  --surface-selected: var(--cortex-50);
+  --surface-ai: var(--synapse-50);
+  /* The whiteboard's dot grid (M29.52). A literal, not an alias: this is the
+     only thing in the app drawn as 1px dots on a 24px pitch, and at that size
+     it has to sit between --n-100 (invisible) and --n-300 (a texture that
+     competes with the diagram). Picked by eye against --surface-board. */
+  --canvas-dot: #d5d9e3;
+  /* JSON Canvas files store only the digit, never these theme paints. */
+  --canvas-1: var(--opt-red);
+  --canvas-2: var(--opt-orange);
+  --canvas-3: var(--opt-yellow);
+  --canvas-4: var(--opt-green);
+  --canvas-5: #0e9bb5;
+  --canvas-6: var(--opt-purple);
+  --text-primary: var(--n-900);
+  --text-secondary: var(--n-600);
+  --text-muted: var(--n-600);
+  /* Metadata remains readable on every neutral surface (contrast.test.ts). */
+  --text-meta: var(--n-600);
+  --text-disabled: var(--n-400);
+  --text-placeholder: var(--n-600);
+  --text-inverse: #ffffff;
+  --text-link: var(--cortex-500);
+  --text-ai: var(--synapse-600);
+  --border-subtle: var(--n-200);
+  --border-strong: var(--n-300);
+  --border-focus: var(--cortex-500);
+  /* A selected diagram node's ring. Its own token because it is drawn ON the
+     node, whose fill is --cortex-50 — in dark that fill becomes #1b2547 while
+     --cortex-500 deliberately does not move, so the ring and its ground close
+     to 2.67:1, under the 3:1 non-text floor, and the only remaining cue is
+     1.5px of extra stroke width against an identically-coloured border
+     (MEASURED, M29.53). */
+  --diagram-selection-ring: var(--cortex-500);
+  --accent: var(--cortex-500);
+  --accent-hover: var(--cortex-600);
+  --accent-press: var(--cortex-700);
+  --scrim: rgba(22, 26, 36, 0.4);
+}
+
+/* ── Dark theme (M16.38) ──────────────────────────────────────────────────
+ *
+ * The seam the --opt-* comment above predicted, finally filled in.
+ *
+ * This block RE-POINTS the ramps rather than re-styling components, because
+ * components reach for --n-*, --danger-*, --opt-* directly — `bg-n-0`,
+ * `text-n-900`, `border-n-200` appear in the hundreds. Invert the ramps and
+ * every one of those call sites is already correct; add a per-component dark
+ * rule and you would be maintaining two stylesheets forever.
+ *
+ * So the ramps invert end-for-end: --n-0 is now the darkest surface and
+ * --n-900 the lightest ink, and the same for the semantic ramps. That is what
+ * keeps the existing `bg-danger-50 text-danger-700` pairing legible without
+ * touching the markup — 50 stays "the quiet background of this hue" and 700
+ * stays "ink that reads on it", which is what those steps always meant. Only
+ * their lightness changes.
+ *
+ * Written on [data-theme] with no prefers-color-scheme media query on purpose:
+ * the hook resolves the OS preference and always writes a concrete
+ * light/dark value, so there is exactly one place that decides. A media query
+ * here would be a second, silent decider that could disagree with an explicit
+ * user choice.
+ *
+ * Shared contrast checks hold primary and secondary ink against every
+ * neutral surface. Filled actions have their own light/dark tokens.
+ */
+:root[data-theme='dark'] {
+  /* Neutral graphite surfaces; quiet elevation replaces the blue cast. */
+  --n-0: #242528;
+  --n-25: #28292c;
+  --n-50: #2e2f33;
+  --n-100: #36373c;
+  --n-200: #41434a;
+  --n-300: #565960;
+  --n-400: #888b94;
+  --n-500: #a0a3ac;
+  --n-600: #b8bac3;
+  --n-700: #d1d2d8;
+  --n-800: #e6e7eb;
+  --n-900: #f3f4f6;
+
+  /* tint steps of the brand ramps become dark tints; the saturated mid steps
+     still read on a dark ground and are left as they are. The 700 ink step
+     follows the semantic ramps below instead: components pair it with the
+     50 ground (`bg-cortex-50 text-cortex-700` — StructureTile, the layout
+     editor's block chips, the sidebar's selected row), and light-mode
+     #2439a0 on the dark #1b2547 ground is ~1.5:1. The light ramp's 200 tint
+     is the ink here — 9.2:1 on the dark 50, the same band as the semantic
+     700s on theirs.
+
+     The 600 step moves too (M52.3), and for the same reason: it is the LINK
+     ink — every `text-cortex-600` in the app (concept links, source links,
+     the update log, the Details panel) — and light-mode #2e48c2 on --n-0 is
+     2.4:1, under AA for the 12-13px it ships at. #7d93f0 sits between the 400
+     and 300 steps and measures 6.2:1 on --n-0, 5.9 on --n-25, 5.5 on --n-50,
+     5.0 on --n-100 and 5.2 on the dark 50 ground. It is too light to carry a
+     white label (2.9:1), so the filled controls REST on cortex-500 — the
+     accent, which holds white at 5.6:1 in both themes — and the hover fills
+     that land on 600 (`hover:bg-cortex-600`) carry `text-n-0`, which is dark
+     ink on it here, not white. */
+  --cortex-50: #1b2547;
+  --cortex-100: #223059;
+  --cortex-600: #7d93f0;
+  --cortex-700: #bcc9fb;
+  --synapse-50: #241c3d;
+  --synapse-100: #2f2450;
+
+  /* semantic ramps invert the same way the neutrals do: 50 is the quiet
+     ground, 700 the ink that reads on it. */
+  --success-50: #12301f;
+  --success-500: #35b87a;
+  --success-600: #5fcd97;
+  --success-700: #8ddcb4;
+  --warn-50: #33280c;
+  --warn-300: #6b5620;
+  --warn-500: #e0a52a;
+  --warn-600: #ecc05e;
+  --warn-700: #f2d492;
+  --danger-50: #351a1e;
+  --danger-200: #5c2b32;
+  --danger-500: #e8596a;
+  --danger-600: #ef7d8a;
+  --danger-700: #f5a8b0;
+
+  /* option triples — dot stays the identity of the hue, the pill ground goes
+     dark and the ink goes light, preserving the >= 4.5:1 ink-on-pill contract
+     the light theme documents above. */
+  --opt-gray: #8b93a5;
+  --opt-gray-bg: #2a2f3a;
+  --opt-gray-ink: #c5cbd7;
+  --opt-brown: #b8845f;
+  --opt-brown-bg: #33291f;
+  --opt-brown-ink: #dcb08c;
+  --opt-orange: #e08a3c;
+  --opt-orange-bg: #3a2612;
+  --opt-orange-ink: #f0b57c;
+  --opt-yellow: #e0b23a;
+  --opt-yellow-bg: #33290c;
+  --opt-yellow-ink: #e8cd7a;
+  --opt-green: #35b87a;
+  --opt-green-bg: #14301f;
+  --opt-green-ink: #7fd6a8;
+  --opt-blue: #5a9cea;
+  --opt-blue-bg: #14263d;
+  --opt-blue-ink: #9ec8f5;
+  --opt-purple: #9a6ee6;
+  --opt-purple-bg: #241a3d;
+  --opt-purple-ink: #c3a6f2;
+  --opt-pink: #e074ae;
+  --opt-pink-bg: #3a1c2d;
+  --opt-pink-ink: #f0a8cd;
+  --opt-red: #e8596a;
+  --opt-red-bg: #3a1a1f;
+  --opt-red-ink: #f2989f;
+
+  /* health / status greys that were picked against white */
+  --status-wontdo: #6e7688;
+  --health-none: #6e7688;
+
+  /* semantic aliases. --surface-raised sits ABOVE the app ground here: on dark,
+     elevation reads as lighter, the inverse of the light theme where a raised
+     surface is white on a tinted ground. */
+  --surface-frame: #191a1c;
+  --surface-navigation: #202124;
+  --action-primary: #eeeef1;
+  --action-primary-hover: #d7d9df;
+  --action-primary-press: #c1c4cc;
+  --on-action-primary: #202226;
+  --surface-app: var(--n-0);
+  --surface-board: var(--n-25);
+  --surface-sunken: var(--n-50);
+  --surface-raised: var(--n-100);
+  --surface-selected: #1b2547;
+  --surface-ai: #241c3d;
+  /* Lighter than the ground it sits on, the inverse of the light theme — and
+     nearer its ground than the light one is to hers, because a light dot on a
+     dark field reads louder than a dark dot on a light one at the same delta. */
+  --canvas-dot: #333a49;
+  /* JSON Canvas files store only the digit, never these theme paints. */
+  --canvas-1: var(--opt-red);
+  --canvas-2: var(--opt-orange);
+  --canvas-3: var(--opt-yellow);
+  --canvas-4: var(--opt-green);
+  --canvas-5: #3fb8d0;
+  --canvas-6: var(--opt-purple);
+  --text-primary: var(--n-900);
+  --text-secondary: var(--n-600);
+  --text-muted: var(--n-600);
+  --text-meta: var(--n-600);
+  --text-disabled: var(--n-400);
+  --text-placeholder: var(--n-600);
+  --text-inverse: #ffffff;
+  --text-link: var(--cortex-300);
+  --text-ai: var(--synapse-300);
+  --border-subtle: var(--n-200);
+  --border-strong: var(--n-300);
+  --border-focus: var(--cortex-400);
+  /* --cortex-300 on --cortex-50 (#1b2547 in dark) is 6.0:1, against 2.67:1 for
+     --cortex-500, and it is plainly a different colour from the resting node
+     border rather than the same one 1.5px thicker. */
+  --diagram-selection-ring: var(--cortex-300);
+  --accent: var(--cortex-500);
+  --accent-hover: var(--cortex-400);
+  --accent-press: var(--cortex-300);
+
+  /* Shadows are ink-on-white in the light theme and all but invisible on a
+     dark ground, so elevation leans on opacity instead of hue. The scrim goes
+     heavier for the same reason: a 0.4 veil over a dark app barely registers. */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55), 0 2px 4px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6), 0 4px 8px rgba(0, 0, 0, 0.4);
+  --ring: 0 0 0 3px rgba(101, 128, 236, 0.45);
+  --scrim: rgba(0, 0, 0, 0.6);
+}
+:root {
+  --font-ui: 'Instrument Sans', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+
+  /* size/line pairs.
+   *
+   * Named --fs-* and --lh-*, NOT --text-* and --leading-*, because those two are
+   * Tailwind v4's own theme namespaces for font-size and line-height (M16.36).
+   * While this scale used the namespace directly, three different things laid
+   * claim to it at once:
+   *
+   *   1. Tailwind's stock scale    --text-sm: .875rem  (14px)
+   *   2. this DS scale             --text-sm: 13px
+   *   3. the semantic ink tokens   --text-meta, --text-inverse, … in colors.css
+   *
+   * (1) and (2) both reached :root and disagreed — stock says 18px for
+   * --text-lg where this scale says 16px. The DS value won only because this
+   * file is unlayered while @theme sits inside `@layer theme`, so the app
+   * rendered correctly on cascade order rather than on anything anyone had
+   * decided. Renaming leaves @theme as the single place a scale becomes a
+   * utility, and lets index.css reset the stock scale to `initial` the way it
+   * already does for --color-* and --radius-*.
+   *
+   * (3) is deliberately left alone. Those are colours that merely read as
+   * typography; they are not theme entries, and @theme already re-exports the
+   * one that needed a utility as --color-inverse.
+   */
+  --fs-2xs: 11px;
+  --lh-2xs: 16px;
+  --fs-xs: 12px;
+  --lh-xs: 16px;
+  --fs-sm: 13px;
+  --lh-sm: 20px; /* base UI */
+  --fs-md: 14px;
+  --lh-md: 20px;
+  --fs-lg: 16px;
+  --lh-lg: 24px;
+  --fs-xl: 20px;
+  --lh-xl: 28px; /* page titles */
+  --fs-2xl: 24px;
+  --lh-2xl: 32px;
+  --fs-3xl: 32px;
+  --lh-3xl: 40px; /* display */
+  /* Editorial display retained for authored content. M73's redesigned page
+     titles use the 3xl reading scale; the token remains available to content. */
+  --fs-4xl: 42px;
+  --lh-4xl: 63px;
+  /* Product roles pair size with leading. Numeric steps remain available for
+     deliberately compact chrome; adopting a role is explicit at each surface. */
+  --fs-page-title: 40px;
+  --lh-page-title: 48px;
+  --fs-workspace-title: 24px;
+  --lh-workspace-title: 32px;
+  --fs-section-title: 16px;
+  --lh-section-title: 24px;
+  --fs-prose: 16px;
+  --lh-prose: 28px;
+  --fs-ui: 14px;
+  --lh-ui: 20px;
+  --fs-meta: 12px;
+  --lh-meta: 18px;
+  /* weights */
+  --w-regular: 400; /* @kind font */
+  --w-medium: 500; /* @kind font */
+  --w-semibold: 600; /* @kind font */
+  --w-bold: 700; /* @kind font */
+  /* tracking */
+  --track-tight: -0.01em;
+  --track-display: -0.02em;
+  --track-caps: 0.06em;
+}
+:root {
+  /* 4px spacing grid. These mirror Tailwind's own `--spacing` step exactly, so
+     the utilities you already write (`p-2` = 8px = --sp-2) ARE this scale —
+     which is why nothing references the custom properties directly. Keep them
+     as the documented grid for hand-written CSS (the `cb-*` blocks injected by
+     the DS primitives); do not re-type their values as literals. */
+  --sp-05: 2px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  /* radii */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 14px;
+  --r-full: 999px;
+  /* shadows — layered low-alpha ink */
+  --shadow-xs: 0 1px 2px rgba(22, 26, 36, 0.06);
+  --shadow-sm: 0 1px 3px rgba(22, 26, 36, 0.08), 0 1px 2px rgba(22, 26, 36, 0.04);
+  --shadow-md: 0 4px 12px rgba(22, 26, 36, 0.1), 0 2px 4px rgba(22, 26, 36, 0.05);
+  --shadow-lg: 0 12px 32px rgba(22, 26, 36, 0.14), 0 4px 8px rgba(22, 26, 36, 0.06);
+  --ring: 0 0 0 3px rgba(61, 91, 222, 0.25);
+  /* layout constants */
+  --rail-w: 54px;
+  --sidebar-w: 240px;
+  --surface-inset: 32px;
+  --surface-readable: 880px;
+  --surface-broad: 1120px;
+  --nav-row-h: 36px;
+  --control-h: 32px;
+  --control-h-sm: 28px;
+  --control-h-lg: 36px;
+  /* motion */
+  --ease-out: cubic-bezier(0.2, 0.6, 0.2, 1); /* @kind other */
+  --dur-fast: 120ms; /* @kind other */
+  --dur-med: 180ms; /* @kind other */
+
+  /* Motion by KIND, not by number (M46.2 Task 3).
+   *
+   * The baseline found every `transition` on every surface computing to
+   * `all` — the CSS initial value, i.e. none declared — while Notion declares
+   * exactly two timings, measured in
+   * docs/superpowers/specs/2026-08-29-notion-drag-and-row-reference.md:
+   *
+   * - HOVER, 20ms ease-in. Not a fade — at 20ms nothing is perceptibly
+   *   animating. It is an anti-flicker guard: a wash that is DECLARED does
+   *   not strobe when the pointer crosses a list of rows at speed, and one
+   *   long enough to see would lag the pointer instead. Rounding it up is
+   *   the one way to get this wrong.
+   * - MOVEMENT, 200ms. Anything that slides, appears or resizes. This is
+   *   what makes a reflow read as motion rather than as teleportation.
+   *
+   * A call site names the kind and never the number: `var(--motion-hover)`
+   * and `var(--motion-move)` are whole `<duration> <easing>` pairs, so
+   * `transition: background-color var(--motion-hover)` is the whole
+   * declaration. The `motion-hover` / `motion-move` utilities in
+   * styles/motion.css are the same two pairs for Tailwind call sites. */
+  --dur-hover: 20ms; /* @kind other */
+  --dur-move: 200ms; /* @kind other */
+  --ease-hover: ease-in; /* @kind other */
+  --ease-move: ease; /* @kind other */
+  --motion-hover: var(--dur-hover) var(--ease-hover); /* @kind other */
+  --motion-move: var(--dur-move) var(--ease-move); /* @kind other */
+
+  /* Arriving and leaving (owner, 2026-10-19: "add more animations … feel
+   * like Notion and ChatGPT"). Movement's 200ms ease suits a reflow; a
+   * surface that arrives should decelerate into place, quick and then
+   * gentle, and one that leaves should go quicker than it came, out of the
+   * way of whatever is next:
+   *
+   * - ENTER, a long ease-out (the curve Radix's, Vercel's and Linear's
+   *   surfaces share): panels, drawers, cards, the assistant.
+   * - POP, the same curve, shorter: what opens under the pointer — menus,
+   *   tooltips, a count that changed.
+   * - EXIT, an ease-in, shorter still: anything leaving.
+   * - SPRING, a curve that overshoots a little, for a mark that should be
+   *   noticed as it lands — a count, a check, a knob. Never a whole surface.
+   * - STAGGER, the step between siblings that arrive together.
+   *
+   * Pairs, like movement's, and every duration here collapses with
+   * movement's under reduced motion below, so a keyframe that spends one
+   * stops travelling without being named anywhere else. */
+  --dur-enter: 240ms; /* @kind other */
+  --dur-pop: 160ms; /* @kind other */
+  --dur-exit: 140ms; /* @kind other */
+  --dur-stagger: 24ms; /* @kind other */
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1); /* @kind other */
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1); /* @kind other */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* @kind other */
+  --motion-enter: var(--dur-enter) var(--ease-enter); /* @kind other */
+  --motion-pop: var(--dur-pop) var(--ease-enter); /* @kind other */
+  --motion-exit: var(--dur-exit) var(--ease-exit); /* @kind other */
+  /* TURN: something that stays and changes where it points or sits — a
+   * chevron folding, a selected pill sliding to its segment, the current
+   * mark moving down the outline. Movement's length, arrival's curve. */
+  --motion-turn: var(--dur-move) var(--ease-enter); /* @kind other */
+  /* SPRING as a pair: a mark landing — a count, a check, a knob. */
+  --motion-spring: var(--dur-enter) var(--ease-spring); /* @kind other */
+}
+
+/* Reduced motion collapses MOVEMENT, arriving and leaving, and leaves hover
+ * alone.
+ *
+ * The blanket `* { transition-duration: 0.01ms !important }` idiom would take
+ * the 20ms hover guard with it and restore the strobing it exists to stop —
+ * and a 20ms background swap is not motion by any reading of the preference.
+ * So the lever is the tokens themselves: everything that slides, appears,
+ * leaves or resizes spends `--motion-move` or one of the arrival pairs, and
+ * here they stop taking time (and siblings stop waiting on each other).
+ * Anything that hard-codes a duration instead of spending a token opts itself
+ * out of this, which is the strongest reason not to hard-code one. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-move: 0s;
+    --dur-enter: 0s;
+    --dur-pop: 0s;
+    --dur-exit: 0s;
+    --dur-stagger: 0s;
+    /* Tailwind's own `transition-*` utilities, which spend no token. */
+    --default-transition-duration: 0s;
+  }
+}
+* {
+  box-sizing: border-box;
+  overscroll-behavior: none;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-primary);
+  background: var(--surface-app);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+a {
+  color: var(--text-link);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+::selection {
+  background: var(--cortex-100);
+}
+kbd {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: 16px;
+  color: var(--text-muted);
+  background: var(--n-50);
+  border: 1px solid var(--n-200);
+  border-bottom-width: 2px;
+  border-radius: var(--r-xs);
+  padding: 0 5px;
+  display: inline-block;
+}
+code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--n-50);
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-xs);
+  padding: 1px 5px;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--n-300);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--n-400);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

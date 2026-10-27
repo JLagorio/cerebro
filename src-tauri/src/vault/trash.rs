@@ -1260,6 +1260,10 @@ mod tests {
             // removes the installed attachment or an authored page.
             ("attachments.rs", "remove_file", "remove_staged"),
             ("attachments.rs", "libc::unlinkat", "remove_staged"),
+            // M93.9: the private app-data journal removes only its two fixed
+            // unpublished setup filenames while holding service ownership.
+            // It never removes the installed DB, a recovery copy or a page.
+            ("recovery.rs", "remove_file", "install"),
         ];
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/vault");
         let mut found = Vec::new();

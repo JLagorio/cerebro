@@ -20,7 +20,7 @@ export function SheetExportMenu({
   sheet: string;
   computed?: SheetComputed;
   getPage: () => Promise<string>;
-  beforeOpen: () => void;
+  beforeOpen: () => boolean | void;
   current: () => boolean;
 }) {
   const path = useContext(NotePathContext);
@@ -61,7 +61,7 @@ export function SheetExportMenu({
         testId="sheet-export-menu"
         disabled={busy}
         onClick={() => {
-          beforeOpen();
+          if (beforeOpen() === false) return;
           setOpen(!open);
         }}
       >

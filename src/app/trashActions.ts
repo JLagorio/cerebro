@@ -17,6 +17,8 @@ import { deleteNote, listTrash, restoreFromTrash } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useUndoStore } from '@/stores/undoStore';
 import { refusedAcrossVaults, useVaultStore } from '@/stores/vaultStore';
+import { saveBeforeAction } from './leaveGuard';
+import { heldOpenPages } from '@/editor/openPages';
 
 const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -32,6 +34,12 @@ export async function trashPath(path: string, label: string): Promise<TrashedIte
   if (refusedAcrossVaults(state)) return null;
   const { toast } = useUiStore.getState();
   try {
+    if (!(await saveBeforeAction('all', 'caller'))) return null;
+    if (useVaultStore.getState().vaultPath !== vault) return null;
+    if (heldOpenPages().some((held) => held === path || held.startsWith(`${path}/`))) {
+      toast('Resolve this page’s unsaved changes before moving it to Trash.');
+      return null;
+    }
     const item = await deleteNote(vault, path);
     const moved = movedToast(label);
     const id = useUndoStore.getState().pushTrash(moved, vault, item);

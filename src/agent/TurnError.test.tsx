@@ -11,27 +11,27 @@ const NOT_FOUND = `<tool_use_error>Error calling tool (mcp__cerebro__get_note): 
 const summary = () => screen.getByTestId('turn-error-summary');
 
 describe('a failed turn Rust could not type', () => {
-  it('shows a short failure in its own words, with Retry and nothing to unfold', () => {
-    const onRetry = vi.fn();
+  it('shows a short failure in its own words, with inspection and nothing to unfold', () => {
+    const onReviewRecovery = vi.fn();
     render(
       <TurnError
         error="API Error: 400 the request was not one Claude could take"
-        onRetry={onRetry}
+        onReviewRecovery={onReviewRecovery}
       />,
     );
     expect(summary().textContent).toBe('API Error: 400 the request was not one Claude could take');
     expect(screen.queryByTestId('turn-error-full')).toBeNull();
-    fireEvent.click(screen.getByTestId('retry-turn'));
-    expect(onRetry).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Review what happened' }));
+    expect(onReviewRecovery).toHaveBeenCalledOnce();
   });
 
-  it('draws no Retry when the thread cannot take one', () => {
+  it('draws no inspection action without its handler', () => {
     render(<TurnError error="Stopped." />);
-    expect(screen.queryByTestId('retry-turn')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review what happened' })).toBeNull();
   });
 
   it('summarises a long failure in three clamped lines, and keeps all of it a click away', () => {
-    render(<TurnError error={NOT_FOUND} onRetry={() => undefined} />);
+    render(<TurnError error={NOT_FOUND} onReviewRecovery={() => undefined} />);
     const box = screen.getByTestId('turn-error');
     // The tags are not the error; the words are.
     expect(box.textContent).not.toContain('tool_use_error');
@@ -53,7 +53,7 @@ describe('a failed turn Rust could not type', () => {
     // Unfolded, it scrolls in its own box rather than filling the thread.
     expect(whole.className).toContain('max-h-[200px]');
     expect(whole.className).toContain('overflow-auto');
-    expect(screen.getByTestId('retry-turn')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Review what happened' })).toBeTruthy();
   });
 
   it('shows the stack a failure printed as a Stack Trace, a frame in the vault opening its page', () => {

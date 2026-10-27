@@ -7,13 +7,16 @@
 //! `CLAUDE_CONFIG_DIR`, `<folder>/claude-config`, signed in once by the owner,
 //! so the owner's own settings, hooks and sessions stay out of the recording
 //! and the recording stays out of `~/.claude`. Under `<folder>/runs/`, each
-//! run leaves three owner-only files named `<utc stamp>-<run>`:
+//! run leaves three owner-only files named `<utc stamp>-<run>`, and a seated
+//! run a fourth:
 //!
 //! - `.stream.jsonl`: stdout's bytes exactly as they were read;
 //! - `.argv.json`: the argument vector, which names the MCP config's path and
 //!   never its contents, where the bearer lives;
 //! - `.end.json`: how the run ended (exit code or signal, cancelled, aborted,
-//!   whether a result arrived, and the last characters of stderr).
+//!   whether a result arrived, and the last characters of stderr);
+//! - `.stdin.jsonl`: every line a seated run's stdin was sent (M92.13,
+//!   `turn_input`), its prompt and its context ask, as they were written.
 //!
 //! The child never sees an API key or token (`CREDENTIALS`): a recording is
 //! the owner's own login or nothing.
@@ -58,6 +61,9 @@ pub(crate) struct Recording {
     /// The stream file, until `tee` hands it to the reader.
     stream: Option<File>,
     end: PathBuf,
+    /// Where a seated run's stdin is copied, made only when it is asked for
+    /// (`stdin_copy`).
+    stdin: PathBuf,
 }
 
 /// A release build records nothing: no value of this type can exist.
@@ -99,6 +105,7 @@ pub(crate) fn recording_at(
             config_dir: dir.join(CONFIG_DIR),
             stream: Some(stream),
             end: runs.join(format!("{base}.end.json")),
+            stdin: runs.join(format!("{base}.stdin.jsonl")),
         })
     })();
     match made {
@@ -123,6 +130,22 @@ impl Recording {
             inner,
             sink: self.stream.take(),
             run: self.run,
+        }
+    }
+
+    /// The file a seated run's stdin is copied to (M92.13), made now: the
+    /// turn input writes it each line it sends the run. None, with one
+    /// warning, when it cannot be made; the run goes on unrecorded there.
+    pub(crate) fn stdin_copy(&self) -> Option<File> {
+        match owner_file(&self.stdin) {
+            Ok(file) => Some(file),
+            Err(error) => {
+                log::warn!(
+                    "agent run {}: its stdin is not recorded, the record folder refused it: {error}",
+                    self.run
+                );
+                None
+            }
         }
     }
 
@@ -169,6 +192,10 @@ impl Recording {
     }
 
     pub(crate) fn tee<R: Read>(&mut self, _inner: R) -> Tee<R> {
+        match *self {}
+    }
+
+    pub(crate) fn stdin_copy(&self) -> Option<File> {
         match *self {}
     }
 
@@ -398,6 +425,65 @@ mod tests {
         for name in names {
             assert_eq!(mode(&dir.join(RUNS_DIR).join(&name)), 0o600, "{name}");
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A seated run's argv in `build_args`' shape (M92.13): stream-json
+    /// input, and no message, which rides stdin.
+    fn seated_args() -> Vec<String> {
+        [
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--mcp-config",
+            "/app/mcp-config-8.json",
+        ]
+        .map(String::from)
+        .to_vec()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_seated_run_records_what_its_stdin_was_sent_beside_the_rest() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::vault::testutil::temp_vault("tee-stdin");
+        let recording = recording_at(&dir, 8, &seated_args(), now()).unwrap();
+        let lines = "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n";
+        recording
+            .stdin_copy()
+            .expect("the stdin file")
+            .write_all(lines.as_bytes())
+            .unwrap();
+        recording.finish(None, &StderrTail::default(), false, false, true);
+        let names = files(&dir);
+        assert_eq!(
+            names,
+            [
+                "20260102T030405.000Z-8.argv.json",
+                "20260102T030405.000Z-8.end.json",
+                "20260102T030405.000Z-8.stdin.jsonl",
+                "20260102T030405.000Z-8.stream.jsonl",
+            ]
+        );
+        let stdin = dir
+            .join(RUNS_DIR)
+            .join("20260102T030405.000Z-8.stdin.jsonl");
+        assert_eq!(std::fs::read_to_string(&stdin).unwrap(), lines);
+        assert_eq!(
+            std::fs::metadata(&stdin).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let argv: Vec<String> = serde_json::from_slice(
+            &std::fs::read(dir.join(RUNS_DIR).join("20260102T030405.000Z-8.argv.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(argv, seated_args(), "no message rides its argv");
+        // Made once: a second copy would write over the first's lines.
+        let again = recording_at(&dir, 9, &seated_args(), now()).unwrap();
+        assert!(again.stdin_copy().is_some());
+        assert!(again.stdin_copy().is_none(), "the file is new or nothing");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

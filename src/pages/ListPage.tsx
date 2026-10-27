@@ -1,3 +1,4 @@
+import { selectedViewIssue } from '@/engine/selectedEntryProjection';
 import { DatabaseActions } from '@/views/DatabaseActions';
 import { PageHeader } from '@/components/PageHeader';
 import { useEntryState } from '@/app/useEntryState';
@@ -90,9 +91,10 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.id, selection.collection, activeId]);
 
+  const selectedUnavailable = surface.unavailable ?? selectedViewIssue(surface.entries, schema, presentation, activeView?.filters, list?.definition.source.type, search);
   const sortedEntries = useMemo(
-    () => searchEntries(sortEntries(surface.entries, presentation.sort, schema), search),
-    [surface.entries, presentation.sort, schema, search],
+    () => selectedUnavailable ? [] : searchEntries(sortEntries(surface.entries, presentation.sort, schema), search),
+    [surface.entries, presentation.sort, schema, search, selectedUnavailable],
   );
   // Applied AFTER the sort, so "the first 25" means the first 25 of the order
   // on screen rather than 25 arbitrary records that then get sorted.
@@ -289,7 +291,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
               <span className="min-w-0 [overflow-wrap:anywhere]">{list.definition.name}</span>
             </button>
           }
-          metadata={<span data-testid="view-count">{sortedEntries.length}</span>}
+          metadata={<span data-testid="view-count">{selectedUnavailable ? 'Unavailable' : sortedEntries.length}</span>}
           actions={
             <>
               <DatabaseActions
@@ -423,6 +425,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
         )}
         <ViewProblems problems={problems} source={sourceType} />
         <ViewCanvas
+          unavailable={selectedUnavailable}
           entryScrollKey="canvas.scroll"
           entries={shownEntries}
           allEntries={entries}
@@ -479,11 +482,11 @@ export function ListPage({ selection }: { selection: ListSelection }) {
             })
           }
         />
-        <ViewLimitNotice
+        {!selectedUnavailable && <ViewLimitNotice
           shown={shownEntries.length}
           total={sortedEntries.length}
           onShowAll={() => changePresentation({ ...presentation, limit: undefined })}
-        />
+        />}
       </div>
       {confirmDelete && (
         <Dialog

@@ -30,7 +30,7 @@ vi.mock('@/editor/openPages', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/editor/openPages')>();
   return {
     ...actual,
-    flushOpenPages: vi.fn(async () => undefined),
+    flushOpenPages: vi.fn(async () => ({ outcomes: [], unresolvedOwnerIds: [] })),
     announceExternalWrites: vi.fn(async () => undefined),
   };
 });

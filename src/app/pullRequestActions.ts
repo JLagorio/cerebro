@@ -1,5 +1,6 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 import { splitFrontmatter } from '@/engine/frontmatter';
-import { flushOpenPages, heldOpenPages } from '@/editor/openPages';
+import { heldOpenPages } from '@/editor/openPages';
 import { isKnowledgePath } from '@/engine/okf';
 import {
   findPullRequestUrls,
@@ -39,7 +40,7 @@ export async function setMergedStatus(
   };
   try {
     if (!current()) return false;
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return false;
     if (!current()) return false;
     if (heldOpenPages().includes(path)) return changed();
     const entries = await scanVault(vault);

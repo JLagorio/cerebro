@@ -1,13 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
-import { checkAgent } from '@/agent/agentIpc';
-import type { AgentStatus } from '@/agent/types';
+import { useEffect, useRef } from 'react';
+import { useCliReadiness, refreshCliReadiness } from '@/agent/useCliReadiness';
+import { cliReadinessWords } from '@/agent/cliReadinessWords';
+import { Button } from '@/components/ui/Button';
 import { useUiStore } from '@/stores/uiStore';
 
 /** The Settings row a failure card's Open Settings brings into view. */
 export const CLAUDE_CODE_FOCUS = 'claude-code';
-
-/** What the row knows: still asking, the answer, or that asking failed. */
-type Check = { state: 'checking' } | { state: 'done'; status: AgentStatus } | { state: 'failed' };
 
 /**
  * Which Claude Code Cerebro runs, and how it signs in (M56.4).
@@ -18,24 +16,10 @@ type Check = { state: 'checking' } | { state: 'done'; status: AgentStatus } | { 
  * says where the fix lives: in Terminal, with the CLI's own /login.
  */
 export function ClaudeCodeRow({ active = true }: { active?: boolean }) {
-  const [check, setCheck] = useState<Check>({ state: 'checking' });
+  const check = useCliReadiness();
   const focus = useUiStore((s) => s.settingsFocus);
   const setFocus = useUiStore((s) => s.setSettingsFocus);
   const row = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let live = true;
-    checkAgent()
-      .then((status) => {
-        if (live) setCheck({ state: 'done', status });
-      })
-      .catch(() => {
-        if (live) setCheck({ state: 'failed' });
-      });
-    return () => {
-      live = false;
-    };
-  }, []);
 
   // A one-shot: scroll here once, then forget it, so a later visit to
   // Settings opens at the top as usual.
@@ -45,7 +29,7 @@ export function ClaudeCodeRow({ active = true }: { active?: boolean }) {
     setFocus(null);
   }, [active, focus, setFocus]);
 
-  const found = check.state === 'done' ? check.status : null;
+  const found = check.state === 'available' ? check : null;
   return (
     <div
       ref={row}
@@ -59,26 +43,27 @@ export function ClaudeCodeRow({ active = true }: { active?: boolean }) {
           Claude Code isn't signed in, open Terminal, run claude, and type /login.
         </div>
         <div
+          role="status"
           data-testid="settings-claude-code-status"
           className="mt-1 text-xs leading-[16px] text-n-700"
         >
-          {check.state === 'checking' && 'Checking for Claude Code…'}
-          {check.state === 'failed' && "Couldn't check for Claude Code on this machine."}
-          {found !== null &&
-            (found.installed ? (
-              <>
-                Claude Code {found.version ?? '(version not reported)'}
-                {found.path !== null && (
-                  <span className="block break-all [font-family:var(--font-mono)] text-n-500">
-                    {found.path}
-                  </span>
-                )}
-              </>
-            ) : (
-              'Claude Code was not found on this machine. Install it, then reopen Cerebro.'
-            ))}
+          {cliReadinessWords(check)}
+          {found?.path != null && (
+            <span className="block break-all [font-family:var(--font-mono)] text-n-500">
+              {found.path}
+            </span>
+          )}
         </div>
       </div>
+      <Button
+        size="sm"
+        disabled={check.state === 'checking'}
+        onClick={() => {
+          void refreshCliReadiness();
+        }}
+      >
+        {check.state === 'unavailable' ? 'Retry check' : 'Check again'}
+      </Button>
     </div>
   );
 }

@@ -1,0 +1,1916 @@
+{
+  "version": 1,
+  "decimal": {
+    "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$",
+    "maxLexemeBytes": 256,
+    "legacyMaxSafeInteger": "9007199254740991"
+  },
+  "limits": {
+    "maxSourceBytes": 65536,
+    "maxDepth": 32,
+    "maxNodes": 4096
+  },
+  "dates": {
+    "grammar": "shared/calendar/dates.v1.json",
+    "date": "calendar_day_only",
+    "instant": "zoned_instant_only",
+    "implicitConversion": false
+  },
+  "decodeCases": [
+    {
+      "name": "literal string",
+      "source": "\"007\"",
+      "schema": "plain",
+      "expected": {
+        "kind": "string",
+        "value": "007"
+      }
+    },
+    {
+      "name": "explicit null",
+      "source": "null",
+      "schema": "plain",
+      "expected": {
+        "kind": "null"
+      }
+    },
+    {
+      "name": "boolean",
+      "source": "true",
+      "schema": "plain",
+      "expected": {
+        "kind": "boolean",
+        "value": true
+      }
+    },
+    {
+      "name": "exact large decimal",
+      "source": "9007199254740993.125",
+      "schema": "plain",
+      "expected": {
+        "kind": "decimal",
+        "value": "9007199254740993.125"
+      }
+    },
+    {
+      "name": "huge finite exponent",
+      "source": "1e400",
+      "schema": "plain",
+      "expected": {
+        "kind": "decimal",
+        "value": "1e400"
+      }
+    },
+    {
+      "name": "tiny finite exponent",
+      "source": "1e-400",
+      "schema": "plain",
+      "expected": {
+        "kind": "decimal",
+        "value": "1e-400"
+      }
+    },
+    {
+      "name": "decimal spelling",
+      "source": "-0.00E+03",
+      "schema": "plain",
+      "expected": {
+        "kind": "decimal",
+        "value": "-0.00E+03"
+      }
+    },
+    {
+      "name": "date-like string",
+      "source": "\"2026-10-23\"",
+      "schema": "plain",
+      "expected": {
+        "kind": "string",
+        "value": "2026-10-23"
+      }
+    },
+    {
+      "name": "schema date",
+      "source": "\"2024-02-29\"",
+      "schema": "date",
+      "expected": {
+        "kind": "date",
+        "value": "2024-02-29"
+      }
+    },
+    {
+      "name": "schema instant",
+      "source": "\"2026-10-23T09:00:00.123456789+05:30\"",
+      "schema": "instant",
+      "expected": {
+        "kind": "instant",
+        "value": "2026-10-23T09:00:00.123456789+05:30"
+      }
+    },
+    {
+      "name": "null date",
+      "source": "null",
+      "schema": "date",
+      "expected": {
+        "kind": "null"
+      }
+    },
+    {
+      "name": "unknown map",
+      "source": "{\"present\":null,\"literal\":\"007\",\"deep\":[9007199254740993.125,true],\"__proto__\":{\"keep\":\"yes\"}}",
+      "schema": "plain",
+      "expected": {
+        "kind": "object",
+        "value": {
+          "present": {
+            "kind": "null"
+          },
+          "literal": {
+            "kind": "string",
+            "value": "007"
+          },
+          "deep": {
+            "kind": "array",
+            "value": [
+              {
+                "kind": "decimal",
+                "value": "9007199254740993.125"
+              },
+              {
+                "kind": "boolean",
+                "value": true
+              }
+            ]
+          },
+          "__proto__": {
+            "kind": "object",
+            "value": {
+              "keep": {
+                "kind": "string",
+                "value": "yes"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid leap day",
+      "source": "\"2026-02-29\"",
+      "schema": "date",
+      "error": "schema_invalid"
+    },
+    {
+      "name": "date needs schema-compatible form",
+      "source": "\"2026-10-23 12:00\"",
+      "schema": "date",
+      "error": "schema_invalid"
+    },
+    {
+      "name": "instant cannot be day",
+      "source": "\"2026-10-23\"",
+      "schema": "instant",
+      "error": "schema_invalid"
+    },
+    {
+      "name": "date trim refused",
+      "source": "\" 2026-10-23 \"",
+      "schema": "date",
+      "error": "schema_invalid"
+    },
+    {
+      "name": "date numeric refused",
+      "source": "20261023",
+      "schema": "date",
+      "error": "schema_invalid"
+    },
+    {
+      "name": "NaN",
+      "source": "NaN",
+      "schema": "plain",
+      "error": "schema_invalid"
+    },
+    {
+      "name": "infinity",
+      "source": "Infinity",
+      "schema": "plain",
+      "error": "schema_invalid"
+    },
+    {
+      "name": "negative infinity",
+      "source": "-Infinity",
+      "schema": "plain",
+      "error": "schema_invalid"
+    },
+    {
+      "name": "non JSON leading zero",
+      "source": "007",
+      "schema": "plain",
+      "error": "schema_invalid"
+    },
+    {
+      "name": "duplicate key",
+      "source": "{\"x\":1,\"x\":2}",
+      "schema": "plain",
+      "error": "schema_invalid"
+    },
+    {
+      "name": "escaped duplicate key",
+      "source": "{\"x\":1,\"\\u0078\":2}",
+      "schema": "plain",
+      "error": "schema_invalid"
+    },
+    {
+      "name": "unpaired surrogate",
+      "source": "\"\\ud800\"",
+      "schema": "plain",
+      "error": "schema_invalid"
+    }
+  ],
+  "taggedCases": [
+    {
+      "name": "unresolved relation",
+      "value": {
+        "kind": "relation",
+        "spelling": "[[Unknown#Intro]]",
+        "fragment": "Intro",
+        "resolution": {
+          "status": "unresolved"
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "ambiguous relation",
+      "value": {
+        "kind": "relation",
+        "spelling": "[[Unknown#Intro]]",
+        "fragment": "Intro",
+        "resolution": {
+          "status": "ambiguous"
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "carried resolved identity",
+      "value": {
+        "kind": "relation",
+        "spelling": "[[Unknown#Intro]]",
+        "fragment": "Intro",
+        "resolution": {
+          "status": "resolved",
+          "targetId": "existing-record-id"
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "empty resolved identity",
+      "value": {
+        "kind": "relation",
+        "spelling": "[[Unknown#Intro]]",
+        "fragment": "Intro",
+        "resolution": {
+          "status": "resolved",
+          "targetId": ""
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "nonfinite decimal",
+      "value": {
+        "kind": "decimal",
+        "value": "NaN"
+      },
+      "valid": false
+    },
+    {
+      "name": "infinite decimal",
+      "value": {
+        "kind": "decimal",
+        "value": "Infinity"
+      },
+      "valid": false
+    },
+    {
+      "name": "padded decimal",
+      "value": {
+        "kind": "decimal",
+        "value": " 1"
+      },
+      "valid": false
+    },
+    {
+      "name": "decimal as JS number",
+      "value": {
+        "kind": "decimal",
+        "value": 12
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid tagged date",
+      "value": {
+        "kind": "date",
+        "value": "2026-02-29"
+      },
+      "valid": false
+    },
+    {
+      "name": "extra field",
+      "value": {
+        "kind": "null",
+        "value": "unexpected"
+      },
+      "valid": false
+    },
+    {
+      "name": "unresolved extra field",
+      "value": {
+        "kind": "relation",
+        "spelling": "[[Unknown]]",
+        "fragment": null,
+        "resolution": {
+          "status": "unresolved",
+          "targetId": "invented"
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "ambiguous extra field",
+      "value": {
+        "kind": "relation",
+        "spelling": "[[Duplicate]]",
+        "fragment": null,
+        "resolution": {
+          "status": "ambiguous",
+          "targetId": "invented"
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "nested null extra field",
+      "value": {
+        "kind": "object",
+        "value": {
+          "x": {
+            "kind": "null",
+            "lost": 1
+          }
+        }
+      },
+      "valid": false
+    }
+  ],
+  "changeCases": [
+    {
+      "name": "remove is legacy null",
+      "changes": [
+        {
+          "op": "remove",
+          "key": "present"
+        }
+      ],
+      "expected": {
+        "present": null
+      }
+    },
+    {
+      "name": "Set null is not removal",
+      "changes": [
+        {
+          "op": "set",
+          "key": "present",
+          "value": {
+            "kind": "null"
+          }
+        }
+      ],
+      "error": "capability_unavailable"
+    },
+    {
+      "name": "string stays string",
+      "changes": [
+        {
+          "op": "set",
+          "key": "literal",
+          "value": {
+            "kind": "string",
+            "value": "007"
+          }
+        }
+      ],
+      "expected": {
+        "literal": "007"
+      }
+    },
+    {
+      "name": "safe canonical integer",
+      "changes": [
+        {
+          "op": "set",
+          "key": "integer",
+          "value": {
+            "kind": "decimal",
+            "value": "9007199254740991"
+          }
+        }
+      ],
+      "expected": {
+        "integer": 9007199254740991
+      }
+    },
+    {
+      "name": "negative safe integer",
+      "changes": [
+        {
+          "op": "set",
+          "key": "integer",
+          "value": {
+            "kind": "decimal",
+            "value": "-9007199254740991"
+          }
+        }
+      ],
+      "expected": {
+        "integer": -9007199254740991
+      }
+    },
+    {
+      "name": "unsafe integer",
+      "changes": [
+        {
+          "op": "set",
+          "key": "number",
+          "value": {
+            "kind": "decimal",
+            "value": "9007199254740992"
+          }
+        }
+      ],
+      "error": "capability_unavailable"
+    },
+    {
+      "name": "fraction",
+      "changes": [
+        {
+          "op": "set",
+          "key": "number",
+          "value": {
+            "kind": "decimal",
+            "value": "0.5"
+          }
+        }
+      ],
+      "error": "capability_unavailable"
+    },
+    {
+      "name": "exponent",
+      "changes": [
+        {
+          "op": "set",
+          "key": "number",
+          "value": {
+            "kind": "decimal",
+            "value": "1e3"
+          }
+        }
+      ],
+      "error": "capability_unavailable"
+    },
+    {
+      "name": "negative zero",
+      "changes": [
+        {
+          "op": "set",
+          "key": "number",
+          "value": {
+            "kind": "decimal",
+            "value": "-0"
+          }
+        }
+      ],
+      "error": "capability_unavailable"
+    },
+    {
+      "name": "trailing decimals",
+      "changes": [
+        {
+          "op": "set",
+          "key": "number",
+          "value": {
+            "kind": "decimal",
+            "value": "12.00"
+          }
+        }
+      ],
+      "error": "capability_unavailable"
+    },
+    {
+      "name": "date string",
+      "changes": [
+        {
+          "op": "set",
+          "key": "due",
+          "value": {
+            "kind": "date",
+            "value": "2024-02-29"
+          }
+        }
+      ],
+      "expected": {
+        "due": "2024-02-29"
+      }
+    },
+    {
+      "name": "instant string",
+      "changes": [
+        {
+          "op": "set",
+          "key": "when",
+          "value": {
+            "kind": "instant",
+            "value": "2026-10-23T09:00Z"
+          }
+        }
+      ],
+      "expected": {
+        "when": "2026-10-23T09:00Z"
+      }
+    },
+    {
+      "name": "relation needs richer store",
+      "changes": [
+        {
+          "op": "set",
+          "key": "related",
+          "value": {
+            "kind": "relation",
+            "spelling": "[[Unknown#Intro]]",
+            "fragment": "Intro",
+            "resolution": {
+              "status": "unresolved"
+            }
+          }
+        }
+      ],
+      "error": "capability_unavailable"
+    },
+    {
+      "name": "nested null remains value",
+      "changes": [
+        {
+          "op": "set",
+          "key": "unknown",
+          "value": {
+            "kind": "object",
+            "value": {
+              "present": {
+                "kind": "null"
+              },
+              "literal": {
+                "kind": "string",
+                "value": "007"
+              }
+            }
+          }
+        }
+      ],
+      "expected": {
+        "unknown": {
+          "present": null,
+          "literal": "007"
+        }
+      }
+    },
+    {
+      "name": "duplicate change key refused",
+      "changes": [
+        {
+          "op": "remove",
+          "key": "x"
+        },
+        {
+          "op": "set",
+          "key": "x",
+          "value": {
+            "kind": "boolean",
+            "value": true
+          }
+        }
+      ],
+      "error": "schema_invalid"
+    }
+  ],
+  "selectedQuery": {
+    "version": 1,
+    "fieldKinds": "shared/schema/field-kinds.v1.json",
+    "taggedScalarKinds": [
+      "null",
+      "string",
+      "boolean",
+      "decimal",
+      "date",
+      "instant"
+    ],
+    "rawScalarKinds": [
+      "string",
+      "boolean"
+    ],
+    "rawNumbers": "canonical_safe_integers_only",
+    "rawIntegerLimitRef": "decimal.legacyMaxSafeInteger",
+    "arrayOperands": "operator_lists_only",
+    "missingEqualsScalar": false,
+    "crossKindEquality": "unequal",
+    "crossKindOrdering": "unsupported",
+    "decimalComparison": "exact_numeric_value",
+    "dateStringOperands": "declared_date_family_only",
+    "resultValues": "tagged_present_keys_only",
+    "emptyValues": [
+      "absent",
+      "null",
+      "empty_string",
+      "empty_array"
+    ],
+    "sortEmpty": "last",
+    "sortTie": "record_id",
+    "defaultOrder": "path",
+    "rawNull": "explicit_null_when_value_key_present",
+    "temporalSort": {
+      "primary": "shared_calendar_local_date_wall_time",
+      "calendarDayTime": "midnight",
+      "sameMidnight": "date_before_instant",
+      "repeatedWallTime": "absolute_nanosecond",
+      "tie": "record_id"
+    }
+  },
+  "selectedQueryCases": [
+    {
+      "name": "literal 007 never equals numeric seven",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {}
+      },
+      "records": [
+        {
+          "path": "literal.md",
+          "properties": {
+            "value": {
+              "kind": "string",
+              "value": "007"
+            }
+          }
+        },
+        {
+          "path": "numeric.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "7"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "equals",
+              "value": {
+                "kind": "string",
+                "value": "007"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "literal.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "string",
+              "value": "007"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "tagged null matches explicit null but not absence",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "text"
+        }
+      },
+      "records": [
+        {
+          "path": "null.md",
+          "properties": {
+            "value": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "path": "absent.md",
+          "properties": {}
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "equals",
+              "value": {
+                "kind": "null"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "null.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "null"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty operator intentionally matches absence and null but result preserves presence",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "text"
+        }
+      },
+      "records": [
+        {
+          "path": "null.md",
+          "properties": {
+            "value": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "path": "absent.md",
+          "properties": {}
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "is_empty"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "absent.md",
+          "null.md"
+        ],
+        "values": [
+          {},
+          {
+            "value": {
+              "kind": "null"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "adjacent large decimals do not collapse to one f64",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "number"
+        }
+      },
+      "records": [
+        {
+          "path": "lower.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "9007199254740993.124"
+            }
+          }
+        },
+        {
+          "path": "higher.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "9007199254740993.125"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "gt",
+              "value": {
+                "kind": "decimal",
+                "value": "9007199254740993.124"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "higher.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "9007199254740993.125"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "huge finite exponents compare without materializing exponent zeros",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "number"
+        }
+      },
+      "records": [
+        {
+          "path": "a.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "1e400"
+            }
+          }
+        },
+        {
+          "path": "b.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "2e400"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "lt",
+              "value": {
+                "kind": "decimal",
+                "value": "2e400"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "a.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "1e400"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "tiny exponent remains greater than zero",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "number"
+        }
+      },
+      "records": [
+        {
+          "path": "zero.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "0"
+            }
+          }
+        },
+        {
+          "path": "tiny.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "1e-400"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "gt",
+              "value": {
+                "kind": "decimal",
+                "value": "0"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "tiny.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "1e-400"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "numeric zero equality retains every original spelling",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "number"
+        }
+      },
+      "records": [
+        {
+          "path": "negative.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "-0.00E+03"
+            }
+          }
+        },
+        {
+          "path": "zero.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "0"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "equals",
+              "value": {
+                "kind": "decimal",
+                "value": "0"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "negative.md",
+          "zero.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "-0.00E+03"
+            }
+          },
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "0"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "decimal spelling is retained though numeric equality is mathematical",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "number"
+        }
+      },
+      "records": [
+        {
+          "path": "one.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "1.00e2"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "equals",
+              "value": {
+                "kind": "decimal",
+                "value": "100"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "one.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "1.00e2"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "exact numeric sorting is separate from textual collation",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "number"
+        }
+      },
+      "records": [
+        {
+          "path": "a.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "1e400"
+            }
+          }
+        },
+        {
+          "path": "b.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "-2"
+            }
+          }
+        },
+        {
+          "path": "c.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "1e-400"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "sort": [
+          {
+            "field": "value",
+            "dir": "asc"
+          }
+        ]
+      },
+      "expect": {
+        "paths": [
+          "b.md",
+          "c.md",
+          "a.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "-2"
+            }
+          },
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "1e-400"
+            }
+          },
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "1e400"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "cross-kind ordered comparison refuses before evaluating records",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {}
+      },
+      "records": [
+        {
+          "path": "literal.md",
+          "properties": {
+            "value": {
+              "kind": "string",
+              "value": "007"
+            }
+          }
+        },
+        {
+          "path": "numeric.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "7"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "gt",
+              "value": {
+                "kind": "decimal",
+                "value": "0"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "unsupported_projection"
+      }
+    },
+    {
+      "name": "object predicate is unsupported and never flattened",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {}
+      },
+      "records": [
+        {
+          "path": "map.md",
+          "properties": {
+            "value": {
+              "kind": "object",
+              "value": {
+                "x": {
+                  "kind": "string",
+                  "value": "007"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "equals",
+              "value": {
+                "kind": "object",
+                "value": {
+                  "x": {
+                    "kind": "string",
+                    "value": "007"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "unsupported_projection"
+      }
+    },
+    {
+      "name": "relation predicate remains unsupported without identity semantics",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {}
+      },
+      "records": [
+        {
+          "path": "relation.md",
+          "properties": {
+            "value": {
+              "kind": "relation",
+              "spelling": "[[Target]]",
+              "fragment": null,
+              "resolution": {
+                "status": "unresolved"
+              }
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "equals",
+              "value": {
+                "kind": "string",
+                "value": "Target"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "unsupported_projection"
+      }
+    },
+    {
+      "name": "raw unsafe integer operand refuses without coercion",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "number"
+        }
+      },
+      "records": [
+        {
+          "path": "row.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "9007199254740993"
+            }
+          }
+        }
+      ],
+      "argsSource": "{\"type\":\"Record\",\"filters\":{\"all\":[{\"field\":\"value\",\"op\":\"equals\",\"value\":9007199254740993}]}}",
+      "expect": {
+        "error": "unsupported_projection"
+      }
+    },
+    {
+      "name": "raw fractional operand requires exact tagged lexeme",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "number"
+        }
+      },
+      "records": [
+        {
+          "path": "row.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "0.10000000000000001"
+            }
+          }
+        }
+      ],
+      "argsSource": "{\"type\":\"Record\",\"filters\":{\"all\":[{\"field\":\"value\",\"op\":\"equals\",\"value\":0.10000000000000001}]}}",
+      "expect": {
+        "error": "unsupported_projection"
+      }
+    },
+    {
+      "name": "declared date uses shared calendar semantics",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "date"
+        }
+      },
+      "records": [
+        {
+          "path": "old.md",
+          "properties": {
+            "value": {
+              "kind": "date",
+              "value": "2026-10-22"
+            }
+          }
+        },
+        {
+          "path": "today.md",
+          "properties": {
+            "value": {
+              "kind": "date",
+              "value": "2026-10-23"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "on_or_after",
+              "value": "today"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "today.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "date",
+              "value": "2026-10-23"
+            }
+          }
+        ]
+      },
+      "context": {
+        "zone": "UTC",
+        "today": "2026-10-23"
+      }
+    },
+    {
+      "name": "date-looking text remains literal under text declaration",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "text"
+        }
+      },
+      "records": [
+        {
+          "path": "text.md",
+          "properties": {
+            "value": {
+              "kind": "string",
+              "value": "2026-10-23"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "equals",
+              "value": {
+                "kind": "string",
+                "value": "2026-10-23"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "text.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "string",
+              "value": "2026-10-23"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "unsupported predicate on undeclared mixed values refuses entire query",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {}
+      },
+      "records": [
+        {
+          "path": "one.md",
+          "properties": {
+            "value": {
+              "kind": "string",
+              "value": "a"
+            }
+          }
+        },
+        {
+          "path": "two.md",
+          "properties": {
+            "value": {
+              "kind": "boolean",
+              "value": true
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "contains",
+              "value": "a"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "unsupported_projection"
+      }
+    },
+    {
+      "name": "present raw null operand means explicit null not absence",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "text"
+        }
+      },
+      "records": [
+        {
+          "path": "null.md",
+          "properties": {
+            "value": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "path": "absent.md",
+          "properties": {}
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "equals",
+              "value": null
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "null.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "null"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing value key is distinct from explicit raw null",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "text"
+        }
+      },
+      "records": [
+        {
+          "path": "null.md",
+          "properties": {
+            "value": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "path": "absent.md",
+          "properties": {}
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "equals"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "unsupported_operation"
+      }
+    },
+    {
+      "name": "zoned instant output retains its tag and nanosecond lexeme",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "date"
+        }
+      },
+      "records": [
+        {
+          "path": "instant.md",
+          "properties": {
+            "value": {
+              "kind": "instant",
+              "value": "2026-10-23T09:00:00.123456789+05:30"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ]
+      },
+      "expect": {
+        "paths": [
+          "instant.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "instant",
+              "value": "2026-10-23T09:00:00.123456789+05:30"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "bounded exact comparator handles exponent beyond machine integer range",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "number"
+        }
+      },
+      "records": [
+        {
+          "path": "higher.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "1e99999999999999999999999999999999999999999999999999"
+            }
+          }
+        },
+        {
+          "path": "lower.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "9e99999999999999999999999999999999999999999999999998"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "gt",
+              "value": {
+                "kind": "decimal",
+                "value": "9e99999999999999999999999999999999999999999999999998"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "higher.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "1e99999999999999999999999999999999999999999999999999"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "exact decimal between accepts bounded tagged operand list",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {
+          "value": "number"
+        }
+      },
+      "records": [
+        {
+          "path": "low.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "1e400"
+            }
+          }
+        },
+        {
+          "path": "middle.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "1.5e400"
+            }
+          }
+        },
+        {
+          "path": "high.md",
+          "properties": {
+            "value": {
+              "kind": "decimal",
+              "value": "2e400"
+            }
+          }
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "is_between",
+              "value": [
+                {
+                  "kind": "decimal",
+                  "value": "1e400"
+                },
+                {
+                  "kind": "decimal",
+                  "value": "2e400"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "high.md",
+          "low.md",
+          "middle.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "2e400"
+            }
+          },
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "1e400"
+            }
+          },
+          {
+            "value": {
+              "kind": "decimal",
+              "value": "1.5e400"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "false boolean does not become absence null or string",
+      "operation": "query_records",
+      "type": {
+        "name": "Record",
+        "fields": {}
+      },
+      "records": [
+        {
+          "path": "false.md",
+          "properties": {
+            "value": {
+              "kind": "boolean",
+              "value": false
+            }
+          }
+        },
+        {
+          "path": "string.md",
+          "properties": {
+            "value": {
+              "kind": "string",
+              "value": "false"
+            }
+          }
+        },
+        {
+          "path": "null.md",
+          "properties": {
+            "value": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "path": "absent.md",
+          "properties": {}
+        }
+      ],
+      "args": {
+        "type": "Record",
+        "fields": [
+          "value"
+        ],
+        "filters": {
+          "all": [
+            {
+              "field": "value",
+              "op": "equals",
+              "value": false
+            }
+          ]
+        }
+      },
+      "expect": {
+        "paths": [
+          "false.md"
+        ],
+        "values": [
+          {
+            "value": {
+              "kind": "boolean",
+              "value": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "selectedSavedView": {
+    "version": 1,
+    "layouts": [
+      "table",
+      "list"
+    ],
+    "maxRows": 100,
+    "defaultRows": 100,
+    "defaultColumnCount": 6,
+    "maxResponseBytes": 8388608,
+    "source": "type_owned_canonical_saved_view",
+    "variant": "exact_saved_only",
+    "requestValues": "native_canonical_tags",
+    "response": "same_snapshot_entries_schema_evidence"
+  }
+}

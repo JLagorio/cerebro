@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "source": "compiled_local_definitions",
+  "definitions": [
+    {
+      "actionId": "github.issue.read",
+      "inputSchema": "{\"type\":\"object\",\"properties\":{\"repository\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":256},\"number\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":9007199254740991}},\"required\":[\"repository\",\"number\"],\"additionalProperties\":false}",
+      "outputSchema": "{\"type\":\"object\",\"properties\":{\"issueId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":128},\"repository\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":256},\"number\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":9007199254740991},\"url\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":2048},\"title\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":1024},\"body\":{\"type\":\"string\",\"maxLength\":8192}},\"required\":[\"issueId\",\"repository\",\"number\",\"url\",\"title\",\"body\"],\"additionalProperties\":false}",
+      "adapterRevision": "github-issues-definition-v1",
+      "effectClass": "read",
+      "requiredCapabilities": ["github.issue.read"],
+      "retry": "never",
+      "cancel": false,
+      "reconcile": false,
+      "secretInputFields": []
+    },
+    {
+      "actionId": "github.issue.create",
+      "inputSchema": "{\"type\":\"object\",\"properties\":{\"repository\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":256},\"title\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":1024},\"body\":{\"type\":\"string\",\"maxLength\":8192}},\"required\":[\"repository\",\"title\",\"body\"],\"additionalProperties\":false}",
+      "outputSchema": "{\"type\":\"object\",\"properties\":{\"issueId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":128},\"repository\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":256},\"number\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":9007199254740991},\"url\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":2048},\"title\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":1024},\"body\":{\"type\":\"string\",\"maxLength\":8192}},\"required\":[\"issueId\",\"repository\",\"number\",\"url\",\"title\",\"body\"],\"additionalProperties\":false}",
+      "adapterRevision": "github-issues-definition-v1",
+      "effectClass": "external_mutation",
+      "requiredCapabilities": ["github.issue.create"],
+      "retry": "never",
+      "cancel": false,
+      "reconcile": false,
+      "secretInputFields": []
+    }
+  ]
+}

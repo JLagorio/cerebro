@@ -73,7 +73,10 @@ export function AgentPageBody({
           <div className="mb-4">
             <FollowupList actor={actor} />
           </div>
-          <AgentRunHistory actor={actor} />
+          <AgentRunHistory
+            actor={actor}
+            scope={vaultPath === null ? null : { kind: 'agent', vault: vaultPath, actor }}
+          />
         </>
       ) : (
         <AgentMemoryTab key={entry.path} entry={entry} />

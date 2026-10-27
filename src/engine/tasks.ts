@@ -27,6 +27,10 @@ export interface DocTask {
 import { DATE_TOKEN_SOURCE } from './dates';
 
 const TASK_LINE = /^(\s*)[-*+] \[( |x|X)\] (.*)$/;
+// split('\n') leaves a CR on CRLF lines. Match the content only; byte
+// transforms still operate on the original line so its terminator survives.
+const taskLine = (line: string): RegExpExecArray | null =>
+  TASK_LINE.exec(line.endsWith('\r') ? line.slice(0, -1) : line);
 const DUE_TOKEN = /📅\s*(\d{4}-\d{2}-\d{2})/g;
 /** Full rich-date token (range/time/flags) — what gets stripped from text. */
 const DATE_TOKEN = new RegExp(DATE_TOKEN_SOURCE, 'gu');
@@ -49,7 +53,7 @@ export function parseTasks(
       continue;
     }
     if (inFence) continue;
-    const match = TASK_LINE.exec(line);
+    const match = taskLine(line);
     if (match === null) continue;
     const raw = match[3];
 
@@ -85,7 +89,7 @@ export function parseTasks(
 export function toggleTaskLine(body: string, line: number, done: boolean): string | null {
   const lines = body.split('\n');
   if (line < 0 || line >= lines.length) return null;
-  const match = TASK_LINE.exec(lines[line]);
+  const match = taskLine(lines[line]);
   if (match === null) return null;
   const box = done ? '[x]' : '[ ]';
   lines[line] = lines[line].replace(/\[( |x|X)\]/, box);

@@ -1,3 +1,5 @@
+import type { AuthorityError } from '@/lib/generated/workspace';
+import { selectedViewIssue } from './selectedEntryProjection';
 import { isTemplate } from '@/lib/templates';
 import { destination, type DestinationKind } from './destinations';
 import { openWork } from './myWork';
@@ -28,6 +30,7 @@ import { clonePresentation, DEFAULT_PRESENTATION, resolveView } from './views';
  * file ambiguous.
  */
 export interface Surface {
+  unavailable?: AuthorityError;
   title: string;
   entries: Entry[];
   presentation: Presentation;
@@ -42,6 +45,9 @@ export function resolveTypeView(
   schema: Schema,
 ): Surface {
   const { filters, presentation } = view;
+  const inSource = entries.filter(entry => entry.type === name && !isTemplate(entry));
+  const unavailable = selectedViewIssue(inSource, schema, presentation, filters, name);
+  if (unavailable) return { title: name, entries: [], presentation, unavailable };
   return {
     title: name,
     entries: sortEntries(
@@ -201,6 +207,8 @@ export function resolveSurface(
       const active = resolveView(view.definition, sel.view);
       const { filters, presentation } = active;
       const inSource = selectSource(entries, source);
+      const unavailable = selectedViewIssue(inSource, schema, presentation, filters, source.type);
+      if (unavailable) return { title: name, entries: [], presentation, unavailable };
       return {
         title: name,
         entries: sortEntries(

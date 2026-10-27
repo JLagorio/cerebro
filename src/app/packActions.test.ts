@@ -5,11 +5,15 @@ import { useUiStore } from '@/stores/uiStore';
 import { installPack } from './packActions';
 const io = vi.hoisted(() => ({ scan: vi.fn(), flush: vi.fn(), held: vi.fn() }));
 vi.mock('@/lib/ipc', () => ({ scanVault: io.scan }));
-vi.mock('@/editor/openPages', () => ({ flushOpenPages: io.flush, heldOpenPages: io.held }));
+vi.mock('@/editor/openPages', async (original) => ({
+  ...(await original<typeof import('@/editor/openPages')>()),
+  flushOpenPages: io.flush,
+  heldOpenPages: io.held,
+}));
 const apply = vi.fn();
 beforeEach(() => {
   io.scan.mockReset().mockResolvedValue([]);
-  io.flush.mockReset().mockResolvedValue(undefined);
+  io.flush.mockReset().mockResolvedValue({ outcomes: [], unresolvedOwnerIds: [] });
   io.held.mockReset().mockReturnValue([]);
   apply.mockReset().mockResolvedValue({ files: [], batchId: 'one' });
   useVaultStore.setState({

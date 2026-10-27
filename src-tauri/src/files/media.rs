@@ -256,10 +256,9 @@ fn destination(note: &str, href: &str) -> Result<String, DestinationError> {
 }
 /// Fenced code uses CommonMark's marker/length rule; an unclosed fence keeps
 /// the rest inert. A marker inside a longer fenced block cannot end it early.
-fn picture_lines(body: &str) -> Vec<Media> {
+fn unfenced_lines(body: &str) -> impl Iterator<Item = &str> {
     let mut fence: Option<(char, usize)> = None;
-    let mut out = vec![];
-    for line in body.lines() {
+    body.lines().filter(move |line| {
         let spaces = line.bytes().take_while(|c| *c == b' ').count();
         let trimmed = &line[spaces..];
         if spaces <= 3 {
@@ -273,21 +272,67 @@ fn picture_lines(body: &str) -> Vec<Media> {
                 } else if count >= 3 && (marker != '`' || !rest.contains('`')) {
                     fence = Some((marker, count));
                 }
-                if count >= 3 {
-                    continue;
+                if fence.is_some() || (count >= 3 && rest.trim().is_empty()) {
+                    return false;
                 }
             }
         }
-        if fence.is_none() {
-            if let Some(media) = parse_media_line(line) {
-                if media_kind(&media.url) == "image" {
-                    out.push(media);
+        fence.is_none()
+    })
+}
+fn picture_lines(body: &str) -> Vec<Media> {
+    unfenced_lines(body)
+        .filter_map(parse_media_line)
+        .filter(|media| media_kind(&media.url) == "image")
+        .collect()
+}
+
+/// Portable backup uses the existing destination and whole-line media grammar.
+/// Inline/reference-style forms are explicitly unsupported here, never silently
+/// treated as a complete dependency inventory. No URI is fetched.
+pub(crate) fn backup_dependencies(note: &str, body: &str) -> Result<BTreeSet<String>, String> {
+    let mut out = BTreeSet::new();
+    for line in unfenced_lines(body) {
+        let link = if line.starts_with('[') && !line.starts_with("[[") {
+            parse_media_line(&format!("!{line}"))
+        } else if line.starts_with("![") {
+            parse_media_line(line)
+        } else {
+            None
+        };
+        if let Some(media) = link {
+            match destination(note, &media.url) {
+                Ok(path) => {
+                    out.insert(path);
+                }
+                Err(DestinationError::Remote) => {}
+                Err(DestinationError::Outside) if media.url.starts_with('#') => {}
+                Err(DestinationError::Outside) => {
+                    return Err(
+                        "A local dependency is outside the supported contained-path grammar."
+                            .into(),
+                    )
                 }
             }
+        } else if line.contains("](") || line.contains("][") || line.contains("![")
+            // A reference label can begin on an earlier line. Refuse its closing
+            // definition delimiter even when this line does not start with '['.
+            || line.contains("]:")
+            || line.match_indices('<').any(|(offset, _)| {
+                let tail = &line[offset + 1..];
+                if !tail.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) { return false; }
+                let end = tail.bytes().take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'-').count();
+                // Recognize an unsupported opening tag, not its attributes or
+                // semantics. URI/email autolinks have ':'/'@' at this boundary.
+                tail[end..].chars().next().is_none_or(|next| next.is_ascii_whitespace() || matches!(next, '/' | '>'))
+            })
+        {
+            return Err("Inline, reference-style or HTML dependencies need a supported reader before this backup can be complete.".into());
         }
     }
-    out
+    Ok(out)
 }
+
 pub struct Pictures {
     pub header: String,
     pub content: Vec<Value>,
@@ -505,5 +550,37 @@ mod tests {
         let result = pictures_of(dir.path(), "page.md", &body, true, |_| true);
         assert!(result.content.is_empty());
         assert!(result.header.contains("1 over the limit of 8"));
+    }
+}
+
+#[cfg(test)]
+mod portable_dependency_tests {
+    use super::*;
+    #[test]
+    fn portable_dependencies_use_existing_relative_destination_and_fence_grammar() {
+        let text = "[One](../attachments/a(b).pdf#part)\n![Two](../attachments/a%20b.png?x=1#image)\n~~~\n![ignored](../missing.png)\n~~~\n";
+        assert_eq!(
+            backup_dependencies("folder/page.md", text).unwrap(),
+            BTreeSet::from(["attachments/a(b).pdf".into(), "attachments/a b.png".into()])
+        );
+        assert!(backup_dependencies("page.md", "Ordinary unlinked prose.\n\n# A heading\n<https://example.test/remote>\n<mail@example.test>\n").unwrap().is_empty());
+    }
+    #[test]
+    fn portable_unsupported_forms_refuse_without_interpreting_partial_dependencies() {
+        for text in [
+            "```info` ![x](attachments/missing.png)",
+            "inline [a](file.bin)",
+            "![image][asset]",
+            "[asset]: file.bin",
+            "[asset\nlabel]: file.bin\n\n[asset label]",
+            "<IMG SRC='file.png'>",
+            "<video\n src='file.mp4'>",
+            "<a\nhref='file.bin'>x</a>",
+            "<input\ntype='image'\nsrc='file.png'>",
+            "<image\nhref='file.png'>",
+            "![[file.png]]",
+        ] {
+            assert!(backup_dependencies("page.md", text).is_err(), "{text}");
+        }
     }
 }

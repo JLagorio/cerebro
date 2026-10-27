@@ -1,4 +1,41 @@
+import {
+  scanSelectedMock,
+  readSelectedMock,
+  projectSelectedMetadata,
+  selectedFolders,
+  isSelectedMock,
+  guardMockLegacy,
+  selectedRetainedReads,
+} from './selectedMock';
+import DRAFT_EXPORT from '../../shared/policy/draft-export.v1.json';
+import { mockRecovery } from './mockRecovery';
+import { replaceSourceBody } from '@/editor/sourceBodyEdits';
+import {
+  boundedSourceBody,
+  resolveSourceWith,
+  sourceLocatorForWindow,
+  sourceUtf8Length,
+  type SourceLocator,
+  type ResolveSourceResult,
+} from '@/engine/sourceLocation';
+import SOURCE_LOCATION_RULES from '../../shared/knowledge/source-location.v1.json';
+import {
+  findSourceOccurrencesWith,
+  type OccurrenceMode,
+  type OccurrencePage,
+  type OccurrenceSource,
+} from '@/engine/sourceOccurrences';
+import { searchableFields } from '@/engine/searchable';
+import { compareUnicodeScalars } from '@/engine/stringOrder';
 import { MAIL, isMailPath } from '@/engine/mailPolicy';
+import type {
+  LegacyRecordSnapshot,
+  WorkspaceBackupAvailability,
+  WorkspaceBackupChoiceResult,
+  WorkspaceBackupCommitResult,
+  WorkspaceBackupCancelResult,
+  WorkspaceBackupOperation,
+} from './generated/workspace';
 let seededMailGate: import('./ipc').MailGateRead | null = null;
 import LINKS from '../../shared/policy/links.v1.json';
 import { planCanvasCreate, planCanvasEdit } from '@/engine/scene/agentEdit';
@@ -138,7 +175,7 @@ import {
   quoteMarkdown,
   type QuoteEdit,
 } from '@/engine/quote';
-import { parseNote } from './mockParse';
+import { canonicalBodyFacts, parseNote } from './mockParse';
 import { buildSchema } from '@/engine/schema';
 import {
   parseSetFieldsRequest,
@@ -529,7 +566,9 @@ export function resetOperational(): void {
   fleetDetails = demoFleetDetails();
   runWrites = demoRunWrites();
   runTranscripts = demoRunTranscripts();
+  runConfigurations = {};
   fleetAvailable = true;
+  runHistoryRegistry = { '/demo-vault': 'demo' };
   resetActivity();
   resetConceptHistory();
   connectorStatusRows = [];
@@ -576,6 +615,8 @@ seedFiles();
 /** Re-seed the whole mock — files and the operational fixtures — for test
  * isolation. Safe to call once the module has finished evaluating. */
 export function resetMockFs(): void {
+  mockRecovery.reset();
+  draftExportTokens.clear();
   seededMailGate = null;
   resetNotionCaptures();
   resetExtractions();
@@ -667,6 +708,12 @@ function saveStarterMarker(outcome: 'added' | 'declined'): void {
 }
 
 export function installStarterKit(vault: string): Promise<{ marker_saved: boolean }> {
+  try {
+    guardMockLegacy(vault, 'install_starter_kit');
+  } catch (error) {
+    return Promise.reject(error);
+  }
+
   return offerTurn(async () => {
     if (await starterMarker(vault))
       throw new Error('This vault was already offered the starter kit.');
@@ -683,6 +730,12 @@ export function installStarterKit(vault: string): Promise<{ marker_saved: boolea
 }
 
 export function declineStarterKit(vault: string): Promise<void> {
+  try {
+    guardMockLegacy(vault, 'decline_starter_kit');
+  } catch (error) {
+    return Promise.reject(error);
+  }
+
   return offerTurn(async () => {
     if (!(await starterMarker(vault))) saveStarterMarker('declined');
   });
@@ -759,6 +812,7 @@ const HANDLE_MAX = 64;
 const HANDLE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export async function getPanelAgent(vault: string): Promise<string | null> {
+  guardMockLegacy(vault, 'panel_agent');
   return panelAgentByVault.get(vault) ?? null;
 }
 
@@ -803,6 +857,31 @@ export function __seedFileTimes(
 }
 
 export async function scanVault(_vault: string): Promise<Entry[]> {
+  const selected = scanSelectedMock(_vault);
+  if (selected !== null)
+    return assignProjects(
+      selected.map((record): Entry => {
+        const projected = projectSelectedMetadata(record.metadata);
+        const properties = projected.properties;
+        return {
+          path: record.path,
+          filename: record.path.split('/').at(-1) ?? record.path,
+          folder: record.path.split('/').slice(0, -1).join('/'),
+          project: null,
+          ...canonicalBodyFacts(record.path, record.body),
+          type: projected.type,
+          // The existing DTO preserves nested values at runtime; its historical Scalar type is narrower.
+          properties: properties as Entry['properties'],
+          relationships: {},
+          createdAt: SEED_TIME,
+          modifiedAt: SEED_TIME,
+          parseError: null,
+          hash: record.version.bodyHash,
+          authority: record.version,
+          canonicalProperties: projected.canonicalProperties,
+        };
+      }),
+    );
   const paths = [...files.keys()]
     .filter((p) => {
       const names = p.split('/');
@@ -812,7 +891,7 @@ export async function scanVault(_vault: string): Promise<Entry[]> {
         !names.slice(0, -1).some(isSkippedDir)
       );
     })
-    .sort();
+    .sort(compareUnicodeScalars);
   const entries = paths.map((p) => {
     const t = times.get(p) ?? { createdAt: SEED_TIME, modifiedAt: SEED_TIME };
     return parseNote(p, files.get(p) ?? '', t.createdAt, t.modifiedAt);
@@ -821,6 +900,8 @@ export async function scanVault(_vault: string): Promise<Entry[]> {
 }
 
 export async function readNote(_vault: string, path: string): Promise<string> {
+  const selected = readSelectedMock(_vault, path);
+  if (selected !== null) return selected;
   // .mmd is RAW (M29.20): mermaid's own `---` header is diagram syntax, so
   // it must never be stripped as frontmatter (parity with read_note).
   if (path.endsWith('.mmd')) return mustGet(path);
@@ -828,10 +909,8 @@ export async function readNote(_vault: string, path: string): Promise<string> {
 }
 
 /** Whole-file read used by link-preserving and database renames. */
-export async function readNoteSource(
-  _vault: string,
-  path: string,
-): Promise<{ content: string; hash: string }> {
+export async function readNoteSource(_vault: string, path: string): Promise<LegacyRecordSnapshot> {
+  guardMockLegacy(_vault, 'read_note_source');
   guardNoteTarget(path, MARKDOWN);
   const content = mustGet(path);
   return { content, hash: sha256Hex(content) };
@@ -856,6 +935,7 @@ export interface VaultHit {
   title: string;
   type: string | null;
   parts: ExcerptPart[];
+  location?: SourceLocator;
 }
 
 /** ⌘K's page-text answer (search.rs `VaultSearch`): the hits, how many
@@ -883,6 +963,74 @@ let searchVaultFailure: string | null = null;
  * reject with `message` until called again with null. */
 export function __failSearchVault(message: string | null): void {
   searchVaultFailure = message;
+}
+
+/** The browser uses its existing seeded vault registry, not a second
+ * approximation of the native canonical-path identity algorithm. */
+export async function resolveSource(
+  vault: string,
+  locator: SourceLocator,
+): Promise<ResolveSourceResult> {
+  const vaultId = runHistoryRegistry?.[vault];
+  if (vaultId === undefined) return { status: 'unavailable', reason: 'Source is unavailable.' };
+  return resolveSourceWith({ vaultId, admits: () => true }, locator, () => {
+    const raw = files.get(locator.path);
+    if (raw === undefined || sourceUtf8Length(raw) > SOURCE_LOCATION_RULES.maxSourceBytes)
+      return null;
+    const entry = parseNote(locator.path, raw, SEED_TIME, SEED_TIME);
+    if (locator.kind === 'property' && entry.parseError !== null) return null;
+    return {
+      sourceHash: sha256Hex(raw),
+      body: splitFrontmatter(raw).body,
+      fields: searchableFields(entry),
+      carrier: locator.path.endsWith('.md') ? 'markdown' : 'unsupported',
+    };
+  });
+}
+
+/** Raw hash, entry, property rows and capped body are one current mock read. */
+export async function findSourceOccurrences(
+  vault: string,
+  targetPath: string,
+  mode: OccurrenceMode,
+  cursor: string | null = null,
+): Promise<OccurrencePage> {
+  guardMockLegacy(vault, 'find_source_occurrences');
+  const vaultId = runHistoryRegistry?.[vault];
+  if (vaultId === undefined) throw new Error('Source discovery is unavailable.');
+  const sources: OccurrenceSource[] = [];
+  for (const scanned of await scanVault(vault)) {
+    const raw = files.get(scanned.path);
+    if (raw === undefined) {
+      sources.push({
+        entry: scanned,
+        body: '',
+        fields: [],
+        sourceHash: null,
+        carrier: 'unsupported',
+        capped: false,
+      });
+      continue;
+    }
+    const entry = parseNote(scanned.path, raw, SEED_TIME, SEED_TIME);
+    const fullBody = splitFrontmatter(raw).body;
+    const body = boundedSourceBody(fullBody);
+    sources.push({
+      entry,
+      body,
+      fields: searchableFields(entry),
+      sourceHash: sha256Hex(raw),
+      carrier: scanned.path.endsWith('.md') ? 'markdown' : 'unsupported',
+      capped: body.length < fullBody.length,
+    });
+  }
+  return findSourceOccurrencesWith(
+    { vaultId, admits: () => true },
+    sources,
+    targetPath,
+    mode,
+    cursor,
+  );
 }
 
 /** `text`'s regex syntax escaped, so a query is matched as written. */
@@ -917,41 +1065,77 @@ export async function searchVault(
   query: string,
   limit = VAULT_SEARCH_MAX,
 ): Promise<VaultSearch> {
+  guardMockLegacy(vault, 'search_vault');
   if (searchVaultFailure !== null) throw new Error(searchVaultFailure);
   const needle = query.trim();
   const found: VaultHit[] = [];
+  let capped = 0;
   if (needle !== '') {
     const pattern = new RegExp(escapeRegExp(needle), 'giu');
-    for (const entry of await scanVault(vault)) {
-      const canvas = isWhiteboardPath(entry.path) ? readCanvas(mustGet(entry.path)) : null;
-      const body =
+    for (const scanned of await scanVault(vault)) {
+      const raw = files.get(scanned.path);
+      if (raw === undefined) continue;
+      // Title, metadata, body and hash come from these same bytes. The scan
+      // supplies membership only; it cannot lend a stale title to a new body.
+      const entry = parseNote(scanned.path, raw, scanned.createdAt, scanned.modifiedAt);
+      const canvas = isWhiteboardPath(entry.path) ? readCanvas(raw) : null;
+      const wholeBody =
         canvas === null
-          ? await readNote(vault, entry.path)
+          ? entry.path.endsWith('.md')
+            ? splitFrontmatter(raw).body
+            : raw
           : canvas.ok
             ? searchTextOf(canvas.board)
             : '';
+      const body = boundedSourceBody(wholeBody);
+      if (body.length !== wholeBody.length) capped += 1;
       let parts: ExcerptPart[] | null = null;
-      for (const line of body.split(/\r?\n/)) {
+      let location: SourceLocator | undefined;
+      let lineOffset = 0;
+      for (const rawLine of body.split('\n')) {
+        const line = rawLine.replace(/\r$/, '');
         const matches = [...line.matchAll(pattern)].map((m) => ({
           start: m.index,
           end: m.index + m[0].length,
         }));
         if (matches.length > 0) {
           parts = mockExcerpt(line, matches);
+          const vaultId = runHistoryRegistry?.[vault];
+          if (entry.path.endsWith('.md') && vaultId !== undefined) {
+            // Retain a scalar-safe raw excerpt window before any presentation
+            // ellipses. Display cleanup never supplies source offsets.
+            const before = [...line.slice(0, matches[0].start)];
+            const fromScalar = Math.max(0, before.length - MOCK_LEAD);
+            const scalars = [...line];
+            const from = scalars.slice(0, fromScalar).join('').length;
+            const to = from + scalars.slice(fromScalar, fromScalar + MOCK_WINDOW).join('').length;
+            location =
+              sourceLocatorForWindow(vaultId, entry.path, sha256Hex(raw), body, {
+                start: sourceUtf8Length(body.slice(0, lineOffset + from)),
+                end: sourceUtf8Length(body.slice(0, lineOffset + to)),
+              }) ?? undefined;
+          }
           break;
         }
+        lineOffset += rawLine.length + 1;
       }
       if (parts === null && entry.title.match(pattern) !== null) {
         const snippet = entry.snippet.trim();
         parts = snippet === '' ? [] : [{ text: snippet, mark: false }];
       }
       if (parts !== null) {
-        found.push({ path: entry.path, title: entry.title, type: entry.type, parts });
+        found.push({
+          path: entry.path,
+          title: entry.title,
+          type: entry.type,
+          parts,
+          ...(location === undefined ? {} : { location }),
+        });
       }
     }
   }
   const shown = Math.min(Math.max(1, Math.floor(limit)), VAULT_SEARCH_MAX);
-  return { hits: found.slice(0, shown), total: found.length, widened: false, capped: 0 };
+  return { hits: found.slice(0, shown), total: found.length, widened: false, capped };
 }
 
 /**
@@ -1057,12 +1241,273 @@ export function restoreFile(path: string, raw: string): void {
 
 /** Human saves may compare the version read by a task list or Library draft.
  * Editor saves omit it; a knowledge capture has no saved projection hash. */
+export async function saveNoteBody({
+  vault,
+  path,
+  body,
+  bodyFormat = 'rich',
+  expectHash,
+  recoveryBypass,
+}: {
+  vault: string;
+  path: string;
+  body: string;
+  bodyFormat?: 'rich' | 'source';
+  expectHash?: string;
+  recoveryBypass?: string;
+}): Promise<import('@/editor/documentOwner').NoteWriteAck> {
+  guardMockLegacy(vault, 'save_note');
+
+  if (bodyFormat !== 'rich' && bodyFormat !== 'source') throw new Error('unsupported_body_format');
+  if (bodyFormat === 'source') {
+    guardNoteTarget(path, MARKDOWN);
+    if (isKnowledgePath(path)) throw new Error('governed_source_unavailable');
+    const current = mustGet(path);
+    const raw = replaceSourceBody(current, body);
+    const recovery = mockRecovery.capture(vault, path, current, raw, recoveryBypass);
+    files.set(path, raw);
+    touch(path);
+    logWrite('vault.write', path);
+    return { kind: 'file', contentHash: sha256Hex(raw), recovery };
+  }
+  // Preserve the authoritative bytes the writer composes, before the map
+  // materializes them. Confirmation must compare bytes, not merely hash
+  // whatever a later read happens to find.
+  guardNoteTarget(path, MARKDOWN_OR_DIAGRAM);
+  const current = mustGet(path);
+  const { yaml } = splitFrontmatter(current);
+  const projected = path.endsWith('.mmd')
+    ? body
+    : yaml !== null
+      ? `---\n${yaml}\n---\n\n${body}`
+      : body;
+  const expected = parseExpectHash(expectHash);
+  if (expected !== null && sha256Hex(current) !== expected) throw new Error('stale_content');
+  const recovery = isKnowledgePath(path)
+    ? undefined
+    : mockRecovery.capture(vault, path, current, projected, recoveryBypass);
+  const hash = await saveNote(vault, path, body, expectHash);
+  if (hash !== null) return { kind: 'file', contentHash: hash, recovery };
+  if (mustGet(path) !== projected)
+    throw new Error(
+      'projection_confirmation_failed: materialized projection differs from its authoritative bytes',
+    );
+  return { kind: 'governed', projectionHash: sha256Hex(projected) };
+}
+
+export async function recoveryStatus(vault: string) {
+  return mockRecovery.status(vault);
+}
+export async function setRecoveryEnabled(vault: string, enabled: boolean) {
+  return mockRecovery.setEnabled(vault, enabled);
+}
+export async function listRecovery(vault: string, path: string) {
+  return mockRecovery.list(vault, path);
+}
+export async function readRecovery(vault: string, path: string, recoveryId: string) {
+  return mockRecovery.read(vault, path, recoveryId);
+}
+export async function deleteRecovery(vault: string, path: string, recoveryId: string) {
+  return mockRecovery.delete(vault, path, recoveryId);
+}
+export async function clearRecovery(vault: string) {
+  return mockRecovery.clear(vault);
+}
+export async function recoveryFailure(vault: string, path: string, nonce: string) {
+  return mockRecovery.failure(vault, path, nonce);
+}
+export async function restoreRecovery(
+  vault: string,
+  path: string,
+  recoveryId: string,
+  expectHash: string,
+  recoveryBypass?: string,
+): Promise<import('@/editor/documentOwner').NoteWriteAck> {
+  guardNoteTarget(path, MARKDOWN_OR_DIAGRAM);
+  guardHumanWrite(path);
+  const current = mustGet(path);
+  const expected = parseExpectHash(expectHash);
+  if (expected === null || sha256Hex(current) !== expected) throw new Error('stale_content');
+  const raw = mockRecovery.read(vault, path, recoveryId);
+  const recovery = mockRecovery.capture(vault, path, current, raw, recoveryBypass);
+  files.set(path, raw);
+  touch(path);
+  logWrite('vault.write', path);
+  return { kind: 'file', contentHash: sha256Hex(raw), recovery };
+}
+export async function exportRecovery(
+  vault: string,
+  path: string,
+  recoveryId: string,
+): Promise<string | null> {
+  const raw = mockRecovery.read(vault, path, recoveryId);
+  const url = URL.createObjectURL(new Blob([raw], { type: 'text/plain;charset=utf-8' }));
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${path.split('/').pop() ?? 'page'}-recovery.txt`;
+    link.click();
+    return link.download;
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+}
+
+type DraftExportToken = {
+  vault: string;
+  name: string;
+  format: string;
+  hash: string;
+  expires: number;
+};
+const draftExportTokens = new Map<string, DraftExportToken>();
+function draftExportRefusal(reason: string): Error {
+  return new Error(`recovery_invalid_path: ${reason}`);
+}
+function checkDraftVault(vault: string): void {
+  // The browser backend has one active in-memory vault.
+  if (vault !== '/demo-vault') throw new Error('recovery_unavailable: vault is unavailable');
+}
+function draftPathIdentity(path: string): string {
+  return path
+    .split('/')
+    .filter((part) => part !== '' && part !== '.')
+    .map((part) => diskFolded(part).normalize('NFC'))
+    .join('/');
+}
+export async function probeDraftTarget(
+  vault: string,
+  path: string,
+): Promise<import('./ipc').DraftTargetProbe> {
+  try {
+    checkDraftVault(vault);
+    guardNoteTarget(path, ['md', 'mmd', 'canvas']);
+    if (folders.has(path) || [...files.keys()].some((key) => key.startsWith(`${path}/`))) {
+      return { kind: 'unavailable', code: 'recovery_invalid_path' };
+    }
+    return { kind: files.has(path) ? 'present' : 'missing' };
+  } catch {
+    return { kind: 'unavailable', code: 'recovery_unavailable' };
+  }
+}
+export async function chooseDraftExport(
+  vault: string,
+  path: string,
+  defaultName: string,
+  format: string,
+  contentHash: string,
+): Promise<import('./ipc').DraftExportChoice> {
+  checkDraftVault(vault);
+  guardNoteTarget(path, ['md', 'mmd', 'canvas']);
+  if (!DRAFT_EXPORT.formats.includes(format) || !/^[a-f0-9]{64}$/.test(contentHash))
+    throw draftExportRefusal('invalid export format or digest');
+  if (format !== 'json' && (!path.endsWith(`.${format}`) || isKnowledgePath(path)))
+    throw draftExportRefusal('this source requires a recovery bundle');
+  if (
+    !defaultName ||
+    defaultName.startsWith('.') ||
+    /[/\\\0]/.test(defaultName) ||
+    !defaultName.endsWith(`.${format}`)
+  )
+    throw draftExportRefusal('invalid export filename');
+  const now = Date.now();
+  for (const [key, value] of draftExportTokens)
+    if (value.expires <= now) draftExportTokens.delete(key);
+  if (draftExportTokens.size >= DRAFT_EXPORT.max_pending)
+    throw new Error('recovery_unavailable: too many pending exports');
+  const token = crypto.randomUUID();
+  draftExportTokens.set(token, {
+    vault,
+    name: defaultName,
+    format,
+    hash: contentHash,
+    expires: now + DRAFT_EXPORT.lease_seconds * 1000,
+  });
+  return { kind: 'chosen', token };
+}
+export async function cancelDraftExport(token: string): Promise<void> {
+  draftExportTokens.delete(token);
+}
+export async function commitDraftExport(
+  vault: string,
+  token: string,
+  content: string,
+): Promise<import('./ipc').DraftExportResult> {
+  const pending = draftExportTokens.get(token);
+  draftExportTokens.delete(token);
+  checkDraftVault(vault);
+  if (!pending || pending.vault !== vault || pending.expires <= Date.now())
+    throw draftExportRefusal('export choice expired');
+  if (
+    new TextEncoder().encode(content).length > DRAFT_EXPORT.max_bytes ||
+    sha256Hex(content) !== pending.hash
+  )
+    throw draftExportRefusal('export content changed or is too large');
+  if (pending.format === 'json') {
+    let bundle: { format?: string; version?: number };
+    try {
+      bundle = JSON.parse(content);
+    } catch {
+      throw draftExportRefusal('invalid recovery data');
+    }
+    if (
+      !bundle ||
+      !DRAFT_EXPORT.bundle_formats.includes(bundle.format ?? '') ||
+      bundle.version !== DRAFT_EXPORT.version
+    )
+      throw draftExportRefusal('invalid recovery data version');
+  }
+  const url = URL.createObjectURL(
+    new Blob([content], {
+      type:
+        pending.format === 'json' ? 'application/json;charset=utf-8' : 'text/plain;charset=utf-8',
+    }),
+  );
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = pending.name;
+    link.click();
+    return { kind: 'exported', destination: pending.name };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+export async function createRecoveredPage(
+  vault: string,
+  originalPath: string,
+  destinationPath: string,
+  content: string,
+): Promise<import('./ipc').RecoveredPage> {
+  checkDraftVault(vault);
+  guardNoteTarget(originalPath, MARKDOWN);
+  guardHumanWrite(originalPath);
+  guardNoteTarget(destinationPath, MARKDOWN);
+  guardHumanWrite(destinationPath);
+  if (draftPathIdentity(originalPath) === draftPathIdentity(destinationPath))
+    throw draftExportRefusal('choose a different page');
+  if (splitFrontmatter(content).yaml !== null)
+    throw draftExportRefusal('body would become page properties; save recovery data instead');
+  if (
+    [...files.keys(), ...folders].some(
+      (path) => draftPathIdentity(path) === draftPathIdentity(destinationPath),
+    )
+  )
+    throw draftExportRefusal('destination already exists');
+  const batch = await applyBatch(vault, [{ op: 'create', path: destinationPath, content }]);
+  const result = batch.files[0];
+  if (!result?.afterHash) throw new Error('recovery_unavailable: create acknowledgement missing');
+  return { path: result.path, contentHash: result.afterHash, batch };
+}
+
 export async function saveNote(
   _vault: string,
   path: string,
   body: string,
   expectHash?: string,
 ): Promise<string | null> {
+  guardMockLegacy(_vault, 'save_note');
+
   let expected: string | null;
   try {
     expected = parseExpectHash(expectHash);
@@ -1856,6 +2301,8 @@ export async function updateFrontmatter(
   path: string,
   patch: Record<string, unknown>,
 ): Promise<string | null> {
+  guardMockLegacy(_vault, 'update_frontmatter');
+
   // Parity with update_frontmatter in write.rs (M29.23): mermaid's config
   // header IS valid YAML, so patching a .mmd would merge into the diagram's
   // own header and reserialize it. There is no frontmatter here to update.
@@ -1916,6 +2363,8 @@ export async function verifyConcept(
   patch: Record<string, unknown>,
   viewedBodyHash: string,
 ): Promise<void> {
+  guardMockLegacy(vault, 'verify_concept');
+
   if (!isKnowledgePath(path)) {
     throw new Error('verify_concept only applies to knowledge/ concepts');
   }
@@ -1966,6 +2415,8 @@ export async function captureConceptEdit(
   _vault: string,
   request: Record<string, unknown>,
 ): Promise<void> {
+  guardMockLegacy(_vault, 'capture_concept_edit');
+
   const path = String(request.path ?? '');
   if (!isKnowledgePath(path)) {
     throw new Error('capture applies only to knowledge/ projections');
@@ -2057,6 +2508,8 @@ export async function createNote(
   frontmatter: Record<string, unknown>,
   body: string,
 ): Promise<string> {
+  guardMockLegacy(_vault, 'create_note');
+
   // '' means the vault root — no separator, or the path grows a leading '/'
   // (parity with note_candidates in write.rs).
   const prefix = folder === '' ? '' : `${folder}/`;
@@ -2087,6 +2540,8 @@ export async function createNote(
 }
 
 export async function setNoteTitle(_vault: string, path: string, title: string): Promise<void> {
+  guardMockLegacy(_vault, 'set_note_title');
+
   guardHumanWrite(path);
   // Parity with set_note_title in write.rs: a .mmd's title is its filename,
   // and `# title` spliced into mermaid source breaks the diagram (M29.21).
@@ -2164,6 +2619,8 @@ function collectionOf(path: string): string | null {
 }
 
 export async function listViews(_vault: string): Promise<RawList[]> {
+  const selected = selectedRetainedReads(_vault);
+  if (selected !== null) return selected.views;
   // Parity with write.rs list_views: M10 `*.list.yml` anywhere, plus the two
   // legacy shapes — root views/ is global; a views/ dir next to a project.md is
   // scoped to that project. Sorted by (collection, project, id).
@@ -2230,6 +2687,8 @@ export async function saveView(
   yaml: string,
   folder: string | null = null,
 ): Promise<void> {
+  guardMockLegacy(_vault, 'save_view');
+
   const path = folder === null ? `views/${id}.yml` : `${folder}/views/${id}.yml`;
   guardHumanWrite(path);
   const existed = files.has(path);
@@ -2239,6 +2698,8 @@ export async function saveView(
 }
 
 export async function listCollections(_vault: string): Promise<{ folder: string; yaml: string }[]> {
+  const selected = selectedRetainedReads(_vault);
+  if (selected !== null) return selected.collections;
   return [...files.keys()]
     .filter((p) => p === COLLECTION_MARKER || p.endsWith(`/${COLLECTION_MARKER}`))
     .filter((p) => !p.split('/').slice(0, -1).some(isHidden))
@@ -2247,6 +2708,8 @@ export async function listCollections(_vault: string): Promise<{ folder: string;
 }
 
 export async function saveCollection(_vault: string, folder: string, yaml: string): Promise<void> {
+  guardMockLegacy(_vault, 'save_collection');
+
   // The bundle first, as lib.rs save_collection guards it (M53.28): the mock
   // had no guard here, so a collection.yml landed in knowledge/.
   guardHumanWrite(folder);
@@ -2264,6 +2727,8 @@ export async function saveList(
   id: string,
   yaml: string,
 ): Promise<void> {
+  guardMockLegacy(_vault, 'save_list');
+
   // As lib.rs save_list guards it (M53.28), and as saveCollection does.
   guardHumanWrite(folder);
   const path = folder === '' ? `${id}${LIST_SUFFIX}` : `${folder}/${id}${LIST_SUFFIX}`;
@@ -2273,7 +2738,9 @@ export async function saveList(
   logWrite(writeKind(existed), path);
 }
 
-export async function startWatcher(_vault: string): Promise<OpenReport> {
+export async function startWatcher(_vault: string): Promise<OpenReport | null> {
+  // No legacy recovery observation or purge occurs for a selected fixture.
+  if (isSelectedMock(_vault)) return null;
   // The mock has no file watcher; writers trigger rescans directly. The open
   // does run lib.rs's launch purge of the Trash (M60.8). A mock change never
   // stops partway, so the open has nothing to put back (M60.6).
@@ -2628,6 +3095,8 @@ if (typeof window !== 'undefined') {
 
 /** A folder holds no bytes, so it logs nothing (write.rs `UNRECORDED`). */
 export async function createFolder(_vault: string, path: string): Promise<void> {
+  guardMockLegacy(_vault, 'create_folder');
+
   guardHumanWrite(path);
   folders.add(path);
 }
@@ -2668,6 +3137,8 @@ function carryComments(from: string, to: string, isDir: boolean): void {
 /** Move a note — or a whole folder prefix — within the vault, and its
  * comments with it (M70.2). */
 export async function renameNote(_vault: string, from: string, to: string): Promise<void> {
+  guardMockLegacy(_vault, 'rename_note');
+
   // Refused from both sides: out would strip the boundary, in would smuggle
   // human content into the agent's corpus.
   guardHumanWrite(from);
@@ -2797,6 +3268,8 @@ function readTrashManifest(stamp: string) {
 /** Move a note or folder to the vault's Trash, and its comment sidecar
  * after it (lib.rs `delete_note`, trash.rs `trash_locked`). */
 export async function deleteNote(_vault: string, path: string): Promise<TrashedItem> {
+  guardMockLegacy(_vault, 'delete_note');
+
   // Mirrors lib.rs delete_note (M17.1). This was the one write path with no
   // guard on either backend — parity here is the point of this file.
   guardHumanWrite(path);
@@ -2883,6 +3356,8 @@ export async function listTrash(_vault: string): Promise<TrashedItem[]> {
  * `untrash_locked`): never over anything, its sidecar too unless one now
  * sits at its place. Resolves the path it restored. */
 export async function restoreFromTrash(_vault: string, stamp: string): Promise<string> {
+  guardMockLegacy(_vault, 'restore_from_trash');
+
   const manifest = readTrashManifest(stamp);
   const target = manifest.path;
   guardHumanWrite(target);
@@ -3094,6 +3569,8 @@ function planBatchRenames(
 /** Apply `ops` as one change, all or nothing (lib.rs `apply_batch`). */
 let importTail: Promise<void> = Promise.resolve();
 export async function applyBatch(vault: string, ops: readonly unknown[]): Promise<BatchApplied> {
+  guardMockLegacy(vault, 'apply_batch');
+
   if (!ops.some((op) => (op as { op?: unknown } | null)?.op === 'import'))
     return applyExpandedBatch(vault, ops);
   const previous = importTail;
@@ -4064,6 +4541,8 @@ function placeAttachment(name: string, bytes: Uint8Array): AttachmentImport {
   }
 }
 export async function importAttachment(_vault: string, source: string): Promise<AttachmentImport> {
+  guardMockLegacy(_vault, 'import_attachment');
+
   if (!source.startsWith('/')) throw new Error(`attachment source must be absolute: ${source}`);
   const name = source.split('/').at(-1) ?? '';
   const staged = droppedSeed(source);
@@ -4087,6 +4566,8 @@ export async function importAttachmentBytes(
   name: string,
   bytesBase64: string,
 ): Promise<AttachmentImport> {
+  guardMockLegacy(_vault, 'import_attachment_bytes');
+
   const leaf = name.split(/[\\/]/).at(-1)?.trim() ?? '';
   const why = attachmentRefusal(name, 0);
   if (why !== null) throw new Error(why);
@@ -4124,6 +4605,8 @@ export async function writeTextFile(
   path: string,
   content: string,
 ): Promise<string> {
+  guardMockLegacy(_vault, 'write_text_file');
+
   guardHumanWrite(path);
   if (path === '' || path.startsWith('/') || path.split('/').includes('..')) {
     throw new Error(`path escapes the vault: ${path}`);
@@ -4149,6 +4632,8 @@ export async function writeTextFile(
  * with scan.rs `list_folders`.
  */
 export async function listFolders(_vault: string): Promise<string[]> {
+  const selected = selectedFolders(_vault);
+  if (selected !== null) return selected;
   const dirs = new Set<string>(folders);
   for (const p of files.keys()) {
     const parts = p.split('/');
@@ -5283,6 +5768,12 @@ let fleetDetails: Record<string, FleetRunDetail> = demoFleetDetails();
 /** Null models a missing runtime DB: every fleet command refuses, which is
  * how the section reaches `unavailable` rather than `empty`. */
 let fleetAvailable = true;
+let runHistoryRegistry: Record<string, string> | null = { '/demo-vault': 'demo' };
+
+/** Browser registry fixture: paths and runtime identities deliberately differ. */
+export function __seedRunHistoryRegistry(registry: Record<string, string> | null): void {
+  runHistoryRegistry = registry === null ? null : { ...registry };
+}
 
 /** Test-only seam, mirroring `__cerebroSeedPipeline`. */
 export function __seedFleet(
@@ -5374,6 +5865,133 @@ export async function fleetRunsPage(filter: FleetFilter = {}): Promise<FleetRun[
     (a, b) => b.started_at.localeCompare(a.started_at) || b.run_id.localeCompare(a.run_id),
   );
   return ordered.slice(0, Math.min(filter.limit ?? FLEET_DEFAULT_LIMIT, FLEET_MAX_LIMIT));
+}
+
+import type {
+  RunCursor,
+  RunHistoryPage,
+  RunHistoryScope,
+  RunLineage,
+  RunOrigin,
+} from './runHistory';
+
+const runOrder = (a: FleetRun, b: FleetRun): number =>
+  a.started_at === b.started_at
+    ? a.run_id === b.run_id
+      ? 0
+      : a.run_id < b.run_id
+        ? 1
+        : -1
+    : a.started_at < b.started_at
+      ? 1
+      : -1;
+
+/** Scope before the cap; lineage has its own bounded read below. */
+export async function scopedFleetRunsPage(
+  scope: RunHistoryScope,
+  cursor?: RunCursor,
+  limit = FLEET_DEFAULT_LIMIT,
+): Promise<RunHistoryPage> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  const bytes = (value: string) => new TextEncoder().encode(value).length;
+  if (scope.actor.length === 0 || bytes(scope.actor) > 1024)
+    throw new Error('Invalid history actor.');
+  if (
+    cursor &&
+    (!cursor.startedAt ||
+      bytes(cursor.startedAt) > 128 ||
+      !cursor.runId ||
+      bytes(cursor.runId) > 1024)
+  )
+    throw new Error('Invalid history cursor.');
+  if (!Number.isInteger(limit) || limit < 0 || limit > 0xffffffff)
+    throw new Error('Invalid history limit.');
+  if (runHistoryRegistry === null) throw new Error('Run origin registry unavailable.');
+  const vaultId = runHistoryRegistry[scope.vault];
+  if (scope.kind === 'agent' && vaultId === undefined)
+    throw new Error('Run origin is not registered.');
+  const effectiveVaultIds =
+    scope.kind === 'agent' ? [vaultId] : [...new Set(Object.values(runHistoryRegistry))].sort();
+  const ids = new Set(effectiveVaultIds);
+  const matches = fleetRuns
+    .filter(
+      (run) =>
+        run.actor === scope.actor &&
+        run.vault_id !== null &&
+        ids.has(run.vault_id) &&
+        (cursor === undefined ||
+          run.started_at < cursor.startedAt ||
+          (run.started_at === cursor.startedAt && run.run_id < cursor.runId)),
+    )
+    .sort(runOrder);
+  const count = Math.max(1, Math.min(limit, FLEET_MAX_LIMIT));
+  const rows = matches.slice(0, count);
+  const last = rows.at(-1);
+  return structuredClone({
+    runs: rows,
+    nextCursor:
+      matches.length > count && last ? { startedAt: last.started_at, runId: last.run_id } : null,
+    effectiveVaultIds,
+  });
+}
+
+export async function fleetRunLineage(rootRunId: string): Promise<RunLineage> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  if (!rootRunId || new TextEncoder().encode(rootRunId).length > 1024)
+    throw new Error('Invalid lineage root.');
+  if (!fleetRuns.some((run) => run.run_id === rootRunId))
+    throw new Error(`no run with id ${rootRunId}`);
+  const seen = new Set([rootRunId]);
+  const queue = [rootRunId];
+  const rows: FleetRun[] = [];
+  while (queue.length) {
+    const parent = queue.shift()!;
+    for (const child of fleetRuns
+      .filter((run) => run.parent_run_id === parent)
+      .sort((a, b) => (a.run_id < b.run_id ? -1 : a.run_id > b.run_id ? 1 : 0))) {
+      if (seen.has(child.run_id)) continue;
+      if (rows.length === FLEET_MAX_LIMIT) return { runs: structuredClone(rows), truncated: true };
+      seen.add(child.run_id);
+      rows.push(child);
+      queue.push(child.run_id);
+    }
+  }
+  return { runs: structuredClone(rows), truncated: false };
+}
+
+/** Synthetic test/lab fixtures only; ordinary demo runs remain explicitly legacy. */
+let runConfigurations: Record<string, import('./runConfiguration').RunConfigurationRead> = {};
+export function __seedRunConfigurations(values: typeof runConfigurations): void {
+  runConfigurations = structuredClone(values);
+}
+if (typeof window !== 'undefined') {
+  (
+    window as unknown as { __cerebroSeedRunConfigurations: typeof __seedRunConfigurations }
+  ).__cerebroSeedRunConfigurations = __seedRunConfigurations;
+}
+
+/** Demo history predates configuration capture. Never infer it from today's settings. */
+export async function fleetRunConfiguration(
+  vault: string,
+  runId: string,
+): Promise<import('./runConfiguration').RunConfigurationRead> {
+  if (!fleetAvailable || runHistoryRegistry === null)
+    return { state: 'unavailable', code: 'storage_unavailable' };
+  const run = fleetDetails[runId]?.run ?? fleetRuns.find((item) => item.run_id === runId);
+  const scope = runHistoryRegistry[vault];
+  if (scope === undefined || run === undefined || run.vault_id !== scope)
+    return { state: 'unavailable', code: 'scope_unavailable' };
+  return structuredClone(runConfigurations[runId] ?? { state: 'not_recorded', reason: 'legacy' });
+}
+
+export async function fleetRunOrigin(vaultId: string | null): Promise<RunOrigin> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  if (vaultId === null) return { kind: 'not_recorded' };
+  if (runHistoryRegistry === null) throw new Error('Run origin registry unavailable.');
+  const vault = Object.keys(runHistoryRegistry).find(
+    (path) => runHistoryRegistry![path] === vaultId,
+  );
+  return vault === undefined ? { kind: 'unavailable' } : { kind: 'registered', vault };
 }
 
 // --- History's activity read (M64.2) ----------------------------------------
@@ -7706,6 +8324,8 @@ export async function saveCanvasFile(
   path: string,
   content: string,
 ): Promise<{ hash: string }> {
+  guardMockLegacy(_vault, 'save_canvas_file');
+
   canvasPath(path, true);
   if (!readCanvas(content).ok) refuseCanvas('invalid_content');
   const old = canvasSource(path);
@@ -7722,6 +8342,8 @@ export async function createCanvasFile(
   mode: 'preview' | 'commit',
   stamp?: WriteStamp,
 ): Promise<{ path: string; hash: string | null }> {
+  guardMockLegacy(_vault, 'create_canvas_file');
+
   canvasPath(path, true);
   if (!readCanvas(content).ok) refuseCanvas('invalid_content');
   const target = freeCanvasPath(path);
@@ -7868,4 +8490,45 @@ export async function mailUndismiss(vault: string, kind: string, value: string):
       (row) => row.kind !== kind || row.value !== read.value,
     ),
   );
+}
+
+export {
+  managedConnections,
+  managedConnectionStatus,
+  managedConnectionAdd,
+  managedConnectionDisable,
+} from './mockManagedAccounts';
+
+// Browser preview has no native chooser, retained output authority, or filesystem writer.
+const BACKUP_PREVIEW =
+  'Preview only. Native backups require the desktop app; no files were written.';
+export async function workspaceBackupAvailability(
+  _expectedVault: string | null,
+): Promise<WorkspaceBackupAvailability> {
+  return { kind: 'preview', message: BACKUP_PREVIEW };
+}
+export async function chooseWorkspaceBackup(
+  _expectedVault: string,
+): Promise<WorkspaceBackupChoiceResult> {
+  return { kind: 'preview', mode: 'create', message: BACKUP_PREVIEW };
+}
+export async function checkWorkspaceBackup(): Promise<WorkspaceBackupChoiceResult> {
+  return { kind: 'preview', mode: 'check', message: BACKUP_PREVIEW };
+}
+export async function chooseWorkspaceRestore(_token: string): Promise<WorkspaceBackupChoiceResult> {
+  return { kind: 'preview', mode: 'restore', message: BACKUP_PREVIEW };
+}
+export async function commitWorkspaceBackup(_token: string): Promise<WorkspaceBackupCommitResult> {
+  return { kind: 'preview', mode: 'create', message: BACKUP_PREVIEW };
+}
+export async function commitWorkspaceRestore(_token: string): Promise<WorkspaceBackupCommitResult> {
+  return { kind: 'preview', mode: 'restore', message: BACKUP_PREVIEW };
+}
+export async function cancelWorkspaceBackupChoice(
+  _token: string,
+): Promise<WorkspaceBackupCancelResult> {
+  return { kind: 'preview', message: BACKUP_PREVIEW };
+}
+export async function workspaceBackupOperation(): Promise<WorkspaceBackupOperation> {
+  return { kind: 'preview', message: BACKUP_PREVIEW };
 }

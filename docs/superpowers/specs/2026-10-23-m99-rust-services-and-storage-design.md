@@ -39,10 +39,12 @@ boundary against another same-user process. No cutover may rely on that claim.
 | SQLite-owned metadata plus Markdown bodies | Transactional typed metadata, relations and queries | Whole workspace is no longer the Markdown folder; coordinated backup/export required |
 | Database/CRDT bodies or Rust-native UI     | Different collaboration/rendering possibilities     | Separate editor and product rewrite; deferred experiment                             |
 
-**Recommended proposal:** Rust services now; compare sidecars and SQLite on the
-same disposable corpus; prefer SQLite if the owner accepts export/backup-based
-portability. Retain React. A pure Rust/WASM semantic pilot is optional and must
-justify its extra build target. No production format choice is presumed approved.
+**Owner selection (2026-10-23):** SQLite metadata plus visible Markdown bodies,
+following the accepted disposable comparison and explicit portability/backup
+conditions in the authority decision packet. Retain React. A pure Rust/WASM
+semantic pilot remains optional and must justify its extra build target.
+Selection authorizes implementation of the acceptance gates, not current-vault
+conversion or activation.
 
 ## Requirements and ownership
 
@@ -87,7 +89,47 @@ workspace authority; it does not define a second action ledger or thread store.
 
 ## Proposed contract
 
-The names below are new proposed interfaces, not existing APIs:
+### M99.1 legacy read bridge (execution amendment, 2026-10-23)
+
+The current file format has no stable-record-ID or metadata-revision producer.
+The first useful consumer therefore retains the existing human whole-source
+read behind an explicitly legacy service:
+
+```text
+LegacyRecordLocator { path: string }
+LegacyRecordSnapshot { content: string, hash: string }
+legacy::read_record(vault_path, LegacyRecordLocator) -> Result<LegacyRecordSnapshot, StoreError>
+StoreError { code, message: string, retryable: boolean }
+```
+
+`content` retains complete UTF-8 source, including BOM, CRLF and frontmatter;
+`hash` is SHA-256 of those exact bytes from that single read. This is a source
+snapshot, not a decoded property map: explicit null, absent fields, numeric
+lexemes and unsupported YAML remain in the source without a claim of typed
+metadata fidelity. Empty source is a real success; unreadable/refused source is
+an error. No read creates an ID, manifest, revision, receipt or file.
+
+The service delegates to the existing guarded Markdown reader. Its vault/path
+arguments are selectors for the existing human read door, not an authenticated
+agent capability and not a portable workspace identity. This bridge adds no MCP
+read access and must not be reused as agent admission. The existing
+`read_note_source` command keeps `{content,hash}` success and string failures;
+the internal error envelope preserves the reader's message, uses the existing
+operational `capability_unavailable` code and sets automatic `retryable` false
+because the legacy reader does not supply a reliable typed failure cause.
+
+Schemars 0.8.22 derives JSON Schema from the Rust declarations in tests only.
+The same deterministic schema-to-TypeScript tool serves later M96 DTOs. Native
+tests check declaration/schema drift and shared source/error fixtures; TS tests
+check schema/generated-type drift and the browser mock. The exporter rejects
+unsupported schema instead of widening types. Generated types describe wire
+shape; they are not a runtime authorization or validation boundary.
+
+### Stable-identity service (pending its producers)
+
+The names below remain proposed interfaces until M99.3's committed identity
+manifest and real metadata revisions exist. The legacy path is never substituted
+for `recordId`, and a fabricated zero is never substituted for a revision:
 
 ```text
 WorkspaceRef { workspaceId: string, vaultId: string, formatVersion: u32 }
@@ -115,14 +157,54 @@ deserializable client field, and a store cannot manufacture the `receiptId` it
 returns. Checks and the actual selected-authority mutation share the required
 lock/transaction; a prior UI read is not authorization.
 
+### M99.2 bounded value contract (execution amendment, 2026-10-23)
+
 `PropertyValue` is a tagged union: `null`, `string`, `boolean`, `decimal`, `array`,
-`object`, `date`, `instant`, `relation`. Decimal retains a finite JSON-number
-lexeme as text, avoiding JS safe-integer loss; reject nonfinite values. Strings
-such as `007` stay strings. Date/instant conversion requires a schema declaration.
-Relations retain target ID when resolved, original spelling and optional fragment;
-unresolved/ambiguous links retain text and a resolution status. An absent key is
-not a value. The legacy patch adapter preserves its null-means-remove behavior
-until all callers explicitly migrate to `Set(null)` versus `Remove`.
+`object`, `date`, `instant`, `relation`. `PropertyChange` explicitly separates
+`Set { key, value }` from `Remove { key }`; an absent key is not a value. This
+phase provides Rust-owned schema/generated TS transport and a `cfg(test)` native
+prototype decoder/converter. It exposes no production mutation endpoint, store
+application or new writer. `WorkspaceMutation`/`MutationOutcome` above remain
+proposed until M99.3 and subsequent guarded consumers provide real identity,
+metadata revisions and receipts. No DTO accepts a client-supplied receipt.
+
+`shared/workspace/values.v1.json` pins JSON finite-decimal grammar, limits and
+shared cases. Raw JSON is decoded through `serde_json::RawValue`, preserving
+number lexemes before any `Number`, f64 or YAML conversion. Decimals retain exact
+text, including exponent spelling, trailing zeros and negative zero. Finite here
+means a JSON decimal token, not a number restricted to IEEE-754 range: `1e400`
+remains valid text; NaN and Infinity refuse. A lexeme is at most 256 bytes. The
+prototype bounds source bytes to 65,536, container nesting to 32 and decoded
+nodes to 4,096 before materialization can grow unboundedly. Duplicate decoded
+object keys and invalid Unicode strings refuse instead of losing data.
+
+Plain strings such as `007` or `2024-02-29` remain strings. `ValueSchema::Date`
+allows only a calendar day and `ValueSchema::Instant` only a zoned instant under
+the existing `shared/calendar/dates.v1.json` grammar; both permit explicit null.
+Schema selection is explicit and applies to the supplied root value, never an
+inferred conversion of arbitrary nested strings. Unknown map keys and their
+values remain tagged recursively. Relations retain original spelling, optional
+fragment and unresolved/ambiguous/resolved status. A resolved relation carries
+an already supplied nonempty target ID; this decoder does not resolve, mint or
+authorize it, nor does it derive fragment meaning from spelling.
+
+`prepare_legacy_patch` is a pure representability check. `Remove` maps to the
+existing top-level JSON-null deletion marker. `Set(null)` refuses with
+`capability_unavailable`, preserving the input; nested null remains a value.
+Only canonical integer lexemes within ±9,007,199,254,740,991 convert numerically;
+fractions, exponent spelling, negative zero, trailing decimal zeros and larger
+integers refuse rather than round or normalize. Typed relations refuse because
+the legacy map cannot carry their resolution contract. Duplicate/empty change
+keys and invalid tagged values produce `schema_invalid`. Both codes retain their
+existing operational destiny and do not promise automatic retry. Refusal does
+not alter the requested values or touch a file.
+
+This adapter certifies only proposed values. It cannot certify preservation of
+unknown original YAML syntax or numeric precision already lost by a legacy
+parser. M99.3's original-byte inventory is required before conversion. Existing
+human/knowledge guards, null-means-remove callers and receipt paths stay intact.
+Rust replays semantics; TS compiler tests replay transport shapes from the same
+cases and generated types. No handwritten browser semantic twin is introduced.
 
 `QueryRequest` uses existing shared view vocabulary, a declared scope, filter,
 sort and opaque cursor. The pilot supports a fixed page size of 100; return a
@@ -169,6 +251,119 @@ design that can replay historical attestations with their original codec.
 CLI-owned definition frontmatter is another compatibility carrier to identify
 separately; “no YAML” must name the actual workspace formats covered.
 
+### M99.3 inventory and identity prototype (execution amendment, 2026-10-23)
+
+Inventory operates on an explicit bounded list of relative source paths under a
+canonical root. The report carries requested-path coverage and `whole_vault:
+false`; a successful subset is not a complete workspace discovery or a cutover
+certificate. Contained anchored reads reject symlinks and unsafe paths. Each
+successful row archives the complete original bytes and their SHA-256 together;
+read failures retain an explicit blocked row with no invented bytes/hash.
+Source/file/aggregate byte and file-count limits bound materialization. Original
+source hashes must be checked again by any future stage/cutover consumer.
+
+A direct development-only dependency on already-locked MIT `unsafe-libyaml
+0.2.11` exposes syntax that Serde's semantic loader discards. An owning RAII
+wrapper frees initialized events and parser on every success/error path, checks
+scalar pointers/lengths before slices, and bounds YAML bytes, event count, nesting
+and total decoded scalar bytes. It preserves duplicate decoded mapping keys,
+scalar text and its plain/nonplain flag, plus unknown nested collections without
+numeric conversion. Explicit tags, anchors/aliases, dialect/tag directives,
+non-string keys, multiple documents and malformed
+or over-limit YAML block automatic conversion. Complete original bytes remain
+authoritative; parser offsets do not reconstruct files.
+
+Governed concepts retain the existing OKF v0.2 projection codec with a source-code
+digest and complete bytes. Any inventoried ledger store ID and projection
+manifest remain separate evidence; inventory never opens a ledger writer,
+verifies a belief, rekeys history or claims a complete ledger backup. CLI-owned
+definitions and sheet YAML are retained compatibility carriers, not ordinary
+metadata rewrites. Relations missing from the requested scope remain explicitly
+unresolved; this is not a claim they are absent from the entire vault.
+If the existing semantic reader cannot read relation/index metadata, that source
+is blocked with `semantic_read_unavailable` and excluded from the target index.
+Its original bytes, hash and exact syntax remain intact; an unavailable semantic
+read is never evidence of an empty relationship set or readiness for identity.
+
+Identity planning consumes only the inventory, an optional existing manifest
+paired with a separate trusted workspace/root binding, explicit moves and known
+workspace registrations. It refuses duplicate IDs/paths, mismatched bindings,
+foreign-root workspace collisions and unexplained missing prior targets. Equal
+bytes, a title or a filename never imply a shared ID. An explicit move supplies
+the committed record ID, old/new paths and the inventoried destination hash.
+A copied document needs its own new identity unless a valid explicit move was
+provided; a copied workspace manifest is a collision to resolve.
+
+Draft creation mints nothing. Consuming a non-cloneable draft through
+`into_proposed_manifest` invokes an injected UUIDv4 mint only for missing IDs and
+returns an in-memory proposal. It is not an atomic/durable manifest commit or a
+production permission check. M99.4 must publish its disposable manifest atomically
+before asserting restart persistence; committed manifest replay calls no mint.
+No source files, identity manifests, registrations, metadata revisions, ledger
+identities, receipts or runtime history are written in this phase.
+
+### M99.4 disposable store contract (execution amendment, 2026-10-23)
+
+The shared prototype `WorkspaceStore` is test/tool-only and does not implement
+the proposed production receipt-bearing mutation API. Its `PrototypeScope` has
+no deserializer and is bound to an explicitly created temporary owner, readable
+and writable IDs and allowed create paths. A `PrototypeOutcome` contains actual
+committed record/workspace/schema versions, never a fabricated receipt. The
+prototype does not bypass or replace human/knowledge admission; it cannot open
+an active registered vault as a mutable store.
+
+Both implementations persist tagged values, stable IDs, schema revision and
+record metadata revision. Ordinary Markdown stays at visible relative body paths;
+governed and CLI compatibility bytes remain separate retained sources. Sidecar
+metadata generations are internal, with a single atomic committed manifest.
+SQLite uses a separate temporary metadata directory and actual transactions.
+Neither representation treats hidden body blobs as the visible body authority.
+
+An OS advisory file lock serializes the prototype's readers, writers, backup and
+recovery. A bounded intent journal contains old/new affected metadata and body
+pre/post bytes/hashes before visible-file installation. Metadata commits only
+after visible bytes match; journal cleanup follows commit. Reopen checks metadata
+and body state together and rolls back to old or completes new at the tested
+intent/visible/metadata durable boundaries. Unexpected third-party bytes or a
+missing required part refuse recovery instead of inventing success. This is a
+temporary-filesystem experiment, not a complete production crash protocol.
+
+Read/mutation/query detect changed or missing visible bodies. External body edits
+are explicitly refused; no automatic hash adoption occurs. Copying only Markdown
+does not recreate canonical metadata, relations or grants. Prototype backup
+captures versioned identity/schema/metadata and matching visible bodies under the
+lock; restore validates required parts and checksums into a fresh temporary root.
+Full ledger/attachment/comment/history backup remains a separate later gate.
+
+Queries reuse the existing shared schema and filter/sort evaluator over readable
+records before ranking. Exact tagged values remain stored; predicates/sorts that
+cannot project faithfully to the legacy evaluator return an explicit unsupported
+result. Cursors bind query, allowed IDs, schema and persisted snapshot, with pages
+of 100 and a stable-record-ID tie-break. Unsupported schemas, stale revisions and
+scope mismatches fail without silently narrowing requests.
+
+The actual Rust harness supplies report data; the Node wrapper is orchestration,
+not another store implementation. Raw 1k/5k/adversarial timings retain toolchain,
+hardware/build and concurrent-load context. Current samples cannot select a
+storage winner or satisfy the quiet-machine performance gate.
+
+The implemented report entry point is the explicitly invoked native
+`comparison::tests::write_report` harness, launched by
+`scripts/workspace-store-report.ts` with an already-built test executable. The
+wrapper rejects stale compiled source hashes and unexplained differences. It
+retains per-source dispositions, original checksums and requested-path coverage;
+the fixture list does not imply a complete real-vault scan. Raw artifacts and
+their snapshot limitations are retained in the
+[comparison record](../plans/2026-10-23-m99-store-comparison/README.md).
+
+The adapters currently materialize complete canonical metadata and SQLite
+rewrites it in one transaction. Neither is an optimized indexed-query design.
+Metadata decoding checks decoded duplicate object keys and bounded expansion
+before materialization. SQLite bounds metadata payload and identity-column
+projections into Rust; this does not claim to bound the SQLite engine's internal
+disk reads for a malicious database. The durability claim is limited to the
+explicitly tested interruption points, not every possible I/O or power failure.
+
 Before activating a selected authority, record this reader/writer cutover matrix
 with actual call sites and an implemented or typed-refused disposition:
 
@@ -190,6 +385,30 @@ The prototype writes only to an explicitly created sibling copy outside the real
 vault's registration. It compares read/write/query costs, file edits, rename,
 copy, broken pairs, unknown fields, restored backups and conflicting imports.
 Reports distinguish measured outcomes from design judgments.
+
+The owner selected SQLite metadata with visible Markdown bodies on 2026-10-23.
+The first M99.6 slice compiles a staging library for new inactive destinations;
+it exposes no IPC migration/registration or current-vault conversion. Its source
+inventory discovers the whole declared root and records an explicit disposition
+for every file. Known private/operational exclusions retain names/reasons without
+reading secret bytes; ordinary unknown hidden files, Trash, reconciliation backup,
+ledger and CLI carriers are retained verbatim or explicitly refused. Bounds,
+symlinks, special files and unreadable parts block completeness rather than being
+silently skipped. Additions, deletions and moves invalidate inventory coverage.
+
+An opaque Rust stage plan consumes explicitly supplied conversion proposals. It
+uses the existing tagged value decoder and persists real IDs/revision 1 in the
+separate selected SQLite database; it never fabricates a legacy revision or a
+receipt. Identity uniqueness and required parts are checked. The complete source
+archive, visible bodies, retained parts and metadata database are checksummed in
+a bounded manifest. A preparing marker precedes body writes; the final marker is
+`staged_inactive`, only after complete validation. Read-only restart validation
+binds the manifest to separately supplied trusted source/body/metadata roots and
+workspace identity. Neither the manifest nor a successful check authorizes
+activation. Conflicting body YAML refuses validation and cannot replace metadata
+or grants. The semantic conversion producer, governed-codec/ledger validation,
+full consumer matrix, crash journal, backup rehearsal and minimum-client release
+remain explicit activation gates. This bounded slice does not complete M99.6.
 
 Production phases are `inventoried → staged → validated → cutover_pending →
 active`, with `blocked` and `rollback_required` outcomes. Pausing Cerebro writers

@@ -760,3 +760,31 @@ describe('QuickOpen beside intent', () => {
     await vi.waitFor(() => expect(ran).toHaveBeenCalledOnce());
   });
 });
+
+it('resumes the one-shot results query/category/expansion/active row and list scroll', async () => {
+  useNavStore.getState().reset();
+  useUiStore.setState({ quickOpenVisible: true });
+  useNavStore.setState({
+    quickOpenResume: {
+      query: 'needle',
+      category: 'pages',
+      level: { kind: 'root' },
+      expandedFor: 'needle',
+      activeRowKey: 'page:source.md',
+      scrollTop: 77,
+    },
+  });
+  searchVault.mockResolvedValue({
+    hits: [{ path: 'source.md', title: 'Source', parts: [{ text: 'needle', mark: true }] }],
+    total: 1,
+    widened: false,
+    capped: 0,
+  });
+  render(<QuickOpen />);
+  expect(screen.getByRole('combobox').getAttribute('value')).toBe('needle');
+  expect(screen.getByTestId('palette-category-pages').getAttribute('aria-selected')).toBe('true');
+  const row = await screen.findByTestId('quick-open-content-result');
+  expect(row.getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByRole('listbox').scrollTop).toBe(77);
+  expect(useNavStore.getState().quickOpenResume).toBeNull();
+});

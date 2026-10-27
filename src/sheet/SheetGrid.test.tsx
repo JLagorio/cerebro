@@ -6,6 +6,7 @@ import type { SheetSource } from '@/engine/sheet/gridEdit';
 import { useUiStore } from '@/stores/uiStore';
 import { SHEET_CLIPBOARD } from './clipboard';
 import { parseSheetFence } from '@/engine/sheet/fence';
+import { pendingSheetDrafts, registerSheetDraft, settleSheetDrafts } from './pendingSheets';
 const restructure = vi.hoisted(() => vi.fn());
 const fill = vi.hoisted(() => vi.fn());
 const complete = vi.hoisted(() => vi.fn());
@@ -50,6 +51,7 @@ function setup(
             : (edits) => {
                 commit(edits);
                 setSources((old) => old.map((s) => edits.find((e) => e.id === s.id) ?? s));
+                return true;
               }
         }
         onUndo={undo}
@@ -355,4 +357,78 @@ describe('the editable sheet grid', () => {
         expect(value === '' || value.startsWith('var(--')).toBe(true);
       }
   });
+});
+
+it.each(['missing', 'invalid', 'refused'] as const)(
+  'retains the exact focused draft when the source commit is %s and retries it',
+  (failure) => {
+    const owner = {};
+    let current = base;
+    let accept = failure !== 'refused';
+    render(
+      <SheetGrid
+        id="one"
+        sources={base}
+        getSources={() => current}
+        registerDraft={(flush, snapshot) => registerSheetDraft(owner, 'one', flush, snapshot)}
+        onCommit={(edits) => {
+          if (!accept) return false;
+          current = current.map((sheet) => edits.find((edit) => edit.id === sheet.id) ?? sheet);
+          return true;
+        }}
+      />,
+    );
+    key(screen.getByTestId('sheet-grid'), 'x');
+    const input = screen.getByTestId('sheet-cell-editor');
+    fireEvent.change(input, { target: { value: '  =EXACT("draft")\nnext  ' } });
+    if (failure === 'missing') current = [];
+    if (failure === 'invalid') current = [{ id: 'one', source: '---\nformat: 900\n---\n' }];
+    expect(() => act(() => settleSheetDrafts(owner))).toThrow();
+    expect(input).toHaveProperty('value', '  =EXACT("draft")\nnext  ');
+    current = base;
+    accept = true;
+    act(() => settleSheetDrafts(owner));
+    expect(screen.queryByTestId('sheet-cell-editor')).toBeNull();
+    expect(parseSheetFence(current[0].source)).toMatchObject({
+      ok: true,
+      cells: expect.arrayContaining([{ row: 1, col: 1, source: '  =EXACT("draft")\nnext  ' }]),
+    });
+  },
+);
+
+it('restores a refused cell after its node view remounts against the same page owner', async () => {
+  const owner = {};
+  let accept = false;
+  let sources = base;
+  const draw = () =>
+    render(
+      <SheetGrid
+        id="one"
+        sources={sources}
+        initialDraft={pendingSheetDrafts(owner).find((entry) => entry.id === 'one')?.draft}
+        getSources={() => sources}
+        registerDraft={(flush, snapshot) => registerSheetDraft(owner, 'one', flush, snapshot)}
+        onCommit={(edits) => {
+          if (!accept) return false;
+          sources = sources.map((sheet) => edits.find((edit) => edit.id === sheet.id) ?? sheet);
+          return true;
+        }}
+      />,
+    );
+  const first = draw();
+  key(screen.getByTestId('sheet-grid'), 'x');
+  fireEvent.change(screen.getByTestId('sheet-cell-editor'), {
+    target: { value: 'exact after remount' },
+  });
+  first.unmount();
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(pendingSheetDrafts(owner)[0].draft.text).toBe('exact after remount');
+  draw();
+  expect(screen.getByTestId('sheet-cell-editor')).toHaveProperty('value', 'exact after remount');
+  accept = true;
+  act(() => settleSheetDrafts(owner));
+  expect(sources[0].source).toContain('exact after remount');
+  expect(pendingSheetDrafts(owner)).toEqual([]);
 });

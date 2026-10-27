@@ -94,6 +94,12 @@
   .cb-chat[data-presentation='canvas'] > .cb-chat-rail-scrim {
     display: none;
   }
+  /* The rail open on a plan holds the list in its Plan card (Q11, M92.17):
+     docked beside it, the dock's steps hide in the layout pass that docks
+     the rail. Folded away or a drawer, they show. */
+  .cb-chat[data-presentation='canvas'][data-rail-plan] .cb-chat-plan {
+    display: none;
+  }
 }
 /* Floating is a presentation of the same controller and composer. The shell
    positions its frame outside page layout; folding never moves React children. */

@@ -1,9 +1,10 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 import type { DateValue } from '@/engine/dates';
 import { isKnowledgePath } from '@/engine/okf';
 import { planDetach } from '@/engine/recurrence';
 import { buildSchema } from '@/engine/schema';
 import { isReservedTypeName } from '@/engine/typeCatalog';
-import { flushOpenPages, heldOpenPages } from '@/editor/openPages';
+import { heldOpenPages } from '@/editor/openPages';
 import { isTemplate } from '@/lib/templates';
 import { readNoteSource, scanVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
@@ -27,7 +28,7 @@ export async function detachOccurrence(
     if (sameVault()) useUiStore.getState().toast(message);
   };
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return null;
     if (!current()) return null;
     if (heldOpenPages().includes(path)) {
       toast(

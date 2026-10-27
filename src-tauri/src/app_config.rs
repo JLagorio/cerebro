@@ -19,6 +19,11 @@ pub const SHARED_APP_DATA_ENV: &str = "CEREBRO_SHARED_APP_DATA";
 /// live vault under the same writer id, and rewrote concepts with an older
 /// schema. Isolated, a dev build starts with no last vault, and a ledger
 /// another build minted classifies as a foreign writer's rather than its own.
+#[cfg(feature = "native-read-smoke")]
+pub fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    crate::native_read_smoke::isolated_app_dir(app)
+}
+#[cfg(not(feature = "native-read-smoke"))]
 pub fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     let base = app.path().app_config_dir().map_err(|e| e.to_string())?;
@@ -27,6 +32,11 @@ pub fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Derived previews are purgeable and never enter the vault or its backups.
+#[cfg(feature = "native-read-smoke")]
+pub fn cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    crate::native_read_smoke::isolated_cache_dir(app)
+}
+#[cfg(not(feature = "native-read-smoke"))]
 pub fn cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     let base = app.path().app_cache_dir().map_err(|e| e.to_string())?;
@@ -34,6 +44,7 @@ pub fn cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(scoped(base, cfg!(debug_assertions), shared))
 }
 
+#[cfg(any(not(feature = "native-read-smoke"), test))]
 fn scoped(base: PathBuf, dev: bool, shared: bool) -> PathBuf {
     if dev && !shared {
         base.join("dev").join(checkout_key())

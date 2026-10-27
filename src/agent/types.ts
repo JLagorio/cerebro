@@ -169,6 +169,8 @@ export type AgentStreamEvent =
   /** A call waits for the person (M57.1): this run's own gate deferred it
    * and its stream confirmed it. Live only, just before its ToolDeferred. */
   | { kind: 'Interaction'; interaction: PendingInteraction }
+  /** Original native held call closed its exact card; it does not end the run. */
+  | { kind: 'InteractionClosed'; interaction_id: string }
   /** Local only, never from Rust (M57.1): the person stopped a turn whose
    * call was waiting, so the call is refused and reads cancelled. */
   | { kind: 'ToolCancelled'; tool_id: string }
@@ -192,9 +194,14 @@ export type AgentStreamEvent =
 export interface PendingInteraction {
   /** 128-bit hex, the id the answer names. */
   id: string;
-  kind: 'permission' | 'write' | 'question' | (string & {});
+  kind: 'permission' | 'write' | 'question' | 'managed_action' | 'managed_access' | (string & {});
+  /** Native managed decision is in flight; metadata only, never approval. */
+  answering?: boolean;
+  /** Real original native run selector, provided only on managed cards. */
+  run?: number | null;
   tool_name: string;
-  tool_id: string;
+  /** Null when a held managed call has no observed CLI tool correlation. */
+  tool_id: string | null;
   session_id: string;
   /** The tool's title and its target, else its name. */
   summary: string;
@@ -538,6 +545,12 @@ export interface ForkPoint {
  * named by `live` (M57.6), so the thread re-attaches to it when it opens.
  */
 export interface Conversation {
+  /** Native archive metadata, never a run/attachment authority. */
+  archiveBacked?: true;
+  /** Source title from native read; explicit browser rename clears this marker. */
+  archiveTitle?: true;
+  archiveTitleExpiresAt?: string | null;
+  archiveAncestry?: { parentThreadId: string; branchMessageId: string } | null;
   id: string;
   title: string;
   /** False once the user renames it, so auto-titling never overwrites them. */
@@ -546,6 +559,9 @@ export interface Conversation {
    * as soon as it is known; null until then. A UUID, or nothing. */
   sessionId: string | null;
   messages: ChatMessage[];
+  /** Browser quota removed some messages from this copy (M95.1). A live
+   * reply and a successful last-turn heal cannot prove those messages back. */
+  cacheTrimmed?: true;
   createdAt: string;
   archived: boolean;
   /** The vault this conversation was had in (M56.3), stamped at its first
@@ -595,12 +611,39 @@ export interface Conversation {
   placeLabel?: string;
 }
 
+/** A native generation observation is metadata only, never a process handle. */
+export interface GenerationObservation {
+  generationId: string;
+  firstRunId: string;
+  currentRunId: string;
+  state: string;
+}
+
+/** Memory-only original native reply selector. Presentation lifetime only;
+ * native inspection independently authenticates the current window and store. */
+export interface NativeRecoveryRoot {
+  runId: string;
+  vaultPath: string;
+  opening: number;
+}
+
 export interface ChatMessage {
+  /** Archive-derived content stays memory-only in the browser cache. */
+  archiveAttachmentRefs?: readonly string[];
+  archiveRecord?: { attemptId: string; expiresAt: string | null; persistence: import('@/lib/generated/conversations').PersistenceState; origin?: import('@/lib/generated/conversations').ContentOrigin; importedAt?: string | null; completedAt?: string | null };
   id: string;
   role: 'user' | 'assistant';
   text: string;
   /** Assistant only: tool calls made while producing this message. */
   tools: ToolCall[];
+  /** Assistant only: the original logical send's scoped native admission key.
+   * A stored key never authorizes re-delivery or names a process. */
+  generationRequestKey?: string;
+  /** Assistant only, memory only: a checked native observation, not a run
+   * handle or confirmation that this reply is attached to its progress. */
+  generationObservation?: GenerationObservation;
+  /** Never persisted or reconstructed from cached transcript metadata. */
+  nativeRecoveryRoot?: NativeRecoveryRoot;
   /** Assistant only: set when the turn failed. */
   error?: string;
   /** Assistant only: the failure typed and worded (M56.4), beside `error`,
@@ -618,6 +661,10 @@ export interface ChatMessage {
    * the panel was closed (M57.6), so it says so and rebuilds from the
    * session file when the turn finishes. */
   gap?: true;
+  /** Some observed child evidence could not be attributed to an Agent call
+   * owned by this turn. Only this availability fact is retained; orphan
+   * words/payloads never enter the parent answer or the browser cache. */
+  childTraceUnavailable?: true;
   /** Assistant only: a person stopped this turn (M57.5), with Stop or by
    * steering past it. It reads "Cancelled" in place of the interrupted copy;
    * the text it wrote before the stop stays. */

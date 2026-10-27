@@ -824,7 +824,9 @@ it('offers document kinds and names the documents still being read', async () =>
     const file = new File(['bytes'], 'Plan.docx');
     fireEvent.change(input, { target: { files: [file] } });
     // One document is one document, and the words say they are working.
-    const status = screen.getByRole('status');
+    const status = screen.getByText('Reading 1 document…').closest('[role="status"]');
+    if (!(status instanceof HTMLElement))
+      throw new Error('Reading document notice is not a status');
     expect(status.textContent).toBe('Reading 1 document…');
     expect(status.querySelector('.cb-working-text')?.textContent).toBe('Reading 1 document…');
     // It floats over the page with the other notices, moving nothing.

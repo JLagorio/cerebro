@@ -1,0 +1,294 @@
+{
+  "version": 1,
+  "canonicalCases": [
+    {
+      "name": "canonical_input_distinguishes_null_omission_and_array_order",
+      "source": "{\"b\":[2,1],\"a\":null}",
+      "canonical": "{\"a\":null,\"b\":[2,1]}"
+    },
+    {
+      "name": "omitted",
+      "source": "{\"b\":[2,1]}",
+      "canonical": "{\"b\":[2,1]}"
+    },
+    {
+      "name": "array_order",
+      "source": "{\"b\":[1,2],\"a\":null}",
+      "canonical": "{\"a\":null,\"b\":[1,2]}"
+    },
+    {
+      "name": "numeric_forms",
+      "source": "[1,1.0,1e0,-0,0.10,1000]",
+      "canonical": "[1,1,1,0,1e-1,1e3]"
+    },
+    {
+      "name": "exact_precision",
+      "source": "[9007199254740993,1.0000000000000001]",
+      "canonical": "[9007199254740993,10000000000000001e-16]"
+    },
+    {
+      "name": "unicode_not_normalized",
+      "source": "{\"é\":\"é\",\"a\":\"\\u00e9\"}",
+      "canonical": "{\"a\":\"é\",\"é\":\"é\"}"
+    }
+  ],
+  "invalidJson": [
+    "{\"x\":1,\"x\":2}",
+    "{\"x\":1,\"\\u0078\":[broken]}",
+    "NaN",
+    "Infinity",
+    "1e1001",
+    "01"
+  ],
+  "schemaCases": [
+    {
+      "name": "supported_object",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      },
+      "input": "{\"name\":\"ok\"}",
+      "valid": true
+    },
+    {
+      "name": "required",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["name"]
+      },
+      "input": "{}",
+      "valid": false
+    },
+    {
+      "name": "closed",
+      "schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "input": "{\"extra\":1}",
+      "valid": false
+    },
+    {
+      "name": "exact_numeric_bound",
+      "schema": {
+        "type": "number",
+        "minimum": 9007199254740993
+      },
+      "input": "9007199254740992",
+      "valid": false
+    },
+    {
+      "name": "array_bounds",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "integer"
+        },
+        "minItems": 1,
+        "maxItems": 2
+      },
+      "input": "[1,2]",
+      "valid": true
+    },
+    {
+      "name": "integer_rejects_fraction",
+      "schema": {
+        "type": "integer"
+      },
+      "input": "1.2",
+      "valid": false
+    },
+    {
+      "name": "enum_semantic_number",
+      "schema": {
+        "type": "number",
+        "enum": [1.0, 2]
+      },
+      "input": "1e0",
+      "valid": true
+    },
+    {
+      "name": "negative_bound",
+      "schema": {
+        "type": "number",
+        "maximum": -1
+      },
+      "input": "-1.0000000000000001",
+      "valid": true
+    },
+    {
+      "name": "zero_bound",
+      "schema": {
+        "type": "number",
+        "minimum": 0
+      },
+      "input": "-0.1",
+      "valid": false
+    },
+    {
+      "name": "negative_exponent_bound",
+      "schema": {
+        "type": "number",
+        "minimum": 0.01
+      },
+      "input": "0.00999",
+      "valid": false
+    },
+    {
+      "name": "exclusive_bound",
+      "schema": {
+        "type": "integer",
+        "exclusiveMinimum": 1
+      },
+      "input": "1.0",
+      "valid": false
+    },
+    {
+      "name": "const_semantics",
+      "schema": {
+        "type": "number",
+        "const": 1
+      },
+      "input": "1.00",
+      "valid": true
+    },
+    {
+      "name": "unicode_scalar_length",
+      "schema": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1
+      },
+      "input": "\"😀\"",
+      "valid": true
+    },
+    {
+      "name": "additional_properties_allowed",
+      "schema": {
+        "type": "object"
+      },
+      "input": "{\"unknown\":null}",
+      "valid": true
+    }
+  ],
+  "unsupportedSchemas": [
+    {
+      "name": "unsupported_ref_is_not_callable",
+      "schema": {
+        "$ref": "https://invalid.example/schema"
+      }
+    },
+    {
+      "name": "composition",
+      "schema": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    {
+      "name": "secret_input",
+      "schema": {
+        "type": "string",
+        "writeOnly": true
+      }
+    },
+    {
+      "name": "unknown_annotation",
+      "schema": {
+        "type": "object",
+        "x-readOnly": true
+      }
+    },
+    {
+      "name": "invalid_keyword_type",
+      "schema": {
+        "type": "array",
+        "maxItems": "two"
+      }
+    },
+    {
+      "name": "unknown_type",
+      "schema": {
+        "type": "banana"
+      }
+    }
+  ],
+  "effectCases": [
+    {
+      "name": "provider_annotation_cannot_downgrade_effect",
+      "local": "external_send",
+      "provider": "read",
+      "expected": "external_send"
+    },
+    {
+      "name": "unknown_provider_annotation",
+      "local": "external_delete",
+      "provider": "harmless",
+      "expected": "external_delete"
+    }
+  ],
+  "secretCases": [
+    {
+      "name": "declared_secret_requirement",
+      "fields": ["credential"],
+      "input": "{\"credential\":\"SECRET_SENTINEL_ONLY\"}"
+    }
+  ],
+  "transportCases": [
+    {
+      "name": "unknown_effect_keeps_absence",
+      "details": {
+        "effect": {
+          "invocationId": "fixture-invocation",
+          "state": "outcome_unknown",
+          "approvalId": null,
+          "accountLabel": null,
+          "canReconcile": false,
+          "canRetry": false
+        },
+        "revision": 2,
+        "account": null,
+        "target": null,
+        "definitionDigest": "fixture-definition",
+        "inputDigest": "fixture-input",
+        "preview": {
+          "summary": "Outcome not recorded",
+          "fields": [],
+          "redactedFields": ["credential"]
+        },
+        "approval": null,
+        "attempts": [
+          {
+            "attemptId": "fixture-attempt",
+            "ordinal": 1,
+            "state": "outcome_unknown",
+            "dispatchedAt": null,
+            "observedAt": null,
+            "receiptId": null,
+            "remoteEffectReference": null,
+            "outcomeSummary": null
+          }
+        ]
+      }
+    }
+  ]
+}

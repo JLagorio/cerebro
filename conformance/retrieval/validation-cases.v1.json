@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "scope": "Offline retrieval fixture validation only; expected outcomes never feed the recorder",
+  "cases": [
+    {
+      "name": "valid-original",
+      "target": "none",
+      "pointer": "",
+      "operation": "none",
+      "value": null,
+      "valid": true
+    },
+    {
+      "name": "source-traversal",
+      "target": "corpus",
+      "pointer": "/documents/0/path",
+      "operation": "set",
+      "value": "../outside.md",
+      "valid": false
+    },
+    {
+      "name": "duplicate-source-path",
+      "target": "corpus",
+      "pointer": "/documents/1/path",
+      "operation": "set",
+      "value": "visible/budget.md",
+      "valid": false
+    },
+    {
+      "name": "not-synthetic",
+      "target": "corpus",
+      "pointer": "/provenance/synthetic",
+      "operation": "set",
+      "value": false,
+      "valid": false
+    },
+    {
+      "name": "embedded-nul",
+      "target": "corpus",
+      "pointer": "/documents/0/markdown",
+      "operation": "set",
+      "value": "x\u0000y",
+      "valid": false
+    },
+    {
+      "name": "query-duplicate-id",
+      "target": "queries",
+      "pointer": "/queries/1/id",
+      "operation": "set",
+      "value": "exact",
+      "valid": false
+    },
+    {
+      "name": "unknown-query-kind",
+      "target": "queries",
+      "pointer": "/queries/0/kind",
+      "operation": "set",
+      "value": "unbounded-semantic",
+      "valid": false
+    },
+    {
+      "name": "missing-null-limit",
+      "target": "queries",
+      "pointer": "/queries/0/requestedLimit",
+      "operation": "remove",
+      "value": null,
+      "valid": false
+    },
+    {
+      "name": "scope-traversal",
+      "target": "queries",
+      "pointer": "/queries/0/readPrefixes",
+      "operation": "set",
+      "value": ["../outside"],
+      "valid": false
+    },
+    {
+      "name": "empty-read-grant",
+      "target": "queries",
+      "pointer": "/queries/0/readPrefixes",
+      "operation": "set",
+      "value": [],
+      "valid": true
+    },
+    {
+      "name": "zero-limit",
+      "target": "queries",
+      "pointer": "/queries/0/requestedLimit",
+      "operation": "set",
+      "value": 0,
+      "valid": false
+    },
+    {
+      "name": "explicit-capped-limit",
+      "target": "queries",
+      "pointer": "/queries/0/requestedLimit",
+      "operation": "set",
+      "value": 101,
+      "valid": true
+    },
+    {
+      "name": "unknown-query-field",
+      "target": "queries",
+      "pointer": "/queries/0/surprise",
+      "operation": "set",
+      "value": true,
+      "valid": false
+    },
+    {
+      "name": "rust-nel-is-blank",
+      "target": "queries",
+      "pointer": "/queries/0/text",
+      "operation": "set",
+      "value": "",
+      "valid": false
+    },
+    {
+      "name": "bom-is-not-rust-whitespace",
+      "target": "queries",
+      "pointer": "/queries/0/text",
+      "operation": "set",
+      "value": "﻿",
+      "valid": true
+    }
+  ]
+}

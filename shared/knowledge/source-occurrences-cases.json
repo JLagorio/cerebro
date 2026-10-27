@@ -1,0 +1,456 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "repeated body aliases and fragments preserve raw Unicode ranges",
+      "targetPath": "target.md",
+      "mode": "linked",
+      "sources": [
+        {
+          "path": "target.md",
+          "title": "Target",
+          "body": ""
+        },
+        {
+          "path": "a.md",
+          "title": "Source",
+          "body": "😀 [[target|one]] and [[Target#Notes|two]]."
+        }
+      ],
+      "expected": [
+        {
+          "path": "a.md",
+          "quote": "[[target|one]]",
+          "kind": "body",
+          "start": 5,
+          "end": 19
+        },
+        {
+          "path": "a.md",
+          "quote": "[[Target#Notes|two]]",
+          "kind": "body",
+          "fragment": "Notes",
+          "start": 24,
+          "end": 44
+        }
+      ]
+    },
+    {
+      "name": "relation fragments identify a row and dedupe repeated members",
+      "targetPath": "target.md",
+      "mode": "linked",
+      "sources": [
+        {
+          "path": "target.md",
+          "title": "Target",
+          "body": ""
+        },
+        {
+          "path": "a.md",
+          "title": "Source",
+          "body": "",
+          "relationships": {
+            "project": [
+              "target#Notes",
+              "target#Notes"
+            ]
+          }
+        }
+      ],
+      "expected": [
+        {
+          "path": "a.md",
+          "quote": "target#Notes",
+          "kind": "property",
+          "key": "project",
+          "fragment": "Notes"
+        }
+      ]
+    },
+    {
+      "name": "mentions exclude linked targets aliases and identifier substrings",
+      "targetPath": "target.md",
+      "mode": "mention",
+      "sources": [
+        {
+          "path": "target.md",
+          "title": "Target",
+          "body": ""
+        },
+        {
+          "path": "a.md",
+          "title": "Source",
+          "body": "Target and targetish. [[target|Target]] TARGET."
+        }
+      ],
+      "expected": [
+        {
+          "path": "a.md",
+          "quote": "Target",
+          "kind": "body",
+          "start": 0,
+          "end": 6
+        },
+        {
+          "path": "a.md",
+          "quote": "TARGET",
+          "kind": "body",
+          "start": 40,
+          "end": 46
+        }
+      ]
+    },
+    {
+      "name": "duplicate title loses to earlier path and identifier passes",
+      "targetPath": "z.md",
+      "mode": "mention",
+      "sources": [
+        {
+          "path": "a.md",
+          "title": "Shared",
+          "body": ""
+        },
+        {
+          "path": "z.md",
+          "title": "Shared",
+          "body": ""
+        },
+        {
+          "path": "source.md",
+          "title": "Source",
+          "body": "Shared"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "key and project folder resolve before title",
+      "targetPath": "projects/atlas/project.md",
+      "mode": "linked",
+      "sources": [
+        {
+          "path": "a.md",
+          "title": "atlas",
+          "body": ""
+        },
+        {
+          "path": "projects/atlas/project.md",
+          "title": "Launch",
+          "body": "",
+          "key": "PRJ-12"
+        },
+        {
+          "path": "source.md",
+          "title": "Source",
+          "body": "[[atlas]] [[PRJ-12]] [[Launch]]"
+        }
+      ],
+      "expected": [
+        {
+          "path": "source.md",
+          "quote": "[[atlas]]",
+          "kind": "body",
+          "start": 0,
+          "end": 9
+        },
+        {
+          "path": "source.md",
+          "quote": "[[PRJ-12]]",
+          "kind": "body",
+          "start": 10,
+          "end": 20
+        },
+        {
+          "path": "source.md",
+          "quote": "[[Launch]]",
+          "kind": "body",
+          "start": 21,
+          "end": 31
+        }
+      ]
+    },
+    {
+      "name": "scalar lowercase expansion preserves original UTF8 boundaries",
+      "targetPath": "city.md",
+      "mode": "mention",
+      "sources": [
+        {
+          "path": "city.md",
+          "title": "İstanbul",
+          "body": ""
+        },
+        {
+          "path": "source.md",
+          "title": "Source",
+          "body": "😀 İSTANBUL and İstanbul."
+        }
+      ],
+      "expected": [
+        {
+          "path": "source.md",
+          "quote": "İSTANBUL",
+          "kind": "body",
+          "start": 5,
+          "end": 14
+        },
+        {
+          "path": "source.md",
+          "quote": "İstanbul",
+          "kind": "body",
+          "start": 19,
+          "end": 28
+        }
+      ]
+    },
+    {
+      "name": "whole hash title wins before fragment parsing",
+      "targetPath": "sharp.md",
+      "mode": "linked",
+      "sources": [
+        {
+          "path": "c.md",
+          "title": "C",
+          "body": ""
+        },
+        {
+          "path": "sharp.md",
+          "title": "C# notes",
+          "body": ""
+        },
+        {
+          "path": "source.md",
+          "title": "Source",
+          "body": "[[C# notes|language]]"
+        }
+      ],
+      "expected": [
+        {
+          "path": "source.md",
+          "quote": "[[C# notes|language]]",
+          "kind": "body",
+          "start": 0,
+          "end": 21
+        }
+      ]
+    },
+    {
+      "name": "UTF8 path order chooses duplicate title before astral filename",
+      "targetPath": ".md",
+      "mode": "mention",
+      "sources": [
+        {
+          "path": "😀.md",
+          "title": "Shared",
+          "body": ""
+        },
+        {
+          "path": ".md",
+          "title": "Shared",
+          "body": ""
+        },
+        {
+          "path": "source.md",
+          "title": "Source",
+          "body": "Shared"
+        }
+      ],
+      "expected": [
+        {
+          "path": "source.md",
+          "quote": "Shared",
+          "kind": "body",
+          "start": 0,
+          "end": 6
+        }
+      ]
+    },
+    {
+      "name": "empty and padded body fragments normalize at the occurrence boundary",
+      "targetPath": "target.md",
+      "mode": "linked",
+      "sources": [
+        {
+          "path": "target.md",
+          "title": "Target",
+          "body": ""
+        },
+        {
+          "path": "source.md",
+          "title": "Source",
+          "body": "[[target#]] [[target# Notes ]]"
+        }
+      ],
+      "expected": [
+        {
+          "path": "source.md",
+          "quote": "[[target#]]",
+          "kind": "body",
+          "start": 0,
+          "end": 11
+        },
+        {
+          "path": "source.md",
+          "quote": "[[target# Notes ]]",
+          "kind": "body",
+          "fragment": "Notes",
+          "start": 12,
+          "end": 30
+        }
+      ],
+      "expectedIds": [
+        "2d47ed09e84cd41d9a0f56f78071d924e4392b77c9fdcbccd4ef9c7b098884fe",
+        "9f969de02d67482c2fba14c0e2b89f9e6d0b10d957a5c34f758859ddb83aadc6"
+      ]
+    },
+    {
+      "name": "empty and padded relation fragments normalize at the occurrence boundary",
+      "targetPath": "target.md",
+      "mode": "linked",
+      "sources": [
+        {
+          "path": "target.md",
+          "title": "Target",
+          "body": ""
+        },
+        {
+          "path": "empty.md",
+          "title": "Empty",
+          "body": "",
+          "relationships": {
+            "project": [
+              "target#"
+            ]
+          }
+        },
+        {
+          "path": "padded.md",
+          "title": "Padded",
+          "body": "",
+          "relationships": {
+            "project": [
+              "target# Notes "
+            ]
+          }
+        }
+      ],
+      "expected": [
+        {
+          "path": "empty.md",
+          "quote": "target#",
+          "kind": "property",
+          "key": "project"
+        },
+        {
+          "path": "padded.md",
+          "quote": "target# Notes",
+          "kind": "property",
+          "key": "project",
+          "fragment": "Notes"
+        }
+      ],
+      "expectedIds": [
+        "50eaf331499e22b6ac2f47b50a5598108daafe9c4875a55a53f5eeaa8ae67f6a",
+        "0559fe4f5519dd401734e256e92811bf09f6c2d0f342d3e86dae77cfd2740621"
+      ]
+    },
+    {
+      "name": "Unicode fragment padding follows one shared rule after whole-name resolution",
+      "targetPath": "target.md",
+      "mode": "linked",
+      "sources": [
+        {
+          "path": "target.md",
+          "title": "Target",
+          "body": ""
+        },
+        {
+          "path": "source.md",
+          "title": "Source",
+          "body": "[[target#Notes]] [[target#﻿Notes﻿]] [[target#﻿ ]]"
+        }
+      ],
+      "expected": [
+        {
+          "path": "source.md",
+          "quote": "[[target#Notes]]",
+          "kind": "body",
+          "start": 0,
+          "end": 20,
+          "fragment": "Notes"
+        },
+        {
+          "path": "source.md",
+          "quote": "[[target#﻿Notes﻿]]",
+          "kind": "body",
+          "start": 21,
+          "end": 43,
+          "fragment": "Notes"
+        },
+        {
+          "path": "source.md",
+          "quote": "[[target#﻿ ]]",
+          "kind": "body",
+          "start": 44,
+          "end": 61
+        }
+      ],
+      "expectedIds": [
+        "6af8df0a9fe183968d7523a10da022b18a4d7f8503580edb497458c4318f891e",
+        "8c09db5843c9a9f6d384b68d3b35d7a933e003b365268471d4931543db0c1e2a",
+        "68f3a415ccbc81a4289dd7d6a6af80078d93befda0affc66706f13ac358e45e8"
+      ]
+    },
+    {
+      "name": "Unicode relation fragment padding uses the shared normalization rule",
+      "targetPath": "target.md",
+      "mode": "linked",
+      "sources": [
+        {
+          "path": "target.md",
+          "title": "Target",
+          "body": ""
+        },
+        {
+          "path": "a-next-line.md",
+          "title": "Source",
+          "body": "",
+          "relationships": {
+            "project": [
+              "target#Notes"
+            ]
+          }
+        },
+        {
+          "path": "b-byte-order-mark.md",
+          "title": "Source",
+          "body": "",
+          "relationships": {
+            "project": [
+              "target#﻿Notes"
+            ]
+          }
+        }
+      ],
+      "expected": [
+        {
+          "path": "a-next-line.md",
+          "quote": "target#Notes",
+          "kind": "property",
+          "key": "project",
+          "fragment": "Notes"
+        },
+        {
+          "path": "b-byte-order-mark.md",
+          "quote": "target#﻿Notes",
+          "kind": "property",
+          "key": "project",
+          "fragment": "Notes"
+        }
+      ],
+      "expectedIds": [
+        "6f9a1cdcfcac6cfdf3946a0aaee9e33790f94de85df7102b50cc494c6fcc9c65",
+        "7f0f217a6e4a6b9210fdeddff8e9ed2c604bc8c4a5c8a44225a1d66773badab5"
+      ]
+    }
+  ]
+}

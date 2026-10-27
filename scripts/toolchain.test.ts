@@ -312,4 +312,17 @@ describe('.husky/pre-push', () => {
       'interrupted_overwrite',
     ]);
   });
+
+  it('never drops a Rust test a rule names as its enforcement', () => {
+    const mac = /if \[ "\$\(uname\)" = "Darwin" \]; then\n([\s\S]*?)\n\s*else\n/.exec(hook)?.[1];
+    const skips = [...(mac ?? '').matchAll(/--skip (\S+)/g)].map((m) => m[1]);
+    expect(skips.length).toBeGreaterThan(0);
+    const enforced = [...read('AGENTS.md').matchAll(/`src-tauri\/[^`]*\.rs::([^`]+)`/g)].map(
+      (m) => m[1],
+    );
+    expect(enforced.length).toBeGreaterThan(0);
+    // A Mac runs every test whose name holds none of the skips; a rule's
+    // proof skipped there never runs on the platform the app ships on.
+    expect(enforced.filter((name) => skips.some((skip) => name.includes(skip)))).toEqual([]);
+  });
 });

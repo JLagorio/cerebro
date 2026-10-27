@@ -1,14 +1,21 @@
 import { memo, useLayoutEffect, useRef, type Ref, type RefObject } from 'react';
+import type { RailContext } from '@/agent/elements/contextCard';
 import type { RailChanges } from '@/agent/elements/conversationChanges';
+import type { RailHandoffs } from '@/agent/elements/railHandoffs';
 import type { RailPlan } from '@/agent/elements/railPlan';
 import type { RailSources } from '@/agent/elements/railSources';
 import type { RailSubagents } from '@/agent/elements/railSubagents';
 import type { RailWaiting } from '@/agent/elements/railWaiting';
 import { ChangesCard } from '@/agent/rail/ChangesCard';
+import { ConnectorsCard } from '@/agent/rail/ConnectorsCard';
+import { ContextCard } from '@/agent/rail/ContextCard';
+import { EnvironmentCard } from '@/agent/rail/EnvironmentCard';
+import { HandoffsCard } from '@/agent/rail/HandoffsCard';
 import { PlanCard } from '@/agent/rail/PlanCard';
 import { SourcesCard } from '@/agent/rail/SourcesCard';
 import { SubagentsCard } from '@/agent/rail/SubagentsCard';
 import { WaitingCard } from '@/agent/rail/WaitingCard';
+import type { RunReach } from '@/agent/types';
 import type { TranscriptStatus } from '@/agent/useConversations';
 import type { MessageScrollerCommands } from '@/components/ai/MessageScroller';
 import { Rail } from '@/components/ai/Rail';
@@ -67,6 +74,10 @@ export interface ConversationRailProps {
   /** Folded away: the canvas has no room to dock it and no drawer is open.
    *  CSS hides it, and this keeps focus and the reader out of it. */
   folded: boolean;
+  /** Shown, but the canvas's width is not measured yet, so CSS may have
+   *  folded it away: its cards read nothing, as folded ones, until the
+   *  width says it docks (M92.1). */
+  measuring?: boolean;
   /** Turned off, and on its way out (`Presence`, components/ui/motion.ts):
    *  it plays its exit and takes nothing. */
   closing: boolean;
@@ -82,7 +93,8 @@ export interface ConversationRailProps {
   jump: (go: () => void) => void;
   /** Waiting on you: the call the thread's turn waits on (`railWaiting`). */
   waiting: RailWaiting | null;
-  /** The open vault, whose book Waiting on you checks while none waits. */
+  /** The open vault: the book Waiting on you checks while none waits, the
+   *  connector list Connectors reads, and what Environment names. */
   vault: string | null;
   /** The conversation the rail is open on. */
   thread: string;
@@ -92,14 +104,25 @@ export interface ConversationRailProps {
   plan: RailPlan;
   /** The agent is at it now: a turn runs, not waiting and not stopping. */
   working: boolean;
+  /** A turn is in flight, a wait on the person included: its end reads
+   *  Connectors again. */
+  streaming: boolean;
   /** Subagents: every subagent the conversation started (`railSubagents`). */
   subagents: RailSubagents;
   /** What reading the thread's transcript back found. */
   transcript: TranscriptStatus['state'];
   /** Changes: what the conversation changed (`railChanges`). */
   changes: RailChanges;
+  /** Handed off: the runs the conversation handed work to (`railHandoffs`). */
+  handoffs: RailHandoffs;
+  /** Context: the composer's own pull, read into the card (`railContext`). */
+  context: RailContext;
   /** Sources: what the conversation drew on (`railSources`). */
   sources: RailSources;
+  /** What the conversation's latest run said it reaches
+   *  (`conversations.threadReach`), which Connectors and Environment read;
+   *  null when none has. */
+  reach: RunReach | null;
   /** A row's second action, a vault page; `openOutside` floats first. */
   onOpenPath: (path: string) => void;
   /** A deleted file's diff at its commit; absent where diffs cannot show. */
@@ -114,14 +137,16 @@ export interface ConversationRailProps {
  * docked where the canvas has room, folded away where it has not, and a
  * drawer over the transcript when a person opens it there. AiPanel decides
  * what it is asked to be, and chat.css draws it. It holds §0 Q5's cards, in
- * that order, each one line here added by the wave that builds it, and it
- * takes memoized, derived props only, never the messages, which change with
- * every streamed word: a turn's stream never draws it again.
+ * that order, one line each: what waits on the person, what is planned, what
+ * happened, then the setup. It takes memoized, derived props only, never the
+ * messages, which change with every streamed word: a turn's stream never
+ * draws it again.
  */
 export const ConversationRail = memo(function ConversationRail({
   id,
   drawer,
   folded,
+  measuring = false,
   closing,
   headingRef,
   ref,
@@ -132,15 +157,22 @@ export const ConversationRail = memo(function ConversationRail({
   scroller,
   plan,
   working,
+  streaming,
   subagents,
   transcript,
   changes,
+  handoffs,
+  context,
   sources,
+  reach,
   onOpenPath,
   onViewDiff,
   reveal,
 }: ConversationRailProps) {
   const own = useRef<HTMLElement | null>(null);
+  // What the cards are told: folded away, or not yet known to dock. Either
+  // way they read nothing.
+  const quiet = folded || measuring;
   const setRail = useMergedRefs(own, ref);
   // It arrives once, as it mounts (chat.css): docked, beside the transcript;
   // as a drawer, over it. A drawer opened from the fold comes in as one.
@@ -176,32 +208,36 @@ export const ConversationRail = memo(function ConversationRail({
       {...arrival}
     >
       {drawer && <DrawerExit rail={own} />}
-      {/* The cards, in §0 Q5's order: each wave adds its own here. */}
+      {/* The cards, in §0 Q5's order. */}
       <WaitingCard
         waiting={waiting}
         vault={vault}
         thread={thread}
-        folded={folded}
+        folded={quiet}
         jump={jump}
         scroller={scroller}
       />
-      <PlanCard plan={plan} working={working} folded={folded} />
-      <SubagentsCard subagents={subagents} transcript={transcript} folded={folded} jump={jump} />
+      <PlanCard plan={plan} working={working} folded={quiet} />
+      <SubagentsCard subagents={subagents} transcript={transcript} folded={quiet} jump={jump} />
       <ChangesCard
         changes={changes}
-        folded={folded}
+        folded={quiet}
         jump={jump}
         onOpenPath={onOpenPath}
         onViewDiff={onViewDiff}
         reveal={reveal}
       />
+      <HandoffsCard handoffs={handoffs} folded={quiet} jump={jump} reveal={reveal} />
+      <ContextCard context={context} folded={quiet} />
       <SourcesCard
         sources={sources}
-        folded={folded}
+        folded={quiet}
         jump={jump}
         onOpenPath={onOpenPath}
         reveal={reveal}
       />
+      <ConnectorsCard vault={vault} reach={reach} streaming={streaming} folded={quiet} />
+      <EnvironmentCard vault={vault} reach={reach} folded={quiet} />
     </Rail>
   );
 });

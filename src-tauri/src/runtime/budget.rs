@@ -1651,3 +1651,25 @@ mod tests {
         assert_eq!(shed_threshold(800_000, 0, 1), 1_000_000, "nothing lower");
     }
 }
+
+/// Read a budget decision from recorded facts without opening a day or
+/// acquiring a dispatch. The caller supplies one existing read transaction.
+#[expect(dead_code, reason = "the native unsaved-draft preview adapter follows this extraction")]
+pub(crate) fn preview_rows(
+    conn: &Connection,
+    _vault_id: &str,
+    _store_uuid: &str,
+    _lane: &str,
+    _actor: Option<&str>,
+    _reservation: Reservation,
+    _now: DateTime<Utc>,
+) -> Result<(Decision, Day), String> {
+    if conn.is_autocommit() {
+        return Err("budget preview requires an active transaction".into());
+    }
+    Err("budget preview is unavailable".into())
+}
+
+#[cfg(test)]
+#[path = "budget_preview_tests.rs"]
+mod preview_tests;

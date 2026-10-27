@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "queries": [
+    {
+      "id": "exact",
+      "kind": "exact",
+      "text": "Harbor budget",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    },
+    {
+      "id": "paraphrase",
+      "kind": "paraphrase",
+      "text": "When will we finish?",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    },
+    {
+      "id": "alias",
+      "kind": "alias",
+      "text": "Lantern",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    },
+    {
+      "id": "accent",
+      "kind": "accent",
+      "text": "cafe",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    },
+    {
+      "id": "multilingual",
+      "kind": "multilingual",
+      "text": "出荷 予定",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    },
+    {
+      "id": "long",
+      "kind": "long",
+      "text": "latebodymarker",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    },
+    {
+      "id": "imported",
+      "kind": "imported",
+      "text": "Harbor permits",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    },
+    {
+      "id": "mixed",
+      "kind": "mixed",
+      "text": "Mina inspection",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    },
+    {
+      "id": "counterevidence",
+      "kind": "counterevidence",
+      "text": "launch window",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    },
+    {
+      "id": "unanswerable",
+      "kind": "unanswerable",
+      "text": "quantum bananas",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    },
+    {
+      "id": "scope",
+      "kind": "scope",
+      "text": "privatecanary",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    },
+    {
+      "id": "cutoff",
+      "kind": "cutoff",
+      "text": "cutoffneedle",
+      "readPrefixes": ["visible"],
+      "requestedLimit": null
+    }
+  ]
+}

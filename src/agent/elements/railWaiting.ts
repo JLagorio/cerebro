@@ -74,7 +74,7 @@ export function railWaiting(
   const held = kept.get(interaction);
   if (held !== undefined && held.tools === tools) return held.view;
   const { card } = interaction;
-  const asker = tools === null ? null : askerOf(tools, card.tool_id);
+  const asker = tools === null || card.tool_id === null || card.tool_id === '' ? null : askerOf(tools, card.tool_id);
   // Another step in the reply (a subagent still working beside the one that
   // asks) makes new calls, and names the same asker.
   const view: RailWaiting =

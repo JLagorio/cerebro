@@ -1,0 +1,928 @@
+{
+  "version": 1,
+  "policy": "shared/workspace/metadata-patch.v1.json",
+  "fieldKinds": "shared/schema/field-kinds.v1.json",
+  "cases": [
+    {
+      "id": "true_to_false",
+      "fieldKind": "checkbox",
+      "stored": {
+        "kind": "boolean",
+        "value": true
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "boolean",
+          "value": false
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "false_to_true",
+      "fieldKind": "checkbox",
+      "stored": {
+        "kind": "boolean",
+        "value": false
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "boolean",
+          "value": true
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "absent_to_false",
+      "fieldKind": "checkbox",
+      "stored": null,
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "boolean",
+          "value": false
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "null_to_false",
+      "fieldKind": "checkbox",
+      "stored": {
+        "kind": "null"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "boolean",
+          "value": false
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "boolean_to_null",
+      "fieldKind": "checkbox",
+      "stored": {
+        "kind": "boolean",
+        "value": false
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "null"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "remove_boolean",
+      "fieldKind": "checkbox",
+      "stored": {
+        "kind": "boolean",
+        "value": false
+      },
+      "change": {
+        "op": "remove",
+        "key": "flag"
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "unchanged_false",
+      "fieldKind": "checkbox",
+      "stored": {
+        "kind": "boolean",
+        "value": false
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "boolean",
+          "value": false
+        }
+      },
+      "outcome": "unchanged",
+      "editable": true
+    },
+    {
+      "id": "string_is_not_boolean",
+      "fieldKind": "checkbox",
+      "stored": {
+        "kind": "boolean",
+        "value": false
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "true"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "decimal_is_not_boolean",
+      "fieldKind": "checkbox",
+      "stored": {
+        "kind": "boolean",
+        "value": false
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "1"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "boolean_is_not_text",
+      "fieldKind": "text",
+      "stored": {
+        "kind": "string",
+        "value": "before"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "boolean",
+          "value": true
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "stored_text_under_checkbox",
+      "fieldKind": "checkbox",
+      "stored": {
+        "kind": "string",
+        "value": "false"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "boolean",
+          "value": false
+        }
+      },
+      "outcome": "applied",
+      "editable": false
+    },
+    {
+      "id": "stored_boolean_under_text",
+      "fieldKind": "text",
+      "stored": {
+        "kind": "boolean",
+        "value": false
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "false"
+        }
+      },
+      "outcome": "applied",
+      "editable": false
+    },
+    {
+      "id": "email_literal",
+      "fieldKind": "email",
+      "stored": {
+        "kind": "string",
+        "value": "old@example.test"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": " User+007@EXAMPLE.test "
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "phone_literal",
+      "fieldKind": "phone",
+      "stored": {
+        "kind": "string",
+        "value": "old"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "+44 (0)20 007"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "url_literal",
+      "fieldKind": "url",
+      "stored": {
+        "kind": "string",
+        "value": "https://old.test"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "HTTPS://EXAMPLE.test/a?x=007#Fragment"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "email_explicit_null",
+      "fieldKind": "email",
+      "stored": {
+        "kind": "string",
+        "value": "old@example.test"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "null"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "phone_remove",
+      "fieldKind": "phone",
+      "stored": {
+        "kind": "string",
+        "value": "007"
+      },
+      "change": {
+        "op": "remove",
+        "key": "flag"
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "url_unchanged",
+      "fieldKind": "url",
+      "stored": {
+        "kind": "string",
+        "value": "https://same.test/007"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "https://same.test/007"
+        }
+      },
+      "outcome": "unchanged",
+      "editable": true
+    },
+    {
+      "id": "url_invalid_prefix",
+      "fieldKind": "url",
+      "stored": {
+        "kind": "string",
+        "value": "https://old.test"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "javascript:alert(1)"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "url_missing_scheme_not_normalized",
+      "fieldKind": "url",
+      "stored": {
+        "kind": "string",
+        "value": "https://old.test"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "example.test/007"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "email_boolean_refused",
+      "fieldKind": "email",
+      "stored": {
+        "kind": "string",
+        "value": "old@example.test"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "boolean",
+          "value": false
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "phone_decimal_refused",
+      "fieldKind": "phone",
+      "stored": {
+        "kind": "string",
+        "value": "007"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "7"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "url_wrong_stored_shape",
+      "fieldKind": "url",
+      "stored": {
+        "kind": "boolean",
+        "value": false
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "https://new.test/007"
+        }
+      },
+      "outcome": "applied",
+      "editable": false
+    },
+    {
+      "id": "email_empty_string_is_present",
+      "fieldKind": "email",
+      "stored": {
+        "kind": "null"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": ""
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "number_large_fraction",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "decimal",
+        "value": "9007199254740993.125"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "9007199254740993.126"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "number_negative_zero_spelling",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "decimal",
+        "value": "1"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "-0.00E+03"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "number_huge_exponent",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "decimal",
+        "value": "1"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "1e99999999999999999999999999999999999999999999999999"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "number_tiny_exponent",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "decimal",
+        "value": "1"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "1e-99999999999999999999999999999999999999999999999999"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "number_absent_to_zero",
+      "fieldKind": "number",
+      "stored": null,
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "0"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "number_null_to_negative_zero",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "null"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "-0"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "number_explicit_null",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "decimal",
+        "value": "12.00"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "null"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "number_remove",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "decimal",
+        "value": "12.00"
+      },
+      "change": {
+        "op": "remove",
+        "key": "flag"
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "number_unchanged_exact",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "decimal",
+        "value": "-0.00E+03"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "-0.00E+03"
+        }
+      },
+      "outcome": "unchanged",
+      "editable": true
+    },
+    {
+      "id": "number_numeric_equal_different_spelling",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "decimal",
+        "value": "1.00e2"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "100"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "number_string_not_decimal",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "decimal",
+        "value": "7"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "007"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "number_boolean_not_decimal",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "decimal",
+        "value": "7"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "boolean",
+          "value": true
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "number_decimal_not_text",
+      "fieldKind": "text",
+      "stored": {
+        "kind": "string",
+        "value": "before"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "7"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "number_stored_string_readonly",
+      "fieldKind": "number",
+      "stored": {
+        "kind": "string",
+        "value": "007"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "7"
+        }
+      },
+      "outcome": "applied",
+      "editable": false
+    },
+    {
+      "id": "date_leap_day",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "date",
+        "value": "2024-02-29"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "date",
+          "value": "2028-02-29"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "date_absent_to_day",
+      "fieldKind": "date",
+      "stored": null,
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "date",
+          "value": "2026-10-23"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "date_null_to_day",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "null"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "date",
+          "value": "2026-10-23"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "date_explicit_null",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "date",
+        "value": "2024-02-29"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "null"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "date_remove",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "date",
+        "value": "2024-02-29"
+      },
+      "change": {
+        "op": "remove",
+        "key": "flag"
+      },
+      "outcome": "applied",
+      "editable": true
+    },
+    {
+      "id": "date_unchanged",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "date",
+        "value": "2024-02-29"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "date",
+          "value": "2024-02-29"
+        }
+      },
+      "outcome": "unchanged",
+      "editable": true
+    },
+    {
+      "id": "date_string_is_not_day",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "date",
+        "value": "2024-02-29"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "2026-10-23"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "date_local_time_is_not_day",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "date",
+        "value": "2024-02-29"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "2026-10-23 12:00"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "date_instant_is_not_day",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "date",
+        "value": "2024-02-29"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "instant",
+          "value": "2026-10-23T09:00:00.123456789+05:30"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "date_boolean_refused",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "date",
+        "value": "2024-02-29"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "boolean",
+          "value": false
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "date_decimal_refused",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "date",
+        "value": "2024-02-29"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "decimal",
+          "value": "20261023"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "date_stored_string_readonly",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "string",
+        "value": "2026-10-23"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "date",
+          "value": "2024-02-29"
+        }
+      },
+      "outcome": "applied",
+      "editable": false
+    },
+    {
+      "id": "date_stored_instant_readonly",
+      "fieldKind": "date",
+      "stored": {
+        "kind": "instant",
+        "value": "2026-10-23T09:00:00.123456789+05:30"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "date",
+          "value": "2024-02-29"
+        }
+      },
+      "outcome": "applied",
+      "editable": false
+    },
+    {
+      "id": "date_day_is_not_text",
+      "fieldKind": "text",
+      "stored": {
+        "kind": "string",
+        "value": "before"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "date",
+          "value": "2024-02-29"
+        }
+      },
+      "outcome": "unsupported_projection",
+      "editable": true
+    },
+    {
+      "id": "date_looking_text_stays_text",
+      "fieldKind": "text",
+      "stored": {
+        "kind": "string",
+        "value": "2024-02-29"
+      },
+      "change": {
+        "op": "set",
+        "key": "flag",
+        "value": {
+          "kind": "string",
+          "value": "2026-10-23"
+        }
+      },
+      "outcome": "applied",
+      "editable": true
+    }
+  ]
+}

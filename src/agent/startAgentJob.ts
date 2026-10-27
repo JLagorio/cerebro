@@ -1,5 +1,5 @@
 import { useFollowupStore } from '@/stores/followupStore';
-import { attachRun, checkWake, runAgent, stopAgent } from './agentIpc';
+import { attachRun, checkWake, runAgent, startedOrThrow, stopAgent } from './agentIpc';
 import { buildSystemPrompt } from './systemPrompt';
 import { newRunId } from './runs';
 import { assignmentPrefix, stillAssigned } from '@/engine/assignment';
@@ -433,7 +433,8 @@ export async function startAgentJob(job: AgentJob, ctx: JobContext): Promise<Job
       finish();
       return { kind: 'deferred', reasons: start.deferred, words, gaveBack };
     }
-    const { run: runId, durableId } = start;
+    const handle = startedOrThrow(start);
+    const { run: runId, durableId } = handle;
     if (woken !== null) ctx.onClaimedWakes?.([woken.claim, ...woken.coalesce]);
     if (job.cooldownKey !== null && !job.manual) {
       const at = new Date().toISOString();
@@ -466,7 +467,7 @@ export async function startAgentJob(job: AgentJob, ctx: JobContext): Promise<Job
       ...(durableId === null ? {} : { durableId }),
       ...(due === null ? {} : { dueAt: due.toISOString() }),
     };
-    const attached = await attachRun(start, 0, (event) => {
+    const attached = await attachRun(handle, 0, (event) => {
       if (event.kind === 'ToolStart') {
         const path = writtenPath(event.tool_name, event.input ?? null);
         if (path !== null && !wrote.includes(path)) wrote.push(path);

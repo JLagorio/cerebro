@@ -58,7 +58,11 @@ export function ViewSuggestionCard({
     view === null ? undefined : typeViews(database, schema).find((item) => sameView(item, view));
   const problems = view === null ? [] : checkView(view, database, schema, entries);
   const problem = (doc !== null && doc.parseError !== null) || problems.length > 0;
-  const state = unavailable
+  const surface = useMemo(
+    () => (view === null ? null : resolveTypeView(database, view, entries, schema)),
+    [view, database, entries, schema],
+  );
+  const state = unavailable || surface?.unavailable !== undefined
     ? 'unavailable'
     : doc === null
       ? 'gone'
@@ -67,10 +71,6 @@ export function ViewSuggestionCard({
         : saved !== undefined
           ? 'added'
           : 'ready';
-  const surface = useMemo(
-    () => (view === null ? null : resolveTypeView(database, view, entries, schema)),
-    [view, database, entries, schema],
-  );
   const fields = useMemo(
     () =>
       surface === null
@@ -120,7 +120,7 @@ export function ViewSuggestionCard({
         )}
         {state === 'unavailable' ? (
           <p className="text-xs text-n-500">
-            This suggestion can't be shown any more. Ask again if you still want it.
+            {surface?.unavailable?.message ?? "This suggestion can't be shown any more. Ask again if you still want it."}
           </p>
         ) : state === 'gone' ? (
           <p className="text-xs text-n-500">{database} is gone, so this view has nowhere to go.</p>
@@ -154,6 +154,7 @@ export function ViewSuggestionCard({
               >
                 {surface !== null && (
                   <ViewCanvas
+                    unavailable={surface.unavailable}
                     entries={surface.entries}
                     allEntries={entries}
                     presentation={surface.presentation}

@@ -294,7 +294,11 @@ function FleetRow({
       className="flex w-full rounded-md border-0 bg-transparent px-2.5 py-1.5 text-left hover:bg-n-50"
       onClick={() => void onOpen(run.run_id)}
     >
-      <TraceLine status={status.trace} statusText={status.statusText} className="cb-run-line">
+      <TraceLine
+        status={status.trace}
+        statusText={status.statusText}
+        className="cb-run-line cb-fleet-run-line"
+      >
         <StepIcon state={status.state} icon={status.icon} />
         {/* NULL is a category, not a blank; the stamp is a hover away. */}
         <TraceTitle
@@ -312,18 +316,18 @@ function FleetRow({
         <span
           data-testid="fleet-when"
           title={run.started_at}
-          className="whitespace-nowrap text-metadata text-(--text-meta)"
+          className="cb-fleet-fact whitespace-nowrap text-metadata text-(--text-meta)"
         >
           {relativeWhen(run.started_at, now)}
         </span>
         {/* WHY it started (M56.7), in Rust's words, and how late a schedule's
           fire ran. A row from before reads "why not recorded". */}
         <RunWhy cause={run.cause} startedAt={run.started_at} />
-        <span className="text-metadata text-(--text-meta)">{run.lane}</span>
+        <span className="cb-fleet-fact text-metadata text-(--text-meta)">{run.lane}</span>
         {/* Sentence case: the DS reserves capitals for eyebrows, and an
           outcome is a fact, not a headline (M42.4). */}
         <span
-          className="rounded-md px-1.5 py-0.5 text-metadata text-n-600"
+          className="cb-fleet-fact rounded-md px-1.5 py-0.5 text-metadata text-n-600"
           style={{ border: '1px solid var(--n-200)' }}
           data-testid="fleet-outcome"
         >
@@ -334,12 +338,12 @@ function FleetRow({
           <TraceDescription
             data-testid="fleet-took"
             title={`${run.started_at} → ${run.ended_at ?? ''}`}
-            className="text-metadata"
+            className="cb-fleet-fact text-metadata"
           >
             {took}
           </TraceDescription>
         )}
-        <span className="tabular-nums text-metadata text-n-600">
+        <span className="cb-fleet-fact tabular-nums text-metadata text-n-600">
           {run.usage_state === 'exact' ? (
             `${(run.input_tokens + run.output_tokens).toLocaleString()} tokens`
           ) : (
@@ -347,7 +351,7 @@ function FleetRow({
             <span data-testid="usage-unknown">unknown</span>
           )}
         </span>
-        <span className="tabular-nums text-metadata text-(--text-meta)">
+        <span className="cb-fleet-fact tabular-nums text-metadata text-(--text-meta)">
           {run.applied === null || run.rejected === null ? (
             // Nothing booked these before M49.9; the zeros the row was
             // inserted with are not a measurement.

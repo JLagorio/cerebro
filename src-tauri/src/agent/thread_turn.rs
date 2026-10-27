@@ -510,6 +510,38 @@ fn begin(
     Ok((plan, placeholder))
 }
 
+/// The platform-independent caller preparation used by start. Its opening
+/// ticket is captured before scope lookup, scanning, planning or placeholder
+/// creation and carried unchanged to resource publication.
+pub(super) struct PreparedTurn {
+    pub(super) preparation: crate::agent::RunPreparation,
+    pub(super) plan: Plan,
+    pub(super) placeholder: String,
+    scope: Option<crate::runtime::VaultScope>,
+}
+pub(super) fn prepare_turn(
+    agents: &crate::agent::AgentState,
+    vault: &Path,
+    req: &ThreadTurnRequest,
+    run_id: &str,
+) -> Result<PreparedTurn, String> {
+    let preparation = agents.prepare_run(vault)?;
+    let scope = crate::runtime::open_vault(vault);
+    let (plan, placeholder) = begin(vault, req, run_id, |actor| match scope.as_ref() {
+        Some(scope) => crate::runtime::sink::with_sink(|conn| {
+            crate::runtime::settings::refuse_if_agent_paused(conn, &scope.vault_id, Some(actor))
+        })
+        .unwrap_or(Ok(())),
+        None => Ok(()),
+    })?;
+    Ok(PreparedTurn {
+        preparation,
+        plan,
+        placeholder,
+        scope,
+    })
+}
+
 fn register(run_id: &str, binding: Binding) {
     turns_held().insert(run_id.to_string(), binding);
 }
@@ -534,15 +566,13 @@ pub fn start(
     vault: &Path,
     req: ThreadTurnRequest,
 ) -> Result<ThreadTurnStarted, String> {
-    let scope = crate::runtime::open_vault(vault);
     let run_id = crate::ledger::new_run_id();
-    let (plan, placeholder) = begin(vault, &req, &run_id, |actor| match scope.as_ref() {
-        Some(scope) => crate::runtime::sink::with_sink(|conn| {
-            crate::runtime::settings::refuse_if_agent_paused(conn, &scope.vault_id, Some(actor))
-        })
-        .unwrap_or(Ok(())),
-        None => Ok(()),
-    })?;
+    let PreparedTurn {
+        preparation,
+        plan,
+        placeholder,
+        scope,
+    } = prepare_turn(agents, vault, &req, &run_id)?;
     let binding = Binding {
         vault: vault.to_path_buf(),
         page: req.page.clone(),
@@ -554,7 +584,15 @@ pub fn start(
     register(&run_id, binding.clone());
     announce(app, &req.page);
     match spawn(
-        app, agents, mcp_state, vault, &req.page, plan, &run_id, scope,
+        app,
+        agents,
+        mcp_state,
+        vault,
+        &req.page,
+        plan,
+        &run_id,
+        scope,
+        &preparation,
     ) {
         Ok(rx) => {
             let app = app.clone();
@@ -601,6 +639,7 @@ fn spawn(
     plan: Plan,
     run_id: &str,
     scope: Option<crate::runtime::VaultScope>,
+    preparation: &crate::agent::RunPreparation,
 ) -> Result<std::sync::mpsc::Receiver<RunEnd>, String> {
     let mut request = plan.request;
     let dir = crate::config_dir(app)?;
@@ -635,6 +674,7 @@ fn spawn(
         &dir,
         Some(meter),
         Some(tx),
+        preparation,
     )?;
     Ok(rx)
 }
@@ -1643,5 +1683,62 @@ mod tests {
             assert!(approval.disallowed.iter().any(|t| t == "AskUserQuestion"));
         }
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn actual_prepared_thread_turn_cannot_publish_after_a_selected_legacy_roundtrip() {
+        let _sink = crate::runtime::sink::test_lock();
+        let _shadow = crate::ledger::shadow::testing::lock();
+        let vault = fixture_vault("thread-turn-opening-generation");
+        let origin = testutil::temp_vault("thread-turn-opening-origin");
+        let context = crate::workspace_service::authority::AuthorityContext::new(origin.clone());
+        let agents = crate::agent::AgentState::default();
+        let generation = context.begin_open().unwrap();
+        agents.begin_open(generation).unwrap();
+        crate::finish_legacy_open(&context, generation, &vault, &agents, || {}).unwrap();
+        let run_id = crate::ledger::new_run_id();
+        // This is start's actual platform-independent preparation, including
+        // scan, record plan and pending placeholder, not a synthetic ticket.
+        let prepared = prepare_turn(&agents, &vault, &asking(), &run_id).unwrap();
+        let file = comments::read_threads(&vault, PAGE).unwrap();
+        assert_eq!(
+            file.threads[0]
+                .comments
+                .iter()
+                .find(|comment| comment.id == prepared.placeholder)
+                .unwrap()
+                .state,
+            Some(CommentState::Pending)
+        );
+        crate::suspend_legacy_for_selected(&Default::default(), &Default::default(), &agents)
+            .unwrap();
+        let generation = context.begin_open().unwrap();
+        agents.begin_open(generation).unwrap();
+        crate::finish_legacy_open(&context, generation, &vault, &agents, || {}).unwrap();
+        let refusal = super::super::publication_tests::assert_stale_thread_request_cannot_publish(
+            &agents,
+            &prepared.preparation,
+            &vault,
+            &prepared.plan.request,
+        );
+        fail_start(
+            &binding_for(&vault, &prepared.placeholder),
+            &run_id,
+            &refusal,
+        )
+        .unwrap();
+        let file = comments::read_threads(&vault, PAGE).unwrap();
+        assert_eq!(
+            file.threads[0]
+                .comments
+                .iter()
+                .find(|comment| comment.id == prepared.placeholder)
+                .unwrap()
+                .state,
+            Some(CommentState::Failed)
+        );
+        std::fs::remove_dir_all(vault).unwrap();
+        std::fs::remove_dir_all(origin).unwrap();
     }
 }

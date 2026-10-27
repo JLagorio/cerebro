@@ -116,10 +116,10 @@ describe('FailureNoticeCard (M56.4)', () => {
     expect(card().querySelector('[data-slot="stack-trace"]')).toBeNull();
   });
 
-  it('offers Retry as the red box did', () => {
-    const onRetry = vi.fn();
-    render(<FailureNoticeCard notice={USAGE_LIMIT} onRetry={onRetry} />);
-    fireEvent.click(screen.getByTestId('retry-turn'));
-    expect(onRetry).toHaveBeenCalledTimes(1);
+  it('offers read-only inspection of the failed reply', () => {
+    const onReviewRecovery = vi.fn();
+    render(<FailureNoticeCard notice={USAGE_LIMIT} onReviewRecovery={onReviewRecovery} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Review what happened' }));
+    expect(onReviewRecovery).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,3 +1,4 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type {
@@ -12,7 +13,7 @@ import type {
   VaultPulse,
 } from '@/engine/git';
 import { syncState, type SyncState } from '@/engine/git';
-import { announceExternalWrites, flushOpenPages } from '@/editor/openPages';
+import { announceExternalWrites } from '@/editor/openPages';
 import * as git from '@/lib/gitIpc';
 import { ledgerHead } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
@@ -445,7 +446,7 @@ export async function restoreVersion(
 ): Promise<boolean> {
   const toast = useUiStore.getState().toast;
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction())) return false;
     const result = await git.restoreNoteVersion(vault, path, commit);
     if (result.unchanged) {
       toast('This page already matches that version.');

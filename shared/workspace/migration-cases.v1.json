@@ -1,0 +1,234 @@
+{
+  "version": 1,
+  "limits": {
+    "maxFiles": 6000,
+    "maxFileBytes": 8388608,
+    "maxTotalBytes": 134217728,
+    "maxYamlBytes": 65536,
+    "maxEvents": 8192,
+    "maxDepth": 32,
+    "maxDecodedScalarBytes": 65536
+  },
+  "cases": [
+    {
+      "name": "BOM and CRLF",
+      "path": "notes/crlf.md",
+      "source": "﻿---\r\nname: \"007\"\r\n---  \r\n# Original title\r\nBody\r\n",
+      "status": "ready",
+      "issues": []
+    },
+    {
+      "name": "duplicate keys",
+      "path": "duplicate.md",
+      "source": "---\na: 1\na: 2\n---\n# Body\n",
+      "status": "blocked",
+      "issues": ["duplicate_key"]
+    },
+    {
+      "name": "quoted decoded duplicate",
+      "path": "quoted.md",
+      "source": "---\nx: one\n\"\\u0078\": two\n---\n",
+      "status": "blocked",
+      "issues": ["duplicate_key"]
+    },
+    {
+      "name": "nested duplicate",
+      "path": "nested.md",
+      "source": "---\nunknown: {a: 1, a: 2}\n---\n",
+      "status": "blocked",
+      "issues": ["duplicate_key"]
+    },
+    {
+      "name": "explicit tag",
+      "path": "tag.md",
+      "source": "---\nx: !!str 007\n---\n",
+      "status": "blocked",
+      "issues": ["explicit_tag"]
+    },
+    {
+      "name": "anchor and alias",
+      "path": "anchor.md",
+      "source": "---\nx: &keep {v: 1}\ny: *keep\n---\n",
+      "status": "blocked",
+      "issues": ["anchor", "alias"]
+    },
+    {
+      "name": "non string scalar key",
+      "path": "number-key.md",
+      "source": "---\n7: value\n---\n",
+      "status": "blocked",
+      "issues": ["non_string_key"]
+    },
+    {
+      "name": "complex key",
+      "path": "complex-key.md",
+      "source": "---\n? [a, b]\n: value\n---\n",
+      "status": "blocked",
+      "issues": ["non_string_key"]
+    },
+    {
+      "name": "missing relation",
+      "path": "missing-link.md",
+      "source": "---\nproject: \"[[Not here#Part]]\"\n---\n",
+      "status": "ambiguous",
+      "issues": ["unresolved_relation"]
+    },
+    {
+      "name": "moved Agent remains Agent",
+      "path": "elsewhere/assistant.md",
+      "source": "---\ntype: Agent\nname: Helper\nreach: \"[[Unresolved]]\"\n---\n# Standing instructions\n",
+      "status": "ambiguous",
+      "issues": ["unresolved_relation"]
+    },
+    {
+      "name": "import stamps",
+      "path": "imported.md",
+      "source": "---\nsource_system: notion\nsource_record_id: abc\nimport_hash: original-stamp\nunknown: {huge: 9007199254740993.125, literal: \"007\"}\n---\n# Imported\n",
+      "status": "ready",
+      "issues": []
+    },
+    {
+      "name": "governed concept",
+      "path": "knowledge/retained.md",
+      "source": "---\ntitle: Kept concept\nverified: [{by: person, at: 2026-10-23}]\n---\n# Evidence\n",
+      "status": "retained",
+      "issues": []
+    },
+    {
+      "name": "CLI owned definition",
+      "path": ".claude/agents/researcher.md",
+      "source": "---\nname: researcher\ntools: Read\n---\nInstructions\n",
+      "status": "retained",
+      "issues": []
+    },
+    {
+      "name": "standalone view YAML",
+      "path": "views/tasks.yml",
+      "source": "layout: table\nfilters: [{field: status, value: open}]\n",
+      "status": "ready",
+      "issues": []
+    },
+    {
+      "name": "malformed YAML",
+      "path": "malformed.md",
+      "source": "---\na: [1,\n---\n",
+      "status": "blocked",
+      "issues": ["malformed_yaml"]
+    },
+    {
+      "name": "unclosed frontmatter",
+      "path": "unclosed.md",
+      "source": "---\na: value\n# Still header\n",
+      "status": "blocked",
+      "issues": ["unclosed_frontmatter"]
+    },
+    {
+      "name": "unknown map exact decimal",
+      "path": "unknown.md",
+      "source": "---\nunknown: {x: 9007199254740993.125, y: \"007\"}\n---\n# Body\n",
+      "status": "ready",
+      "issues": []
+    },
+    {
+      "name": "quoted punctuation not syntax",
+      "path": "punctuation.md",
+      "source": "---\nquoted: \"&anchor !tag *alias\"\nliteral: |\n  &anchor !tag *alias\n---\n",
+      "status": "ready",
+      "issues": []
+    },
+    {
+      "name": "sheet YAML retained",
+      "path": "sheet.md",
+      "source": "# Table\n```cerebro-sheet\n---\nname: Costs\n---\nAmount\n007\n```\n",
+      "status": "retained",
+      "issues": ["sheet_yaml_retained"]
+    }
+  ],
+  "identityCases": [
+    {
+      "name": "duplicate record UUID across different paths",
+      "manifest": {
+        "format": 1,
+        "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "records": [
+          {
+            "record_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "path": "one.md",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "record_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "path": "two.md",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "errorKind": "duplicate_identity"
+    },
+    {
+      "name": "duplicate path across different UUIDs",
+      "manifest": {
+        "format": 1,
+        "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "records": [
+          {
+            "record_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "path": "one.md",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "record_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "path": "one.md",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "errorKind": "duplicate_identity"
+    },
+    {
+      "name": "workspace UUID reused as record UUID",
+      "manifest": {
+        "format": 1,
+        "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "records": [
+          {
+            "record_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "path": "one.md",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "errorKind": "duplicate_identity"
+    },
+    {
+      "name": "invalid record UUID is not repaired",
+      "manifest": {
+        "format": 1,
+        "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "records": [
+          {
+            "record_id": "not-an-id",
+            "path": "one.md",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "errorKind": "invalid_manifest"
+    },
+    {
+      "name": "unsupported manifest version is not rekeyed",
+      "manifest": {
+        "format": 2,
+        "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "records": [
+          {
+            "record_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "path": "one.md",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "errorKind": "invalid_manifest"
+    }
+  ]
+}

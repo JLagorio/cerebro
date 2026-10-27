@@ -411,7 +411,9 @@ it('List search and controls return with Back and a new tab starts empty (M65.4)
   render(<Place />);
   fireEvent.click(screen.getByLabelText('Search this view'));
   fireEvent.change(screen.getByTestId('view-search-input'), { target: { value: 'sync' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sort' }));
+  // The consolidated toolbar opens sorting in View options; the retained
+  // filter-bar state is still a visit preference, independently of that panel.
+  act(() => useNavStore.getState().setEntryState('view.controls', true));
   act(() => useNavStore.getState().navigate({ kind: 'settings' }));
   act(() => useNavStore.getState().back());
   expect((screen.getByTestId('view-search-input') as HTMLInputElement).value).toBe('sync');

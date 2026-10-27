@@ -114,31 +114,40 @@ SDK maturity or packaged Tauri isolation is established by those documents.
 
 ## Credential bootstrap and broker admission
 
-The proposed GitHub beta imports an existing credential through the person's
-installed `gh`, only after an explicit Connect/Replace decision. It supports
-`github.com` and one explicitly selected login; multiple stored bindings remain
-possible, but an active-account change in `gh` never switches one. Rust obtains
-bounded account metadata, then runs `gh auth token --hostname github.com --user
-<selected-login>` without a shell, capturing the secret only in private native
+The GitHub beta imports an existing credential through the person's installed
+`gh`, only after an explicit Connect/Replace decision. It supports `github.com`
+and one explicitly selected login; multiple stored bindings remain possible, but
+an active-account change in `gh` never switches one. Rust validates the selected
+host/login and the authenticated original owner, then runs
+`gh auth token --hostname github.com --user <selected-login> --no-refresh`
+without a shell. Selected capture establishes availability; no metadata command
+authenticates other accounts first. The secret exists only in private native
 memory. Clear `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`,
-`GITHUB_ENTERPRISE_TOKEN`, host overrides and debug output; disable prompts and
-bound process time/output. Validate the token's authenticated provider subject
-through an HTTPS identity read before installing an app-owned OS-store reference.
-Missing `gh`, unavailable account, unsupported CLI flags, denied keychain access
-or mismatched identity yields a repairable status and no fallback account.
+`GITHUB_ENTERPRISE_TOKEN`, host/config/proxy/debug overrides; disable prompts and
+bound process time/output. Verify the token's authenticated provider identity
+and supported scope evidence through HTTPS before reserving or installing an
+app-owned OS-store reference or binding the connection. Missing `gh`, an
+unavailable selected credential, unsupported flags, denied Keychain access,
+unknown scope evidence or mismatched identity yields a repairable status and no
+fallback account.
 
-This command shape was checked against installed `--help` and the official
+The revised selected-user/no-refresh command follows the current official
 [token](https://cli.github.com/manual/gh_auth_token) and
-[environment](https://cli.github.com/manual/gh_help_environment) manuals; no token
-was requested and no sign-in was exercised. Existing
-[forge.rs](../../../src-tauri/src/forge.rs#L282) demonstrates bounded native `gh`
-process setup, but remains a read-only feature that never reads tokens. The new
-credential acquisition module owns a separate, reviewed secret-capture path.
-React receives only attempt/status/account metadata; no token, token-bearing
-stdout/stderr, config file or debug log crosses IPC. Do not invoke interactive
-login, alter `gh`'s active account or import all its accounts. If no usable login
-exists, explain external `gh` setup; app OAuth/device-flow registration and
-arbitrary-host discovery remain separately designed, disabled capabilities.
+[status](https://cli.github.com/manual/gh_auth_status) manuals checked on
+2026-10-25. That documentation check is not installed-version or live-account
+acceptance: the exact installed executable must pass a bounded, credential-free
+compatibility check before the native adapter is enabled. Unsupported flags fail
+closed, with no retry that drops `--no-refresh`. The earlier installed-help
+observation covered the earlier command shape only.
+[forge.rs](../../../src-tauri/src/forge.rs#L282) remains a read-only example of
+bounded native process setup and never reads tokens. Credential acquisition owns
+a separate reviewed private capture path. React receives only
+attempt/status/account metadata; no token, token-bearing stdout/stderr, config
+file or debug log crosses IPC. Do not invoke interactive login, change the
+active account, refresh, read raw CLI account configuration or import/probe all
+stored accounts. Explain external `gh` setup when the selected login is
+unavailable; OAuth/device registration and arbitrary-host discovery remain
+separately designed, disabled capabilities.
 
 `CredentialAcquisition` binds an opaque attempt ID to the attended person,
 connection, fixed host/login, expected connection revision and revocation

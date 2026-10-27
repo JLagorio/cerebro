@@ -11,6 +11,7 @@ export function PageHeader({
   headingTestId,
   className = '',
   variant = 'workspace',
+  composition,
 }: {
   title: ReactNode;
   icon?: ReactNode;
@@ -20,9 +21,14 @@ export function PageHeader({
   headingTestId?: string;
   className?: string;
   variant?: 'workspace' | 'compact' | 'tool';
+  /** Opt-in pane composition; the nearest .cb-composition owns its width. */
+  composition?: 'collection' | 'utility';
 }) {
   return (
-    <header className={`cb-page-header cb-page-header--${variant} ${className}`}>
+    <header
+      className={`cb-page-header cb-page-header--${variant} ${className}`}
+      data-composition={composition}
+    >
       <div className="cb-page-header-line">
         {icon !== undefined && <div className="cb-page-header-icon">{icon}</div>}
         <h1 className="cb-page-heading" data-testid={headingTestId}>

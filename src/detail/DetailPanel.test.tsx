@@ -1,5 +1,7 @@
 import { createElement, useLayoutEffect, useState, type ComponentProps } from 'react';
 import type { EditorReadyInfo } from '@/editor/MarkdownEditor';
+import { __resetOpenPages } from '@/editor/openPages';
+import { sha256Hex } from '@/lib/sha256';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -40,7 +42,10 @@ vi.mock('@/lib/ipc', () => ({
   listenOsFileDrop: vi.fn().mockResolvedValue(() => {}),
   readNote: vi.fn().mockResolvedValue('Existing body'),
   readNoteSource: vi.fn().mockResolvedValue({ content: 'Existing body', hash: 'a'.repeat(64) }),
-  saveNote: vi.fn().mockResolvedValue(undefined),
+  saveNoteBody: vi.fn(async ({ body }: { body: string }) => ({
+    kind: 'file',
+    contentHash: sha256Hex(body),
+  })),
   setNoteTitle: vi.fn().mockResolvedValue(undefined),
   pickVault: vi.fn(),
   getLastVault: vi.fn(),
@@ -67,7 +72,11 @@ vi.mock('@/lib/ipc', () => ({
   ingestItemState: vi.fn().mockResolvedValue(null),
 }));
 
-afterEach(cleanup);
+beforeEach(__resetOpenPages);
+afterEach(() => {
+  cleanup();
+  __resetOpenPages();
+});
 
 /**
  * Escape delivered in the commit that opened a surface, before the browser has
@@ -146,7 +155,7 @@ describe('DetailPanel', () => {
 
   it('writes a frontmatter patch when a status option is picked', async () => {
     const user = userEvent.setup();
-    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+    const patchFrontmatter = vi.fn().mockResolvedValue(true);
     useVaultStore.setState({ patchFrontmatter });
     render(<DetailPanel />);
     await user.click(screen.getByRole('button', { name: 'Show Status property' }));
@@ -492,7 +501,7 @@ describe('DetailPanel', () => {
 
   it('retains a native title draft when its document save fails', async () => {
     useUiStore.setState({ toasts: [] });
-    vi.mocked(ipc.saveNote).mockRejectedValueOnce(new Error('read-only vault'));
+    vi.mocked(ipc.saveNoteBody).mockRejectedValueOnce(new Error('read-only vault'));
     vi.mocked(ipc.readNote).mockResolvedValueOnce('# Design first-run flow\n\nBody text\n');
     render(<DetailPanel />);
     await waitFor(() => expect(lastEditor.info).not.toBeNull());
@@ -548,8 +557,8 @@ describe('DetailPanel', () => {
     expect(lastEditor.info).toBe(info);
     expect(info.editor.document[0].id).toBe(titleId);
     expect(screen.getByRole('heading', { name: 'Renamed twice' })).toBeTruthy();
-    expect(vi.mocked(ipc.saveNote).mock.calls.at(-1)?.[2]).toContain('# Renamed twice');
-    expect(vi.mocked(ipc.saveNote).mock.calls.at(-1)?.[2]).toContain('Body text');
+    expect(vi.mocked(ipc.saveNoteBody).mock.calls.at(-1)?.[0].body).toContain('# Renamed twice');
+    expect(vi.mocked(ipc.saveNoteBody).mock.calls.at(-1)?.[0].body).toContain('Body text');
     expect(ipc.setNoteTitle).not.toHaveBeenCalled();
   });
 
@@ -1156,20 +1165,21 @@ describe('FieldEditor number guard', () => {
     const entries = fixtureVault();
     const schema = buildSchema(entries);
     const entry = entries.find((e) => e.path === 'projects/onboarding/items/fld-1.md')!;
-    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+    const patchFrontmatter = vi.fn().mockResolvedValue(true);
     useVaultStore.setState({ entries, patchFrontmatter });
     render(<FieldEditor entry={entry} def={{ name: 'effort', kind: 'number' }} schema={schema} />);
     return patchFrontmatter;
   }
 
-  it('refuses a non-numeric draft with a toast instead of writing .nan', async () => {
+  it('retains a non-numeric draft with an accessible error instead of writing .nan', async () => {
     const user = userEvent.setup();
     const patchFrontmatter = setupNumberEditor();
     await user.click(screen.getByRole('button'));
     await user.type(screen.getByLabelText('Effort'), 'abc');
     fireEvent.blur(screen.getByLabelText('Effort'));
     expect(patchFrontmatter).not.toHaveBeenCalled();
-    expect(useUiStore.getState().toasts.map((t) => t.message)).toContain('Enter a number');
+    expect(screen.getByLabelText('Effort').getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByRole('status').textContent).toContain('Enter a finite number.');
   });
 
   it('commits a numeric draft as a number', async () => {
@@ -1200,7 +1210,7 @@ describe('FieldEditor number guard', () => {
     entry.properties.effort = 1840;
     const schema = buildSchema(entries);
     const def = schema.types.get('Work item')!.fields.find((f) => f.name === 'effort')!;
-    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+    const patchFrontmatter = vi.fn().mockResolvedValue(true);
     useVaultStore.setState({ entries, patchFrontmatter });
     render(<FieldEditor entry={entry} def={def} schema={schema} />);
     return patchFrontmatter;

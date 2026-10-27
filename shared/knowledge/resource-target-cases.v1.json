@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "entries": [
+    { "path": "records/decision.md", "title": "The decision" },
+    { "path": "README", "title": "Read me" },
+    { "path": "assets/paper.pdf", "title": "Paper" }
+  ],
+  "cases": [
+    { "id": "current-rooted-page", "resource": "/records/decision.md", "target": { "kind": "VaultPage", "path": "records/decision.md" }, "projection": { "internal": "records/decision.md" }, "refKind": "vault" },
+    { "id": "current-relative-page", "resource": "records/decision.md", "target": { "kind": "VaultPage", "path": "records/decision.md" }, "projection": { "internal": "records/decision.md" }, "refKind": "vault" },
+    { "id": "current-extensionless-entry", "resource": "README", "target": { "kind": "VaultPage", "path": "README" }, "projection": { "internal": "README" }, "refKind": "vault" },
+    { "id": "current-asset-entry", "resource": "assets/paper.pdf", "target": { "kind": "VaultPage", "path": "assets/paper.pdf" }, "projection": { "internal": "assets/paper.pdf" }, "refKind": "vault" },
+    { "id": "safe-https", "resource": "https://example.com/report", "target": { "kind": "ExternalUrl", "url": "https://example.com/report" }, "projection": { "external": "https://example.com/report" }, "refKind": "url" },
+    { "id": "existing-http-policy-trims", "resource": " https://example.com/report ", "target": { "kind": "ExternalUrl", "url": "https://example.com/report" }, "projection": { "external": "https://example.com/report" }, "refKind": "url" },
+    { "id": "safe-http", "resource": "http://example.com/report", "target": { "kind": "ExternalUrl", "url": "http://example.com/report" }, "projection": { "external": "http://example.com/report" }, "refKind": "url" },
+    { "id": "missing-rooted-page", "resource": "/records/gone.md", "target": { "kind": "MissingLocal", "path": "records/gone.md" }, "projection": null, "refKind": null },
+    { "id": "missing-explicit-rooted-name", "resource": "/gone", "target": { "kind": "MissingLocal", "path": "gone" }, "projection": null, "refKind": null },
+    { "id": "missing-relative-note", "resource": "records/gone.md", "target": { "kind": "MissingLocal", "path": "records/gone.md" }, "projection": null, "refKind": null },
+    { "id": "missing-bare-note", "resource": "gone.md", "target": { "kind": "MissingLocal", "path": "gone.md" }, "projection": null, "refKind": null },
+    { "id": "missing-qualified-pdf", "resource": "assets/gone.pdf", "target": { "kind": "MissingLocal", "path": "assets/gone.pdf" }, "projection": null, "refKind": null },
+    { "id": "case-is-not-relocated", "resource": "records/Decision.md", "target": { "kind": "MissingLocal", "path": "records/Decision.md" }, "projection": null, "refKind": null },
+    { "id": "rooted-percent-encoding-is-not-decoded", "resource": "/records/decision%2Emd", "target": { "kind": "MissingLocal", "path": "records/decision%2Emd" }, "projection": null, "refKind": null },
+    { "id": "scope-prose", "resource": "all queries in project X", "target": { "kind": "Descriptor", "text": "all queries in project X" }, "projection": null, "refKind": null },
+    { "id": "scope-prose-with-slash", "resource": "all telemetry eu/west", "target": { "kind": "Descriptor", "text": "all telemetry eu/west" }, "projection": null, "refKind": null },
+    { "id": "ambiguous-key", "resource": "ENG-142", "target": { "kind": "Descriptor", "text": "ENG-142" }, "projection": null, "refKind": null },
+    { "id": "ambiguous-bare-domain", "resource": "example.com", "target": { "kind": "Descriptor", "text": "example.com" }, "projection": null, "refKind": null },
+    { "id": "conservative-bare-nonmarkdown", "resource": "report.pdf", "target": { "kind": "Descriptor", "text": "report.pdf" }, "projection": null, "refKind": null },
+    { "id": "unknown-relative-extension", "resource": "records/name.legacy", "target": { "kind": "Descriptor", "text": "records/name.legacy" }, "projection": null, "refKind": null },
+    { "id": "fragment-not-a-guessed-page", "resource": "records/decision.md#section", "target": { "kind": "Descriptor", "text": "records/decision.md#section" }, "projection": null, "refKind": null },
+    { "id": "unsafe-javascript", "resource": "javascript:alert(1)", "target": { "kind": "Descriptor", "text": "javascript:alert(1)" }, "projection": null, "refKind": null },
+    { "id": "unsafe-file-scheme", "resource": "file:///etc/passwd", "target": { "kind": "Descriptor", "text": "file:///etc/passwd" }, "projection": null, "refKind": null },
+    { "id": "unsupported-mail-scheme", "resource": "mailto:a@b.c", "target": { "kind": "Descriptor", "text": "mailto:a@b.c" }, "projection": null, "refKind": null },
+    { "id": "unsupported-ftp", "resource": "ftp://files.example.com/report.csv", "target": { "kind": "Descriptor", "text": "ftp://files.example.com/report.csv" }, "projection": null, "refKind": null },
+    { "id": "unsafe-url-credentials", "resource": "https://user:secret@example.com/report", "target": { "kind": "Descriptor", "text": "https://user:secret@example.com/report" }, "projection": null, "refKind": null },
+    { "id": "unsafe-url-control", "resource": "https://example.com/re\nport", "target": { "kind": "Descriptor", "text": "https://example.com/re\nport" }, "projection": null, "refKind": null },
+    { "id": "malformed-http", "resource": "https:report", "target": { "kind": "Descriptor", "text": "https:report" }, "projection": null, "refKind": null },
+    { "id": "protocol-relative-is-not-local", "resource": "//example.com/report", "target": { "kind": "Descriptor", "text": "//example.com/report" }, "projection": null, "refKind": null },
+    { "id": "traversal-is-not-relocated", "resource": "../records/decision.md", "target": { "kind": "Descriptor", "text": "../records/decision.md" }, "projection": null, "refKind": null },
+    { "id": "dot-segment-is-not-normalized", "resource": "./records/decision.md", "target": { "kind": "Descriptor", "text": "./records/decision.md" }, "projection": null, "refKind": null },
+    { "id": "backslash-is-not-normalized", "resource": "records\\decision.md", "target": { "kind": "Descriptor", "text": "records\\decision.md" }, "projection": null, "refKind": null },
+    { "id": "local-whitespace-is-not-normalized", "resource": " records/decision.md ", "target": { "kind": "Descriptor", "text": " records/decision.md " }, "projection": null, "refKind": null }
+  ]
+}

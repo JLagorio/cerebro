@@ -9,7 +9,8 @@ import { railSources, type RailSources } from './railSources';
  * merged, the latest reply's first, each under the reply its line jumps to.
  * A streaming reply adds nothing, a subagent's finds count, and a list that
  * may be short says why: the transcript could not be read back, or a
- * finished web call holds no result (CV-05).
+ * finished web call holds no result (CV-05). With nothing listed, that is
+ * unavailable or not recorded, never empty.
  */
 
 const IDLE: TranscriptStatus = { state: 'idle' };
@@ -112,7 +113,7 @@ describe('railSources', () => {
     ]);
   });
 
-  it('is partial when the transcript could not be read back, whatever it could list', () => {
+  it('is partial when the transcript could not be read back, over what it could list', () => {
     const listed = railSources(
       [asked('u1'), replied('a1', [read('r1', 'notes/plan.md')])],
       UNREADABLE,
@@ -120,10 +121,21 @@ describe('railSources', () => {
     expect(listed.state).toBe('partial');
     expect(listed.missing).toBe('transcript');
     expect(lines(listed)).toEqual([['notes/plan.md', 'a1']]);
+  });
 
-    // Nothing it could list is not nothing drawn on.
+  it('is unavailable, never empty, when nothing is listed and the transcript could not be read', () => {
+    // Nothing it could list is not nothing drawn on: the file that would say
+    // could not be read.
     const bare = railSources([asked('u1'), replied('a1', [])], UNREADABLE);
-    expect(bare).toMatchObject({ state: 'partial', missing: 'transcript', cited: [] });
+    expect(bare).toEqual({ state: 'unavailable', cited: [], missing: 'transcript' });
+    // A thread that kept no reply at all cannot tell either.
+    expect(railSources([], UNREADABLE)).toEqual({
+      state: 'unavailable',
+      cited: [],
+      missing: 'transcript',
+    });
+    // The same thread, its transcript read, drew on nothing.
+    expect(railSources([asked('u1'), replied('a1', [])], IDLE).state).toBe('empty');
   });
 
   it('is partial when a finished web call holds no result, a subagent’s too', () => {
@@ -143,11 +155,45 @@ describe('railSources', () => {
         tools: [fetchedNothing('sub-f')],
       },
     });
-    expect(railSources([asked('u1'), replied('a1', [agent])], IDLE)).toMatchObject({
-      state: 'partial',
+    // With nothing else listed, what it found was not recorded.
+    expect(railSources([asked('u1'), replied('a1', [agent])], IDLE)).toEqual({
+      state: 'not-recorded',
       missing: 'results',
       cited: [],
     });
+  });
+
+  it('is not recorded, never empty, when nothing is listed and a reply lost what it drew on', () => {
+    // A subagent's steps gone (a branch's copy, a reload without its
+    // `subagents/` transcript), the session file itself read whole.
+    const stepless = call('ag', 'Agent', {
+      subagent: {
+        type: 'cerebro-researcher',
+        description: 'Research the cutover',
+        status: 'done',
+        toolUses: 4,
+        parts: [],
+        tools: [],
+      },
+    });
+    const readWhole: TranscriptStatus[] = [IDLE, { state: 'healed' }, { state: 'rebuilt' }];
+    for (const transcript of readWhole) {
+      expect(railSources([asked('u1'), replied('a1', [stepless])], transcript)).toEqual({
+        state: 'not-recorded',
+        cited: [],
+        missing: 'steps',
+      });
+    }
+    // A web call's result gone.
+    expect(railSources([asked('u1'), replied('a1', [fetchedNothing('f1')])], IDLE)).toEqual({
+      state: 'not-recorded',
+      cited: [],
+      missing: 'results',
+    });
+    // An unread file outranks either: it may hold what they lost.
+    expect(railSources([asked('u1'), replied('a1', [stepless])], UNREADABLE).state).toBe(
+      'unavailable',
+    );
   });
 
   it('is partial when a subagent ran and used tools but none of its steps are in hand', () => {
@@ -207,7 +253,7 @@ describe('railSources', () => {
     const thread = [asked('u1'), replied('a1', [fetchedNothing('f1')])];
     expect(railSources(thread, READING)).toMatchObject({ state: 'empty', missing: null });
     expect(railSources(thread, { state: 'healed' })).toMatchObject({
-      state: 'partial',
+      state: 'not-recorded',
       missing: 'results',
     });
   });

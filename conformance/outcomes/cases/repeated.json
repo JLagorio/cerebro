@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "id": "repeated",
+  "title": "Preserve repeated occurrence",
+  "adapter": "source_location",
+  "inputs": {
+    "vectors": [
+      "same hash exact repeated occurrence",
+      "recorded context disambiguates repeated quote"
+    ]
+  },
+  "allowedEffects": [],
+  "forbiddenEffects": [
+    "send",
+    "verify"
+  ],
+  "expectedSources": [
+    {
+      "id": "same hash exact repeated occurrence",
+      "status": "exact",
+      "range": {
+        "start": 14,
+        "end": 19
+      }
+    },
+    {
+      "id": "recorded context disambiguates repeated quote",
+      "status": "relocated",
+      "range": {
+        "start": 21,
+        "end": 26
+      }
+    }
+  ],
+  "expectedArtifacts": [],
+  "injections": [],
+  "requiredCapabilities": []
+}

@@ -1,3 +1,5 @@
+import { RecoveryBufferContext } from '@/editor/recoveryBuffers';
+import { DeletedDraftRecovery, useRecoveryHold } from '@/editor/DeletedDraftRecoveryFace';
 import { useMemo, useRef, useState } from 'react';
 import { ConvertBoardDialog } from '@/whiteboard/ConvertBoardDialog';
 import { readMermaidBoard } from '@/whiteboard/mermaidBoard';
@@ -54,6 +56,10 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
   const [converting, setConverting] = useState(false);
   const openBoard = useOpenPath('navigate');
   const entry = useEntry(selection.path);
+  const hadEntry = useRef(entry !== undefined && entry !== null);
+  if (entry) hadEntry.current = true;
+  const vault = useVaultStore((s) => s.vaultPath);
+  const recoveryHeld = useRecoveryHold(vault, selection.path);
   const navigate = useNavStore((s) => s.navigate);
   // M29.38 — the link popover's record search and what a link badge opens.
   // `in-place`, not `navigate`: this page IS the canvas the user is standing
@@ -65,8 +71,18 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
   // The whole file lifecycle. The entry mode is latched by
   // FullScreenDiagramEditor, from the source it mounts with — which is this
   // load's result, so the M29.21 rule is unchanged.
-  const { code, loadFailed, saveState, handleChange, undo, redo, canUndo, canRedo } =
-    useDiagramFile(selection.path);
+  const {
+    code,
+    loadFailed,
+    saveState,
+    handleChange,
+    undo,
+    redo,
+    retry,
+    canUndo,
+    canRedo,
+    recoveryCapture,
+  } = useDiagramFile(selection.path);
   const convertible = useMemo(
     () => code !== null && readMermaidBoard(code, entries).ok,
     [code, entries],
@@ -75,20 +91,26 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
   // Only a FAILED READ tombstones the page (see loadFailed above): an entry
   // the scanner has not adopted yet still opens, and an entry that lingers
   // after its file went unreadable does not pretend to be editable.
-  if (loadFailed) {
+  if (loadFailed || (hadEntry.current && !entry) || recoveryHeld) {
     return (
-      <div className="flex min-w-0 flex-1 items-center justify-center">
-        <EmptyState
-          icon="file-x"
-          title="Diagram unavailable"
-          description="It may have been renamed, moved to the Trash, or its file couldn't be read."
-          action={
-            <Button variant="secondary" onClick={() => navigate({ kind: 'home' })}>
-              Go home
-            </Button>
-          }
-        />
-      </div>
+      <DeletedDraftRecovery
+        vaultId={vault}
+        path={selection.path}
+        fallback={
+          <div className="flex min-w-0 flex-1 items-center justify-center">
+            <EmptyState
+              icon="file-x"
+              title="Diagram unavailable"
+              description="It may have been renamed, moved to the Trash, or its file couldn't be read."
+              action={
+                <Button variant="secondary" onClick={() => navigate({ kind: 'home' })}>
+                  Go home
+                </Button>
+              }
+            />
+          </div>
+        }
+      />
     );
   }
 
@@ -99,7 +121,7 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
     entry?.title ??
     humanize((selection.path.split('/').pop() ?? selection.path).replace(/\.mmd$/, ''));
 
-  return (
+  const content = (
     <div ref={host} className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="diagram-page">
       <div className="cb-diagram-toolbar">
         <Icon name="waypoints" size={14} color="var(--n-500)" />
@@ -121,6 +143,15 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
             onClick={() => setConverting(true)}
           >
             Convert to whiteboard
+          </button>
+        )}
+        {saveState === 'failed' && (
+          <button
+            type="button"
+            className="rounded-md border border-n-200 px-2 py-1 text-xs text-n-700 hover:bg-n-50"
+            onClick={() => void retry()}
+          >
+            Retry save
           </button>
         )}
         {SAVE_LABEL[saveState] !== null && (
@@ -151,14 +182,17 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
            handleChange, the same channel the old panes used, so the keyed
            debounced autosave (M29.23) is untouched. The editor owns no
            persistence; this page is the only writer. */
-        <FullScreenDiagramEditor
-          code={code}
-          onChangeCode={handleChange}
-          history={{ undo, redo, canUndo, canRedo }}
-          entries={entries}
-          onOpenPath={openPath}
-        />
+        <RecoveryBufferContext.Provider value={recoveryCapture}>
+          <FullScreenDiagramEditor
+            code={code}
+            onChangeCode={handleChange}
+            history={{ undo, redo, canUndo, canRedo }}
+            entries={entries}
+            onOpenPath={openPath}
+          />
+        </RecoveryBufferContext.Provider>
       )}
     </div>
   );
+  return content;
 }

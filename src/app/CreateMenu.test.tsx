@@ -9,11 +9,13 @@ import { chooseOption } from '@/test/chooseOption';
 import { fixtureVault } from '@/test/factories';
 import { CreateLauncher } from './CreateLauncher';
 import { useLauncherStore } from '@/stores/launcherStore';
+import { clearCreationDraftsForVault } from '@/stores/creationDraftStore';
 
 afterEach(cleanup);
 
 describe('CreateMenu', () => {
   beforeEach(() => {
+    clearCreationDraftsForVault('/demo-vault');
     useVaultStore.setState({
       vaultPath: '/demo-vault',
       entriesVault: '/demo-vault',
@@ -36,8 +38,8 @@ describe('CreateMenu', () => {
     );
     await user.click(screen.getByRole('button', { name: 'New' }));
     await user.click(screen.getByRole('option', { name: 'Record' }));
-    await user.type(screen.getByPlaceholderText('What is it called?'), 'Ship the fix');
     chooseOption(screen.getByRole('button', { name: 'Database' }), 'Work item');
+    await user.type(screen.getByPlaceholderText('What is it called?'), 'Ship the fix');
     await user.click(screen.getByRole('button', { name: 'Create record' }));
     // No project context → the type's records folder; no key without a
     // container prefix (M12.2).
@@ -108,9 +110,8 @@ describe('CreateMenu', () => {
     expect(screen.getByRole('dialog', { name: 'New collection' })).toBeTruthy();
   });
 
-  // Deviation guards (16a/17b): createItem throws to callers by design — the
-  // dialog surfaces the failure and stays open for retry.
-  it('surfaces a failed record create via toast and keeps the dialog open', async () => {
+  // Creation retains the failed submission in its session, with an inline error.
+  it('surfaces a failed record create and keeps the dialog open', async () => {
     const user = userEvent.setup();
     const createItem = vi.fn().mockRejectedValue(new Error('disk full'));
     useVaultStore.setState({ createItem });
@@ -124,11 +125,7 @@ describe('CreateMenu', () => {
     await user.click(screen.getByRole('option', { name: 'Record' }));
     await user.type(screen.getByPlaceholderText('What is it called?'), 'Doomed');
     await user.click(screen.getByRole('button', { name: 'Create record' }));
-    await vi.waitFor(() => {
-      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-        "Couldn't create “Doomed”",
-      );
-    });
+    expect(await screen.findByText('disk full')).toBeTruthy();
     expect(screen.getByPlaceholderText('What is it called?')).toBeTruthy();
   });
 

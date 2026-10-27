@@ -1680,3 +1680,895 @@ pub const SCHEMA_V31: &str = "
         PRIMARY KEY (vault_id, kind, value)
     ) WITHOUT ROWID;
 ";
+
+/// M96.2 — native connection metadata and revocable acquisition attempts.
+/// Secret bytes are absent: only typed references enter the cleanup journal.
+pub const SCHEMA_V32: &str = r#"
+    CREATE TABLE managed_connections (
+        connection_id TEXT PRIMARY KEY NOT NULL CHECK (length(connection_id) BETWEEN 1 AND 128),
+        person TEXT NOT NULL CHECK (person LIKE 'human:_%' AND length(person) <= 128),
+        status TEXT NOT NULL CHECK (json_valid(status) AND json_type(status) = 'object' AND length(status) <= 8192),
+        active_attempt TEXT CHECK (active_attempt IS NULL OR length(active_attempt) = 32),
+        secret_ref TEXT CHECK (secret_ref IS NULL OR (json_valid(secret_ref) AND json_type(secret_ref) = 'object' AND length(secret_ref) <= 2048)),
+        CHECK (json_extract(status, '$.connectionId') IS connection_id),
+        CHECK (json_type(status, '$.revision') IS 'integer' AND json_extract(status, '$.revision') BETWEEN 1 AND 9007199254740991),
+        CHECK (json_type(status, '$.secretRevision') IS 'integer' AND json_extract(status, '$.secretRevision') BETWEEN 0 AND 9007199254740991),
+        CHECK (json_type(status, '$.revocationGeneration') IS 'integer' AND json_extract(status, '$.revocationGeneration') BETWEEN 0 AND 9007199254740991),
+        CHECK (coalesce(json_extract(status, '$.health') IN ('sign_in_required', 'ready', 'unavailable', 'unsupported', 'disabled'), 0)),
+        CHECK (json_extract(status, '$.remoteRevocation') IS 'not_attempted'),
+        CHECK (json_extract(status, '$.health') != 'ready' OR (json_type(status, '$.account') IS 'object' AND secret_ref IS NOT NULL)),
+        CHECK (json_type(status, '$.cleanupPending') IN ('true', 'false')),
+        CHECK (coalesce(json_extract(status, '$.observedAt') LIKE '____-__-__T%Z', 0)),
+        CHECK (json_type(status, '$.account') IS 'null' OR (json_type(status, '$.account.accountRevision') IS 'integer' AND json_extract(status, '$.account.accountRevision') BETWEEN 1 AND 9007199254740991))
+    );
+    CREATE TABLE managed_connection_attempts (
+        attempt_id TEXT PRIMARY KEY NOT NULL CHECK (length(attempt_id) = 32 AND NOT attempt_id GLOB '*[^0-9a-f]*'),
+        connection_id TEXT NOT NULL REFERENCES managed_connections (connection_id),
+        person TEXT NOT NULL CHECK (person LIKE 'human:_%' AND length(person) <= 128),
+        payload TEXT NOT NULL CHECK (json_valid(payload) AND json_type(payload) = 'object' AND length(payload) <= 4096),
+        CHECK (json_extract(payload, '$.attemptId') IS attempt_id),
+        CHECK (json_extract(payload, '$.connectionId') IS connection_id),
+        CHECK (json_extract(payload, '$.person') IS person),
+        CHECK (json_extract(payload, '$.host') IS 'github.com'),
+        CHECK (json_type(payload, '$.expectedRevision') IS 'integer' AND json_extract(payload, '$.expectedRevision') BETWEEN 1 AND 9007199254740991),
+        CHECK (json_type(payload, '$.revocationGeneration') IS 'integer' AND json_extract(payload, '$.revocationGeneration') BETWEEN 0 AND 9007199254740991),
+        CHECK (coalesce(json_extract(payload, '$.state') IN ('pending', 'installed', 'cancelled', 'failed'), 0)),
+        CHECK (json_type(payload, '$.error') IS 'null' OR coalesce(json_extract(payload, '$.error') IN ('sign_in_required', 'invalid_selection', 'stale_revision', 'not_found', 'unavailable', 'unsupported', 'identity_mismatch', 'cancelled', 'source_changed', 'unsafe_path', 'invalid_config'), 0)),
+        CHECK (coalesce(json_extract(payload, '$.observedAt') LIKE '____-__-__T%Z', 0))
+    );
+    CREATE INDEX managed_attempts_by_connection ON managed_connection_attempts(connection_id);
+    CREATE TABLE managed_secret_cleanup (
+        secret_id TEXT PRIMARY KEY NOT NULL CHECK (length(secret_id) = 32 AND NOT secret_id GLOB '*[^0-9a-f]*'),
+        connection_id TEXT NOT NULL REFERENCES managed_connections (connection_id),
+        disposition TEXT NOT NULL CHECK (disposition IN ('reserved', 'delete')),
+        reference TEXT NOT NULL CHECK (json_valid(reference) AND json_type(reference) = 'object' AND length(reference) <= 2048),
+        CHECK (json_extract(reference, '$.id') IS secret_id),
+        CHECK (json_type(reference, '$.secretRevision') IS 'integer' AND json_extract(reference, '$.secretRevision') BETWEEN 1 AND 9007199254740991)
+    );
+"#;
+
+/// M96.2 repair — observation writes have their own CAS epoch. V32 bindings
+/// retain their exact status bytes and start at epoch zero on upgrade.
+pub const SCHEMA_V33: &str = "
+    ALTER TABLE managed_connections ADD COLUMN observation_revision INTEGER NOT NULL DEFAULT 0
+        CHECK (typeof(observation_revision) = 'integer'
+            AND observation_revision BETWEEN 0 AND 9007199254740991);
+";
+
+/// M96.3 — minimal operational action evidence, independent of chat retention.
+/// The active-fence index arbitrates dispatch across runs and windows.
+pub const SCHEMA_V34: &str = r#"
+    CREATE TABLE action_invocations (
+        invocation_id TEXT PRIMARY KEY NOT NULL CHECK(length(invocation_id)=32 AND NOT invocation_id GLOB '*[^0-9a-f]*'),
+        subject_scope TEXT NOT NULL CHECK(length(subject_scope)=64 AND NOT subject_scope GLOB '*[^0-9a-f]*'),
+        request_key TEXT NOT NULL CHECK(length(request_key) BETWEEN 1 AND 256),
+        request_digest TEXT NOT NULL CHECK(length(request_digest)=64 AND NOT request_digest GLOB '*[^0-9a-f]*'),
+        revision INTEGER NOT NULL CHECK(typeof(revision)='integer' AND revision BETWEEN 1 AND 9007199254740991),
+        state TEXT NOT NULL CHECK(state IN ('prepared','awaiting_approval','ready','dispatched','succeeded','failed','outcome_unknown','cancelled')),
+        fence TEXT CHECK(fence IS NULL OR (length(fence)=64 AND NOT fence GLOB '*[^0-9a-f]*')),
+        payload TEXT NOT NULL CHECK(json_valid(payload) AND json_type(payload)='object' AND length(payload)<=1048576),
+        CHECK(json_extract(payload,'$.details.effect.invocationId') IS invocation_id),
+        CHECK(json_extract(payload,'$.details.effect.state') IS state),
+        CHECK(json_extract(payload,'$.details.revision') IS revision),
+        CHECK(json_extract(payload,'$.request.requestKey') IS request_key),
+        CHECK(json_extract(payload,'$.request_digest') IS request_digest),
+        UNIQUE(subject_scope,request_key)
+    );
+    CREATE UNIQUE INDEX action_unresolved_fence ON action_invocations(fence)
+        WHERE fence IS NOT NULL AND state IN ('dispatched','outcome_unknown');
+    CREATE TABLE action_approvals (
+        approval_id TEXT PRIMARY KEY NOT NULL CHECK(length(approval_id)=32 AND NOT approval_id GLOB '*[^0-9a-f]*'),
+        invocation_id TEXT NOT NULL REFERENCES action_invocations(invocation_id),
+        payload TEXT NOT NULL CHECK(json_valid(payload) AND json_type(payload)='object' AND length(payload)<=131072),
+        CHECK(json_extract(payload,'$.view.approvalId') IS approval_id),
+        CHECK(json_type(payload,'$.view.revision') IS 'integer' AND json_extract(payload,'$.view.revision') BETWEEN 1 AND 9007199254740991),
+        CHECK(json_type(payload,'$.consumed') IN ('true','false')),
+        CHECK(json_type(payload,'$.retired') IN ('true','false'))
+    );
+    CREATE INDEX action_approvals_by_invocation ON action_approvals(invocation_id);
+    CREATE TABLE action_attempts (
+        attempt_id TEXT PRIMARY KEY NOT NULL CHECK(length(attempt_id)=32 AND NOT attempt_id GLOB '*[^0-9a-f]*'),
+        invocation_id TEXT NOT NULL REFERENCES action_invocations(invocation_id),
+        ordinal INTEGER NOT NULL CHECK(typeof(ordinal)='integer' AND ordinal BETWEEN 1 AND 9007199254740991),
+        payload TEXT NOT NULL CHECK(json_valid(payload) AND json_type(payload)='object' AND length(payload)<=8192),
+        CHECK(json_extract(payload,'$.attemptId') IS attempt_id),
+        CHECK(json_extract(payload,'$.ordinal') IS ordinal),
+        UNIQUE(invocation_id,ordinal)
+    );
+"#;
+
+/// Native action provenance and explicit account/action grants. No legacy backfill.
+pub const SCHEMA_V35: &str = r#"
+CREATE TABLE action_native_runs (
+    run_id TEXT PRIMARY KEY NOT NULL REFERENCES runs(run_id)
+        CHECK(length(run_id) BETWEEN 1 AND 128),
+    authority_id TEXT NOT NULL UNIQUE
+        CHECK(length(authority_id)=32 AND NOT authority_id GLOB '*[^0-9a-f]*'),
+    revision INTEGER NOT NULL
+        CHECK(typeof(revision)='integer' AND revision BETWEEN 1 AND 9007199254740991),
+    vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+    store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+    canonical_vault_path TEXT NOT NULL CHECK(length(canonical_vault_path) BETWEEN 1 AND 4096),
+    owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
+    actor_id TEXT NOT NULL CHECK(length(actor_id) BETWEEN 1 AND 128),
+    source_kind TEXT NOT NULL CHECK(source_kind IN ('attended_operation','run','client','job')),
+    app_session_id TEXT NOT NULL CHECK(length(app_session_id) BETWEEN 1 AND 1024),
+    cli_session_id TEXT CHECK(cli_session_id IS NULL OR length(cli_session_id) BETWEEN 8 AND 64),
+    parent_run_id TEXT REFERENCES action_native_runs(run_id)
+        CHECK(parent_run_id IS NULL OR parent_run_id<>run_id),
+    client_id TEXT CHECK(client_id IS NULL OR
+        (length(client_id)=32 AND NOT client_id GLOB '*[^0-9a-f]*')),
+    child_job_id TEXT CHECK(child_job_id IS NULL OR length(child_job_id) BETWEEN 1 AND 128),
+    admitted_at TEXT NOT NULL CHECK(admitted_at LIKE '____-__-__T%Z'),
+    closed_at TEXT CHECK(closed_at IS NULL OR closed_at LIKE '____-__-__T%Z'),
+    close_kind TEXT CHECK(close_kind IS NULL OR close_kind IN ('completed','stopped','revoked','context_closed')),
+    CHECK((closed_at IS NULL)=(close_kind IS NULL)),
+    CHECK((source_kind='client')=(client_id IS NOT NULL)),
+    CHECK((source_kind='job')=(child_job_id IS NOT NULL)),
+    CHECK((source_kind IN ('run','job'))=(cli_session_id IS NOT NULL)),
+    FOREIGN KEY(app_session_id,vault_id,store_uuid)
+        REFERENCES app_sessions(session_id,vault_id,store_uuid)
+);
+CREATE INDEX action_native_runs_by_owner_scope
+    ON action_native_runs(owner_person,vault_id,store_uuid,run_id);
+CREATE INDEX action_native_runs_by_parent ON action_native_runs(parent_run_id);
+CREATE INDEX action_native_runs_by_client ON action_native_runs(client_id)
+    WHERE client_id IS NOT NULL;
+
+CREATE TABLE action_account_grants (
+    grant_id TEXT PRIMARY KEY NOT NULL
+        CHECK(length(grant_id)=32 AND NOT grant_id GLOB '*[^0-9a-f]*'),
+    run_id TEXT NOT NULL REFERENCES action_native_runs(run_id),
+    connection_id TEXT NOT NULL REFERENCES managed_connections(connection_id),
+    account_id TEXT NOT NULL CHECK(length(account_id) BETWEEN 1 AND 128),
+    account_identity_digest TEXT NOT NULL
+        CHECK(length(account_identity_digest)=64 AND NOT account_identity_digest GLOB '*[^0-9a-f]*'),
+    account_revision INTEGER NOT NULL
+        CHECK(typeof(account_revision)='integer' AND account_revision BETWEEN 1 AND 9007199254740991),
+    revocation_generation INTEGER NOT NULL
+        CHECK(typeof(revocation_generation)='integer' AND revocation_generation BETWEEN 0 AND 9007199254740991),
+    action_id TEXT NOT NULL CHECK(length(action_id) BETWEEN 1 AND 8192 AND instr(action_id,':')>1),
+    definition_digest TEXT NOT NULL
+        CHECK(length(definition_digest)=64 AND NOT definition_digest GLOB '*[^0-9a-f]*'),
+    input_scope TEXT NOT NULL CHECK(input_scope IN ('all_valid_inputs','exact_canonical_input')),
+    input_digest TEXT CHECK(input_digest IS NULL OR
+        (length(input_digest)=64 AND NOT input_digest GLOB '*[^0-9a-f]*')),
+    capabilities_json TEXT NOT NULL CHECK(json_valid(capabilities_json)
+        AND json_type(capabilities_json)='array' AND length(capabilities_json)<=65536
+        AND json_array_length(capabilities_json)<=256),
+    parent_grant_id TEXT REFERENCES action_account_grants(grant_id)
+        CHECK(parent_grant_id IS NULL OR parent_grant_id<>grant_id),
+    revision INTEGER NOT NULL
+        CHECK(typeof(revision)='integer' AND revision BETWEEN 1 AND 9007199254740991),
+    granted_by TEXT NOT NULL CHECK(granted_by='human:me'),
+    granted_at TEXT NOT NULL CHECK(granted_at LIKE '____-__-__T%Z'),
+    revoked_at TEXT CHECK(revoked_at IS NULL OR revoked_at LIKE '____-__-__T%Z'),
+    CHECK((input_scope='exact_canonical_input')=(input_digest IS NOT NULL))
+);
+CREATE UNIQUE INDEX action_account_grants_active_all
+    ON action_account_grants(run_id,connection_id,account_id,action_id,definition_digest)
+    WHERE revoked_at IS NULL AND input_scope='all_valid_inputs';
+CREATE UNIQUE INDEX action_account_grants_active_exact
+    ON action_account_grants(run_id,connection_id,account_id,action_id,definition_digest,input_digest)
+    WHERE revoked_at IS NULL AND input_scope='exact_canonical_input';
+CREATE INDEX action_account_grants_by_parent ON action_account_grants(parent_grant_id)
+    WHERE parent_grant_id IS NOT NULL;
+"#;
+
+/// M97.3 — immutable, capped configuration facts. No payload backfill or run purge.
+pub const SCHEMA_V36: &str = r#"
+ALTER TABLE runs ADD COLUMN configuration_capture TEXT NOT NULL DEFAULT 'legacy'
+ CHECK(configuration_capture IN ('legacy','required','recorded','expired','deleted','capture_failed'));
+ALTER TABLE runs ADD COLUMN configuration_failure_code TEXT
+ CHECK(configuration_failure_code IS NULL OR configuration_failure_code IN ('too_large','active_capacity','invalid_metadata','write_failed','interrupted'));
+ALTER TABLE runs ADD COLUMN configuration_disposed_at TEXT
+ CHECK(configuration_disposed_at IS NULL OR configuration_disposed_at LIKE '____-__-__T%Z');
+ALTER TABLE runs ADD COLUMN configuration_publication_failure TEXT
+ CHECK(configuration_publication_failure IS NULL OR configuration_publication_failure IN ('failed_before_start','failed_publication'));
+CREATE TABLE run_configurations (
+ run_id TEXT PRIMARY KEY NOT NULL REFERENCES runs(run_id),
+ vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),store_uuid TEXT,
+ format INTEGER NOT NULL CHECK(format=1),
+ captured_at TEXT NOT NULL CHECK(captured_at LIKE '____-__-__T%Z'),
+ manifest_json TEXT NOT NULL CHECK(json_valid(manifest_json) AND json_type(manifest_json)='object'),
+ payload_bytes INTEGER NOT NULL CHECK(typeof(payload_bytes)='integer' AND payload_bytes BETWEEN 1 AND 65536),
+ CHECK(length(CAST(manifest_json AS BLOB))=payload_bytes),
+ CHECK(json_extract(manifest_json,'$.run_id') IS run_id),
+ CHECK(json_extract(manifest_json,'$.vault_id') IS vault_id),
+ CHECK(json_extract(manifest_json,'$.store_uuid') IS store_uuid)
+);
+CREATE INDEX run_configurations_by_vault ON run_configurations(vault_id,run_id);
+"#;
+
+/// M96 native catalog reads — admit dotted IDs in the storage shape without
+/// rewriting V35 or changing grants. Strict namespace semantics are the shared
+/// action-id contract consumed by the definition compiler, not this SQL shape.
+pub const SCHEMA_V37: &str = r#"
+CREATE TABLE action_account_grants_v37 (
+    grant_id TEXT PRIMARY KEY NOT NULL
+        CHECK(length(grant_id)=32 AND NOT grant_id GLOB '*[^0-9a-f]*'),
+    run_id TEXT NOT NULL REFERENCES action_native_runs(run_id),
+    connection_id TEXT NOT NULL REFERENCES managed_connections(connection_id),
+    account_id TEXT NOT NULL CHECK(length(account_id) BETWEEN 1 AND 128),
+    account_identity_digest TEXT NOT NULL
+        CHECK(length(account_identity_digest)=64 AND NOT account_identity_digest GLOB '*[^0-9a-f]*'),
+    account_revision INTEGER NOT NULL
+        CHECK(typeof(account_revision)='integer' AND account_revision BETWEEN 1 AND 9007199254740991),
+    revocation_generation INTEGER NOT NULL
+        CHECK(typeof(revocation_generation)='integer' AND revocation_generation BETWEEN 0 AND 9007199254740991),
+    action_id TEXT NOT NULL CHECK(length(action_id) BETWEEN 1 AND 8192 AND (instr(action_id,':')>1 OR instr(action_id,'.')>1)),
+    definition_digest TEXT NOT NULL
+        CHECK(length(definition_digest)=64 AND NOT definition_digest GLOB '*[^0-9a-f]*'),
+    input_scope TEXT NOT NULL CHECK(input_scope IN ('all_valid_inputs','exact_canonical_input')),
+    input_digest TEXT CHECK(input_digest IS NULL OR
+        (length(input_digest)=64 AND NOT input_digest GLOB '*[^0-9a-f]*')),
+    capabilities_json TEXT NOT NULL CHECK(json_valid(capabilities_json)
+        AND json_type(capabilities_json)='array' AND length(capabilities_json)<=65536
+        AND json_array_length(capabilities_json)<=256),
+    parent_grant_id TEXT REFERENCES action_account_grants_v37(grant_id)
+        CHECK(parent_grant_id IS NULL OR parent_grant_id<>grant_id),
+    revision INTEGER NOT NULL
+        CHECK(typeof(revision)='integer' AND revision BETWEEN 1 AND 9007199254740991),
+    granted_by TEXT NOT NULL CHECK(granted_by='human:me'),
+    granted_at TEXT NOT NULL CHECK(granted_at LIKE '____-__-__T%Z'),
+    revoked_at TEXT CHECK(revoked_at IS NULL OR revoked_at LIKE '____-__-__T%Z'),
+    CHECK((input_scope='exact_canonical_input')=(input_digest IS NOT NULL))
+);
+INSERT INTO action_account_grants_v37 (grant_id,run_id,connection_id,account_id,account_identity_digest,account_revision,revocation_generation,action_id,definition_digest,input_scope,input_digest,capabilities_json,parent_grant_id,revision,granted_by,granted_at,revoked_at)
+SELECT grant_id,run_id,connection_id,account_id,account_identity_digest,account_revision,revocation_generation,action_id,definition_digest,input_scope,input_digest,capabilities_json,parent_grant_id,revision,granted_by,granted_at,revoked_at FROM action_account_grants;
+DROP TABLE action_account_grants;
+ALTER TABLE action_account_grants_v37 RENAME TO action_account_grants;
+CREATE UNIQUE INDEX action_account_grants_active_all
+    ON action_account_grants(run_id,connection_id,account_id,action_id,definition_digest)
+    WHERE revoked_at IS NULL AND input_scope='all_valid_inputs';
+CREATE UNIQUE INDEX action_account_grants_active_exact
+    ON action_account_grants(run_id,connection_id,account_id,action_id,definition_digest,input_digest)
+    WHERE revoked_at IS NULL AND input_scope='exact_canonical_input';
+CREATE INDEX action_account_grants_by_parent ON action_account_grants(parent_grant_id)
+    WHERE parent_grant_id IS NOT NULL;
+"#;
+
+/// M95.6 — original native parent-attempt identity only. No legacy backfill,
+/// request bodies, job reservation or execution authority. The native owner
+/// checks that run and authority name the SAME joined parent before recording.
+pub const SCHEMA_V38: &str = r#"
+CREATE TABLE chat_parent_attempts (
+    parent_run_id TEXT PRIMARY KEY NOT NULL
+        REFERENCES action_native_runs(run_id) ON DELETE CASCADE,
+    attempt_id TEXT NOT NULL UNIQUE
+        CHECK(length(attempt_id)=32 AND NOT attempt_id GLOB '*[^0-9a-f]*'),
+    authority_id TEXT NOT NULL UNIQUE
+        REFERENCES action_native_runs(authority_id) ON DELETE CASCADE
+);
+"#;
+
+/// M95.6 inert original-root intent/allocation metadata. No bodies/backfill,
+/// running child rows, lifecycle, credentials or admission. Writers stay test-only.
+pub const SCHEMA_V39: &str = r#"
+CREATE UNIQUE INDEX chat_parent_attempt_binding
+    ON chat_parent_attempts(parent_run_id,attempt_id,authority_id);
+CREATE TABLE chat_delegation_intents (
+    slot_id TEXT PRIMARY KEY NOT NULL
+        CHECK(length(slot_id)=32 AND NOT slot_id GLOB '*[^0-9a-f]*'),
+    request_key TEXT NOT NULL
+        CHECK(length(request_key)=32 AND NOT request_key GLOB '*[^0-9a-f]*'),
+    parent_run_id TEXT NOT NULL CHECK(length(parent_run_id) BETWEEN 1 AND 128),
+    attempt_id TEXT NOT NULL
+        CHECK(length(attempt_id)=32 AND NOT attempt_id GLOB '*[^0-9a-f]*'),
+    authority_id TEXT NOT NULL
+        CHECK(length(authority_id)=32 AND NOT authority_id GLOB '*[^0-9a-f]*'),
+    authority_revision INTEGER NOT NULL
+        CHECK(typeof(authority_revision)='integer' AND authority_revision BETWEEN 1 AND 9007199254740991),
+    owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
+    vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+    store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+    parent_cli_session_id TEXT NOT NULL CHECK(length(parent_cli_session_id)=36),
+    app_session_id TEXT NOT NULL CHECK(length(app_session_id) BETWEEN 1 AND 1024),
+    actor_id TEXT NOT NULL CHECK(length(actor_id) BETWEEN 1 AND 128),
+    slot_ordinal INTEGER NOT NULL CHECK(typeof(slot_ordinal)='integer' AND slot_ordinal BETWEEN 0 AND 4294967295),
+    CHECK(slot_id<>request_key),
+    UNIQUE(parent_run_id,attempt_id,slot_ordinal),
+    UNIQUE(owner_person,vault_id,store_uuid,parent_run_id,attempt_id,request_key),
+    FOREIGN KEY(parent_run_id,attempt_id,authority_id)
+        REFERENCES chat_parent_attempts(parent_run_id,attempt_id,authority_id) ON DELETE RESTRICT,
+    FOREIGN KEY(app_session_id,vault_id,store_uuid)
+        REFERENCES app_sessions(session_id,vault_id,store_uuid) ON DELETE RESTRICT
+);
+CREATE INDEX chat_delegation_session
+    ON chat_delegation_intents(owner_person,vault_id,store_uuid,parent_cli_session_id);
+CREATE TABLE child_job_reservations (
+    slot_id TEXT PRIMARY KEY NOT NULL REFERENCES chat_delegation_intents(slot_id) ON DELETE RESTRICT,
+    job_id TEXT NOT NULL UNIQUE
+        CHECK(length(job_id)=32 AND NOT job_id GLOB '*[^0-9a-f]*'),
+    reserved_run_id TEXT NOT NULL UNIQUE
+        CHECK(length(reserved_run_id)=32 AND NOT reserved_run_id GLOB '*[^0-9a-f]*'),
+    reserved_cli_session_id TEXT NOT NULL UNIQUE CHECK(length(reserved_cli_session_id)=36),
+    request_digest TEXT NOT NULL
+        CHECK(length(request_digest)=64 AND NOT request_digest GLOB '*[^0-9a-f]*'),
+    deadline_at INTEGER NOT NULL
+        CHECK(typeof(deadline_at)='integer' AND deadline_at BETWEEN 1 AND 9007199254740991),
+    elapsed_seconds INTEGER NOT NULL
+        CHECK(typeof(elapsed_seconds)='integer' AND elapsed_seconds BETWEEN 1 AND 4294967295),
+    result_bytes INTEGER NOT NULL
+        CHECK(typeof(result_bytes)='integer' AND result_bytes BETWEEN 1 AND 4294967295),
+    occupies_slot INTEGER NOT NULL CHECK(typeof(occupies_slot)='integer' AND occupies_slot IN (0,1)),
+    CHECK(job_id<>reserved_run_id)
+);
+CREATE TRIGGER chat_delegation_intents_immutable BEFORE UPDATE ON chat_delegation_intents
+BEGIN SELECT RAISE(ABORT,'delegation intent is immutable'); END;
+CREATE TRIGGER chat_delegation_intents_retained BEFORE DELETE ON chat_delegation_intents
+BEGIN SELECT RAISE(ABORT,'delegation intent accounting is retained'); END;
+CREATE TRIGGER child_job_reservations_immutable BEFORE UPDATE ON child_job_reservations
+WHEN NEW.slot_id IS NOT OLD.slot_id OR NEW.job_id IS NOT OLD.job_id
+    OR NEW.reserved_run_id IS NOT OLD.reserved_run_id
+    OR NEW.reserved_cli_session_id IS NOT OLD.reserved_cli_session_id
+    OR NEW.request_digest IS NOT OLD.request_digest OR NEW.deadline_at IS NOT OLD.deadline_at
+    OR NEW.elapsed_seconds IS NOT OLD.elapsed_seconds OR NEW.result_bytes IS NOT OLD.result_bytes
+    OR (OLD.occupies_slot=0 AND NEW.occupies_slot<>0)
+BEGIN SELECT RAISE(ABORT,'reservation identity is immutable'); END;
+CREATE TRIGGER child_job_reservations_retained BEFORE DELETE ON child_job_reservations
+BEGIN SELECT RAISE(ABORT,'reservation lifetime accounting is retained'); END;
+"#;
+
+/// M95.6 local built-in grant freeze. Only immutable digests, one original V39
+/// reservation; no body, child run, configuration, account or execution state.
+pub const SCHEMA_V40: &str = r#"
+CREATE TABLE child_job_grant_freezes (
+    slot_id TEXT PRIMARY KEY NOT NULL REFERENCES child_job_reservations(slot_id) ON DELETE RESTRICT,
+    contract_digest TEXT NOT NULL UNIQUE
+        CHECK(length(contract_digest)=64 AND NOT contract_digest GLOB '*[^0-9a-f]*'),
+    instruction_source_version TEXT NOT NULL
+        CHECK(length(instruction_source_version)=64 AND NOT instruction_source_version GLOB '*[^0-9a-f]*'),
+    policy_digest TEXT NOT NULL
+        CHECK(length(policy_digest)=64 AND NOT policy_digest GLOB '*[^0-9a-f]*')
+);
+CREATE TRIGGER child_job_grant_freezes_no_replace BEFORE INSERT ON child_job_grant_freezes
+WHEN EXISTS(SELECT 1 FROM child_job_grant_freezes WHERE slot_id=NEW.slot_id OR contract_digest=NEW.contract_digest)
+BEGIN SELECT RAISE(ABORT,'grant freeze is immutable'); END;
+CREATE TRIGGER child_job_grant_freezes_immutable BEFORE UPDATE ON child_job_grant_freezes
+BEGIN SELECT RAISE(ABORT,'grant freeze is immutable'); END;
+CREATE TRIGGER child_job_grant_freezes_retained BEFORE DELETE ON child_job_grant_freezes
+BEGIN SELECT RAISE(ABORT,'grant freeze is retained'); END;
+"#;
+
+/// M95 actual pre-launch claims. No prompt, configuration, process or result.
+/// Immutable reservation/freeze/intent joins supply the remaining identity axes.
+pub const SCHEMA_V41: &str = r#"
+CREATE TABLE child_job_claims (
+    slot_id TEXT PRIMARY KEY NOT NULL REFERENCES child_job_grant_freezes(slot_id),
+    claim_id TEXT NOT NULL UNIQUE CHECK(length(claim_id)=32 AND NOT claim_id GLOB '*[^0-9a-f]*'),
+    run_id TEXT NOT NULL UNIQUE REFERENCES runs(run_id),
+    authority_id TEXT NOT NULL UNIQUE REFERENCES action_native_runs(authority_id),
+    contract_digest TEXT NOT NULL REFERENCES child_job_grant_freezes(contract_digest),
+    app_session_id TEXT NOT NULL CHECK(length(app_session_id) BETWEEN 1 AND 1024),
+    claimed_at TEXT NOT NULL CHECK(claimed_at LIKE '____-__-__T%Z'),
+    state TEXT NOT NULL CHECK(state IN ('claimed','backend_unavailable','cancelled','expired','interrupted')),
+    ended_at TEXT CHECK(ended_at IS NULL OR ended_at LIKE '____-__-__T%Z'),
+    CHECK((state='claimed')=(ended_at IS NULL)),
+    CHECK(ended_at IS NULL OR ended_at>=claimed_at)
+);
+CREATE TRIGGER child_job_claims_no_replace BEFORE INSERT ON child_job_claims
+WHEN EXISTS(SELECT 1 FROM child_job_claims WHERE slot_id=NEW.slot_id OR claim_id=NEW.claim_id
+    OR run_id=NEW.run_id OR authority_id=NEW.authority_id)
+BEGIN SELECT RAISE(ABORT,'child claim cannot be replaced'); END;
+CREATE TRIGGER child_job_claims_immutable BEFORE UPDATE ON child_job_claims
+WHEN NEW.slot_id IS NOT OLD.slot_id OR NEW.claim_id IS NOT OLD.claim_id
+    OR NEW.run_id IS NOT OLD.run_id OR NEW.authority_id IS NOT OLD.authority_id
+    OR NEW.contract_digest IS NOT OLD.contract_digest OR NEW.app_session_id IS NOT OLD.app_session_id
+    OR NEW.claimed_at IS NOT OLD.claimed_at OR OLD.state<>'claimed'
+    OR NEW.state='claimed' OR NEW.ended_at IS NULL
+BEGIN SELECT RAISE(ABORT,'child claim identity and terminal disposition are immutable'); END;
+CREATE TRIGGER child_job_claims_retained BEFORE DELETE ON child_job_claims
+BEGIN SELECT RAISE(ABORT,'child claim is retained'); END;
+"#;
+
+/// M95.5 — metadata-only pre-dispatch generation admission. No content archive,
+/// effect permission, historical backfill or child enablement.
+pub const SCHEMA_V42: &str = r#"
+CREATE TABLE chat_generations (
+    generation_id TEXT PRIMARY KEY NOT NULL CHECK(length(generation_id)=32 AND NOT generation_id GLOB '*[^0-9a-f]*'),
+    owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
+    vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+    store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+    actor_id TEXT NOT NULL CHECK(length(actor_id) BETWEEN 1 AND 128),
+    request_key TEXT NOT NULL CHECK(length(request_key)=32 AND NOT request_key GLOB '*[^0-9a-f]*'),
+    request_digest TEXT NOT NULL CHECK(length(request_digest)=64 AND NOT request_digest GLOB '*[^0-9a-f]*'),
+    first_run_id TEXT NOT NULL UNIQUE CHECK(length(first_run_id)=32 AND NOT first_run_id GLOB '*[^0-9a-f]*'),
+    current_run_id TEXT NOT NULL UNIQUE CHECK(length(current_run_id)=32 AND NOT current_run_id GLOB '*[^0-9a-f]*'),
+    state TEXT NOT NULL CHECK(state IN ('admitted','running','deferred','completed','failed','cancelled','interrupted')),
+    cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancel_requested IN (0,1)),
+    UNIQUE(owner_person,vault_id,store_uuid,request_key)
+);
+CREATE TABLE chat_generation_runs (
+    run_id TEXT PRIMARY KEY NOT NULL CHECK(length(run_id)=32 AND NOT run_id GLOB '*[^0-9a-f]*'),
+    generation_id TEXT NOT NULL REFERENCES chat_generations(generation_id) ON DELETE RESTRICT,
+    predecessor_run_id TEXT REFERENCES chat_generation_runs(run_id) ON DELETE RESTRICT,
+    answer_key TEXT UNIQUE CHECK(answer_key IS NULL OR (length(answer_key)=32 AND NOT answer_key GLOB '*[^0-9a-f]*')),
+    cli_session_id TEXT CHECK(cli_session_id IS NULL OR length(cli_session_id)=36),
+    app_session_id TEXT NOT NULL CHECK(length(app_session_id) BETWEEN 1 AND 1024),
+    state TEXT NOT NULL CHECK(state IN ('admitted','running','deferred','completed','failed','cancelled','interrupted')),
+    CHECK((predecessor_run_id IS NULL)=(answer_key IS NULL))
+);
+"#;
+
+/// M98.2/.3 — durable sequential workflow identities and active recovery values.
+/// Completed-detail retention remains off; activation/provider authority is absent.
+pub const SCHEMA_V43: &str = r#"
+CREATE TABLE workflow_runs (
+    run_id TEXT PRIMARY KEY NOT NULL CHECK(length(run_id)=32 AND NOT run_id GLOB '*[^0-9a-f]*'),
+    owner_person TEXT NOT NULL CHECK(length(owner_person) BETWEEN 1 AND 128),
+    vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+    store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+    actor_id TEXT NOT NULL CHECK(length(actor_id) BETWEEN 1 AND 128),
+    workflow_id TEXT NOT NULL CHECK(length(workflow_id) BETWEEN 1 AND 128),
+    definition_hash TEXT NOT NULL CHECK(length(definition_hash)=64),
+    input_schema_digest TEXT NOT NULL CHECK(length(input_schema_digest)=64),
+    start_key TEXT NOT NULL CHECK(length(start_key)=32),
+    start_digest TEXT NOT NULL CHECK(length(start_digest)=64),
+    input_ref TEXT NOT NULL CHECK(length(input_ref)=32),
+    input_digest TEXT NOT NULL CHECK(length(input_digest)=64),
+    configuration_digest TEXT NOT NULL CHECK(length(configuration_digest)=64),
+    grant_digest TEXT NOT NULL CHECK(length(grant_digest)=64),
+    act_scope_digest TEXT CHECK(act_scope_digest IS NULL OR length(act_scope_digest)=64),
+    act_run_id TEXT CHECK(act_run_id IS NULL OR length(act_run_id) BETWEEN 1 AND 128),
+    state TEXT NOT NULL CHECK(state IN ('queued','running','waiting','blocked','succeeded','failed','cancelled')),
+    reason TEXT CHECK(reason IS NULL OR length(reason) BETWEEN 1 AND 64),
+    cursor TEXT CHECK(cursor IS NULL OR length(cursor) BETWEEN 1 AND 128),
+    revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 9007199254740991),
+    cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancel_requested IN (0,1)),
+    output_bytes INTEGER NOT NULL DEFAULT 0 CHECK(output_bytes>=0),
+    reserved_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reserved_bytes>=0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK((act_scope_digest IS NULL)=(act_run_id IS NULL)),
+    UNIQUE(owner_person,vault_id,store_uuid,start_key)
+);
+CREATE TABLE workflow_steps (
+    run_id TEXT NOT NULL REFERENCES workflow_runs(run_id) ON DELETE RESTRICT,
+    step_id TEXT NOT NULL CHECK(length(step_id) BETWEEN 1 AND 128),
+    definition_ordinal INTEGER NOT NULL CHECK(definition_ordinal>=0),
+    kind TEXT NOT NULL CHECK(kind IN ('read','transform','condition','action','timer','external_input','result')),
+    next_step TEXT,
+    otherwise_step TEXT,
+    state TEXT NOT NULL CHECK(state IN ('pending','running','waiting','blocked','succeeded','failed','skipped','cancelled')),
+    attempt_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(attempt_ordinal>=0),
+    revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 9007199254740991),
+    lease_token TEXT CHECK(lease_token IS NULL OR length(lease_token)=32),
+    process_id TEXT CHECK(process_id IS NULL OR length(process_id) BETWEEN 1 AND 1024),
+    input_ref TEXT CHECK(input_ref IS NULL OR length(input_ref)=32),
+    input_digest TEXT CHECK(input_digest IS NULL OR length(input_digest)=64),
+    output_ref TEXT CHECK(output_ref IS NULL OR length(output_ref)=32),
+    output_digest TEXT CHECK(output_digest IS NULL OR length(output_digest)=64),
+    effect_revision INTEGER NOT NULL DEFAULT 0 CHECK(effect_revision>=0),
+    reason TEXT CHECK(reason IS NULL OR length(reason) BETWEEN 1 AND 64),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(run_id,step_id),
+    UNIQUE(run_id,definition_ordinal)
+);
+CREATE TABLE workflow_attempts (
+    run_id TEXT NOT NULL,
+    step_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK(ordinal>=1),
+    request_key TEXT NOT NULL UNIQUE CHECK(length(request_key)=64),
+    input_ref TEXT NOT NULL CHECK(length(input_ref)=32),
+    input_digest TEXT NOT NULL CHECK(length(input_digest)=64),
+    invocation_id TEXT CHECK(invocation_id IS NULL OR length(invocation_id) BETWEEN 1 AND 128),
+    approval_id TEXT CHECK(approval_id IS NULL OR length(approval_id) BETWEEN 1 AND 128),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(run_id,step_id,ordinal),
+    FOREIGN KEY(run_id,step_id) REFERENCES workflow_steps(run_id,step_id) ON DELETE RESTRICT
+);
+CREATE TABLE workflow_waits (
+    continuation_id TEXT PRIMARY KEY NOT NULL CHECK(length(continuation_id)=32),
+    run_id TEXT NOT NULL,
+    definition_hash TEXT NOT NULL CHECK(length(definition_hash)=64),
+    step_id TEXT NOT NULL,
+    attempt_ordinal INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('timer','external_input','person_approval')),
+    state TEXT NOT NULL CHECK(state IN ('pending','consumed','cancelled','expired')),
+    revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 9007199254740991),
+    due_at INTEGER,
+    expires_at INTEGER,
+    schema_ref TEXT CHECK(schema_ref IS NULL OR length(schema_ref)=32),
+    schema_digest TEXT CHECK(schema_digest IS NULL OR length(schema_digest)=64),
+    invocation_id TEXT,
+    approval_id TEXT,
+    signal_key TEXT CHECK(signal_key IS NULL OR length(signal_key)=32),
+    signal_digest TEXT CHECK(signal_digest IS NULL OR length(signal_digest)=64),
+    rejection_count INTEGER NOT NULL DEFAULT 0 CHECK(rejection_count BETWEEN 0 AND 9007199254740991),
+    rejection_reason TEXT CHECK(rejection_reason IS NULL OR length(rejection_reason) BETWEEN 1 AND 64),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(run_id,step_id,attempt_ordinal),
+    FOREIGN KEY(run_id,step_id,attempt_ordinal) REFERENCES workflow_attempts(run_id,step_id,ordinal) ON DELETE RESTRICT
+);
+CREATE TABLE workflow_values (
+    run_id TEXT NOT NULL REFERENCES workflow_runs(run_id) ON DELETE RESTRICT,
+    value_ref TEXT NOT NULL CHECK(length(value_ref)=32),
+    digest TEXT NOT NULL CHECK(length(digest)=64),
+    role TEXT NOT NULL CHECK(role IN ('run_input','step_input','step_output','wait_schema')),
+    step_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK(ordinal>=0),
+    canonical_json TEXT NOT NULL CHECK(json_valid(canonical_json)),
+    byte_count INTEGER NOT NULL CHECK(byte_count=length(CAST(canonical_json AS BLOB))),
+    PRIMARY KEY(run_id,value_ref),
+    UNIQUE(run_id,role,step_id,ordinal)
+);
+"#;
+
+/// M96: explicitly registered FLOW consumers' active ACT output handoff.
+pub const SCHEMA_V44: &str = r#"
+CREATE TABLE action_output_handoffs (
+    invocation_id TEXT PRIMARY KEY NOT NULL REFERENCES action_invocations(invocation_id) ON DELETE RESTRICT,
+    workflow_run_id TEXT NOT NULL,
+    step_id TEXT NOT NULL CHECK(length(step_id) BETWEEN 1 AND 128),
+    ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 9007199254740991),
+    request_key TEXT NOT NULL CHECK(length(request_key)=64 AND NOT request_key GLOB '*[^0-9a-f]*'),
+    owner_person TEXT NOT NULL CHECK(length(owner_person) BETWEEN 1 AND 128),
+    vault_id TEXT NOT NULL CHECK(length(vault_id)=32 AND NOT vault_id GLOB '*[^0-9a-f]*'),
+    store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+    actor_id TEXT NOT NULL CHECK(length(actor_id) BETWEEN 1 AND 128),
+    act_scope_json TEXT NOT NULL CHECK(json_valid(act_scope_json) AND length(CAST(act_scope_json AS BLOB))<=8192),
+    act_scope_digest TEXT NOT NULL CHECK(length(act_scope_digest)=64 AND NOT act_scope_digest GLOB '*[^0-9a-f]*'),
+    original_request_digest TEXT NOT NULL CHECK(length(original_request_digest)=64 AND NOT original_request_digest GLOB '*[^0-9a-f]*'),
+    original_input_digest TEXT NOT NULL CHECK(length(original_input_digest)=64 AND NOT original_input_digest GLOB '*[^0-9a-f]*'),
+    effective_input_digest TEXT CHECK(effective_input_digest IS NULL OR (length(effective_input_digest)=64 AND NOT effective_input_digest GLOB '*[^0-9a-f]*')),
+    reserved_bytes INTEGER NOT NULL CHECK(reserved_bytes BETWEEN 1 AND 9007199254740991),
+    attempt_id TEXT CHECK(attempt_id IS NULL OR (length(attempt_id)=32 AND NOT attempt_id GLOB '*[^0-9a-f]*')),
+    receipt_id TEXT CHECK(receipt_id IS NULL OR (length(receipt_id)=32 AND NOT receipt_id GLOB '*[^0-9a-f]*')),
+    observation_revision INTEGER CHECK(observation_revision IS NULL OR observation_revision BETWEEN 1 AND 9007199254740991),
+    state TEXT NOT NULL CHECK(state IN ('registered','retained','acknowledged')),
+    output_json TEXT CHECK(output_json IS NULL OR json_valid(output_json)),
+    output_digest TEXT CHECK(output_digest IS NULL OR (length(output_digest)=64 AND NOT output_digest GLOB '*[^0-9a-f]*')),
+    byte_count INTEGER NOT NULL CHECK(byte_count BETWEEN 0 AND reserved_bytes),
+    ack_kind TEXT CHECK(ack_kind IS NULL OR ack_kind IN ('transferred','discarded')),
+    CHECK((attempt_id IS NULL)=(effective_input_digest IS NULL)),
+    CHECK((receipt_id IS NULL)=(observation_revision IS NULL)),
+    CHECK((receipt_id IS NULL)=(output_digest IS NULL)),
+    CHECK((state='registered' AND receipt_id IS NULL AND output_json IS NULL AND byte_count=0 AND ack_kind IS NULL)
+       OR (state='retained' AND attempt_id IS NOT NULL AND receipt_id IS NOT NULL AND output_json IS NOT NULL AND byte_count=length(CAST(output_json AS BLOB)) AND ack_kind IS NULL)
+       OR (state='acknowledged' AND attempt_id IS NOT NULL AND receipt_id IS NOT NULL AND output_json IS NULL AND byte_count>0 AND ack_kind IS NOT NULL)),
+    UNIQUE(workflow_run_id,step_id,ordinal,request_key),
+    FOREIGN KEY(workflow_run_id,step_id,ordinal) REFERENCES workflow_attempts(run_id,step_id,ordinal) ON DELETE RESTRICT
+);
+"#;
+
+/// M98: original workflow action request selectors; original input bytes remain in V43.
+pub const SCHEMA_V45:&str=r#"
+CREATE TABLE workflow_action_inputs (
+ run_id TEXT NOT NULL, step_id TEXT NOT NULL, ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 9007199254740991),
+ act_scope_digest TEXT NOT NULL CHECK(length(act_scope_digest)=64 AND NOT act_scope_digest GLOB '*[^0-9a-f]*'),
+ act_run_id TEXT NOT NULL CHECK(length(act_run_id) BETWEEN 1 AND 128),
+ action_id TEXT NOT NULL CHECK(length(action_id) BETWEEN 1 AND 128),
+ definition_digest TEXT NOT NULL CHECK(length(definition_digest)=64 AND NOT definition_digest GLOB '*[^0-9a-f]*'),
+ connection_id TEXT NOT NULL CHECK(length(connection_id) BETWEEN 1 AND 128),
+ account_id TEXT NOT NULL CHECK(length(account_id) BETWEEN 1 AND 128),
+ snapshot_digest TEXT NOT NULL CHECK(length(snapshot_digest)=64 AND NOT snapshot_digest GLOB '*[^0-9a-f]*'),
+ configuration_digest TEXT NOT NULL CHECK(length(configuration_digest)=64 AND NOT configuration_digest GLOB '*[^0-9a-f]*'),
+ input_ref TEXT NOT NULL CHECK(length(input_ref)=32),
+ input_digest TEXT NOT NULL CHECK(length(input_digest)=64 AND NOT input_digest GLOB '*[^0-9a-f]*'),
+ request_key TEXT NOT NULL UNIQUE CHECK(length(request_key)=64 AND NOT request_key GLOB '*[^0-9a-f]*'),
+ request_digest TEXT NOT NULL CHECK(length(request_digest)=64 AND NOT request_digest GLOB '*[^0-9a-f]*'),
+ PRIMARY KEY(run_id,step_id,ordinal),
+ FOREIGN KEY(run_id,step_id,ordinal) REFERENCES workflow_attempts(run_id,step_id,ordinal) ON DELETE RESTRICT
+);
+"#;
+
+/// Fixed physical namespace pins: never auto-rebind after directory/file replacement.
+pub const SCHEMA_V46:&str=r#"
+CREATE TABLE action_submission_namespace (
+    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),
+    protocol INTEGER NOT NULL CHECK(protocol=1),
+    runtime_device TEXT NOT NULL CHECK(length(runtime_device)=16 AND NOT runtime_device GLOB '*[^0-9a-f]*'),
+    runtime_inode TEXT NOT NULL CHECK(length(runtime_inode)=16 AND NOT runtime_inode GLOB '*[^0-9a-f]*'),
+    parent_device TEXT NOT NULL CHECK(length(parent_device)=16 AND NOT parent_device GLOB '*[^0-9a-f]*'),
+    parent_inode TEXT NOT NULL CHECK(length(parent_inode)=16 AND NOT parent_inode GLOB '*[^0-9a-f]*'),
+    directory_device TEXT NOT NULL CHECK(length(directory_device)=16 AND NOT directory_device GLOB '*[^0-9a-f]*'),
+    directory_inode TEXT NOT NULL CHECK(length(directory_inode)=16 AND NOT directory_inode GLOB '*[^0-9a-f]*')
+);
+CREATE TABLE action_submission_files (
+    invocation_id TEXT PRIMARY KEY NOT NULL REFERENCES action_invocations(invocation_id) ON DELETE RESTRICT,
+    namespace_id INTEGER NOT NULL REFERENCES action_submission_namespace(singleton) ON DELETE RESTRICT CHECK(namespace_id=1),
+    lock_device TEXT NOT NULL CHECK(length(lock_device)=16 AND NOT lock_device GLOB '*[^0-9a-f]*'),
+    lock_inode TEXT NOT NULL CHECK(length(lock_inode)=16 AND NOT lock_inode GLOB '*[^0-9a-f]*')
+);
+"#;
+
+/// M98: immutable workflow-owned operation and current narrowed admission.
+pub const SCHEMA_V47:&str=r#"
+CREATE TABLE workflow_run_origins (
+ workflow_run_id TEXT PRIMARY KEY NOT NULL REFERENCES workflow_runs(run_id) ON DELETE RESTRICT,
+ native_run_id TEXT NOT NULL UNIQUE REFERENCES action_native_runs(run_id) ON DELETE RESTRICT,
+ authority_id TEXT NOT NULL CHECK(length(authority_id)=32 AND NOT authority_id GLOB '*[^0-9a-f]*'),
+ owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
+ vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+ store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+ canonical_vault_path TEXT NOT NULL CHECK(length(canonical_vault_path) BETWEEN 1 AND 4096),
+ actor_id TEXT NOT NULL CHECK(length(actor_id) BETWEEN 1 AND 128),
+ configuration_digest TEXT NOT NULL CHECK(length(configuration_digest)=64 AND NOT configuration_digest GLOB '*[^0-9a-f]*'),
+ definition_hash TEXT NOT NULL CHECK(length(definition_hash)=64 AND NOT definition_hash GLOB '*[^0-9a-f]*'),
+ permission_digest TEXT NOT NULL CHECK(length(permission_digest)=64 AND NOT permission_digest GLOB '*[^0-9a-f]*'),
+ selector_digest TEXT NOT NULL CHECK(length(selector_digest)=64 AND NOT selector_digest GLOB '*[^0-9a-f]*'),
+ original_permissions_json TEXT NOT NULL CHECK(json_valid(original_permissions_json) AND json_type(original_permissions_json)='object' AND length(CAST(original_permissions_json AS BLOB))<=8192),
+ current_permissions_json TEXT NOT NULL CHECK(json_valid(current_permissions_json) AND json_type(current_permissions_json)='object' AND length(CAST(current_permissions_json AS BLOB))<=8192),
+ current_permission_digest TEXT NOT NULL CHECK(length(current_permission_digest)=64 AND NOT current_permission_digest GLOB '*[^0-9a-f]*'),
+ creation_session_id TEXT NOT NULL CHECK(length(creation_session_id) BETWEEN 1 AND 1024),
+ admission_session_id TEXT NOT NULL CHECK(length(admission_session_id) BETWEEN 1 AND 1024),
+ admission_process_id TEXT NOT NULL CHECK(length(admission_process_id) BETWEEN 1 AND 1024),
+ admission_epoch INTEGER NOT NULL CHECK(admission_epoch BETWEEN 1 AND 9007199254740991),
+ revoked_at TEXT CHECK(revoked_at IS NULL OR revoked_at LIKE '____-__-__T%Z'),
+ created_at TEXT NOT NULL CHECK(created_at LIKE '____-__-__T%Z'),
+ updated_at TEXT NOT NULL CHECK(updated_at LIKE '____-__-__T%Z'),
+ FOREIGN KEY(creation_session_id,vault_id,store_uuid) REFERENCES app_sessions(session_id,vault_id,store_uuid),
+ FOREIGN KEY(admission_session_id,vault_id,store_uuid) REFERENCES app_sessions(session_id,vault_id,store_uuid)
+);
+CREATE TABLE workflow_run_action_selectors (
+ workflow_run_id TEXT NOT NULL REFERENCES workflow_run_origins(workflow_run_id) ON DELETE RESTRICT,
+ step_id TEXT NOT NULL CHECK(length(step_id) BETWEEN 1 AND 128),
+ action_id TEXT NOT NULL CHECK(length(action_id) BETWEEN 1 AND 128),
+ definition_digest TEXT NOT NULL CHECK(length(definition_digest)=64 AND NOT definition_digest GLOB '*[^0-9a-f]*'),
+ connection_id TEXT NOT NULL CHECK(length(connection_id) BETWEEN 1 AND 128),
+ account_id TEXT NOT NULL CHECK(length(account_id) BETWEEN 1 AND 128),
+ snapshot_digest TEXT NOT NULL CHECK(length(snapshot_digest)=64 AND NOT snapshot_digest GLOB '*[^0-9a-f]*'),
+ configuration_digest TEXT NOT NULL CHECK(length(configuration_digest)=64 AND NOT configuration_digest GLOB '*[^0-9a-f]*'),
+ PRIMARY KEY(workflow_run_id,step_id),
+ FOREIGN KEY(workflow_run_id,step_id) REFERENCES workflow_steps(run_id,step_id) ON DELETE RESTRICT
+);
+CREATE TABLE workflow_origin_account_grants (
+ workflow_run_id TEXT NOT NULL REFERENCES workflow_run_origins(workflow_run_id) ON DELETE RESTRICT,
+ grant_id TEXT NOT NULL UNIQUE REFERENCES action_account_grants(grant_id) ON DELETE RESTRICT,
+ PRIMARY KEY(workflow_run_id,grant_id)
+);
+CREATE TABLE workflow_submission_namespace (
+ singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),
+ protocol INTEGER NOT NULL CHECK(protocol=1),
+ runtime_device TEXT NOT NULL CHECK(length(runtime_device)=16 AND NOT runtime_device GLOB '*[^0-9a-f]*'),
+ runtime_inode TEXT NOT NULL CHECK(length(runtime_inode)=16 AND NOT runtime_inode GLOB '*[^0-9a-f]*'),
+ parent_device TEXT NOT NULL CHECK(length(parent_device)=16 AND NOT parent_device GLOB '*[^0-9a-f]*'),
+ parent_inode TEXT NOT NULL CHECK(length(parent_inode)=16 AND NOT parent_inode GLOB '*[^0-9a-f]*'),
+ directory_device TEXT NOT NULL CHECK(length(directory_device)=16 AND NOT directory_device GLOB '*[^0-9a-f]*'),
+ directory_inode TEXT NOT NULL CHECK(length(directory_inode)=16 AND NOT directory_inode GLOB '*[^0-9a-f]*')
+);
+CREATE TABLE workflow_submission_files (
+ workflow_run_id TEXT PRIMARY KEY NOT NULL REFERENCES workflow_run_origins(workflow_run_id) ON DELETE RESTRICT,
+ namespace_id INTEGER NOT NULL CHECK(namespace_id=1) REFERENCES workflow_submission_namespace(singleton),
+ lock_device TEXT NOT NULL CHECK(length(lock_device)=16 AND NOT lock_device GLOB '*[^0-9a-f]*'),
+ lock_inode TEXT NOT NULL CHECK(length(lock_inode)=16 AND NOT lock_inode GLOB '*[^0-9a-f]*')
+);
+"#;
+
+/// M98: explicit awake activations, request receipts and occurrence identity.
+pub const SCHEMA_V48:&str=r#"
+CREATE TABLE workflow_activations (
+ activation_id TEXT PRIMARY KEY NOT NULL CHECK(length(activation_id)=32 AND NOT activation_id GLOB '*[^0-9a-f]*'),
+ owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
+ vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+ store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+ canonical_vault_path TEXT NOT NULL CHECK(length(canonical_vault_path) BETWEEN 1 AND 4096),
+ workflow_id TEXT NOT NULL CHECK(length(workflow_id) BETWEEN 1 AND 128),
+ definition_hash TEXT NOT NULL CHECK(length(definition_hash)=64 AND NOT definition_hash GLOB '*[^0-9a-f]*'),
+ input_schema_digest TEXT NOT NULL CHECK(length(input_schema_digest)=64 AND NOT input_schema_digest GLOB '*[^0-9a-f]*'),
+ configuration_digest TEXT NOT NULL CHECK(length(configuration_digest)=64 AND NOT configuration_digest GLOB '*[^0-9a-f]*'),
+ trigger_digest TEXT NOT NULL CHECK(length(trigger_digest)=64 AND NOT trigger_digest GLOB '*[^0-9a-f]*'),
+ input_digest TEXT NOT NULL CHECK(length(input_digest)=64 AND NOT input_digest GLOB '*[^0-9a-f]*'),
+ permission_digest TEXT NOT NULL CHECK(length(permission_digest)=64 AND NOT permission_digest GLOB '*[^0-9a-f]*'),
+ input_json TEXT CHECK(input_json IS NULL OR json_valid(input_json)),
+ input_bytes INTEGER NOT NULL CHECK(input_bytes BETWEEN 0 AND 262144),
+ permissions_json TEXT CHECK(permissions_json IS NULL OR (json_valid(permissions_json) AND json_type(permissions_json)='object' AND length(CAST(permissions_json AS BLOB))<=8192)),
+ interval_seconds INTEGER NOT NULL CHECK(interval_seconds BETWEEN 1 AND 4294967295),
+ catch_up TEXT NOT NULL CHECK(catch_up IN ('skip_missed','coalesce_latest')),
+ state TEXT NOT NULL CHECK(state IN ('enabled','paused','removed')),
+ revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 9007199254740991),
+ epoch TEXT NOT NULL CHECK(length(epoch)=32 AND NOT epoch GLOB '*[^0-9a-f]*'),
+ anchor_ms INTEGER NOT NULL CHECK(anchor_ms BETWEEN 0 AND 9007199254740991),
+ cursor_ms INTEGER NOT NULL CHECK(cursor_ms BETWEEN anchor_ms AND 9007199254740991),
+ observed_at_ms INTEGER CHECK(observed_at_ms IS NULL OR observed_at_ms BETWEEN 0 AND 9007199254740991),
+ coverage_known INTEGER NOT NULL DEFAULT 0 CHECK(coverage_known IN (0,1)),
+ skipped_count INTEGER NOT NULL DEFAULT 0 CHECK(skipped_count BETWEEN 0 AND 9007199254740991),
+ coalesced_count INTEGER NOT NULL DEFAULT 0 CHECK(coalesced_count BETWEEN 0 AND 9007199254740991),
+ first_skipped_ms INTEGER,
+ last_skipped_ms INTEGER,
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms BETWEEN 0 AND 9007199254740991),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms BETWEEN 0 AND 9007199254740991),
+ CHECK((state='removed' AND input_json IS NULL AND input_bytes=0 AND permissions_json IS NULL) OR (state<>'removed' AND input_json IS NOT NULL AND input_bytes=length(CAST(input_json AS BLOB)) AND permissions_json IS NOT NULL)),
+ UNIQUE(owner_person,vault_id,store_uuid,workflow_id),
+ UNIQUE(activation_id,epoch)
+);
+CREATE TABLE workflow_activation_requests (
+ owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
+ vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+ store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+ request_key TEXT NOT NULL CHECK(length(request_key)=32 AND NOT request_key GLOB '*[^0-9a-f]*'),
+ request_digest TEXT NOT NULL CHECK(length(request_digest)=64 AND NOT request_digest GLOB '*[^0-9a-f]*'),
+ activation_id TEXT NOT NULL REFERENCES workflow_activations(activation_id) ON DELETE RESTRICT,
+ operation TEXT NOT NULL CHECK(operation IN ('enable','pause','remove')),
+ applied_revision INTEGER NOT NULL CHECK(applied_revision BETWEEN 1 AND 9007199254740991),
+ applied_epoch TEXT NOT NULL CHECK(length(applied_epoch)=32 AND NOT applied_epoch GLOB '*[^0-9a-f]*'),
+ applied_state TEXT NOT NULL CHECK(applied_state IN ('enabled','paused','removed')),
+ applied_definition_hash TEXT NOT NULL CHECK(length(applied_definition_hash)=64 AND NOT applied_definition_hash GLOB '*[^0-9a-f]*'),
+ applied_at_ms INTEGER NOT NULL CHECK(applied_at_ms BETWEEN 0 AND 9007199254740991),
+ PRIMARY KEY(owner_person,vault_id,store_uuid,request_key)
+);
+CREATE TABLE workflow_occurrences (
+ activation_id TEXT NOT NULL REFERENCES workflow_activations(activation_id) ON DELETE RESTRICT,
+ epoch TEXT NOT NULL CHECK(length(epoch)=32 AND NOT epoch GLOB '*[^0-9a-f]*'),
+ occurrence_digest TEXT NOT NULL CHECK(length(occurrence_digest)=64 AND NOT occurrence_digest GLOB '*[^0-9a-f]*'),
+ trigger_digest TEXT NOT NULL CHECK(length(trigger_digest)=64 AND NOT trigger_digest GLOB '*[^0-9a-f]*'),
+ intended_at_ms INTEGER CHECK(intended_at_ms IS NULL OR intended_at_ms BETWEEN 0 AND 9007199254740991),
+ event_digest TEXT CHECK(event_digest IS NULL OR (length(event_digest)=64 AND NOT event_digest GLOB '*[^0-9a-f]*')),
+ workflow_run_id TEXT NOT NULL UNIQUE REFERENCES workflow_runs(run_id) ON DELETE RESTRICT,
+ start_key TEXT NOT NULL CHECK(length(start_key)=32 AND NOT start_key GLOB '*[^0-9a-f]*'),
+ definition_hash TEXT NOT NULL CHECK(length(definition_hash)=64 AND NOT definition_hash GLOB '*[^0-9a-f]*'),
+ configuration_digest TEXT NOT NULL CHECK(length(configuration_digest)=64 AND NOT configuration_digest GLOB '*[^0-9a-f]*'),
+ input_digest TEXT NOT NULL CHECK(length(input_digest)=64 AND NOT input_digest GLOB '*[^0-9a-f]*'),
+ permission_digest TEXT NOT NULL CHECK(length(permission_digest)=64 AND NOT permission_digest GLOB '*[^0-9a-f]*'),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms BETWEEN 0 AND 9007199254740991),
+ CHECK((intended_at_ms IS NULL)<>(event_digest IS NULL)),
+ PRIMARY KEY(activation_id,epoch,occurrence_digest),
+ UNIQUE(activation_id,start_key),
+ UNIQUE(activation_id,epoch,intended_at_ms),
+ UNIQUE(activation_id,epoch,event_digest)
+);
+CREATE TABLE workflow_activation_journal (
+ transition_id TEXT PRIMARY KEY NOT NULL CHECK(length(transition_id)=32 AND NOT transition_id GLOB '*[^0-9a-f]*'),
+ owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
+ vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+ store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+ canonical_vault_path TEXT NOT NULL CHECK(length(canonical_vault_path) BETWEEN 1 AND 4096),
+ workflow_id TEXT NOT NULL CHECK(length(workflow_id) BETWEEN 1 AND 128),
+ expected_publication_revision INTEGER NOT NULL CHECK(expected_publication_revision BETWEEN 1 AND 9007199254740991),
+ expected_definition_hash TEXT NOT NULL CHECK(length(expected_definition_hash)=64 AND NOT expected_definition_hash GLOB '*[^0-9a-f]*'),
+ phase TEXT NOT NULL CHECK(phase IN ('prepared','pointer_cleared','reconciled')),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms BETWEEN 0 AND 9007199254740991),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms BETWEEN 0 AND 9007199254740991),
+ UNIQUE(owner_person,vault_id,store_uuid,workflow_id,expected_publication_revision)
+);
+
+CREATE TABLE workflow_activation_accounts (
+ activation_id TEXT NOT NULL,
+ epoch TEXT NOT NULL CHECK(length(epoch)=32 AND NOT epoch GLOB '*[^0-9a-f]*'),
+ connection_id TEXT NOT NULL CHECK(length(connection_id) BETWEEN 1 AND 128),
+ account_id TEXT NOT NULL CHECK(length(account_id) BETWEEN 1 AND 128),
+ account_identity_digest TEXT NOT NULL CHECK(length(account_identity_digest)=64 AND NOT account_identity_digest GLOB '*[^0-9a-f]*'),
+ account_revision INTEGER NOT NULL CHECK(account_revision BETWEEN 1 AND 9007199254740991),
+ revocation_generation INTEGER NOT NULL CHECK(revocation_generation BETWEEN 0 AND 9007199254740991),
+ PRIMARY KEY(activation_id,epoch,connection_id,account_id),
+ FOREIGN KEY(activation_id,epoch) REFERENCES workflow_activations(activation_id,epoch) ON DELETE RESTRICT
+);
+"#;
+
+/// M95.2/.3 opt-in conversation archive. No settings rows, import or content backfill.
+pub const SCHEMA_V49: &str = r#"
+CREATE UNIQUE INDEX conversation_generation_scope ON chat_generations(generation_id,owner_person,vault_id,store_uuid);
+CREATE TABLE conversation_retention (
+ owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
+ vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+ store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+ choice TEXT NOT NULL CHECK(choice IN ('off','days30','days90','forever')),
+ revision INTEGER NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 9007199254740991),
+ PRIMARY KEY(owner_person,vault_id,store_uuid)
+);
+CREATE TABLE conversation_threads (
+ owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
+ vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+ store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+ thread_id TEXT NOT NULL CHECK(length(thread_id) BETWEEN 1 AND 128),
+ parent_thread_id TEXT,
+ branch_message_id TEXT,
+ title TEXT CHECK(title IS NULL OR length(CAST(title AS BLOB))<=320),
+ title_generation_id TEXT,
+ created_at INTEGER NOT NULL CHECK(created_at BETWEEN 0 AND 9007199254740991),
+ updated_at INTEGER NOT NULL CHECK(updated_at BETWEEN created_at AND 9007199254740991),
+ tombstone_at INTEGER CHECK(tombstone_at IS NULL OR tombstone_at BETWEEN 0 AND 9007199254740991),
+ CHECK((parent_thread_id IS NULL)=(branch_message_id IS NULL)),
+ CHECK(parent_thread_id IS NULL OR parent_thread_id<>thread_id),
+ CHECK(tombstone_at IS NULL OR (title IS NULL AND title_generation_id IS NULL)),
+ PRIMARY KEY(owner_person,vault_id,store_uuid,thread_id),
+ FOREIGN KEY(owner_person,vault_id,store_uuid,parent_thread_id) REFERENCES conversation_threads(owner_person,vault_id,store_uuid,thread_id)
+);
+CREATE TABLE conversation_bindings (
+ generation_id TEXT PRIMARY KEY NOT NULL REFERENCES chat_generations(generation_id),
+ owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
+ vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+ store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+ thread_id TEXT NOT NULL CHECK(length(thread_id) BETWEEN 1 AND 128),
+ user_message_id TEXT NOT NULL CHECK(length(user_message_id) BETWEEN 1 AND 128),
+ assistant_message_id TEXT NOT NULL CHECK(length(assistant_message_id) BETWEEN 1 AND 128 AND assistant_message_id<>user_message_id),
+ binding_digest TEXT NOT NULL CHECK(length(binding_digest)=64 AND NOT binding_digest GLOB '*[^0-9a-f]*'),
+ display_json TEXT CHECK(display_json IS NULL OR (json_valid(display_json) AND length(CAST(display_json AS BLOB))<=65536)),
+ pending_json TEXT CHECK(pending_json IS NULL OR (json_valid(pending_json) AND length(CAST(pending_json AS BLOB))<=4194304)),
+ choice TEXT NOT NULL CHECK(choice IN ('off','days30','days90','forever')),
+ archive_state TEXT NOT NULL CHECK(archive_state IN ('pending','retained','off','expired','unavailable','deleted')),
+ completed_at INTEGER CHECK(completed_at IS NULL OR completed_at BETWEEN 0 AND 9007199254740991),
+ expires_at INTEGER CHECK(expires_at IS NULL OR expires_at>=completed_at),
+ CHECK((archive_state='pending')=(completed_at IS NULL)),
+ CHECK(completed_at IS NULL OR (display_json IS NULL AND pending_json IS NULL)),
+ UNIQUE(owner_person,vault_id,store_uuid,user_message_id),
+ UNIQUE(owner_person,vault_id,store_uuid,assistant_message_id),
+ FOREIGN KEY(owner_person,vault_id,store_uuid,thread_id) REFERENCES conversation_threads(owner_person,vault_id,store_uuid,thread_id),
+ FOREIGN KEY(generation_id,owner_person,vault_id,store_uuid) REFERENCES chat_generations(generation_id,owner_person,vault_id,store_uuid)
+);
+CREATE TABLE conversation_content (
+ generation_id TEXT PRIMARY KEY NOT NULL REFERENCES conversation_bindings(generation_id),
+ content_json TEXT NOT NULL CHECK(json_valid(content_json) AND length(CAST(content_json AS BLOB))<=4194304),
+ logical_bytes INTEGER NOT NULL CHECK(logical_bytes=length(CAST(content_json AS BLOB))),
+ completed_at INTEGER NOT NULL CHECK(completed_at BETWEEN 0 AND 9007199254740991),
+ expires_at INTEGER CHECK(expires_at IS NULL OR expires_at>=completed_at)
+);
+CREATE TABLE conversation_search (
+ generation_id TEXT PRIMARY KEY NOT NULL REFERENCES conversation_content(generation_id) ON DELETE CASCADE,
+ search_text TEXT NOT NULL CHECK(length(CAST(search_text AS BLOB))<=4194304)
+);
+CREATE INDEX conversation_thread_order ON conversation_threads(owner_person,vault_id,store_uuid,updated_at,thread_id);
+CREATE INDEX conversation_expiry ON conversation_content(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX conversation_attempt_order ON conversation_bindings(owner_person,vault_id,store_uuid,thread_id,completed_at,generation_id);
+CREATE TRIGGER conversation_ancestry_immutable BEFORE UPDATE ON conversation_threads
+WHEN NEW.owner_person IS NOT OLD.owner_person OR NEW.vault_id IS NOT OLD.vault_id OR NEW.store_uuid IS NOT OLD.store_uuid OR NEW.thread_id IS NOT OLD.thread_id OR NEW.parent_thread_id IS NOT OLD.parent_thread_id OR NEW.branch_message_id IS NOT OLD.branch_message_id OR NEW.created_at IS NOT OLD.created_at OR (OLD.tombstone_at IS NOT NULL AND NEW.tombstone_at IS NOT OLD.tombstone_at)
+BEGIN SELECT RAISE(ABORT,'conversation ancestry and tombstone are immutable'); END;
+CREATE TRIGGER conversation_binding_immutable BEFORE UPDATE ON conversation_bindings
+WHEN NEW.generation_id IS NOT OLD.generation_id OR NEW.owner_person IS NOT OLD.owner_person OR NEW.vault_id IS NOT OLD.vault_id OR NEW.store_uuid IS NOT OLD.store_uuid OR NEW.thread_id IS NOT OLD.thread_id OR NEW.user_message_id IS NOT OLD.user_message_id OR NEW.assistant_message_id IS NOT OLD.assistant_message_id OR NEW.binding_digest IS NOT OLD.binding_digest OR (NEW.display_json IS NOT NULL AND NEW.display_json IS NOT OLD.display_json) OR (OLD.completed_at IS NOT NULL AND (NEW.completed_at IS NOT OLD.completed_at OR NEW.expires_at IS NOT OLD.expires_at OR NEW.choice IS NOT OLD.choice OR NEW.display_json IS NOT NULL OR NEW.pending_json IS NOT NULL OR NEW.archive_state='pending'))
+BEGIN SELECT RAISE(ABORT,'conversation attempt identity and completion are immutable'); END;
+CREATE TRIGGER conversation_tombstones_retained BEFORE DELETE ON conversation_threads
+BEGIN SELECT RAISE(ABORT,'conversation tombstones are retained'); END;
+CREATE TRIGGER conversation_content_terminal_immutable BEFORE UPDATE ON conversation_content
+BEGIN SELECT RAISE(ABORT,'completed conversation content is immutable'); END;
+CREATE TRIGGER conversation_content_tombstone_guard BEFORE INSERT ON conversation_content
+WHEN EXISTS(SELECT 1 FROM conversation_bindings b JOIN conversation_threads t USING(owner_person,vault_id,store_uuid,thread_id) WHERE b.generation_id=NEW.generation_id AND (t.tombstone_at IS NOT NULL OR b.archive_state<>'pending'))
+BEGIN SELECT RAISE(ABORT,'conversation content is tombstoned or already terminal'); END;
+"#;
+
+
+/// Explicit browser-cache imports have no execution generation or run identity.
+pub const SCHEMA_V50:&str=r#"
+CREATE TABLE conversation_legacy_attempts (
+ attempt_id TEXT PRIMARY KEY NOT NULL CHECK(length(attempt_id) BETWEEN 1 AND 128),
+ owner_person TEXT NOT NULL CHECK(owner_person='human:me'),
+ vault_id TEXT NOT NULL REFERENCES vault_registry(vault_id),
+ store_uuid TEXT NOT NULL CHECK(length(store_uuid) BETWEEN 1 AND 128),
+ thread_id TEXT NOT NULL CHECK(length(thread_id) BETWEEN 1 AND 128),
+ user_message_id TEXT NOT NULL CHECK(length(user_message_id) BETWEEN 1 AND 128),
+ assistant_message_id TEXT NOT NULL CHECK(length(assistant_message_id) BETWEEN 1 AND 128 AND assistant_message_id<>user_message_id),
+ source_digest TEXT NOT NULL CHECK(length(source_digest)=64 AND NOT source_digest GLOB '*[^0-9a-f]*'),
+ original_completed_at INTEGER CHECK(original_completed_at IS NULL OR original_completed_at BETWEEN 0 AND 9007199254740991),
+ imported_at INTEGER NOT NULL CHECK(imported_at BETWEEN 0 AND 9007199254740991),
+ cli_session_id TEXT CHECK(cli_session_id IS NULL OR length(cli_session_id)=36),
+ choice TEXT NOT NULL CHECK(choice IN ('days30','days90','forever')),
+ archive_state TEXT NOT NULL CHECK(archive_state IN ('retained','expired','unavailable','deleted')),
+ expires_at INTEGER CHECK(expires_at IS NULL OR (original_completed_at IS NOT NULL AND expires_at>=original_completed_at)),
+ UNIQUE(owner_person,vault_id,store_uuid,user_message_id),
+ UNIQUE(owner_person,vault_id,store_uuid,assistant_message_id),
+ FOREIGN KEY(owner_person,vault_id,store_uuid,thread_id) REFERENCES conversation_threads(owner_person,vault_id,store_uuid,thread_id)
+);
+CREATE TABLE conversation_legacy_content (
+ attempt_id TEXT PRIMARY KEY NOT NULL REFERENCES conversation_legacy_attempts(attempt_id),
+ content_json TEXT NOT NULL CHECK(json_valid(content_json) AND length(CAST(content_json AS BLOB))<=4194304),
+ logical_bytes INTEGER NOT NULL CHECK(logical_bytes=length(CAST(content_json AS BLOB))),
+ expires_at INTEGER CHECK(expires_at IS NULL OR expires_at BETWEEN 0 AND 9007199254740991)
+);
+CREATE TABLE conversation_legacy_search (
+ attempt_id TEXT PRIMARY KEY NOT NULL REFERENCES conversation_legacy_content(attempt_id) ON DELETE CASCADE,
+ search_text TEXT NOT NULL CHECK(length(CAST(search_text AS BLOB))<=4194304)
+);
+CREATE INDEX conversation_legacy_order ON conversation_legacy_attempts(owner_person,vault_id,store_uuid,thread_id,imported_at,attempt_id);
+CREATE INDEX conversation_legacy_expiry ON conversation_legacy_content(expires_at) WHERE expires_at IS NOT NULL;
+CREATE TRIGGER conversation_legacy_identity_immutable BEFORE UPDATE ON conversation_legacy_attempts
+WHEN NEW.attempt_id IS NOT OLD.attempt_id OR NEW.owner_person IS NOT OLD.owner_person OR NEW.vault_id IS NOT OLD.vault_id OR NEW.store_uuid IS NOT OLD.store_uuid OR NEW.thread_id IS NOT OLD.thread_id OR NEW.user_message_id IS NOT OLD.user_message_id OR NEW.assistant_message_id IS NOT OLD.assistant_message_id OR NEW.source_digest IS NOT OLD.source_digest OR NEW.original_completed_at IS NOT OLD.original_completed_at OR NEW.imported_at IS NOT OLD.imported_at OR NEW.cli_session_id IS NOT OLD.cli_session_id OR NEW.choice IS NOT OLD.choice OR NEW.expires_at IS NOT OLD.expires_at OR (OLD.archive_state IN ('expired','deleted') AND NEW.archive_state IS NOT OLD.archive_state)
+BEGIN SELECT RAISE(ABORT,'legacy archive identity and expiry are immutable'); END;
+CREATE TRIGGER conversation_legacy_content_immutable BEFORE UPDATE ON conversation_legacy_content
+BEGIN SELECT RAISE(ABORT,'legacy completed content is immutable'); END;
+CREATE TRIGGER conversation_legacy_content_tombstone_guard BEFORE INSERT ON conversation_legacy_content
+WHEN NOT EXISTS(SELECT 1 FROM conversation_legacy_attempts a JOIN conversation_threads t USING(owner_person,vault_id,store_uuid,thread_id) WHERE a.attempt_id=NEW.attempt_id AND t.tombstone_at IS NULL AND a.archive_state IN ('retained','unavailable'))
+BEGIN SELECT RAISE(ABORT,'legacy archive is tombstoned or expired'); END;
+CREATE VIEW conversation_archive_attempts AS
+ SELECT b.generation_id AS attempt_id,b.owner_person,b.vault_id,b.store_uuid,b.thread_id,b.user_message_id,b.assistant_message_id,g.current_run_id AS run_id,m.cli_session_id,b.completed_at,b.completed_at AS order_at,b.expires_at,b.archive_state,NULL AS imported_at,'native_run' AS origin
+ FROM conversation_bindings b JOIN chat_generations g USING(generation_id) JOIN chat_generation_runs m ON m.run_id=g.current_run_id
+ UNION ALL
+ SELECT a.attempt_id,a.owner_person,a.vault_id,a.store_uuid,a.thread_id,a.user_message_id,a.assistant_message_id,NULL,a.cli_session_id,a.original_completed_at,a.imported_at,a.expires_at,a.archive_state,a.imported_at,'browser_cache'
+ FROM conversation_legacy_attempts a;
+CREATE VIEW conversation_archive_content AS
+ SELECT generation_id AS attempt_id,content_json,logical_bytes,expires_at FROM conversation_content
+ UNION ALL SELECT attempt_id,content_json,logical_bytes,expires_at FROM conversation_legacy_content;
+CREATE VIEW conversation_archive_search AS
+ SELECT generation_id AS attempt_id,search_text FROM conversation_search
+ UNION ALL SELECT attempt_id,search_text FROM conversation_legacy_search;
+"#;

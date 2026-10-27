@@ -5,7 +5,7 @@ import { NumberField } from './NumberField';
 if (typeof window.PointerEvent === 'undefined')
   window.PointerEvent = MouseEvent as unknown as typeof window.PointerEvent;
 afterEach(cleanup);
-it('Enter commits once, blur does not repeat it, invalid input reverts and arrows use whole steps', () => {
+it('Enter commits once, blur does not repeat it, invalid input remains exact and arrows use whole steps', () => {
   const commit = vi.fn();
   render(<NumberField label="X" value={10} onCommit={commit} />);
   const input = screen.getByRole('textbox', { name: 'X' });
@@ -16,11 +16,12 @@ it('Enter commits once, blur does not repeat it, invalid input reverts and arrow
   expect(commit).toHaveBeenLastCalledWith(24);
   fireEvent.change(input, { target: { value: '3.4' } });
   fireEvent.keyDown(input, { key: 'Enter' });
-  expect(input).toHaveProperty('value', '10');
+  expect(input).toHaveProperty('value', '3.4');
+  expect(input.getAttribute('aria-invalid')).toBe('true');
   fireEvent.keyDown(input, { key: 'ArrowUp', shiftKey: true });
   expect(commit).toHaveBeenLastCalledWith(20);
 });
-it('Mixed stays words and a refused number restores the existing value', () => {
+it('Mixed stays words and a refused number retains the exact draft', () => {
   const commit = vi.fn(() => false);
   const { rerender } = render(<NumberField label="W" value={MIXED} onCommit={commit} />);
   const input = screen.getByRole('textbox', { name: 'W' });
@@ -31,7 +32,7 @@ it('Mixed stays words and a refused number restores the existing value', () => {
   rerender(<NumberField label="W" value={30} onCommit={commit} />);
   fireEvent.change(input, { target: { value: '-1' } });
   fireEvent.blur(input);
-  expect(input).toHaveProperty('value', '30');
+  expect(input).toHaveProperty('value', '-1');
 });
 it('a scrub previews many times, release commits once, and Escape cancels', () => {
   const start = vi.fn(),

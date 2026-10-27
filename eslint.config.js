@@ -26,6 +26,9 @@ const ENGINE_IMPORTS = new RegExp(
   `^(?!${[
     '\\./',
     '@/engine/',
+    // Rust-owned transport types only; lint-rails proves this leaf has no
+    // runtime code or imported dependencies. Neighboring modules stay closed.
+    '@/lib/generated/workspace$',
     'yaml$',
     // M61.10: checked recurrence options in engine/recurrence.ts alone.
     'rrule$',
@@ -37,8 +40,9 @@ const ENGINE_IMPORTS = new RegExp(
     '@/views/viewKinds$',
     // Tables the backends share: okf.ts reads staleness, M60.3's readers the
     // field kinds (shared/schema) and the date grammar (shared/calendar), and
-    // fileKinds.ts the file kinds (shared/files, M66.1).
-    '\\.\\./\\.\\./shared/(?:policy|schema|calendar|files|import)/[\\w.-]+\\.json$',
+    // fileKinds.ts the file kinds (shared/files, M66.1), and source locations
+    // share their bounded contract (shared/knowledge, M97.1).
+    '\\.\\./\\.\\./shared/(?:policy|schema|calendar|files|import|knowledge)/[\\w.-]+\\.json$',
     // JSON Canvas's shared format; the scene boundary pins its one reader.
     '\\.\\./\\.\\./\\.\\./shared/canvas/[\\w.-]+\\.json$',
     // The whiteboard scene core's two pinned upstream libraries (M68.1), bare
@@ -109,7 +113,7 @@ const RAILS = {
     // `typeof import('…')` names a module too, so the engine checks types.
     types: true,
     message:
-      'engine/ is the pure core: it imports engine modules, yaml, the lib leaves deepEqual, slug, templates, sha256, policy/table, policy/tools and policy/toolApproval, views/viewKinds, JSON tables under shared/policy, shared/schema, shared/calendar, shared/files and shared/import, the scene libraries perfect-freehand and fractional-indexing, and the pure URL parser whatwg-url. Move the code into engine/, or have the caller pass the value in.',
+      'engine/ is the pure core: it imports engine modules, yaml, the lib leaves deepEqual, slug, templates, sha256, policy/table, policy/tools and policy/toolApproval, views/viewKinds, JSON tables under shared/policy, shared/schema, shared/calendar, shared/files, shared/import and shared/knowledge, the scene libraries perfect-freehand and fractional-indexing, the generated workspace types, and the pure URL parser whatwg-url. Move the code into engine/, or have the caller pass the value in.',
   },
 };
 
@@ -165,7 +169,13 @@ export default tseslint.config(
       'test-results/**',
       'playwright-report/**',
       'coverage/**',
+      // Only the closed builder-owned entry/chunk outputs are generated.
+      // Authored fixture sources, including web/smoke.js, remain linted.
+      'conformance/native-read-smoke/web/quit.js',
+      'conformance/native-read-smoke/web/quit-*.js',
       '.claude/**',
+      // Review evidence is preserved source material, not application code.
+      '.superpowers/**',
       '.vite/**',
       // Tracked-by-accident prototype export; relocated in M14.7.
       'HardwareSoftware Security Engineering Tool/**',
@@ -218,6 +228,14 @@ export default tseslint.config(
     files: ['scripts/**', 'e2e/**', '*.config.ts', 'playwright.config.ts'],
     rules: {
       'no-console': 'off',
+    },
+  },
+  {
+    // The authored native-fixture bootstrap runs in the webview. Keep normal
+    // rules active; only its two actual browser globals need an environment.
+    files: ['conformance/native-read-smoke/web/smoke.js'],
+    languageOptions: {
+      globals: { window: 'readonly', document: 'readonly' },
     },
   },
   // The rails' file classes. Each later object replaces the rail rules of the

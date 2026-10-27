@@ -108,7 +108,8 @@ async function start(message: string): Promise<RunHandle> {
   const started = await act(() =>
     runAgent(VAULT, { message, shell: 'off', connectors: false, attended: true }),
   );
-  if ('deferred' in started || 'settled' in started) throw new Error('an attended run starts');
+  if ('deferred' in started || 'settled' in started || 'observed_generation' in started)
+    throw new Error('an attended run starts');
   return started;
 }
 

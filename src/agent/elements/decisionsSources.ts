@@ -1,4 +1,4 @@
-import { sourceTarget } from '@/editor/citations';
+import { resourceTarget, type ResourceTarget } from '@/editor/citations';
 import type { SourceRef } from '@/engine/ai/types';
 import { linkLabel } from '@/engine/linkLabels';
 import type { Source } from '@/engine/okf';
@@ -8,20 +8,27 @@ import type { Entry } from '@/engine/types';
  * A concept's sources (M91.14), as the Sources element lists them: a web page
  * is a link out, a page of this vault opens in the app through the caller,
  * and anything else is its words (CV-16). Where a `resource` leads is
- * `sourceTarget`'s one rule, which the body's citation chips follow too
- * (M51.5): a resource with a scheme is an address — a link only when it is
- * http(s), which the element checks — a path opens when a page answers to
- * it, and anything else (a path no page answers to, an OKF scope descriptor
- * such as "all queries in project X") names something nobody can follow.
+ * `resourceTarget`'s one rule, which the body's citation chips project too
+ * (M51.5). Missing local references, scope prose and unsafe addresses never
+ * acquire a SourceRef's file or URL semantics. Classification is not evidence
+ * that the resource was read or supports a claim.
  */
 
 /** A row for the Sources element, and the vault page it opens, if any. */
-export interface ResourceRow {
-  ref: SourceRef;
-  /** The vault page a press opens, or null: an address, or a resource no
-   *  page answers to. */
-  page: string | null;
-}
+export type ResourceRow =
+  | {
+      target: Extract<ResourceTarget, { kind: 'VaultPage' | 'ExternalUrl' }>;
+      ref: SourceRef;
+      page: string | null;
+    }
+  | {
+      target: Extract<ResourceTarget, { kind: 'MissingLocal' | 'Descriptor' }>;
+      ref: null;
+      page: null;
+      label: string;
+      /** The literal source spelling, retained even when a title names it. */
+      resource: string;
+    };
 
 /**
  * One resource as a row. An untitled web page reads as the name its link
@@ -34,30 +41,35 @@ export function resourceRow(
   title: string | null,
   entries: readonly Pick<Entry, 'path' | 'title'>[],
 ): ResourceRow {
-  const target = sourceTarget(resource, entries);
-  if (target !== null && 'external' in target) {
-    const named = title ?? linkLabel(resource)?.text;
+  const target = resourceTarget(resource, entries);
+  if (target.kind === 'ExternalUrl') {
+    const named = title ?? linkLabel(target.url)?.text;
     return {
-      ref: { kind: 'url', url: resource, via: 'text', ...(named ? { title: named } : {}) },
+      target,
+      ref: { kind: 'url', url: target.url, via: 'text', ...(named ? { title: named } : {}) },
       page: null,
     };
   }
-  if (target !== null) {
-    const page = entries.find((entry) => entry.path === target.internal);
+  if (target.kind === 'VaultPage') {
+    const page = entries.find((entry) => entry.path === target.path);
     const named = title ?? (page?.title || undefined);
     return {
+      target,
       ref: {
         kind: 'vault',
-        path: target.internal,
+        path: target.path,
         via: 'text',
         ...(named ? { title: named } : {}),
       },
-      page: target.internal,
+      page: target.path,
     };
   }
   return {
-    ref: { kind: 'vault', path: resource, via: 'text', ...(title ? { title } : {}) },
+    target,
+    ref: null,
     page: null,
+    label: title?.trim() || resource,
+    resource,
   };
 }
 

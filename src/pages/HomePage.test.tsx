@@ -162,6 +162,7 @@ describe('HomePage', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'New page' }));
     expect(useLauncherStore.getState().flow).toMatchObject({ id: 'page', vault: '/demo-vault' });
+    act(() => useLauncherStore.getState().endFlow());
     fireEvent.click(screen.getByRole('button', { name: 'New whiteboard' }));
     expect(useLauncherStore.getState().flow).toMatchObject({
       id: 'whiteboard',

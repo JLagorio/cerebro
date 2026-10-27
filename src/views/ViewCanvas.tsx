@@ -1,3 +1,5 @@
+import type { AuthorityError } from '@/lib/generated/workspace';
+import { selectedViewIssue } from '@/engine/selectedEntryProjection';
 import { usePaneId } from '@/stores/navStore';
 import type { EntryStateKey } from '@/stores/navStore';
 import type { TimeSlot } from '@/engine/timeGrid';
@@ -37,6 +39,8 @@ import { useUiStore } from '@/stores/uiStore';
  * them the same way, and a new view kind is one case here.
  */
 export interface ViewCanvasProps {
+  /** Refusal produced before filtering; an empty entry list cannot carry it. */
+  unavailable?: AuthorityError;
   entryScrollKey?: EntryStateKey;
   /** Filtered and sorted by the caller. */
   entries: Entry[];
@@ -100,7 +104,17 @@ export interface ViewCanvasProps {
   whiteboardHost?: WhiteboardHost;
 }
 
-export function ViewCanvas({
+export function SelectedViewUnavailable({ message }: { message: string }) {
+  return <div data-testid="selected-view-unavailable" role="status" className="section-unavailable flex min-w-0 flex-col gap-1 px-5 py-4 text-ui text-n-700"><strong>This selected view is unavailable</strong><span>{message}</span></div>;
+}
+
+export function ViewCanvas(props: ViewCanvasProps): React.ReactElement {
+  const issue = props.unavailable ?? selectedViewIssue(props.entries, props.schema, props.presentation, props.viewFilters);
+  if (issue) return <SelectedViewUnavailable message={issue.message} />;
+  return <AvailableViewCanvas {...props} />;
+}
+
+function AvailableViewCanvas({
   entries,
   allEntries,
   presentation,

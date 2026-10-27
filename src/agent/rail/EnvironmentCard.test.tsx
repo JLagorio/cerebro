@@ -71,7 +71,8 @@ function Card(props: Partial<EnvironmentCardProps>) {
 
 const card = () => screen.getByTestId('rail-environment');
 const value = (key: string) =>
-  within(card()).getByTestId(`rail-environment-${key}`).querySelector('dd')?.textContent;
+  within(card()).getByTestId(`rail-environment-${key}`).querySelector('.cb-rail-environment-value')
+    ?.textContent;
 
 /** Let every read a render started land. */
 async function settle() {
@@ -155,6 +156,21 @@ describe('what the card says', () => {
     );
     expect(card().textContent).not.toContain('Up to date');
     expect(card().textContent).toContain(UNCOUNTED_WORDS.unread);
+  });
+
+  it('says why sync is unknown in text, not a title alone', async () => {
+    vi.mocked(gitIpc.gitRemoteStatus).mockResolvedValue({
+      ...COUNTED,
+      ahead: null,
+      behind: null,
+      hasUpstream: false,
+      upstream: null,
+    });
+    render(<Card />);
+    await settle();
+    expect(value('sync')).toBe('Sync unknown');
+    const dd = within(card()).getByTestId('rail-environment-sync').querySelector('dd');
+    expect(dd?.querySelector('.sr-only')?.textContent).toContain(UNCOUNTED_WORDS.no_upstream);
   });
 
   it('is not recorded before a turn said what the conversation reaches', async () => {

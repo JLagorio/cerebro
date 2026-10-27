@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "admission": {
+    "version": 1,
+    "defaultGrant": "deny",
+    "ownerRealm": "verified_single_local_app_owner",
+    "ownerStorageKey": "human:me",
+    "sourceKinds": ["attended_operation", "run", "client", "job"],
+    "grantInputScopes": ["all_valid_inputs", "exact_canonical_input"],
+    "parentGrantRule": "explicit_intersection_only",
+    "ordinaryHandoffChildJobId": "absent",
+    "childJobIdRule": "actual_m95_job_claim_proof_only",
+    "normalParentCompletion": "preserve_explicit_live_child_grants",
+    "parentStopOrRevocation": "deny_future_descendant_claims",
+    "historicalRead": "verified_native_owner_read_only",
+    "legacyAdmission": "deny_without_native_provenance",
+    "noStoreAdmission": "unavailable",
+    "limits": {
+      "identityBytes": 128,
+      "canonicalPathBytes": 4096,
+      "processSessionBytes": 1024,
+      "grantCapabilities": 256,
+      "grantBytes": 65536,
+      "grantsPerRun": 256,
+      "ancestryDepth": 8,
+      "catalogPageSize": 32,
+      "cursorBytes": 4096
+    }
+  },
+  "schemaSqlSha256": "7f6de96581647535e062ac032fd860d058179f0e385ddc3ca055d8247169f14c",
+  "scopeEncoding": {
+    "scope": {
+      "vaultId": "vault",
+      "runId": "run",
+      "actorId": "actor",
+      "clientId": null,
+      "childJobId": null
+    },
+    "canonical": "[\"cerebro:native-action-catalog-scope\",1,\"vault\",\"run\",\"actor\",null,null]",
+    "sha256": "864a43ff9e75a0404bbc1ca4fe277dcd0ff085b75aec4519d952d4c59655dc65"
+  },
+  "forgedFields": [
+    "database",
+    "vault",
+    "store",
+    "run",
+    "actor",
+    "session",
+    "parent",
+    "client",
+    "owner",
+    "job"
+  ],
+  "parentOutcomes": [
+    {
+      "outcome": "succeeded",
+      "canCall": true
+    },
+    {
+      "outcome": "failed",
+      "canCall": true
+    },
+    {
+      "outcome": "cancelled",
+      "canCall": false
+    }
+  ],
+  "notes": [
+    "Native fixture proofs do not establish actual bearer, Ticket, window or seat authentication.",
+    "Owner history uses a separate future native owner-operation producer; no old token or actor string authenticates it."
+  ]
+}

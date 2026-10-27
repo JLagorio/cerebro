@@ -1010,6 +1010,103 @@ describe('a turn’s parts, anchor and subagents (M91.4)', () => {
       expect(other.messages).toEqual([]);
     });
 
+    it('keeps only a true cache omission marker from storage', () => {
+      for (const cacheTrimmed of [false, 'true', 1, null]) {
+        window.localStorage.setItem(
+          'cerebro.conversations',
+          JSON.stringify([{ ...newConversation(), cacheTrimmed }]),
+        );
+        expect(loadConversations()[0].cacheTrimmed).toBeUndefined();
+      }
+    });
+
+    it('quota_retry_does_not_repeat_full_trim_per_delta', () => {
+      const live = { run: 4, attach: 'run-0004', assistantId: 'a-live' };
+      const prior = { ...msg('assistant', 'y'.repeat(4000)), id: 'a-prior' };
+      const running = thread(1, {
+        live,
+        messages: [
+          msg('user', 'earlier'),
+          prior,
+          msg('user', 'now'),
+          { ...msg('assistant', 'half'), id: 'a-live', seq: 9 },
+        ],
+      });
+      const other = thread(2);
+      const setItem = quota(1500);
+      saveConversations([running, other]);
+      expect(loadConversations()[0].messages.map((m) => m.text)).toEqual(['now', 'half']);
+      // Reading/serializing a body rejected on the first save is observable
+      // work, independent of machine speed or a timing threshold.
+      let priorReads = 0;
+      Object.defineProperty(prior, 'text', {
+        get: () => {
+          priorReads += 1;
+          return 'y'.repeat(4000);
+        },
+        enumerable: true,
+      });
+      setItem.mockClear();
+      for (const [seq, text] of [
+        [10, 'half one'],
+        [11, 'half one two'],
+      ] as const) {
+        running.messages = running.messages.map((m) =>
+          m.id === 'a-live' ? { ...m, text, seq } : m,
+        );
+        saveConversations([running, other]);
+        expect(loadConversations()[0].messages[1]).toMatchObject({ text, seq });
+      }
+      expect(priorReads).toBe(0);
+      expect(setItem).toHaveBeenCalledTimes(2);
+      expect(loadConversations()[0].live).toEqual(live);
+    });
+
+    it.each([
+      'healed',
+      'prefix reorder',
+      'session',
+      'vault',
+      'thread reorder',
+      'clear',
+      'overwrite',
+    ])('invalidates quota admission after %s', (change) => {
+      const original = thread(1);
+      const threads = [original, thread(2)];
+      const full = quota(1000);
+      saveConversations(threads);
+      expect(loadConversations()[0].messages).toEqual([]);
+      full.mockRestore();
+      if (change === 'healed') {
+        original.messages = original.messages.map((m) => ({ ...m, text: 'healed' }));
+      } else if (change === 'prefix reorder') {
+        original.messages = [...original.messages].reverse();
+      } else if (change === 'session') {
+        original.sessionId = '00000000-0000-4000-8000-000000000002';
+      } else if (change === 'vault') {
+        original.vault = '/other-vault';
+      } else if (change === 'thread reorder') {
+        threads.reverse();
+      } else if (change === 'clear') {
+        window.localStorage.clear();
+      } else {
+        window.localStorage.setItem('cerebro.conversations', '[]');
+      }
+      saveConversations(threads);
+      expect(loadConversations().find((c) => c.id === original.id)?.messages).toEqual(
+        original.messages,
+      );
+    });
+
+    it('does not admit omissions from a save that never fit', () => {
+      const threads = [thread(1), thread(2)];
+      const full = quota(10);
+      saveConversations(threads);
+      full.mockRestore();
+      saveConversations(threads);
+      expect(loadConversations().map((c) => c.messages.length)).toEqual([2, 2]);
+    });
+
     it('saves nothing new, and throws nothing, when even the trimmed list cannot fit', () => {
       saveConversations([thread(1)]);
       const before = raw();
@@ -1238,5 +1335,91 @@ describe('a branch’s fork (M91.6)', () => {
     // A thread that never branched only takes the session.
     const plain = { ...newConversation(), id: 'c-plain' };
     expect(withSession(plain, MINTED)).toEqual({ ...plain, sessionId: MINTED });
+  });
+});
+
+describe('M95 cached generation metadata has no execution authority', () => {
+  const key = '1234567890abcdef1234567890abcdef';
+  const receipt = {
+    generationId: '11111111111111111111111111111111',
+    firstRunId: '22222222222222222222222222222222',
+    currentRunId: '33333333333333333333333333333333',
+    state: 'running',
+  };
+
+  it('retains the logical key but never persists a live generation observation as current state', () => {
+    const reply = {
+      ...msg('assistant', 'Original reply'),
+      generationRequestKey: key,
+      generationObservation: receipt,
+    };
+    saveConversations([
+      { ...newConversation(), messages: [msg('user', 'Original question'), reply] },
+    ]);
+    const loaded = loadConversations()[0].messages[1];
+    expect(Reflect.get(loaded, 'generationRequestKey')).toBe(key);
+    expect(Reflect.get(loaded, 'generationObservation')).toBeUndefined();
+    expect(window.localStorage.getItem('cerebro.conversations')).not.toContain(
+      'generationObservation',
+    );
+  });
+
+  it('drops even well-formed injected cache observations rather than treating them as fresh native facts', () => {
+    window.localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([
+        {
+          ...newConversation(),
+          messages: [
+            {
+              ...msg('assistant', 'Retained words'),
+              generationRequestKey: key,
+              generationObservation: receipt,
+            },
+          ],
+        },
+      ]),
+    );
+    const loaded = loadConversations()[0].messages[0];
+    expect(loaded.text).toBe('Retained words');
+    expect(Reflect.get(loaded, 'generationRequestKey')).toBe(key);
+    expect(Reflect.get(loaded, 'generationObservation')).toBeUndefined();
+  });
+
+  it('drops malformed cached keys and observation objects without losing the neighboring question', () => {
+    window.localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([
+        {
+          ...newConversation(),
+          messages: [
+            msg('user', 'Keep my question'),
+            {
+              ...msg('assistant', 'Keep my reply'),
+              generationRequestKey: { run: 99, attach: 'claimed-authority' },
+              generationObservation: { currentRunId: 99, state: { kind: 'success' } },
+            },
+          ],
+        },
+      ]),
+    );
+    const loaded = loadConversations()[0].messages;
+    expect(loaded.map((message) => message.text)).toEqual(['Keep my question', 'Keep my reply']);
+    expect(Reflect.get(loaded[1], 'generationRequestKey')).toBeUndefined();
+    expect(Reflect.get(loaded[1], 'generationObservation')).toBeUndefined();
+  });
+});
+
+
+describe('M95 cached messages cannot retain an original native reply selector', () => {
+  const reply = { ...msg('assistant', 'Original reply'), nativeRecoveryRoot: { runId: 'original-native-root', vaultPath: '/vault', opening: 4 } };
+  it('strips the captured selector when saving a thread', () => {
+    saveConversations([{ ...newConversation(), messages: [msg('user', 'Question'), reply] }]);
+    expect(localStorage.getItem('cerebro.conversations')).not.toContain('nativeRecoveryRoot');
+    expect(Reflect.get(loadConversations()[0].messages[1], 'nativeRecoveryRoot')).toBeUndefined();
+  });
+  it('drops a well-formed selector injected into cached history', () => {
+    localStorage.setItem('cerebro.conversations', JSON.stringify([{ ...newConversation(), messages: [msg('user', 'Question'), reply] }]));
+    expect(Reflect.get(loadConversations()[0].messages[1], 'nativeRecoveryRoot')).toBeUndefined();
   });
 });

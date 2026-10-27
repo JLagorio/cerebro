@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "reads": [
+    {
+      "name": "bom_crlf_and_null",
+      "path": "notes/\u00e9xact.md",
+      "expected": {
+        "content": "\ufeff---\r\npresent: null\r\nliteral: \"007\"\r\nlarge: 9007199254740993.125\r\nunknown: { nested: [true, null] }\r\n---\r\n\r\n# Exact\r\n",
+        "hash": "dd88de693f5801c6b64cc1006c32581e988f007913d0e919b16d29fd7701811f"
+      }
+    },
+    {
+      "name": "malformed_metadata",
+      "path": "notes/malformed.md",
+      "expected": {
+        "content": "---\nkey: [unfinished\n---\n# Keep raw\n",
+        "hash": "7ee6cd11bc907afffb975de39658bb469dce12374d699426eda7d0e6eaf42d2e"
+      }
+    },
+    {
+      "name": "empty_file",
+      "path": "notes/empty.md",
+      "expected": {
+        "content": "",
+        "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "refusedPaths": [
+    ".git/config",
+    "attachments/a.md",
+    "notes/a.txt",
+    "../outside.md",
+    "Knowledge/a.md"
+  ],
+  "unavailablePath": "notes/unavailable.md"
+}

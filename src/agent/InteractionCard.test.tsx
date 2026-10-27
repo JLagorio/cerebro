@@ -177,7 +177,7 @@ describe('InteractionCard', () => {
   });
 
   it('draws by kind, and a kind this build does not know as a permission', () => {
-    expect(Object.keys(CARD_RENDERERS)).toEqual(['permission', 'question']);
+    expect(Object.keys(CARD_RENDERERS)).toEqual(['permission', 'question', 'managed_action', 'managed_access']);
     const unknown = waiting();
     unknown.card = { ...unknown.card, kind: 'teleport' };
     render(<InteractionCard interaction={unknown} onAnswer={vi.fn()} />);

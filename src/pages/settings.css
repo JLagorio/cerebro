@@ -1,23 +1,7 @@
-/* Settings keeps the same controls in a calm, focused reading column. */
+/* Settings keeps its controls and retained panels on the shared utility edge. */
 .cb-settings {
   container-type: inline-size;
   background: var(--surface-app);
-}
-.cb-settings-content {
-  width: 100%;
-  max-width: 840px;
-  margin: 0 auto;
-  padding: 48px 48px 64px;
-}
-.cb-settings .cb-settings-header {
-  padding: 0;
-  margin-bottom: 32px;
-}
-.cb-settings-eyebrow {
-  margin: 0 0 12px;
-  color: var(--text-meta);
-  font-size: var(--fs-meta);
-  font-weight: 500;
 }
 .cb-settings-nav-group {
   margin: 24px 10px 8px;
@@ -68,7 +52,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 16px 24px;
+  padding-block: var(--sp-4);
   border-bottom: 1px solid var(--n-200);
 }
 .cb-settings-nav-inline .cb-settings-nav-group {
@@ -115,9 +99,6 @@
   flex-shrink: 0;
 }
 @container (max-width: 560px) {
-  .cb-settings-content {
-    padding: 28px 24px 48px;
-  }
   .cb-settings-panel .cb-setting-row {
     gap: 16px;
     flex-wrap: wrap;

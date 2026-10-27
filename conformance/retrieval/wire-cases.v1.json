@@ -1,0 +1,338 @@
+{
+  "version": 1,
+  "scope": "Synthetic wire grammar probes for the current untyped all-fields offline fixture surface; no expected arrays enter the recorder.",
+  "corpus": {
+    "version": 1,
+    "provenance": {
+      "synthetic": true,
+      "author": "M97 wire-format regression probes",
+      "note": "Synthetic only. No native execution is implied by these literal wire cases."
+    },
+    "documents": [
+      {
+        "path": "visible/a.md",
+        "markdown": "# A\n\nHarbor budget is42.\n"
+      },
+      {
+        "path": "visible/b.md",
+        "markdown": "# B\n\nRevised budget is44.\n"
+      },
+      {
+        "path": "hidden/c.md",
+        "markdown": "# C\n\nHidden fixture only.\n"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "recognized-empty",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "No notes matched \"harbor budget\". (1 notes outside this run's read scope were not searched)",
+      "paths": [],
+      "valid": true
+    },
+    {
+      "name": "recognized-bare-empty",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 0,
+      "capped": 0,
+      "wire": "No notes matched \"harbor budget\".",
+      "paths": [],
+      "valid": true
+    },
+    {
+      "name": "recognized-capped-empty",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 1,
+      "wire": "No notes matched \"harbor budget\". (1 notes outside this run's read scope were not searched) (1 note longer than 100 KB was searched in its first 100 KB)",
+      "paths": [],
+      "valid": true
+    },
+    {
+      "name": "recognized-singular-hit",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "1 of 1 note matches \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.",
+      "paths": ["visible/a.md"],
+      "valid": true
+    },
+    {
+      "name": "recognized-plural-hits",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "2 of 2 notes match \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.\n- visible/b.md — B\n  L3: Revised budget is44.",
+      "paths": ["visible/a.md", "visible/b.md"],
+      "valid": true
+    },
+    {
+      "name": "recognized-widened-hit",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "No note contains every word of \"harbor budget\". 1 of 1 closest match, best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.\n  matched: harbor",
+      "paths": ["visible/a.md"],
+      "valid": true
+    },
+    {
+      "name": "recognized-widened-plural",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "No note contains every word of \"harbor budget\". 2 of 2 closest matches, best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.\n  matched: harbor\n- visible/b.md — B\n  L3: Revised budget is44.\n  matched: budget",
+      "paths": ["visible/a.md", "visible/b.md"],
+      "valid": true
+    },
+    {
+      "name": "recognized-capped-plural",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 2,
+      "wire": "2 of 2 notes match \"harbor budget\", best first (1 notes outside this run's read scope were not searched) (2 notes longer than 100 KB were searched in their first 100 KB):\n- visible/a.md — A\n  L3: Harbor budget is42.\n- visible/b.md — B\n  L3: Revised budget is44.",
+      "paths": ["visible/a.md", "visible/b.md"],
+      "valid": true
+    },
+    {
+      "name": "recognized-more-footer",
+      "queryText": "harbor budget",
+      "requestedLimit": 1,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "1 of 2 notes match \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.\n\n1 more not shown; raise limit (at most 100) or narrow the query.",
+      "paths": ["visible/a.md"],
+      "valid": true
+    },
+    {
+      "name": "recognized-limit-footer",
+      "queryText": "harbor budget",
+      "requestedLimit": 101,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "1 of 1 note matches \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.\n\nThe limit is at most 100.",
+      "paths": ["visible/a.md"],
+      "valid": true
+    },
+    {
+      "name": "recognized-empty-limit-footer",
+      "queryText": "harbor budget",
+      "requestedLimit": 101,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "No notes matched \"harbor budget\". (1 notes outside this run's read scope were not searched)\n\nThe limit is at most 100.",
+      "paths": [],
+      "valid": true
+    },
+    {
+      "name": "unknown-no-row-text",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "native result unavailable",
+      "paths": [],
+      "valid": false
+    },
+    {
+      "name": "positive-header-without-rows",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "1 of 1 note matches \"harbor budget\", best first (1 notes outside this run's read scope were not searched):",
+      "paths": [],
+      "valid": false
+    },
+    {
+      "name": "positive-header-with-empty-body",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "1 of 1 note matches \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n",
+      "paths": [],
+      "valid": false
+    },
+    {
+      "name": "empty-header-with-row",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "No notes matched \"harbor budget\". (1 notes outside this run's read scope were not searched)\n- visible/a.md — A\n  L3: Harbor budget is42.",
+      "paths": ["visible/a.md"],
+      "valid": false
+    },
+    {
+      "name": "header-count-missing-row",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "2 of 2 notes match \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.",
+      "paths": ["visible/a.md"],
+      "valid": false
+    },
+    {
+      "name": "header-count-extra-row",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "1 of 1 note matches \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.\n- visible/b.md — B\n  L3: Revised budget is44.",
+      "paths": ["visible/a.md", "visible/b.md"],
+      "valid": false
+    },
+    {
+      "name": "header-count-over-total",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "2 of 1 note matches \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.\n- visible/b.md — B\n  L3: Revised budget is44.",
+      "paths": ["visible/a.md", "visible/b.md"],
+      "valid": false
+    },
+    {
+      "name": "zero-hit-positive-header",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "0 of 0 notes match \"harbor budget\", best first (1 notes outside this run's read scope were not searched):",
+      "paths": [],
+      "valid": false
+    },
+    {
+      "name": "query-mismatch",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "No notes matched \"different query\". (1 notes outside this run's read scope were not searched)",
+      "paths": [],
+      "valid": false
+    },
+    {
+      "name": "missing-scope-note",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "No notes matched \"harbor budget\".",
+      "paths": [],
+      "valid": false
+    },
+    {
+      "name": "missing-cap-note",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 1,
+      "wire": "No notes matched \"harbor budget\". (1 notes outside this run's read scope were not searched)",
+      "paths": [],
+      "valid": false
+    },
+    {
+      "name": "unexpected-empty-footer",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "No notes matched \"harbor budget\". (1 notes outside this run's read scope were not searched)\n\nnative result unavailable",
+      "paths": [],
+      "valid": false
+    },
+    {
+      "name": "unknown-body-line",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "1 of 1 note matches \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.\nnative result unavailable",
+      "paths": ["visible/a.md"],
+      "valid": false
+    },
+    {
+      "name": "row-before-header",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "- visible/a.md — A\n  L3: Harbor budget is42.",
+      "paths": ["visible/a.md"],
+      "valid": false
+    },
+    {
+      "name": "missing-more-footer",
+      "queryText": "harbor budget",
+      "requestedLimit": 1,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "1 of 2 notes match \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.",
+      "paths": ["visible/a.md"],
+      "valid": false
+    },
+    {
+      "name": "inconsistent-more-footer",
+      "queryText": "harbor budget",
+      "requestedLimit": 1,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "1 of 2 notes match \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.\n\n2 more not shown; raise limit (at most 100) or narrow the query.",
+      "paths": ["visible/a.md"],
+      "valid": false
+    },
+    {
+      "name": "missing-request-limit-footer",
+      "queryText": "harbor budget",
+      "requestedLimit": 101,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "1 of 1 note matches \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.",
+      "paths": ["visible/a.md"],
+      "valid": false
+    },
+    {
+      "name": "widened-row-missing-matched-line",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "No note contains every word of \"harbor budget\". 1 of 1 closest match, best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.",
+      "paths": ["visible/a.md"],
+      "valid": false
+    },
+    {
+      "name": "duplicate-wire-path",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "2 of 2 notes match \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md — A\n  L3: Harbor budget is42.\n- visible/a.md — A\n  L3: Harbor budget is42.",
+      "paths": ["visible/a.md", "visible/a.md"],
+      "valid": false
+    },
+    {
+      "name": "missing-path-separator",
+      "queryText": "harbor budget",
+      "requestedLimit": null,
+      "withheld": 1,
+      "capped": 0,
+      "wire": "1 of 1 note matches \"harbor budget\", best first (1 notes outside this run's read scope were not searched):\n- visible/a.md A",
+      "paths": ["visible/a.md"],
+      "valid": false
+    }
+  ]
+}

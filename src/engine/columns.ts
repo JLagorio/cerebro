@@ -1,3 +1,4 @@
+import { selectedPropertyKeys } from './selectedEntryProjection';
 import { childTypeOf } from './createRecord';
 import { isSystemProperty } from './properties';
 import { nestLevels } from './types';
@@ -170,7 +171,7 @@ export function columnUniverse(
   // Undeclared frontmatter keys still deserve a column — that is the advisory
   // schema rule the detail panel already follows.
   for (const e of entries) {
-    for (const name of Object.keys(e.properties)) {
+    for (const name of selectedPropertyKeys(e)) {
       if (isSystemProperty(name) || byName.has(name)) continue;
       byName.set(name, { name, kind: 'text', undeclared: true });
     }

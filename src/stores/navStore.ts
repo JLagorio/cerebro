@@ -1,3 +1,11 @@
+import type { QuickOpenSnapshot, SourceOpenRecord } from '@/app/sourceOpen';
+import {
+  requestLeave,
+  invalidatePendingLeaves,
+  reserveLeaveIntent,
+  finishLeaveIntent,
+  saveBeforeAction,
+} from '@/app/leaveGuard';
 import { createContext, useContext, useMemo } from 'react';
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
@@ -23,6 +31,10 @@ export interface OpenPaneOptions extends NavigateOptions {
   from?: PaneId;
 }
 export interface NavState {
+  sourcePeek: SourceOpenRecord | null;
+  quickOpenResume: QuickOpenSnapshot | null;
+  pruneSourceRequests(vaultPath: string | null, paths: ReadonlySet<string>): void;
+  restoreVisit(pane: PaneId, visitId: string, stillCurrent?: () => boolean): Promise<boolean>;
   selection: Selection;
   history: NavSlot[];
   historyIndex: number;
@@ -157,33 +169,126 @@ function notice(outcome: NavOutcome, options?: NavigateOptions): void {
 const store = createStore<NavState>((set, get) => ({
   ...inlineLayout(panes.emptyPanes()),
   paneCapacity: 1,
+  sourcePeek: null,
+  quickOpenResume: null,
+  pruneSourceRequests(vaultPath, paths) {
+    const current = (request: SourceOpenRecord | null | undefined) =>
+      request && request.openedVaultPath === vaultPath && paths.has(request.locator.path);
+    const layout = layoutOf(get());
+    let changed = false;
+    const next = {
+      ...layout,
+      panes: layout.panes.map((pane) => ({
+        ...pane,
+        history: pane.history.map((slot) => {
+          const request = slot.state?.['source.request'] as SourceOpenRecord | undefined;
+          if (!request || current(request)) return slot;
+          changed = true;
+          return withState(slot, 'source.request', undefined);
+        }),
+      })),
+    };
+    const peek = get().sourcePeek;
+    if (changed || (peek !== null && !current(peek)))
+      set({ ...inlineLayout(next), sourcePeek: current(peek) ? peek : null });
+    if (vaultPath === null) set({ quickOpenResume: null });
+  },
+  async restoreVisit(id, visitId, stillCurrent = () => true) {
+    const source = get();
+    const sourcePane = source.active;
+    const sourceSeq = source.navSeq;
+    const intent = reserveLeaveIntent(`pane:${sourcePane}`);
+    const current = () =>
+      intent.isCurrent() &&
+      stillCurrent() &&
+      get().active === sourcePane &&
+      get().navSeq === sourceSeq;
+    try {
+      if (!(await saveBeforeAction('all', 'block', current))) return false;
+      // Saving is asynchronous. Never replay a captured layout over newer
+      // pane ownership, history, or visit state.
+      const layout = capture(layoutOf(get()), sourcePane);
+      const pane = panes.paneById(layout, id);
+      const index =
+        pane?.history.findIndex((slot) => slot.state?.['source.visitId'] === visitId) ?? -1;
+      if (
+        !current() ||
+        !pane ||
+        index < 0 ||
+        (liveCheck && !liveCheck(pane.history[index].selection))
+      )
+        return false;
+      const selection = pane.history[index].selection;
+      const holder = panes.holderOf(layout, selection);
+      const next =
+        holder && holder.id !== id
+          ? panes.focusPane(layout, holder.id)
+          : panes.focusPane(
+              {
+                ...layout,
+                panes: layout.panes.map((item) =>
+                  item.id !== id
+                    ? item
+                    : {
+                        ...item,
+                        historyIndex: index,
+                        selection,
+                        navSeq: item.navSeq + 1,
+                      },
+                ),
+              },
+              id,
+            );
+      leaveSurface(sourcePane, next);
+      set(inlineLayout(next));
+      return true;
+    } finally {
+      finishLeaveIntent(intent);
+    }
+  },
   navigate(selection, options) {
     return get().navigateIn(get().active, selection, options);
   },
   navigateIn(id, selection, options) {
-    let layout = layoutOf(get());
-    const source = panes.paneById(layout, id);
-    if (!source) return { kind: 'unchanged', pane: layout.active };
-    const inherited =
-      options?.byAgent === true ||
-      (options?.replace === true && source.history[source.historyIndex]?.byAgent === true);
-    const effective = { ...options, byAgent: inherited };
-    layout = capture(layout, id);
-    const held = panes.holderOf(layout, selection, id);
-    if (held) layout = capture(layout, held.id);
-    const result = panes.navigatePane(layout, id, selection, effective);
-    leaveSurface(id, result.layout, options?.keepDetail);
-    const page = pagePathOf(selection);
-    if (
-      !inherited &&
-      !options?.restore &&
-      page !== null &&
-      (result.outcome.kind === 'reused' || page !== pagePathOf(source.selection))
-    )
-      recordPersonOpen(page);
-    set(inlineLayout(result.layout));
-    notice(result.outcome, effective);
-    return result.outcome;
+    const requestedPane = id;
+    const before = panes.paneById(layoutOf(get()), requestedPane)?.navSeq;
+    let outcome: NavOutcome = { kind: 'unchanged', pane: requestedPane };
+    const perform = (): NavOutcome => {
+      let layout = layoutOf(get());
+      const source = panes.paneById(layout, id);
+      if (!source) return { kind: 'unchanged', pane: layout.active };
+      const inherited =
+        options?.byAgent === true ||
+        (options?.replace === true && source.history[source.historyIndex]?.byAgent === true);
+      const effective = { ...options, byAgent: inherited };
+      layout = capture(layout, id);
+      const held = panes.holderOf(layout, selection, id);
+      if (held) layout = capture(layout, held.id);
+      const result = panes.navigatePane(layout, id, selection, effective);
+      const promoted = get().sourcePeek;
+      leaveSurface(id, result.layout, options?.keepDetail);
+      const page = pagePathOf(selection);
+      if (
+        !inherited &&
+        !options?.restore &&
+        page !== null &&
+        (result.outcome.kind === 'reused' || page !== pagePathOf(source.selection))
+      )
+        recordPersonOpen(page);
+      set(inlineLayout(result.layout));
+      if (promoted?.locator.path === page)
+        get().setEntryState('source.request', promoted, result.outcome.pane);
+      notice(result.outcome, effective);
+      return result.outcome;
+    };
+    requestLeave(
+      `pane:${requestedPane}`,
+      () => {
+        outcome = perform();
+      },
+      () => panes.paneById(layoutOf(get()), requestedPane)?.navSeq === before,
+    );
+    return outcome;
   },
   back(id) {
     step(-1, id ?? get().active);
@@ -192,42 +297,65 @@ const store = createStore<NavState>((set, get) => ({
     step(1, id ?? get().active);
   },
   openPane(selection, options) {
-    const from = options?.from ?? get().active;
-    let layout = capture(layoutOf(get()), from);
-    const held = panes.holderOf(layout, selection);
-    if (held) layout = capture(layout, held.id);
-    const result = panes.openPane(layout, from, selection, get().paneCapacity, options);
-    // Opening beside doesn't make the source leave, but a newly claimed file
-    // can never remain in the peek too.
-    if (result.outcome.kind === 'full') leaveSurface(from, result.layout, options?.keepDetail);
-    else if (
-      useUiStore.getState().detailPath !== null &&
-      result.layout.panes.some(
-        (pane) => panes.claimOf(pane.selection) === useUiStore.getState().detailPath,
+    const requestedPane = options?.from ?? get().active;
+    const before = panes.paneById(layoutOf(get()), requestedPane)?.navSeq;
+    let outcome: NavOutcome = { kind: 'unchanged', pane: requestedPane };
+    const perform = (): NavOutcome => {
+      const from = requestedPane;
+      let layout = capture(layoutOf(get()), from);
+      const held = panes.holderOf(layout, selection);
+      if (held) layout = capture(layout, held.id);
+      const result = panes.openPane(layout, from, selection, get().paneCapacity, options);
+      const promoted = get().sourcePeek;
+      // Opening beside doesn't make the source leave, but a newly claimed file
+      // can never remain in the peek too.
+      if (result.outcome.kind === 'full') leaveSurface(from, result.layout, options?.keepDetail);
+      else if (
+        useUiStore.getState().detailPath !== null &&
+        result.layout.panes.some(
+          (pane) => panes.claimOf(pane.selection) === useUiStore.getState().detailPath,
+        )
       )
-    )
-      useUiStore.getState().closeDetail();
-    const page = pagePathOf(selection);
-    const sourcePage = pagePathOf(panes.paneById(layout, from)?.selection ?? { kind: 'home' });
-    if (
-      !options?.byAgent &&
-      !options?.restore &&
-      page !== null &&
-      (result.outcome.pane !== from || page !== sourcePage)
-    )
-      recordPersonOpen(page);
-    set(inlineLayout(result.layout));
-    if (result.outcome.kind !== 'reused' || result.outcome.pane !== from)
-      notice(result.outcome, options);
-    return result.outcome;
+        useUiStore.getState().closeDetail();
+      const page = pagePathOf(selection);
+      const sourcePage = pagePathOf(panes.paneById(layout, from)?.selection ?? { kind: 'home' });
+      if (
+        !options?.byAgent &&
+        !options?.restore &&
+        page !== null &&
+        (result.outcome.pane !== from || page !== sourcePage)
+      )
+        recordPersonOpen(page);
+      set(inlineLayout(result.layout));
+      if (promoted?.locator.path === page)
+        get().setEntryState('source.request', promoted, result.outcome.pane);
+      if (result.outcome.kind !== 'reused' || result.outcome.pane !== from)
+        notice(result.outcome, options);
+      return result.outcome;
+    };
+    requestLeave(
+      `pane:${requestedPane}`,
+      () => {
+        outcome = perform();
+      },
+      () => panes.paneById(layoutOf(get()), requestedPane)?.navSeq === before,
+    );
+    return outcome;
   },
   closePane(id = get().active) {
-    const layout = layoutOf(get());
-    const next = panes.closePane(layout, id);
-    if (next === layout) return;
-    leaveSurface(id, next);
-    captors.delete(id);
-    set(inlineLayout(next));
+    const before = panes.paneById(layoutOf(get()), id)?.navSeq;
+    requestLeave(
+      `pane:${id}`,
+      () => {
+        const layout = layoutOf(get());
+        const next = panes.closePane(layout, id);
+        if (next === layout) return;
+        leaveSurface(id, next);
+        captors.delete(id);
+        set(inlineLayout(next));
+      },
+      () => panes.paneById(layoutOf(get()), id)?.navSeq === before,
+    );
   },
   focusPane(id) {
     const layout = layoutOf(get());
@@ -266,11 +394,12 @@ const store = createStore<NavState>((set, get) => ({
   },
   reset() {
     const next = panes.emptyPanes(get().seq);
+    invalidatePendingLeaves(`pane:${next.active}`);
     next.panes[0].navSeq = get().navSeq + 1;
     useUiStore.getState().closeDetail();
     useUiStore.getState().closeDiff();
     captors.clear();
-    set(inlineLayout(next));
+    set({ ...inlineLayout(next), sourcePeek: null, quickOpenResume: null });
   },
   setEntryState(key, value, id = get().active) {
     const layout = layoutOf(get());
@@ -358,6 +487,14 @@ const store = createStore<NavState>((set, get) => ({
   },
 }));
 function step(direction: -1 | 1, id: PaneId): void {
+  const before = panes.paneById(layoutOf(store.getState()), id)?.navSeq;
+  requestLeave(
+    `pane:${id}`,
+    () => stepNow(direction, id),
+    () => panes.paneById(layoutOf(store.getState()), id)?.navSeq === before,
+  );
+}
+function stepNow(direction: -1 | 1, id: PaneId): void {
   const layout = capture(layoutOf(store.getState()), id);
   const result = panes.stepPane(
     layout,
@@ -424,3 +561,10 @@ export function usePaneId(): PaneId {
   const context = useContext(PaneContext);
   return useStore(store, (state) => context ?? state.active);
 }
+
+// A peek request lives exactly as long as that overlay generation. Promotion
+// captures it before closing the overlay and attaches it to the resulting visit.
+useUiStore.subscribe((state, previous) => {
+  if (state.detailPath !== previous.detailPath || state.detailPane !== previous.detailPane)
+    store.setState({ sourcePeek: null });
+});

@@ -44,6 +44,8 @@ export default defineConfig({
       '**/tolaria-main/**',
       'e2e/**',
       '.claude/**',
+      // Review packets retain old sources and browser specs, not live tests.
+      '.superpowers/**',
       'src-tauri/.bundle-resources/**',
     ],
     // setup.ts grants waitFor 5s for shared CI runners, but vitest's default
@@ -69,6 +71,7 @@ export default defineConfig({
         '**/tolaria-main/**',
         'e2e/**',
         '.claude/**',
+        '.superpowers/**',
         // Cargo embeds copies of the built web bundle under target/. They
         // are generated output, already outside the lint/format source set;
         // counting them here charges the same app a second time at zero hits.

@@ -160,6 +160,25 @@ export async function openAssistantPanel(page: Page): Promise<void> {
   await expect(panel).toHaveAttribute('data-presentation', 'panel');
 }
 
+/** The assistant opened from the app rail and expanded into the canvas, its
+ * full-screen presentation (M92: the conversation rail lives there only).
+ * Returns the panel. */
+export async function openAssistantCanvas(page: Page): Promise<Locator> {
+  await page
+    .getByTestId('app-rail')
+    .getByRole('button', { name: 'Assistant', exact: true })
+    .click();
+  const panel = page.getByTestId('ai-panel');
+  if ((await panel.getAttribute('data-presentation')) === 'floating') {
+    await panel.getByRole('button', { name: 'Conversation options', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Expand conversation', exact: true }).click();
+  } else if ((await panel.getAttribute('data-presentation')) !== 'canvas') {
+    await panel.getByRole('button', { name: 'Expand conversation', exact: true }).click();
+  }
+  await expect(panel).toHaveAttribute('data-presentation', 'canvas');
+  return panel;
+}
+
 /** Send `text` from the open assistant's composer, as a person does: typed,
  * then Enter (M91.15). */
 export async function askAssistant(page: Page, text: string): Promise<void> {
@@ -520,6 +539,44 @@ export async function seedFileBeforeBoot(page: Page, path: string, text: string)
     },
     { path, text },
   );
+}
+
+/**
+ * Let every held `wait for me` turn go (M57.5) until `done` holds. The
+ * script holds a step after its call shows, so a release that came before
+ * the hold would free nothing; this one is asked again until it has. Not on
+ * a held clock, where the turn steps only as `stepUntil` lets it.
+ */
+export async function releaseHeldTurns(page: Page, done: () => Promise<boolean>): Promise<void> {
+  await expect
+    .poll(async () => {
+      await page.evaluate(() =>
+        (window as unknown as { __cerebroReleaseMockRuns: () => void }).__cerebroReleaseMockRuns(),
+      );
+      return done();
+    })
+    .toBe(true);
+}
+
+/**
+ * From here on, the browser's context book (`window.__cerebroMockContextBook`,
+ * src/agent/agentIpc.ts) answers every reading without Claude Code's
+ * breakdown, as a reading reads when its run did not ask for one (every run
+ * but a seated one, M92.13): the count alone.
+ */
+export async function contextReadingsWithoutBreakdown(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const book = (
+      window as unknown as {
+        __cerebroMockContextBook: { read: (session: string) => Record<string, unknown> };
+      }
+    ).__cerebroMockContextBook;
+    const read = book.read.bind(book);
+    book.read = (session) => {
+      const { breakdown: _dropped, ...reading } = read(session);
+      return reading;
+    };
+  });
 }
 
 /** Settings owns local sections; use its visible navigation, including the compact drawer. */

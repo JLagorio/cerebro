@@ -1,0 +1,117 @@
+{
+  "create": [
+    {
+      "name": "empty body",
+      "original": "gone.md",
+      "destination": "new.md",
+      "content": "",
+      "allowed": true
+    },
+    {
+      "name": "whitespace CRLF",
+      "original": "gone.md",
+      "destination": "new.md",
+      "content": " \t\r\n",
+      "allowed": true
+    },
+    {
+      "name": "BOM exact body",
+      "original": "gone.md",
+      "destination": "new.md",
+      "content": "﻿body\r\n",
+      "allowed": true
+    },
+    {
+      "name": "unclosed rule",
+      "original": "gone.md",
+      "destination": "new.md",
+      "content": "---\nnot closed",
+      "allowed": true
+    },
+    {
+      "name": "same target",
+      "original": "gone.md",
+      "destination": "gone.md",
+      "content": "body",
+      "allowed": false
+    },
+    {
+      "name": "dot alias",
+      "original": "gone.md",
+      "destination": "./gone.md",
+      "content": "body",
+      "allowed": false
+    },
+    {
+      "name": "folded alias",
+      "original": "gone.md",
+      "destination": "GONE.md",
+      "content": "body",
+      "allowed": false
+    },
+    {
+      "name": "diagram origin",
+      "original": "gone.mmd",
+      "destination": "new.md",
+      "content": "body",
+      "allowed": false
+    },
+    {
+      "name": "governed origin",
+      "original": "knowledge/a.md",
+      "destination": "new.md",
+      "content": "body",
+      "allowed": false
+    },
+    {
+      "name": "governed destination",
+      "original": "gone.md",
+      "destination": "knowledge/new.md",
+      "content": "body",
+      "allowed": false
+    },
+    {
+      "name": "protected destination",
+      "original": "gone.md",
+      "destination": ".git/new.md",
+      "content": "body",
+      "allowed": false
+    },
+    {
+      "name": "frontmatter promotion",
+      "original": "gone.md",
+      "destination": "new.md",
+      "content": "---\ntitle: promoted\n---\nbody",
+      "allowed": false
+    },
+    {
+      "name": "BOM CRLF frontmatter promotion",
+      "original": "gone.md",
+      "destination": "new.md",
+      "content": "﻿---\r\n---\r\nbody",
+      "allowed": false
+    }
+  ],
+  "exports": [
+    {
+      "format": "json",
+      "content": "{\"format\":\"cerebro-retained-draft\",\"version\":1,\"text\":\"  \\r\\n☀\"}",
+      "allowed": true
+    },
+    {
+      "format": "json",
+      "content": "{\"format\":\"cerebro-retained-drafts\",\"version\":1,\"drafts\":[]}",
+      "allowed": true
+    },
+    { "format": "json", "content": "{}", "allowed": false },
+    {
+      "format": "json",
+      "content": "{\"format\":\"cerebro-retained-draft\",\"version\":2}",
+      "allowed": false
+    },
+    { "format": "json", "content": "not json", "allowed": false },
+    { "format": "mmd", "content": "﻿graph TD\r\n A-->B  \r\n", "allowed": true },
+    { "format": "canvas", "content": "{\"unknown\":true,\"nodes\":[]}", "allowed": true },
+    { "format": "svg", "content": "<svg/>", "allowed": false }
+  ]
+}

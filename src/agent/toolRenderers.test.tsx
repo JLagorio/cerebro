@@ -14,6 +14,8 @@ import {
   MessageScrollerViewport,
 } from '@/components/ai/MessageScroller';
 import { TOOLS } from '@/lib/policy/tools';
+import { useNavStore } from '@/stores/navStore';
+import { useUiStore } from '@/stores/uiStore';
 
 /**
  * Rows drawn by the manifest's renderer (M56.8). The renderer vocabulary is
@@ -199,6 +201,55 @@ describe("a reply's rows", () => {
     // sliver of the fourth line.
     expect(refusal.className).not.toContain('line-clamp-3');
     expect(refusal.querySelector('span')?.className).toContain('line-clamp-3');
+  });
+
+  describe('a handoff’s line, which opens the run it started', () => {
+    const RUN = '0000000000000000000000000092150d';
+    const handed = () =>
+      call('hand_to', {
+        input: JSON.stringify({ agent: 'release-scout', message: 'Go.' }),
+        output: `Started Release scout (run ${RUN}) with what you handed it.`,
+      });
+    const realNavigate = useNavStore.getState().navigate;
+    /** Where the conversation stood as the run's page opened. */
+    let during: string | null = null;
+    const navigate = vi.fn(() => {
+      during = useUiStore.getState().aiPanelPresentation;
+    });
+
+    beforeEach(() => {
+      during = null;
+      navigate.mockClear();
+      useNavStore.setState({ navigate } as never);
+    });
+    afterEach(() => {
+      // Unmounted first: the line reads its navigate from the store.
+      cleanup();
+      useNavStore.setState({ navigate: realNavigate } as never);
+    });
+
+    it('floats the canvas first, which would hide the run’s page (M92.1)', () => {
+      useUiStore.setState({ aiPanelPresentation: 'canvas', aiPanelMinimized: false });
+      rows([handed()]);
+      fireEvent.click(screen.getByRole('button', { name: /Handed to release-scout/ }));
+      expect(navigate).toHaveBeenCalledWith({ kind: 'knowledge', nav: { tab: 'runs', run: RUN } });
+      expect(during).toBe('floating');
+    });
+
+    it('opens the run beside a floating or docked conversation, which stays as it is', () => {
+      for (const presentation of ['floating', 'panel'] as const) {
+        useUiStore.setState({ aiPanelPresentation: presentation, aiPanelMinimized: false });
+        rows([handed()]);
+        fireEvent.click(screen.getByRole('button', { name: /Handed to release-scout/ }));
+        expect(navigate).toHaveBeenLastCalledWith({
+          kind: 'knowledge',
+          nav: { tab: 'runs', run: RUN },
+        });
+        expect(during).toBe(presentation);
+        expect(useUiStore.getState().aiPanelPresentation).toBe(presentation);
+        cleanup();
+      }
+    });
   });
 
   it('counts what a commit decided, and shows a refusal’s code', () => {

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "failed-save",
+  "title": "Recover a failed save",
+  "adapter": "unavailable",
+  "inputs": {
+    "capability": "native_save_recovery",
+    "reason": "No actual save-recovery producer registered in this outcome harness."
+  },
+  "allowedEffects": [],
+  "forbiddenEffects": [
+    "send",
+    "verify"
+  ],
+  "expectedSources": [],
+  "expectedArtifacts": [],
+  "injections": [],
+  "requiredCapabilities": [
+    "native_save_recovery"
+  ]
+}

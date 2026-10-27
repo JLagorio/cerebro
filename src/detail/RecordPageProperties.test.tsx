@@ -66,7 +66,7 @@ describe('record page summary', () => {
     expect(
       screen.getByTestId('record-summary').querySelectorAll('.cb-record-summary-field'),
     ).toHaveLength(0);
-    fireEvent.click(screen.getByRole('button', { name: /Properties/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Show all properties/ }));
     expect(screen.getByRole('button', { name: 'Add property' })).toBeTruthy();
   });
 

@@ -95,7 +95,7 @@ export function SettingsNavigation({
   return (
     <nav
       aria-label="Settings sections"
-      className={`cb-settings-nav${inline ? ' cb-settings-nav-inline' : ''}`}
+      className={`cb-settings-nav${inline ? ' cb-settings-nav-inline cb-composition-content' : ''}`}
     >
       {SETTINGS_SECTIONS.map((section, index) => (
         <div key={section.id}>

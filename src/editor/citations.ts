@@ -1,4 +1,6 @@
 import { noSourceText } from '@/agent/elements/writingCitations';
+import { httpUrl } from '@/engine/ai/sources';
+import { kindFor } from '@/engine/fileKinds';
 import { linkLabel } from '@/engine/linkLabels';
 import type { Source } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
@@ -229,18 +231,54 @@ export function citationChoices(
 
 export type SourceTarget = { external: string } | { internal: string } | null;
 
+export type ResourceTarget =
+  | { kind: 'VaultPage'; path: string }
+  | { kind: 'ExternalUrl'; url: string }
+  | { kind: 'MissingLocal'; path: string }
+  | { kind: 'Descriptor'; text: string };
+
 /**
- * Where a source's `resource` leads — ONE rule for the citation chips and the
- * Sources list (KnowledgePanel's SourceRow): a URL scheme is outside the vault,
- * a path (vault-relative, usually with a leading `/`) is a page if the vault
- * has one there, and anything else is a scope descriptor ("all sync telemetry
- * in eu-west") that names something but cannot be followed.
+ * What a resource names in the supplied vault listing, not proof that its
+ * contents were read. Only exact local entries and the existing safe HTTP(S)
+ * policy produce actions. Missing is reserved for explicit rooted paths or
+ * recognized file references; ambiguous legacy strings remain literal text.
+ * Shared resource-target cases pin the classifier and its adapter projection.
  */
+export function resourceTarget(
+  resource: string,
+  entries: readonly Pick<Entry, 'path'>[],
+): ResourceTarget {
+  const url = httpUrl(resource);
+  if (url !== null) return { kind: 'ExternalUrl', url };
+  const descriptor: ResourceTarget = { kind: 'Descriptor', text: resource };
+  if (
+    resource !== resource.trim() ||
+    /^[a-z][a-z0-9+.-]*:/i.test(resource) ||
+    resource.startsWith('//') ||
+    resource.startsWith('~') ||
+    // eslint-disable-next-line no-control-regex -- controls cannot name a local resource.
+    /[\\\u0000-\u001f\u007f]/.test(resource)
+  )
+    return descriptor;
+  const rooted = resource.startsWith('/');
+  const path = rooted ? resource.slice(1) : resource;
+  if (path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..'))
+    return descriptor;
+  if (entries.some((entry) => entry.path === path)) return { kind: 'VaultPage', path };
+  const file = kindFor(path);
+  return rooted || file.kind === 'markdown' || (path.includes('/') && file.ext !== null)
+    ? { kind: 'MissingLocal', path }
+    : descriptor;
+}
+
+/** The existing citation action shape, projected from the same classification
+ * Knowledge uses. Inert text never becomes a source-open target. */
 export function sourceTarget(
   resource: string,
   entries: readonly Pick<Entry, 'path'>[],
 ): SourceTarget {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(resource)) return { external: resource };
-  const path = resource.replace(/^\/+/, '');
-  return entries.some((e) => e.path === path) ? { internal: path } : null;
+  const target = resourceTarget(resource, entries);
+  if (target.kind === 'VaultPage') return { internal: target.path };
+  if (target.kind === 'ExternalUrl') return { external: target.url };
+  return null;
 }

@@ -1,3 +1,4 @@
+import { selectedConfigIssue, selectedLegacyProperties, selectedResolvedField } from './selectedEntryProjection';
 import type {
   DisplayConfig,
   Entry,
@@ -331,12 +332,15 @@ export function buildSchema(entries: Entry[]): Schema {
   const types = new Map<string, TypeDef>();
   for (const e of entries) {
     if (e.type !== 'Type') continue;
-    const fields = parseFields((e.properties as Record<string, unknown>).fields);
+    const properties = selectedLegacyProperties(e);
+    const unavailableReason = selectedConfigIssue(e, ['fields', 'statuses', 'deadline', 'email_domain', 'icon', 'color', 'folder', 'views', 'display', 'layout', 'tabs']);
+    const fields = parseFields((properties as Record<string, unknown>).fields);
     const deadline =
-      typeof e.properties.deadline === 'string' ? e.properties.deadline.trim() : null;
+      typeof properties.deadline === 'string' ? properties.deadline.trim() : null;
     const emailDomain =
-      typeof e.properties.email_domain === 'string' ? e.properties.email_domain.trim() : null;
+      typeof properties.email_domain === 'string' ? properties.email_domain.trim() : null;
     types.set(e.title, {
+      ...(unavailableReason ? { unavailableReason } : {}),
       emailDomain: fields.some(
         (f) => f.name === emailDomain && (f.kind === 'text' || f.kind === 'url'),
       )
@@ -348,18 +352,18 @@ export function buildSchema(entries: Entry[]): Schema {
         ? deadline
         : null,
       name: e.title,
-      icon: typeof e.properties.icon === 'string' ? e.properties.icon : null,
-      color: typeof e.properties.color === 'string' ? e.properties.color : null,
+      icon: typeof properties.icon === 'string' ? properties.icon : null,
+      color: typeof properties.color === 'string' ? properties.color : null,
       fields,
-      statuses: parseStatuses((e.properties as Record<string, unknown>).statuses),
+      statuses: parseStatuses((properties as Record<string, unknown>).statuses),
       folder:
-        typeof e.properties.folder === 'string' && e.properties.folder.trim() !== ''
-          ? e.properties.folder.trim().replace(/^\/+|\/+$/g, '')
+        typeof properties.folder === 'string' && properties.folder.trim() !== ''
+          ? properties.folder.trim().replace(/^\/+|\/+$/g, '')
           : null,
-      views: parseViewList((e.properties as Record<string, unknown>).views),
-      display: parseDisplayConfig((e.properties as Record<string, unknown>).display),
-      layout: parseLayoutConfig((e.properties as Record<string, unknown>).layout),
-      tabs: parseTabList((e.properties as Record<string, unknown>).tabs),
+      views: parseViewList((properties as Record<string, unknown>).views),
+      display: parseDisplayConfig((properties as Record<string, unknown>).display),
+      layout: parseLayoutConfig((properties as Record<string, unknown>).layout),
+      tabs: parseTabList((properties as Record<string, unknown>).tabs),
     });
   }
 
@@ -377,7 +381,7 @@ export function buildSchema(entries: Entry[]): Schema {
     if (projectPath !== null) {
       const project = byPath.get(projectPath);
       if (project !== undefined) {
-        const override = parseStatuses((project.properties as Record<string, unknown>).statuses);
+        const override = parseStatuses((selectedLegacyProperties(project) as Record<string, unknown>).statuses);
         if (override.length > 0) return override;
       }
     }
@@ -392,7 +396,7 @@ export function buildSchema(entries: Entry[]): Schema {
     if (e.project !== null) {
       const project = byPath.get(e.project);
       if (project !== undefined) {
-        const override = parseStatuses((project.properties as Record<string, unknown>).statuses);
+        const override = parseStatuses((selectedLegacyProperties(project) as Record<string, unknown>).statuses);
         if (override.length > 0) return override;
       }
     }
@@ -414,7 +418,7 @@ export function buildSchema(entries: Entry[]): Schema {
     if (e.project !== null) {
       const project = byPath.get(e.project);
       if (project !== undefined) {
-        const override = parseStatuses((project.properties as Record<string, unknown>).statuses);
+        const override = parseStatuses((selectedLegacyProperties(project) as Record<string, unknown>).statuses);
         if (override.length > 0) return 'project';
       }
     }
@@ -461,8 +465,11 @@ export function buildSchema(entries: Entry[]): Schema {
   function computeFieldValue(e: Entry, field: string): unknown {
     if (isVirtualField(field)) return virtualValue(e, field);
     const def = declaredDef(e, field);
+    if (e.type && types.get(e.type)?.unavailableReason) return undefined;
     if (def?.kind === 'created_time') return e.createdAt;
     if (def?.kind === 'last_edited_time') return e.modifiedAt;
+    // No selected metadata value enters the synchronous legacy evaluator.
+    if (e.authority?.kind === 'sqlite_metadata') return undefined;
     if (def?.kind === 'formula') {
       const checked = checkedFormula(e, def);
       return checked === null ? undefined : evaluateFormula(checked, (name) => fieldValue(e, name));
@@ -501,6 +508,17 @@ export function buildSchema(entries: Entry[]): Schema {
 
   function resolveField(e: Entry, field: string): ResolvedField {
     const def = declaredDef(e, field);
+    if (e.authority?.kind === 'sqlite_metadata' && isVirtualField(field)) {
+      const raw = virtualValue(e, field);
+      const display = typeof raw === 'string' ? (field === 'createdAt' || field === 'modifiedAt' ? formatTimestamp(raw) : raw) : '';
+      return { def, raw, display, color: null, ghost: false };
+    }
+    const typeIssue = e.type ? types.get(e.type)?.unavailableReason : undefined;
+    if (def?.kind !== 'created_time' && def?.kind !== 'last_edited_time') {
+      const selected = selectedResolvedField(e, field, def, typeIssue);
+      if (selected !== null) return selected;
+      if (typeIssue) return { def, raw: undefined, display: 'Unavailable', color: null, ghost: false, unavailableReason: typeIssue };
+    }
     const relTargets = e.relationships[field];
     const raw: unknown = relTargets !== undefined ? relTargets : e.properties[field];
 

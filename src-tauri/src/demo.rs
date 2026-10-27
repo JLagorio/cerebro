@@ -18,10 +18,20 @@ pub const FOLDER_NAME: &str = "Cerebro Demo Vault";
 /// Return the path to a writable demo vault, copying it out of the bundle the
 /// first time. Subsequent calls return the existing folder untouched — this is
 /// the user's vault now, and edits made in it survive reopening.
-pub fn ensure(app: &AppHandle) -> Result<String, String> {
+pub(crate) fn ensure(
+    app: &AppHandle,
+) -> Result<String, crate::workspace_service::types::selected::CommandReadError> {
     let destinations = destinations(app);
+    let authority = crate::workspace_service::authority::context().map_err(|e| e.message)?;
+    let guarded: Vec<_> = destinations
+        .iter()
+        .flat_map(|destination| [destination.clone(), staging_path(destination)])
+        .collect();
+    crate::workspace_service::native_admission::guard_demo_destinations(&authority, &guarded)?;
     if destinations.is_empty() {
-        return Err("no writable folder to put the demo vault in".into());
+        return Err("no writable folder to put the demo vault in"
+            .to_owned()
+            .into());
     }
     if let Some(seeded) = destinations.iter().find(|dir| is_populated(dir)) {
         return Ok(seeded.to_string_lossy().to_string());
@@ -38,7 +48,8 @@ pub fn ensure(app: &AppHandle) -> Result<String, String> {
     Err(format!(
         "could not copy the demo vault anywhere ({})",
         failure.unwrap_or_else(|| "no candidate folders".into())
-    ))
+    )
+    .into())
 }
 
 /// Where the demo vault may live once it is the user's, best first.

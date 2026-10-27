@@ -1,6 +1,7 @@
 import type { AggregateCalc } from './aggregate';
 import type { DateDisplayFormat, RemindOffset, TimeDisplayFormat } from './dates';
 import type { RelationIndex } from './relations';
+import type { SelectedBodyObservation, SelectedEntryProperties, SelectedPropertyValue, SelectedRecordVersion } from '@/lib/generated/workspace';
 
 export type Scalar = string | number | boolean | null;
 
@@ -28,6 +29,12 @@ export interface Entry {
    * answered yet. Never the hash of nothing.
    */
   hash: string | null;
+  /** Native-selected authority expectation; never a permission or registration. */
+  authority?: SelectedRecordVersion;
+  /** Complete canonical metadata from the same selected snapshot/version. */
+  canonicalProperties?: SelectedEntryProperties;
+  /** Exact visible bytes in a selected human presentation; never a canonical acknowledgement. */
+  bodyObservation?: SelectedBodyObservation;
 }
 
 /**
@@ -233,6 +240,8 @@ export interface TabDef {
 }
 
 export interface TypeDef {
+  /** Native configuration was present but unavailable; defaults cannot represent it. */
+  unavailableReason?: string;
   /** Declared stored date/range field used for deadline sections (M61.3b). */
   deadline?: string | null;
   /** Declared text/url field holding the domain whose mail this record groups. */
@@ -264,6 +273,9 @@ export interface TypeDef {
 }
 
 export interface ResolvedField {
+  /** Exact descriptive selected value, including absence versus explicit Null. */
+  selectedValue?: SelectedPropertyValue;
+  unavailableReason?: string;
   def: FieldDef | null; // null → undeclared field (advisory: still shown as text)
   raw: unknown;
   display: string; // '' when empty
@@ -297,7 +309,7 @@ export type KnowledgeNav =
  * dependency-free — every module in the app reads this file, and few of them
  * have any business knowing what a skill is.
  */
-export type LibraryTab = 'skill' | 'agent' | 'template';
+export type LibraryTab = 'skill' | 'agent' | 'template' | 'workflow';
 
 export type Selection =
   | { kind: 'home' }
@@ -358,7 +370,7 @@ export type Selection =
   // "the risk sweep's arguments" is a place the back button can return to
   // rather than component state that a re-render forgets. An agent's path
   // forwards to its page (M55.12).
-  | { kind: 'library'; tab?: LibraryTab; path?: string }
+  | { kind: 'library'; tab?: LibraryTab; path?: string; workflowId?: string }
   // M30 — mounted roots. `root` and `path` ride on the selection rather than in
   // component state so "the README of cerebro" is a place Back returns to, the
   // same contract `list.view` and `library.tab` already follow.

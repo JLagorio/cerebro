@@ -6,6 +6,7 @@ import { claimsKey, claimsOf } from '@/lib/keys/claims';
 import { chooseOption, optionLabels } from '@/test/chooseOption';
 import { Inspector } from './Inspector';
 import { createBoardState } from './boardState';
+import { pendingBoardDrafts, settleBoardText } from './pendingText';
 if (typeof window.PointerEvent === 'undefined')
   window.PointerEvent = MouseEvent as unknown as typeof window.PointerEvent;
 afterEach(() => {
@@ -188,4 +189,40 @@ it('uncommitted fields do not spill into a newly selected record and storage fai
   });
   expect(broken.getState().inspectorOpen).toBe(true);
   expect(() => broken.getState().setInspectorOpen(false)).not.toThrow();
+});
+
+it('prepares a retained field against its original target without overwriting newer geometry', () => {
+  const { editor, select } = setup();
+  select('n:a');
+  fireEvent.change(screen.getByRole('textbox', { name: 'X' }), { target: { value: '900' } });
+  select('n:c');
+  const a = editor.board.nodes.get('a')!;
+  act(() =>
+    editor.applyExternal(
+      { ...editor.board, nodes: new Map(editor.board.nodes).set('a', { ...a, y: 123 }) },
+      'Outside',
+    ),
+  );
+  act(() => {
+    expect(settleBoardText(editor)).toBe(true);
+  });
+  expect(editor.board.nodes.get('a')).toMatchObject({ x: 900, y: 123 });
+  expect(editor.board.nodes.get('c')?.x).toBe(400);
+  expect(pendingBoardDrafts(editor)).toEqual([]);
+});
+it('does not drop a pending colour when its original target disappears', () => {
+  const { editor, select } = setup();
+  select('n:a');
+  fireEvent.change(screen.getByRole('textbox', { name: 'Hex colour' }), {
+    target: { value: '#abc' },
+  });
+  select('n:c');
+  const nodes = new Map(editor.board.nodes);
+  nodes.delete('a');
+  act(() => editor.applyExternal({ ...editor.board, nodes, edges: new Map() }, 'Outside'));
+  act(() => {
+    expect(settleBoardText(editor)).toBe(false);
+  });
+  expect(pendingBoardDrafts(editor)).toEqual([{ id: expect.any(String), text: '#abc' }]);
+  expect(editor.board.nodes.get('c')).not.toHaveProperty('color');
 });

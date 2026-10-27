@@ -67,3 +67,19 @@ describe('dueBucket / formatDue', () => {
     expect(formatDue('2026-12-31')).toBe('Dec 31');
   });
 });
+
+
+it('parses CRLF checklist lines without losing offsets, state or display text',()=>{
+  const body='\ufeff# Plan\r\n\r\n- [ ] Call vendor\r\n- [x] Done task\r\n';
+  const tasks=parseTasks('notes/plan.md',body,'exact-body-hash');
+  expect(tasks).toEqual([
+    {sourcePath:'notes/plan.md',version:'exact-body-hash',line:2,text:'Call vendor',done:false,due:null,assignees:[]},
+    {sourcePath:'notes/plan.md',version:'exact-body-hash',line:3,text:'Done task',done:true,due:null,assignees:[]},
+  ]);
+});
+it('toggles a CRLF checklist item while preserving every other body byte',()=>{
+  const body='\ufeff---\r\ntype: body text\r\n---\r\n# Plan\r\n\r\n- [ ] Call vendor\r\n';
+  const next=toggleTaskLine(body,5,true);
+  expect(next).toBe(body.replace('- [ ] Call vendor','- [x] Call vendor'));
+  expect(toggleTaskLine(next!,5,false)).toBe(body);
+});

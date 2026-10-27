@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useRef } from 'react';
 import { useStore } from 'zustand';
 import {
   colorItems,
@@ -20,6 +20,7 @@ import type { BoardStore } from './boardState';
 import './canvasChrome.css';
 import { NumberField } from './NumberField';
 import { ColorField } from './ColorField';
+import { useBoardDraft, type BoardDraftOwner } from './pendingText';
 import type { Preview } from './gestures/types';
 
 const ROW = 'w-full rounded-md border border-n-200 bg-n-0 px-2 py-1 text-xs text-n-700';
@@ -45,10 +46,18 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
     chosen = selectedItems(board, keys),
     boxes = selectedBoxes(board, keys);
   const sections = sectionsFor(board, keys);
+  const draftOwner = (field: string): BoardDraftOwner => ({
+    editor,
+    id: JSON.stringify(['inspector', keys, field]),
+  });
   const scrub = useRef<{ board: Board; boxes: PlacedBox[]; release(): void; stop(): void } | null>(
     null,
   );
   const apply = <P,>(command: Command<P>, payload: P) => {
+    if (keys.some((key) => getItem(editor.board, key) === undefined)) {
+      toast('An item in this edit was removed. The draft is still held.');
+      return false;
+    }
     state.claimGesture(() => {})();
     const result = editor.execute(command, payload);
     if (!result.ok) toast(result.refusal.message);
@@ -56,7 +65,10 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
   };
   const setBoxes = (field: keyof Box, value: number) =>
     apply(resizeItems, {
-      boxes: boxes.map((item) => ({ ...item, box: { ...item.box, [field]: value } })),
+      boxes: selectedBoxes(editor.board, keys).map((item) => ({
+        ...item,
+        box: { ...item.box, [field]: value },
+      })),
     });
   const finishScrub = (commit: boolean) => {
     const current = scrub.current;
@@ -71,7 +83,7 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
   };
   const color = common(chosen.map(({ item }) => item.color ?? null)) ?? null;
   const setColor = (value: string | null) => {
-    if (!apply(colorItems, { keys, color: value })) return;
+    if (!apply(colorItems, { keys, color: value })) return false;
     const colors = { ...state.getState().colors };
     for (const { item } of chosen) {
       const family =
@@ -86,6 +98,7 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
       colors[family] = value;
     }
     state.setState({ colors });
+    return true;
   };
   const cards = chosen.flatMap(({ item }) => ('type' in item ? [item] : []));
   const edges = chosen.flatMap(({ item }) => ('fromNode' in item ? [item] : []));
@@ -121,6 +134,7 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
                 <NumberField
                   key={field}
                   label={label}
+                  draftOwner={draftOwner(field)}
                   value={common(boxes.map((item) => item.box[field])) ?? MIXED}
                   disabled={!sections.position}
                   onCommit={(value) => setBoxes(field, value)}
@@ -164,7 +178,7 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
           </section>
           <section>
             <h3 className="mb-2 mt-0 text-xs font-medium text-n-600">Colour</h3>
-            <ColorField value={color} onCommit={setColor} />
+            <ColorField value={color} onCommit={setColor} draftOwner={draftOwner('color')} />
           </section>
           {sections.shape && (
             <section>
@@ -195,6 +209,7 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
               <h3 className="mb-2 mt-0 text-xs font-medium text-n-600">Ink</h3>
               <NumberField
                 label="Width"
+                draftOwner={draftOwner('inkWidth')}
                 value={common(drawings.map((item) => item.size)) ?? MIXED}
                 onCommit={(size) => apply(sizeInk, { keys, size })}
               />
@@ -203,6 +218,7 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
           {sections.group && (
             <TextSetting
               label="Group label"
+              draftOwner={draftOwner('groupLabel')}
               value={
                 common(
                   cards.flatMap((item) => (item.type === 'group' ? [item.label ?? ''] : [])),
@@ -246,6 +262,7 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
               ))}
               <TextSetting
                 label="Connection label"
+                draftOwner={draftOwner('connectionLabel')}
                 value={common(edges.map((edge) => edge.label ?? '')) ?? ''}
                 onCommit={(label) =>
                   apply(updateEdges, {
@@ -327,36 +344,40 @@ function TextSetting({
   label,
   value,
   onCommit,
+  draftOwner,
 }: {
   label: string;
   value: string | typeof MIXED;
-  onCommit(value: string): void;
+  onCommit(value: string): boolean;
+  draftOwner: BoardDraftOwner;
 }) {
-  const [draft, setDraft] = useState(value === MIXED ? '' : value);
-  const dirty = useRef(false);
-  useEffect(() => {
-    setDraft(value === MIXED ? '' : value);
-    dirty.current = false;
-  }, [value]);
-  const commit = () => {
-    if (!dirty.current) return;
-    dirty.current = false;
-    if (draft !== value) onCommit(draft);
-  };
+  const {
+    draft,
+    error,
+    prepare: commit,
+    change,
+    discard,
+  } = useBoardDraft(draftOwner, value === MIXED ? '' : value, (text) =>
+    text === value || onCommit(text) ? text : false,
+  );
   return (
     <label className="block text-xs text-n-600">
       {label}
       <input
         className={ROW}
         value={draft}
+        aria-invalid={error}
         placeholder={value === MIXED ? 'Mixed' : undefined}
         onChange={(event) => {
-          dirty.current = true;
-          setDraft(event.target.value);
+          change(event.target.value);
         }}
         onBlur={commit}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+          if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            event.stopPropagation();
+            discard();
+          } else if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
             event.preventDefault();
             commit();
           }

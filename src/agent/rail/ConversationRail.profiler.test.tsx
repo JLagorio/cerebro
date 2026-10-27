@@ -1,12 +1,24 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, AgentStreamEvent, ChatMessage, Conversation } from '@/agent/types';
+import type {
+  AgentEvent,
+  AgentStreamEvent,
+  ChatMessage,
+  Conversation,
+  RunReach,
+} from '@/agent/types';
 
 const wire = vi.hoisted(() => ({ deliver: null as ((event: AgentEvent) => void) | null }));
 
 /** Commits under the rail's Profiler and the conversation lists'. */
 const commits = vi.hoisted(() => ({ rail: 0, list: 0 }));
+
+/** The run the conversation handed work to, and the session its turn opens. */
+const ids = vi.hoisted(() => ({
+  handed: '0000000000000000000000000092150a',
+  session: '00000000-0000-4000-8000-000000092150',
+}));
 
 vi.mock('@/agent/agentIpc', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/agent/agentIpc')>();
@@ -29,7 +41,71 @@ vi.mock('@/agent/agentIpc', async (importOriginal) => {
       reason: 'not_recorded',
       retention_days: 30,
     })),
-    agentContextUsage: vi.fn(async () => ({ state: 'not_recorded' })),
+    // The reading the session's last turn filed, with Claude Code's own
+    // breakdown, as the meter keeps it.
+    agentContextUsage: vi.fn(async () => ({
+      state: 'recorded',
+      used: 15_000,
+      window: 200_000,
+      model: 'claude-sonnet-5',
+      at: '2026-10-14T12:00:00.000Z',
+      breakdown: {
+        categories: [
+          { name: 'System prompt', tokens: 6_000, kind: 'used' },
+          { name: 'MCP tools (deferred)', tokens: 450, kind: 'deferred' },
+          { name: 'Messages', tokens: 9_000, kind: 'used' },
+          { name: 'Free space', tokens: 185_000, kind: 'free' },
+        ],
+        total: 15_000,
+        max: 200_000,
+        model: 'claude-sonnet-5',
+        autocompact: { enabled: true, threshold: 167_000 },
+        mcpServers: [{ name: 'cerebro', tools: 31, loaded: 2, tokens: 450 }],
+        memoryFiles: 0,
+      },
+    })),
+  };
+});
+
+// The vault's connector list and what the newest runs saw of it, and the
+// run the conversation handed off as runtime.db reads it back.
+vi.mock('@/lib/ipc', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ipc')>();
+  return {
+    ...actual,
+    readConnectors: vi.fn(async () =>
+      JSON.stringify({
+        servers: {
+          gmail: { transport: 'http', url: 'https://gmail.example.test/mcp', enabled: true },
+        },
+      }),
+    ),
+    connectorStatus: vi.fn(async () => [
+      {
+        connector: 'gmail',
+        cli_name: 'gmail',
+        refused: null,
+        state: 'working',
+        signal: 'tool_result',
+        seen_at: '2026-10-14T11:00:00.000Z',
+        run_id: null,
+      },
+    ]),
+    fleetRunDetail: vi.fn(async () => ({
+      run: {
+        run_id: ids.handed,
+        actor: 'process:release-scout',
+        outcome: 'succeeded',
+        started_at: '2026-10-14T11:20:00.000Z',
+        ended_at: '2026-10-14T11:24:00.000Z',
+      },
+      cost_components: null,
+      assembly: null,
+      model_id: null,
+      refusals: [],
+      refusals_total: 0,
+      wrote: { state: 'not_recorded' },
+    })),
   };
 });
 
@@ -86,18 +162,20 @@ import { useVaultStore } from '@/stores/vaultStore';
 
 /**
  * The whole rail holds still while a turn streams (M92, each wave's closing
- * step): every mounted card and a 50-word stream make no commit in the rail,
- * and none in the conversation lists. Every word makes a new message and a
- * new list of them (transcript.ts), so the rail takes its host's memoized,
- * derived props, never the messages, and the lists take a state that stays
- * the same object while what they list does.
+ * step): every card mounted, each with something to say, and a 50-word
+ * stream make no commit in the rail, and none in the conversation lists.
+ * Every word makes a new message and a new list of them (transcript.ts), so
+ * the rail takes its host's memoized, derived props, never the messages, and
+ * the lists take a state that stays the same object while what they list
+ * does.
  */
 
 /** A record the fixture vault holds: what the turn read. */
 const ITEM = 'projects/onboarding/items/fld-1.md';
 
-/** A turn that worked through a plan, started a subagent, read a record and
- *  changed a page: something for every card the rail holds. */
+/** A turn that worked through a plan, started a subagent, read a record,
+ *  handed work off and changed a page: something for every card the rail
+ *  holds. */
 const worked: ChatMessage = {
   id: 'a-1',
   role: 'assistant',
@@ -145,6 +223,14 @@ const worked: ChatMessage = {
       done: true,
       failed: false,
     },
+    {
+      id: 'hand-1',
+      name: 'mcp__cerebro__hand_to',
+      input: JSON.stringify({ agent: 'release-scout', message: 'Bring the brief up to date.' }),
+      output: `Started Release scout (run ${ids.handed}) with what you handed it.`,
+      done: true,
+      failed: false,
+    },
   ],
   changesets: [
     {
@@ -169,6 +255,23 @@ const worked: ChatMessage = {
   ],
 };
 
+/** What the thread's last run said it reaches, as the thread saved it. */
+const savedReach: RunReach = {
+  connectors: [],
+  missing: [],
+  missing_more: 0,
+  inherits: false,
+  permission_mode: 'default',
+  cerebro: true,
+  families: { confirmable: ['allow'], shell: ['deny'], web: ['deny'] },
+};
+
+/** What the turn's own run says it reaches as it starts. */
+const liveReach: RunReach = {
+  ...savedReach,
+  connectors: [{ name: 'gmail', status: 'connected' }],
+};
+
 function keep() {
   const thread: Conversation = {
     id: 'kept',
@@ -179,6 +282,7 @@ function keep() {
     vault: '/demo-vault',
     archived: false,
     place: null,
+    reach: savedReach,
     messages: [{ id: 'u-1', role: 'user', text: 'What is at risk?', tools: [] }, worked],
   };
   localStorage.setItem('cerebro.activeConversation', thread.id);
@@ -192,7 +296,7 @@ function stream(event: AgentStreamEvent) {
 }
 
 /** Let every read a render started land: the git probe, the book, the
- *  status reads. */
+ *  status, connector and run reads. */
 async function settle() {
   for (let pass = 0; pass < 3; pass += 1) {
     await act(async () => {
@@ -201,7 +305,24 @@ async function settle() {
   }
 }
 
-const CARDS = ['rail-waiting', 'rail-plan', 'rail-subagents', 'rail-changes', 'rail-sources'];
+/** Every card, in §0 Q5's order. */
+const CARDS = [
+  'rail-waiting',
+  'rail-plan',
+  'rail-subagents',
+  'rail-changes',
+  'rail-handoffs',
+  'rail-context',
+  'rail-sources',
+  'rail-connectors',
+  'rail-environment',
+];
+
+/** The cards the rail draws, in its order, each with its state. */
+const drawn = (rail: HTMLElement) =>
+  [...rail.querySelectorAll<HTMLElement>('[data-slot="rail-cards"] > [data-testid]')].map(
+    (card) => [card.dataset.testid, card.dataset.state],
+  );
 
 let sidebar: HTMLElement;
 
@@ -224,6 +345,8 @@ beforeEach(() => {
     chatRailRequest: null,
     panelConversation: null,
     panelAgents: { '/demo-vault': null },
+    agentConnectors: true,
+    stdioApprovals: {},
     handoffs: [],
     runs: [],
     detailPath: null,
@@ -245,13 +368,9 @@ describe('the whole rail, while a turn streams', () => {
     // Docked: a folded rail's cards keep what they drew, which would hold
     // still whatever their props did.
     expect(rail.hasAttribute('inert')).toBe(false);
-    // Every card is up, Waiting on you saying it could not check.
-    await within(rail).findByTestId('rail-waiting');
-    expect(
-      [...rail.querySelectorAll<HTMLElement>('[data-slot="rail-cards"] > [data-testid]')].map(
-        (card) => card.dataset.testid,
-      ),
-    ).toEqual(CARDS);
+    // Every card is up once its reads land, Waiting on you saying it could
+    // not check, and Context that the thread has no session to read yet.
+    await waitFor(() => expect(drawn(rail).map(([id]) => id)).toEqual(CARDS));
     expect(within(sidebar).getByRole('navigation', { name: 'Conversations' })).toBeTruthy();
 
     const input = screen.getByLabelText('Message the assistant');
@@ -260,20 +379,46 @@ describe('the whole rail, while a turn streams', () => {
       fireEvent.keyDown(input, { key: 'Enter' });
     });
     await waitFor(() => expect(wire.deliver).not.toBeNull());
-    // The turn's start is news to the rail (Changes lands when it ends) and
-    // to the lists (the thread works now); its words are not.
+    // The turn's start is news to the rail (its session, what its run
+    // reaches, Changes landing when it ends) and to the lists (the thread
+    // works now); its words are not.
+    stream({ kind: 'Init', session_id: ids.session });
+    stream({ kind: 'Reach', reach: liveReach });
     stream({ kind: 'TextDelta', text: 'Words ' });
     await settle();
+    expect(drawn(rail)).toEqual([
+      ['rail-waiting', 'unavailable'],
+      ['rail-plan', 'ready'],
+      ['rail-subagents', 'ready'],
+      ['rail-changes', 'ready'],
+      ['rail-handoffs', 'ready'],
+      ['rail-context', 'ready'],
+      ['rail-sources', 'ready'],
+      ['rail-connectors', 'ready'],
+      ['rail-environment', 'ready'],
+    ]);
+    expect(
+      within(rail).getByTestId('rail-connector').dataset.run,
+      'the run that streams reaches what it said it does',
+    ).toBe('loaded');
     // The Profilers count: a rail and lists that never commit prove nothing.
     expect(commits.rail).toBeGreaterThan(0);
     expect(commits.list).toBeGreaterThan(0);
+    // The rail's entrance ends first, so its one commit, on its own clock,
+    // is not counted against the words (useArrival).
+    const own = screen.getByTestId('conversation-rail');
+    fireEvent.animationEnd(own);
+    expect(own.hasAttribute('data-arrive')).toBe(false);
+    await settle();
     commits.rail = 0;
     commits.list = 0;
     for (let word = 0; word < 50; word += 1) stream({ kind: 'TextDelta', text: `word${word} ` });
     expect(screen.getByText(/word49/)).toBeTruthy();
+    // Anything a word started (a read, a timer) lands before the count.
+    await settle();
     expect(commits).toEqual({ rail: 0, list: 0 });
     // Still drawn and still the rail it was.
     expect(screen.getByRole('region', { name: 'Conversation details' })).toBe(rail);
-    for (const id of CARDS) expect(within(rail).getByTestId(id)).toBeTruthy();
+    expect(drawn(rail).map(([id]) => id)).toEqual(CARDS);
   });
 });

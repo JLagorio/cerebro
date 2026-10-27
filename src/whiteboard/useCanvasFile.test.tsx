@@ -11,6 +11,7 @@ import {
   editorHoldersOf,
   flushOpenPages,
   heldOpenPages,
+  unresolvedOpenPages,
 } from '@/editor/openPages';
 import { readCanvas } from '@/engine/scene/jsonCanvas';
 import { makeEntry } from '@/engine/testHelpers';
@@ -441,4 +442,138 @@ it('an unmount flush failure still tells the person in the same vault', async ()
     "Couldn't save whiteboard",
   );
   expect(xOf()).toBe(0);
+});
+
+it('reports the writer hash and retains a failed exact scene through reopening', async () => {
+  const first = renderHook(() => useCanvasFile(PATH));
+  await tick();
+  const original = ready(first.result.current).editor;
+  const dispose = vi.spyOn(original, 'dispose');
+  move(first.result.current, 77);
+  vi.mocked(saveCanvasFile).mockRejectedValueOnce(new Error('full'));
+  first.unmount();
+  await tick();
+  expect(dispose).not.toHaveBeenCalled();
+  expect(unresolvedOpenPages()).toEqual([
+    expect.objectContaining({
+      key: { vaultId: VAULT, path: PATH, ownerId: 'p1' },
+      latestDraft: expect.stringContaining('"x":77'),
+      failure: expect.objectContaining({ kind: 'failed' }),
+    }),
+  ]);
+  const second = renderHook(() => useCanvasFile(PATH));
+  await tick();
+  expect(ready(second.result.current).editor).toBe(original);
+  expect(ready(second.result.current).saveState).toBe('failed');
+  let report!: Awaited<ReturnType<typeof flushOpenPages>>;
+  await act(async () => {
+    report = await flushOpenPages();
+  });
+  expect(report.unresolvedOwnerIds).toEqual([]);
+  const disk = await mock.readCanvasFile(VAULT, PATH);
+  expect(report.outcomes).toContainEqual(
+    expect.objectContaining({
+      kind: 'acknowledged',
+      write: { kind: 'file', contentHash: disk.hash },
+    }),
+  );
+  expect(xOf()).toBe(77);
+  expect(dispose).not.toHaveBeenCalled();
+  second.unmount();
+  await tick();
+  expect(dispose).toHaveBeenCalledOnce();
+});
+
+it('prepares focused inspector drafts and refuses invalid exact values before serialization', async () => {
+  let current: CanvasFile = { state: 'loading' };
+  function OpenBoard() {
+    current = useCanvasFile(PATH);
+    return current.state === 'ready' ? (
+      <BoardCanvas source={current.editor} name="Plan" cameraKey="inspector-save" />
+    ) : null;
+  }
+  render(<OpenBoard />);
+  await tick();
+  act(() => ready(current).editor.select(['n:a']));
+  const x = screen.getByRole('textbox', { name: 'X' });
+  fireEvent.change(x, { target: { value: '42' } });
+  await act(() => flushOpenPages());
+  expect(xOf()).toBe(42);
+  fireEvent.change(x, { target: { value: '1.25 invalid' } });
+  let report!: Awaited<ReturnType<typeof flushOpenPages>>;
+  await act(async () => {
+    report = await flushOpenPages();
+  });
+  expect(report.unresolvedOwnerIds).not.toEqual([]);
+  expect(x).toHaveProperty('value', '1.25 invalid');
+  expect(unresolvedOpenPages()[0].latestDraft).toContain('1.25 invalid');
+  expect(xOf()).toBe(42);
+  fireEvent.change(x, { target: { value: '43' } });
+  await act(async () => {
+    report = await flushOpenPages();
+  });
+  expect(report.unresolvedOwnerIds).toEqual([]);
+  expect(xOf()).toBe(43);
+});
+
+it('reattaches during a pending save without an old release disposing the live scene', async () => {
+  let finish!: () => void;
+  vi.mocked(saveCanvasFile).mockImplementationOnce(async (vault, path, content) => {
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    return { ok: true, ...(await mock.saveCanvasFile(vault, path, content)) };
+  });
+  const first = renderHook(() => useCanvasFile(PATH));
+  await tick();
+  const original = ready(first.result.current).editor;
+  const dispose = vi.spyOn(original, 'dispose');
+  move(first.result.current, 88);
+  await advance(500);
+  first.unmount();
+  const second = renderHook(() => useCanvasFile(PATH));
+  await tick();
+  expect(ready(second.result.current).editor).toBe(original);
+  await act(async () => {
+    finish();
+  });
+  await tick();
+  expect(xOf()).toBe(88);
+  expect(dispose).not.toHaveBeenCalled();
+  expect(editorHoldersOf(PATH)).toHaveLength(1);
+  move(second.result.current, 89);
+  await act(() => flushOpenPages());
+  expect(xOf()).toBe(89);
+  second.unmount();
+  await tick();
+  expect(dispose).toHaveBeenCalledOnce();
+});
+
+it('reopens an invalid inspector draft in the same retained scene', async () => {
+  let current: CanvasFile = { state: 'loading' };
+  function OpenBoard() {
+    current = useCanvasFile(PATH);
+    return current.state === 'ready' ? (
+      <BoardCanvas source={current.editor} name="Plan" cameraKey="invalid-reopen" />
+    ) : null;
+  }
+  const first = render(<OpenBoard />);
+  await tick();
+  const original = ready(current).editor;
+  act(() => original.select(['n:a']));
+  fireEvent.change(screen.getByRole('textbox', { name: 'W' }), {
+    target: { value: '-invalid width' },
+  });
+  first.unmount();
+  await tick();
+  expect(unresolvedOpenPages()[0].latestDraft).toContain('-invalid width');
+  render(<OpenBoard />);
+  await tick();
+  expect(ready(current).editor).toBe(original);
+  const width = screen.getByRole('textbox', { name: 'W' });
+  expect(width).toHaveProperty('value', '-invalid width');
+  fireEvent.change(width, { target: { value: '175' } });
+  await act(() => flushOpenPages());
+  expect(JSON.parse(fs().get(PATH)!).nodes[0].width).toBe(175);
+  expect(unresolvedOpenPages()).toEqual([]);
 });

@@ -1,0 +1,49 @@
+.cb-source-occurrences {
+  display: grid;
+  gap: var(--sp-2);
+  color: var(--n-500);
+  font-family: var(--font-ui);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.cb-source-occurrences p {
+  margin: 0;
+}
+.cb-source-occurrences ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cb-source-occurrences button {
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--n-700);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  padding: 4px;
+  overflow-wrap: anywhere;
+}
+.cb-source-occurrences button:hover {
+  background: var(--n-50);
+}
+.cb-source-occurrences button:focus-visible {
+  outline: 2px solid var(--synapse-500);
+  outline-offset: 2px;
+}
+.cb-source-occurrences li button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+}
+.cb-source-occurrences-title {
+  color: var(--n-800);
+  font-weight: 500;
+}
+.cb-source-occurrences mark {
+  color: inherit;
+  background: var(--synapse-100);
+}

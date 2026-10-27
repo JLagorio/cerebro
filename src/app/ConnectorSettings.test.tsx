@@ -709,3 +709,244 @@ describe('ConnectorSettings and the rail’s Sign in… (M92.9)', () => {
     expect(scrolled).not.toHaveBeenCalled();
   });
 });
+
+describe('M96.4a Settings ownership admission', () => {
+  const markedEntries = (): Record<string, Record<string, unknown>> => ({
+    'managed-http': {
+      transport: 'http',
+      url: 'https://m96-route.example.test/mcp',
+      enabled: true,
+      headers: { Authorization: 'm96-header-sentinel' },
+      oauth: { scopes: 'read write' },
+      executionOwner: 'cerebro',
+      secretRef: { opaque: 'm96-reference-sentinel' },
+      custom: { nested: [null, 3, 'kept'] },
+    },
+    'managed-stdio': {
+      transport: 'stdio',
+      command: 'm96-unexecuted-command',
+      args: ['m96-arg-sentinel'],
+      env: { TOKEN: 'm96-env-sentinel' },
+      executionOwner: 'cerebro',
+      enabled: false,
+    },
+    'invalid-http': {
+      transport: 'http',
+      url: 'https://m96-route.example.test/mcp',
+      enabled: true,
+      executionOwner: { malformed: true },
+      secretRef: null,
+      unknown: ['kept'],
+    },
+    'orphan-stdio': {
+      transport: 'stdio',
+      command: 'm96-unexecuted-command',
+      enabled: true,
+      executionOwner: 'cli',
+      secretRef: null,
+    },
+  });
+
+  function listedWithLegacyApprovals(servers: Record<string, Record<string, unknown>>) {
+    const raw = JSON.stringify({ servers });
+    vi.mocked(ipc.readConnectors).mockResolvedValue(raw);
+    const legacyServers = Object.fromEntries(
+      Object.entries(servers).map(([name, entry]) => [
+        name,
+        Object.fromEntries(
+          Object.entries(entry).filter(([key]) => key !== 'executionOwner' && key !== 'secretRef'),
+        ),
+      ]),
+    );
+    const approvals = parseConnectors(JSON.stringify({ servers: legacyServers })).flatMap(
+      (spec) => approvalKey(spec) ?? [],
+    );
+    expect(approvals).toHaveLength(Object.keys(servers).length);
+    useUiStore.setState({ stdioApprovals: { '/vault': approvals } });
+    return approvals;
+  }
+
+  function historical(servers: Record<string, unknown>, state: 'working' | 'needs_sign_in') {
+    return Object.keys(servers).map((connector): ConnectorStatusRow => ({
+      connector,
+      cli_name: connector,
+      refused: null,
+      state,
+      signal: 'init',
+      seen_at: '2026-10-13T10:00:00.000Z',
+      run_id: 'historical-run',
+    }));
+  }
+
+  function assertReadOnlyMarkedRows() {
+    for (const name of Object.keys(markedEntries())) {
+      expect(screen.queryByLabelText('Enable ' + name)).toBeNull();
+      expect(screen.queryByLabelText('Remove ' + name)).toBeNull();
+    }
+    expect(screen.queryByText('Approve')).toBeNull();
+    expect(screen.queryByTestId('connector-sign-in')).toBeNull();
+    expect(screen.queryByTestId('connector-sign-in-command')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Copy' })).toBeNull();
+    expect(screen.queryByTestId('connector-seen')).toBeNull();
+    const rows = screen.getAllByTestId('connector-status');
+    expect(rows).toHaveLength(4);
+    for (const row of rows) {
+      const words = row.textContent ?? '';
+      if (words.startsWith('managed-')) expect(words).toMatch(/managed.*unavailable/i);
+      else {
+        expect(words).toMatch(/ownership/i);
+        expect(words).toMatch(/file|correct/i);
+      }
+      expect(words).not.toMatch(/working|needs sign-in|not observed yet/i);
+    }
+    const shown = screen.getByTestId('connector-settings').innerHTML;
+    for (const payload of [
+      'https://m96-route.example.test/mcp',
+      'm96-header-sentinel',
+      'm96-unexecuted-command',
+      'm96-arg-sentinel',
+      'm96-env-sentinel',
+      'm96-reference-sentinel',
+    ])
+      expect(shown).not.toContain(payload);
+  }
+
+  beforeEach(() => {
+    useVaultStore.setState({ vaultPath: '/vault' });
+    useUiStore.setState({ stdioApprovals: {}, toasts: [], settingsFocus: null });
+    vi.mocked(ipc.saveConnectors).mockReset().mockResolvedValue(undefined);
+    vi.mocked(ipc.connectorStatus).mockReset().mockResolvedValue([]);
+    vi.mocked(ipc.readConnectors).mockReset();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.mocked(ipc.readConnectors).mockReset();
+    vi.mocked(ipc.connectorStatus).mockReset();
+    vi.mocked(ipc.saveConnectors).mockReset();
+  });
+
+  it.each(['working', 'needs_sign_in', 'loading', 'unavailable'] as const)(
+    'm96_owner_settings_non_cli_rows_are_honest_and_read_only_during_%s',
+    async (read) => {
+      const servers = markedEntries();
+      const approvals = listedWithLegacyApprovals(servers);
+      if (read === 'loading') {
+        vi.mocked(ipc.connectorStatus).mockReturnValue(new Promise(() => {}));
+      } else if (read === 'unavailable') {
+        vi.mocked(ipc.connectorStatus).mockRejectedValue(new Error('no runtime database'));
+      } else {
+        vi.mocked(ipc.connectorStatus).mockResolvedValue(historical(servers, read));
+      }
+      render(<ConnectorSettings />);
+      await screen.findAllByTestId('connector-status');
+      if (read === 'loading')
+        expect(await screen.findByTestId('connector-status-loading')).toBeTruthy();
+      else if (read === 'unavailable') {
+        expect((await screen.findByTestId('section-unavailable')).textContent).toContain(
+          'no runtime database',
+        );
+      } else
+        await waitFor(() => expect(screen.queryByTestId('connector-status-loading')).toBeNull());
+      assertReadOnlyMarkedRows();
+      expect(vi.mocked(ipc.saveConnectors)).not.toHaveBeenCalled();
+      expect(useUiStore.getState().stdioApprovals['/vault']).toEqual(approvals);
+    },
+  );
+
+  it('m96_owner_sibling_edit_retains_marked_configuration_after_completed_save', async () => {
+    const marked = markedEntries();
+    const sibling = { transport: 'http', url: 'https://sibling.example.test/mcp', enabled: true };
+    const servers = { ...marked, sibling };
+    const approvals = listedWithLegacyApprovals(servers);
+    render(<ConnectorSettings />);
+    const toggle = await screen.findByRole('switch', { name: 'Enable sibling' });
+    expect(screen.queryByLabelText('Remove sibling')).toBeTruthy();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(vi.mocked(ipc.saveConnectors)).toHaveBeenCalledTimes(1));
+    const [vault, saved] = vi.mocked(ipc.saveConnectors).mock.calls[0];
+    expect(vault).toBe('/vault');
+    expect(JSON.parse(saved)).toEqual({
+      servers: { ...marked, sibling: { ...sibling, enabled: false } },
+    });
+    await waitFor(() => expect(vi.mocked(ipc.connectorStatus)).toHaveBeenCalledTimes(2));
+    expect(useUiStore.getState().stdioApprovals['/vault']).toEqual(approvals);
+    expect(useUiStore.getState().toasts).toEqual([]);
+  });
+
+  it('m96_owner_failed_config_stays_blocked_and_retry_keeps_managed_rows_visible', async () => {
+    vi.mocked(ipc.readConnectors).mockRejectedValue(
+      new Error('synthetic unreadable connector list'),
+    );
+    render(<ConnectorSettings />);
+    expect((await screen.findByTestId('connector-settings-blocked')).textContent).toContain(
+      'synthetic unreadable connector list',
+    );
+    expect(screen.queryByTestId('connector-settings')).toBeNull();
+    expect(screen.queryByText('Add')).toBeNull();
+    listedWithLegacyApprovals(markedEntries());
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await screen.findAllByTestId('connector-status');
+    expect(screen.queryByTestId('connector-settings-blocked')).toBeNull();
+    assertReadOnlyMarkedRows();
+    expect(vi.mocked(ipc.saveConnectors)).not.toHaveBeenCalled();
+  });
+
+  it('m96_owner_explicit_cli_keeps_existing_raw_controls_and_signin', async () => {
+    const sibling = {
+      transport: 'http',
+      url: 'https://sibling.example.test/mcp',
+      enabled: true,
+      executionOwner: 'cli',
+    };
+    listedWithLegacyApprovals({ sibling });
+    vi.mocked(ipc.connectorStatus).mockResolvedValue(historical({ sibling }, 'needs_sign_in'));
+    render(<ConnectorSettings />);
+    expect(await screen.findByRole('switch', { name: 'Enable sibling' })).toBeTruthy();
+    expect(screen.getByLabelText('Remove sibling')).toBeTruthy();
+    expect((await screen.findByTestId('connector-sign-in-command')).textContent).toBe(
+      'claude mcp add --transport http sibling https://sibling.example.test/mcp',
+    );
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
+    expect(screen.queryByText('Approve')).toBeNull();
+  });
+});
+
+describe('M96.4a unreadable configuration bytes', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ vaultPath: '/vault' });
+    useUiStore.setState({ stdioApprovals: {}, toasts: [], settingsFocus: null });
+    vi.mocked(ipc.readConnectors).mockReset();
+    vi.mocked(ipc.connectorStatus).mockReset().mockResolvedValue([]);
+    vi.mocked(ipc.saveConnectors).mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.mocked(ipc.readConnectors).mockReset();
+    vi.mocked(ipc.connectorStatus).mockReset();
+    vi.mocked(ipc.saveConnectors).mockReset();
+  });
+
+  it('m96_owner_malformed_config_bytes_stay_blocked_and_retry_preserves_absent_list', async () => {
+    vi.mocked(ipc.readConnectors).mockResolvedValue('{not json');
+    render(<ConnectorSettings />);
+    expect((await screen.findByTestId('connector-settings-blocked')).textContent).toContain(
+      'connector list cannot be read',
+    );
+    expect(screen.queryByTestId('connector-settings')).toBeNull();
+    expect(screen.queryByTestId('section-unavailable')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add' })).toBeNull();
+    expect(vi.mocked(ipc.saveConnectors)).not.toHaveBeenCalled();
+
+    // Retry reads absent bytes as the existing legacy state, not an invalid list.
+    vi.mocked(ipc.readConnectors).mockResolvedValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    const note = await screen.findByTestId('connector-settings-note');
+    expect(note.textContent).toContain('loads your global MCP config');
+    expect(screen.queryByTestId('connector-settings-blocked')).toBeNull();
+    expect(screen.queryAllByTestId('connector-status')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Add' })).toBeTruthy();
+    expect(vi.mocked(ipc.saveConnectors)).not.toHaveBeenCalled();
+  });
+});

@@ -302,6 +302,7 @@ export const FIELD_FROM_KEYS = {
 
 /** `name` is the type's own name, its identity rather than a reference. */
 export const TYPE_DEF_KEYS = {
+  unavailableReason: 'nothing',
   emailDomain: 'field',
   deadline: 'field',
   name: 'nothing',

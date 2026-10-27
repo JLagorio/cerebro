@@ -1,0 +1,16 @@
+{
+  "formatVersion": 1,
+  "steps": 32,
+  "definitionBytes": 262144,
+  "expressionNodes": 128,
+  "expressionDepth": 16,
+  "identityBytes": 128,
+  "labelBytes": 256,
+  "pathSegments": 16,
+  "pathSegmentBytes": 256,
+  "minimumIntervalSeconds": 60,
+  "maximumIntervalSeconds": 31536000,
+  "stepOutputBytes": 262144,
+  "runOutputBytes": 8388608,
+  "jsonDepth": 64
+}

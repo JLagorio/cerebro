@@ -34,6 +34,7 @@ use super::ask::{Spawn, ACTOR};
 
 /// Everything a live attended spawn needs from the app.
 pub struct Live<'a> {
+    pub(crate) preparation: &'a crate::agent::RunPreparation,
     pub app: &'a AppHandle,
     pub agents: &'a AgentState,
     pub mcp: &'a McpState,
@@ -110,6 +111,7 @@ impl Spawn for Live<'_> {
                 cause: Some(RunCause::of(CauseKind::Assembly)),
             }),
             Some(tx),
+            self.preparation,
         )?;
         // Blocking, deliberately: a `recv_timeout` would report an outcome the
         // run never had and leave a live child behind.

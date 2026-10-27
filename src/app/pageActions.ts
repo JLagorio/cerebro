@@ -1,3 +1,4 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 /**
  * Sub-pages (M55.13): give a page a child, or drop one page into another.
  *
@@ -16,7 +17,7 @@
  */
 
 import { canHaveSubPages, growPlan, nestPlan, type PageMove } from '@/engine/docPages';
-import { flushOpenPages, heldOpenPages } from '@/editor/openPages';
+import { heldOpenPages } from '@/editor/openPages';
 import { renameKeepingLinks } from '@/app/renameActions';
 import { slugify } from '@/lib/slug';
 import { useUiStore } from '@/stores/uiStore';
@@ -57,7 +58,7 @@ export async function addSubPage(parentPath: string, title: string): Promise<str
   if (parent === undefined) return refuse('the page is gone');
   if (!canHaveSubPages(parent)) return refuse(`"${parent.title}" can't have sub-pages`);
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return null;
     const fresh = useVaultStore.getState();
     if (fresh.vaultPath !== vault || refusedAcrossVaults(fresh)) return null;
     const plan = growPlan(parent, fresh.entries, fresh.folders);
@@ -98,7 +99,7 @@ export async function nestPage(srcPath: string, targetPath: string): Promise<Pag
   const target = state.entries.find((e) => e.path === targetPath);
   if (target === undefined) return refuse('the page is gone');
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return null;
     const fresh = useVaultStore.getState();
     if (fresh.vaultPath !== vault || refusedAcrossVaults(fresh)) return null;
     const plan = nestPlan(srcPath, target, fresh.entries, fresh.folders);

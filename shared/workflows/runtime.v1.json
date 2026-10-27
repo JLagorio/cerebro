@@ -1,0 +1,21 @@
+{
+  "formatVersion": 1,
+  "activeVaultBytes": 268435456,
+  "completedDetailRetention": "off",
+  "execution": {
+    "reconciliationBatch": 32,
+    "maxWorkers": 1,
+    "maxQueuedRuns": 128,
+    "minimumWakeIntervalMs": 1000
+  },
+  "origin": {
+    "permissionBytes": 8192,
+    "readPrefixes": 128,
+    "accountGrants": 32
+  },
+  "catalog": {
+    "pageSize": 32,
+    "scanEntries": 1024,
+    "versionsPerWorkflow": 128
+  }
+}

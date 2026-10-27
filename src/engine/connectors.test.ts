@@ -10,6 +10,7 @@ import {
   httpApprovalKey,
   httpFingerprint,
   parseConnectors,
+  readConnectorList,
   scrubStdioApprovals,
   serializeConnectors,
   signInBlocker,
@@ -54,6 +55,14 @@ describe('connectors config', () => {
     expect(parseConnectors('')).toEqual([]);
     expect(parseConnectors('{not json')).toEqual([]);
     expect(parseConnectors('{"servers": 3}')).toEqual([]);
+    expect(parseConnectors('null')).toEqual([]);
+  });
+
+  it('tells bytes that do not parse apart from a list of no servers', () => {
+    expect(readConnectorList('')).toEqual({ kind: 'specs', specs: [] });
+    expect(readConnectorList('{not json')).toEqual({ kind: 'unreadable' });
+    expect(readConnectorList('{"servers": 3}')).toEqual({ kind: 'specs', specs: [] });
+    expect(readConnectorList('null')).toEqual({ kind: 'specs', specs: [] });
   });
 
   it('treats anything but explicit enabled: true as off', () => {
@@ -456,5 +465,143 @@ describe('connector approvals and presets (M69.1)', () => {
         extra: {},
       }),
     ).toBeNull();
+  });
+});
+
+describe('M96.4a explicit connector ownership admission', () => {
+  const routes = (): ConnectorSpec[] =>
+    parseConnectors(
+      JSON.stringify({
+        servers: {
+          'm96-http': {
+            transport: 'http',
+            url: 'https://m96-route.example.test/mcp',
+            enabled: true,
+            headers: { Authorization: 'm96-header-sentinel' },
+            oauth: { scopes: 'read write' },
+            timeout: 5000,
+          },
+          'm96-stdio': {
+            transport: 'stdio',
+            command: 'm96-unexecuted-command',
+            args: ['m96-arg-sentinel'],
+            env: { TOKEN: 'm96-env-sentinel' },
+            enabled: true,
+          },
+        },
+      }),
+    );
+  const withMarker = (spec: ConnectorSpec, marker: Record<string, unknown>): ConnectorSpec => ({
+    ...spec,
+    extra: { ...spec.extra, ...marker },
+  });
+  const invalidOwners: unknown[] = [null, 7, true, '', 'Cerebro', 'CLI', 'unknown', [], {}];
+  const references: unknown[] = [
+    null,
+    7,
+    false,
+    '',
+    'm96-reference-sentinel',
+    [],
+    { opaque: 'm96-reference-sentinel' },
+  ];
+
+  function noRawHelpers(spec: ConnectorSpec) {
+    expect(approvalKey(spec)).toBeNull();
+    expect(httpApprovalKey(spec)).toBeNull();
+    expect(stdioApprovalKey(spec)).toBeNull();
+    expect(signInBlocker(spec)).not.toBeNull();
+    expect(signInCommand(spec)).toBeNull();
+    const note = removalNote(spec);
+    expect(note ?? '').not.toMatch(/never held|run claude|\/mcp/i);
+  }
+
+  it('m96_owner_direct_key_and_signin_helpers_cannot_bypass_managed_ownership', () => {
+    for (const legacy of routes()) {
+      expect(approvalKey(legacy)).toMatch(/^[0-9a-f]{64}$/);
+      if (legacy.transport === 'http')
+        expect(signInCommand(legacy)).toContain('claude mcp add-json');
+      for (const enabled of [true, false]) {
+        for (const marker of [
+          { executionOwner: 'cerebro' },
+          ...references.map((secretRef) => ({ executionOwner: 'cerebro', secretRef })),
+        ]) {
+          noRawHelpers({ ...withMarker(legacy, marker), enabled });
+        }
+      }
+    }
+  });
+
+  it('m96_owner_invalid_marker_values_fail_closed_in_exported_helpers', () => {
+    for (const legacy of routes()) {
+      expect(approvalKey(legacy)).not.toBeNull();
+      for (const executionOwner of invalidOwners)
+        noRawHelpers(withMarker(legacy, { executionOwner }));
+    }
+  });
+
+  it('m96_owner_orphan_reference_never_falls_back_to_cli_helpers', () => {
+    for (const legacy of routes()) {
+      for (const secretRef of references) {
+        noRawHelpers(withMarker(legacy, { secretRef }));
+        noRawHelpers(withMarker(legacy, { executionOwner: 'cli', secretRef }));
+      }
+    }
+  });
+
+  it('m96_owner_explicit_cli_preserves_legacy_keys_and_signin_without_granting_approval', () => {
+    for (const legacy of routes()) {
+      const explicit = withMarker(legacy, { executionOwner: 'cli' });
+      expect(approvalKey(explicit)).toBe(approvalKey(legacy));
+      expect(httpApprovalKey(explicit)).toBe(httpApprovalKey(legacy));
+      expect(stdioApprovalKey(explicit)).toBe(stdioApprovalKey(legacy));
+      expect(signInCommand(explicit)).toBe(signInCommand(legacy));
+      expect(removalNote(explicit)).toBe(removalNote(legacy));
+    }
+  });
+
+  it('m96_owner_sibling_serialization_retains_marked_fields_and_unknown_values', () => {
+    const original = {
+      servers: {
+        managed: {
+          transport: 'http',
+          url: 'https://managed.example.test/mcp',
+          enabled: true,
+          executionOwner: 'cerebro',
+          secretRef: { opaque: 'm96-reference-sentinel' },
+          headers: { Authorization: 'm96-header-sentinel' },
+          custom: { nested: [null, 3, 'kept'] },
+        },
+        invalid: {
+          transport: 'stdio',
+          command: 'm96-unexecuted-command',
+          enabled: false,
+          executionOwner: { malformed: true },
+          secretRef: null,
+          unknown: ['kept'],
+        },
+        sibling: { transport: 'http', url: 'https://sibling.example.test/mcp', enabled: true },
+      },
+    };
+    const specs = parseConnectors(JSON.stringify(original));
+    const saved: unknown = JSON.parse(
+      serializeConnectors(
+        specs.map((spec) => (spec.name === 'sibling' ? { ...spec, enabled: false } : spec)),
+      ),
+    );
+    expect(saved).toEqual({
+      servers: {
+        ...original.servers,
+        sibling: { ...original.servers.sibling, enabled: false },
+      },
+    });
+    expect(readConnectorList('{not json')).toEqual({ kind: 'unreadable' });
+    const onlyManaged = readConnectorList(
+      JSON.stringify({ servers: { managed: original.servers.managed } }),
+    );
+    expect(onlyManaged.kind).toBe('specs');
+    if (onlyManaged.kind !== 'specs') throw new Error('readable marked list must retain its row');
+    expect(onlyManaged.specs).toHaveLength(1);
+    expect(approvalKey(onlyManaged.specs[0])).toBeNull();
   });
 });

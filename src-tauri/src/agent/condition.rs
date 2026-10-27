@@ -456,6 +456,7 @@ fn request(input: &Request, token: &str, url: &str) -> AgentRequest {
 }
 
 pub struct Live<'a> {
+    pub(crate) preparation: &'a crate::agent::RunPreparation,
     pub app: &'a tauri::AppHandle,
     pub agents: &'a AgentState,
     pub mcp: &'a McpState,
@@ -499,6 +500,7 @@ impl Runner for Live<'_> {
                     cause: Some(input.cause.clone()),
                 }),
                 Some(tx),
+                self.preparation,
             )?;
             Ok::<_, String>(rx)
         };

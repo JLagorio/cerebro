@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, renderHook } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
 
 // The transcript read is Rust's (M56.3); each test says what it answers.
 vi.mock('./agentIpc', () => ({
@@ -8,6 +8,7 @@ vi.mock('./agentIpc', () => ({
     reason: 'not_recorded',
     retention_days: 30,
   })),
+  attachRun: vi.fn(),
   // M57.6: deleting a thread ends its turn.
   stopAgent: vi.fn(async () => true),
   listInteractions: vi.fn(async () => []),
@@ -15,9 +16,20 @@ vi.mock('./agentIpc', () => ({
 }));
 
 import * as agentIpc from './agentIpc';
+import { loadConversations, saveConversations } from './conversations';
 import { NO_BRANCH_POINT, NO_SUCH_REPLY, useConversations } from './useConversations';
-import type { AgentChat } from './useAgentChat';
-import type { AgentStreamEvent, ChatMessage, Conversation, TranscriptRead } from './types';
+import { useAgentChat, type AgentChat } from './useAgentChat';
+import { Message } from './ChatTurn';
+import { TranscriptNotice } from './TranscriptNotice';
+import type { ConversationState } from './useConversations';
+import { useVaultStore } from '@/stores/vaultStore';
+import type {
+  AgentEvent,
+  AgentStreamEvent,
+  ChatMessage,
+  Conversation,
+  TranscriptRead,
+} from './types';
 import type { Place } from '@/engine/place';
 import { makeEntry } from '@/test/factories';
 import { useReviewNotesStore } from '@/stores/reviewNotesStore';
@@ -282,6 +294,131 @@ describe('useConversations — threads rebuild from the session file', () => {
     read.mockClear();
   });
 
+  it('busy_quota_trim_preserves_prior_turn_availability', async () => {
+    const live = { run: 4, attach: 'run-0004', assistantId: 'a-live' };
+    const source = conversation('c-busy', {
+      sessionId: SESSION,
+      vault: '/demo-vault',
+      live,
+      messages: [
+        { id: 'u-prior', role: 'user', text: 'earlier', tools: [] },
+        { id: 'a-prior', role: 'assistant', text: 'x'.repeat(4000), tools: [] },
+        { id: 'u-live', role: 'user', text: 'now', tools: [] },
+        { id: 'a-live', role: 'assistant', text: 'half', tools: [], seq: 9 },
+      ],
+    });
+    const store = window.localStorage;
+    const owner = Object.prototype.hasOwnProperty.call(store, 'setItem')
+      ? store
+      : (Object.getPrototypeOf(store) as Storage);
+    const real = owner.setItem;
+    const full = vi.spyOn(owner, 'setItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (key === 'cerebro.conversations' && value.length > 1500) {
+        throw new DOMException('Full', 'QuotaExceededError');
+      }
+      real.call(this, key, value);
+    });
+    saveConversations([source]);
+    full.mockRestore();
+    const [cached] = loadConversations();
+    expect(cached.messages.map((m) => m.text)).toEqual(['now', 'half']);
+    expect(cached.live).toEqual(live);
+    expect(cached).toMatchObject({ cacheTrimmed: true });
+    useVaultStore.setState({ vaultPath: '/demo-vault' });
+    useUiStore.setState({ runs: [] });
+    let deliver: (event: AgentEvent) => void = () => {};
+    vi.mocked(agentIpc.attachRun).mockImplementationOnce(async (handle, after, take, onState) => {
+      expect(handle).toEqual({ run: 4, attach: 'run-0004' });
+      expect(after).toBe(9);
+      let cursor = after;
+      deliver = (event) => {
+        if (event.run === handle.run && event.seq > cursor) {
+          cursor = event.seq;
+          take(event);
+        }
+      };
+      onState?.('held', false);
+      return { state: 'held', done: false, detach: () => {} };
+    });
+    let current!: { chat: AgentChat; conversations: ConversationState };
+    function Harness() {
+      const chat = useAgentChat(
+        () => ({ systemPrompt: () => '', place: null, conversationId: 'c-busy' }),
+        { shell: 'off', connectors: false },
+      );
+      const conversations = useConversations(chat, undefined, undefined, '/demo-vault');
+      current = { chat, conversations };
+      return (
+        <>
+          {chat.messages.map((message) => (
+            <Message key={message.id} message={message} onOpen={() => {}} onOpenPath={() => {}} />
+          ))}
+          {conversations.transcript.state === 'unavailable' && (
+            <TranscriptNotice {...conversations.transcript} cached={chat.messages.length > 0} />
+          )}
+        </>
+      );
+    }
+    const { unmount } = render(<Harness />);
+    await settle();
+    const words = () =>
+      screen
+        .getAllByTestId('chat-message')
+        .map((node) => node.querySelector('.cb-chat-answer')?.textContent ?? node.textContent);
+    const [questionNode, replyNode] = screen.getAllByTestId('chat-message');
+    expect(words()).toEqual(['now', 'half']);
+    expect(screen.getByTestId('transcript-unavailable').getAttribute('role')).toBe('status');
+    expect(screen.getByTestId('transcript-unavailable').textContent).toContain(
+      'Earlier messages unavailable',
+    );
+    expect(current.chat.live).toEqual(live);
+    expect(current.chat.sessionId).toBe(SESSION);
+    expect(current.chat.messages.map((m) => m.id)).toEqual(['u-live', 'a-live']);
+    expect(current.chat.streaming).toBe(true);
+    expect(current.conversations.blocked).toBeNull();
+    act(() => deliver({ run: 4, seq: 10, kind: 'TextDelta', text: ' one' }));
+    // Hold before Done: an eventual transcript read cannot hide wrong words
+    // or a missing earlier-content notice while the stream is still live.
+    expect(words()).toEqual(['now', 'half one']);
+    expect(current.chat.messages[1].seq).toBe(10);
+    expect(current.chat.streaming).toBe(true);
+    expect(screen.getByTestId('transcript-unavailable').getAttribute('role')).toBe('status');
+    expect(screen.getByTestId('transcript-unavailable').textContent).toContain(
+      'Earlier messages unavailable',
+    );
+    act(() => deliver({ run: 4, seq: 11, kind: 'TextDelta', text: ' two' }));
+    expect(words()).toEqual(['now', 'half one two']);
+    answer({ state: 'unavailable', reason: 'not_recorded', retention_days: 30 });
+    await act(async () => deliver({ run: 4, seq: 12, kind: 'Done' }));
+    await settle();
+    expect(current.chat.streaming).toBe(false);
+    expect(current.chat.live).toBeNull();
+    expect(current.chat.sessionId).toBe(SESSION);
+    expect(current.chat.messages.map((m) => m.id)).toEqual(['u-live', 'a-live']);
+    expect(current.chat.messages[1].seq).toBe(12);
+    expect(words()).toEqual(['now', 'half one two']);
+    expect(screen.getAllByTestId('chat-message')).toEqual([questionNode, replyNode]);
+    expect(screen.getByTestId('transcript-unavailable').getAttribute('role')).toBe('status');
+    expect(screen.getByTestId('transcript-unavailable').textContent).toContain(
+      'Earlier messages unavailable',
+    );
+    expect(read).toHaveBeenCalledWith('/demo-vault', SESSION, null);
+    unmount();
+    answer({ state: 'unavailable', reason: 'not_recorded', retention_days: 30 });
+    const reopened = renderHook(() =>
+      useConversations(stubChat(), undefined, undefined, '/demo-vault'),
+    );
+    await settle();
+    expect(reopened.result.current.transcript).toMatchObject({
+      state: 'unavailable',
+      reason: 'cache_trimmed',
+    });
+  });
+
   it('stamps the vault and persists the session id mid-turn', () => {
     let chat = stubChat();
     const { result, rerender } = renderHook(() =>
@@ -319,6 +456,35 @@ describe('useConversations — threads rebuild from the session file', () => {
       ],
     });
     expect(result.current.blocked).toBeNull();
+  });
+
+  it('clears the omission marker only when the whole empty cache is rebuilt', async () => {
+    seed(conversation('c-1', { sessionId: SESSION, cacheTrimmed: true }));
+    answer({ state: 'read', events, lines: 9, unclassified: [] });
+    const { result } = renderHook(() =>
+      useConversations(stubChat(), undefined, undefined, '/demo-vault'),
+    );
+    await settle();
+    expect(result.current.transcript.state).toBe('rebuilt');
+    expect(result.current.active?.cacheTrimmed).toBeUndefined();
+  });
+
+  it('a partial cache heal does not claim omitted messages were recovered', async () => {
+    const cached: ChatMessage[] = [
+      { id: 'u-live', role: 'user', text: 'now', tools: [] },
+      { id: 'a-live', role: 'assistant', text: 'half done', tools: [] },
+    ];
+    seed(conversation('c-1', { sessionId: SESSION, messages: cached, cacheTrimmed: true }));
+    answer({ state: 'read', events, lines: 9, unclassified: [] });
+    const { result } = renderHook(() =>
+      useConversations(stubChat(), undefined, undefined, '/demo-vault'),
+    );
+    await settle();
+    expect(result.current.transcript).toMatchObject({
+      state: 'unavailable',
+      reason: 'cache_trimmed',
+    });
+    expect(result.current.active?.cacheTrimmed).toBe(true);
   });
 
   it('reads an expired thread as cleared by Claude Code, and blocks it', async () => {
@@ -724,6 +890,30 @@ describe('useConversations branches a thread (M91.6)', () => {
     expect(agentIpc.stopAgent).not.toHaveBeenCalled();
     expect(agentIpc.cancelInteraction).not.toHaveBeenCalled();
     expect(stored().find((c) => c.id === 'c-source')?.messages).toHaveLength(6);
+  });
+
+  it('copies no run reach from the open thread: the branch has not run yet', () => {
+    seed(source());
+    const chat = holding();
+    const { result, rerender } = renderHook(() => useConversations(chat));
+    const reach = {
+      connectors: [],
+      missing: [],
+      missing_more: 0,
+      inherits: false,
+      permission_mode: 'default',
+      cerebro: true,
+      families: {},
+    };
+    chat.messages = thread.map((m) => (m.role === 'assistant' ? { ...m, reach } : m));
+    rerender();
+    let id: string | null = null;
+    act(() => {
+      id = result.current.branchFrom('c-source', 'a-2');
+    });
+    expect(result.current.active?.messages).toEqual(thread);
+    const saved = stored().find((c) => c.id === id);
+    expect(saved?.reach ?? null).toBeNull();
   });
 
   it('forks a reply carried from an earlier branch at the session its anchor names', () => {

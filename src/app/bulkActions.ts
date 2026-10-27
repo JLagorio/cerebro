@@ -1,5 +1,6 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 import { withInheritedAgents } from '@/engine/assignment';
-import { flushOpenPages, heldOpenPages } from '@/editor/openPages';
+import { heldOpenPages } from '@/editor/openPages';
 import {
   BULK_FAILED,
   BULK_KNOWLEDGE,
@@ -58,7 +59,7 @@ async function applyPlanned(
   const vault = state.vaultPath;
   if (vault === null || refusedAcrossVaults(state)) return failAll(entries);
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return failAll(entries);
     if (useVaultStore.getState().vaultPath !== vault) return failAll(entries);
     const reads = await readRows(vault, entries);
     if (useVaultStore.getState().vaultPath !== vault) return failAll(entries);
@@ -120,7 +121,7 @@ export async function bulkDuplicate(entries: readonly Entry[]): Promise<BulkResu
   const failed = new Map<string, string>();
   let made = 0;
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return failAll(entries);
     for (const entry of new Map(entries.map((row) => [row.path, row])).values()) {
       if (useVaultStore.getState().vaultPath !== vault) failed.set(entry.path, BULK_FAILED);
       else if (isKnowledgePath(entry.path)) failed.set(entry.path, BULK_KNOWLEDGE);

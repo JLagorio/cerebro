@@ -12,6 +12,7 @@ pub mod parse;
 pub mod query;
 pub mod quote;
 pub mod receipt;
+pub mod recovery;
 pub mod scan;
 pub mod schema;
 pub mod set_fields;

@@ -9,7 +9,7 @@ import { useCanvasTransform } from '@/mermaid/CanvasViewport';
 import { useUiStore } from '@/stores/uiStore';
 import type { BoardStore } from './boardState';
 import type { BoardEditing } from './gestures/text';
-import { registerBoardText } from './pendingText';
+import { pendingBoardDrafts, registerBoardDraft } from './pendingText';
 
 /** One raw markdown draft, committed once when editing ends. Geometry and
  * opaque file members are read from the current scene at that moment. */
@@ -28,7 +28,14 @@ export function TextEditor({
   useLayer({ kind: 'gesture', contains: (node) => input.current?.contains(node) ?? false });
   useStore(state, (s) => s.revision);
   const initial = editing.kind === 'draft' ? editing.card.text : editing.initial;
-  const [text, setText] = useState(initial);
+  const draftId = JSON.stringify([
+    'text',
+    editing.kind,
+    editing.kind === 'draft' ? editing.card : editing.id,
+  ]);
+  const [text, setText] = useState(
+    () => pendingBoardDrafts(editor).find((draft) => draft.id === draftId)?.text ?? initial,
+  );
   const textRef = useRef(text);
   textRef.current = text;
   const completed = useRef(false);
@@ -48,10 +55,15 @@ export function TextEditor({
     } else box = undefined;
   }
   const commit = () => {
-    if (completed.current) return;
-    completed.current = true;
+    if (completed.current) return true;
     const value = textRef.current;
     let result: CommandResult | undefined;
+    if (
+      editing.kind !== 'draft' &&
+      value !== initial &&
+      !(editing.kind === 'edge' ? editor.board.edges : editor.board.nodes).has(editing.id)
+    )
+      return false;
     if (editing.kind === 'draft') {
       if (value.trim() !== '')
         result = editor.execute(addCards, { cards: [{ ...editing.card, text: value }] });
@@ -67,7 +79,11 @@ export function TextEditor({
         ],
       });
     }
-    if (result && !result.ok) toast(result.refusal.message);
+    if (result && !result.ok) {
+      toast(result.refusal.message);
+      return false;
+    }
+    completed.current = true;
     const created = result?.ok ? (result.selection ?? []) : [];
     if (result?.ok && editing.kind === 'draft')
       state.setState((s) => ({
@@ -80,6 +96,7 @@ export function TextEditor({
       }));
     state.setState({ editing: null, tool: 'select' });
     focus();
+    return true;
   };
   const commitRef = useRef(commit);
   commitRef.current = commit;
@@ -89,7 +106,17 @@ export function TextEditor({
     input.current?.focus();
     if (editing.kind !== 'draft') input.current?.select();
     const release = state.claimGesture(() => commitRef.current());
-    const unregister = registerBoardText(editor, () => commitRef.current());
+    const unregister = registerBoardDraft(
+      { editor, id: draftId },
+      {
+        prepare: () => commitRef.current(),
+        snapshot: () =>
+          completed.current ||
+          (editing.kind === 'draft' ? textRef.current.trim() === '' : textRef.current === initial)
+            ? null
+            : textRef.current,
+      },
+    );
     return () => {
       release();
       // StrictMode's replay is not an ended edit. Keep the pending draft
@@ -100,7 +127,7 @@ export function TextEditor({
         unregister();
       });
     };
-  }, [editor, state, editing]);
+  }, [editor, state, editing, draftId, initial]);
   useEffect(() => {
     const outside = (event: PointerEvent) => {
       if (!input.current?.contains(event.target as Node)) commitRef.current();
@@ -111,10 +138,11 @@ export function TextEditor({
         editing.kind !== 'draft' &&
         !(editing.kind === 'edge' ? board.edges : board.nodes).has(editing.id)
       ) {
-        completed.current = true;
+        // Close its absent geometry, while the original text stays retained
+        // against that target until the person resolves it.
         state.setState({ editing: null });
         toast(
-          `This ${editing.kind === 'edge' ? 'connection' : 'card'} was removed outside the whiteboard. Its text edit was closed.`,
+          `This ${editing.kind === 'edge' ? 'connection' : 'card'} was removed outside the whiteboard. Its text draft is still held and has not been saved.`,
         );
         focus();
       }

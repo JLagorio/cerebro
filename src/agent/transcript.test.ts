@@ -1321,11 +1321,15 @@ describe('subagents (M91.4)', () => {
     expect(m.error).toBeUndefined();
     expect(m.notice).toBeUndefined();
     expect(runOf(m, 'a1')).toMatchObject({ status: 'failed', error: 'API Error: overloaded' });
-    // One for a call the turn never started changes nothing.
-    expect(applyEvent(m, { kind: 'Error', message: 'x', parent: 'nope' }, 'live')).toBe(m);
+    // Unattributed child failure stays outside the answer and marks the
+    // supporting detail as incomplete without retaining its raw words.
+    const partial = applyEvent(m, { kind: 'Error', message: 'x', parent: 'nope' }, 'live');
+    expect(partial.tools).toBe(m.tools);
+    expect(partial.error).toBeUndefined();
+    expect(partial.childTraceUnavailable).toBe(true);
   });
 
-  it('drops a subagent’s step whose call the turn never started', () => {
+  it('discloses missing child steps without retaining unattributed contents', () => {
     const before = reduce([agentCall('a1', 'Look')], 'live');
     for (const event of [
       textOf('m9', 'stray', { parent: 'nope' }),
@@ -1333,7 +1337,10 @@ describe('subagents (M91.4)', () => {
       start('x1', 'Read', { parent: 'nope' }),
       done('x1', { parent: 'nope' }),
     ] as AgentStreamEvent[]) {
-      expect(applyEvent(before, event, 'live')).toBe(before);
+      const partial = applyEvent(before, event, 'live');
+      expect(partial.tools).toBe(before.tools);
+      expect(partial.text).toBe(before.text);
+      expect(partial.childTraceUnavailable).toBe(true);
     }
   });
 

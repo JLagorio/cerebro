@@ -1,3 +1,4 @@
+import { RecoveryVersions } from './RecoveryVersions';
 import { useMemo, useState, type ReactNode } from 'react';
 import { runStatus } from '@/agent/elements/runs';
 import { StepIcon } from '@/components/ai/StepLine';
@@ -34,7 +35,7 @@ export const PAGE_HISTORY_WORDS = {
   notRecordedAlone: "Cerebro hasn't recorded an edit in this vault yet.",
   attribution: "Whether this page changed outside Cerebro couldn't be read.",
   gitOff:
-    'History is off: this vault keeps no history. Turn it on in Settings to keep every version of every page.',
+    'Committed history is off. Turn it on in Settings to keep committed versions of eligible pages.',
   noVersions:
     'No versions yet. A version appears here each time this page is committed to history.',
   empty: 'No history yet for this page.',
@@ -61,6 +62,15 @@ const NO_COMMITS: FileCommit[] = [];
  * found where they always were.
  */
 export function PageHistory({ path }: { path: string }) {
+  return (
+    <>
+      <RecoveryVersions path={path} />
+      <PageHistoryTimeline path={path} />
+    </>
+  );
+}
+
+function PageHistoryTimeline({ path }: { path: string }) {
   const { activity, history, attribution } = usePageActivity(path);
   const git = useGit();
   const entries = useVaultStore((s) => s.entries);

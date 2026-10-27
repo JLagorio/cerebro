@@ -43,16 +43,17 @@ export function MyWorkPage() {
       {...cursor.containerProps}
       role="listbox"
       aria-label="My work"
-      className="cb-work-page min-h-0 min-w-0 flex-1 overflow-y-auto"
+      className="cb-work-page cb-composition min-h-0 min-w-0 flex-1 overflow-y-auto"
       data-testid="mywork-page"
     >
       <div className="cb-work-content">
         <PageHeader
+          composition="collection"
           title="My work"
           description="Your open work, organized by when it needs you."
           metadata={`${rows.length} open`}
         />
-        <div className="cb-work-groups">
+        <div className="cb-work-groups cb-composition-content">
           {groups.length === 0 ? (
             <p className="mt-3 text-sm text-(--text-meta)">
               Nothing is in progress — no record's status sits in an active group.

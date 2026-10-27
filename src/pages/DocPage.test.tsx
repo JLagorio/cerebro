@@ -185,7 +185,7 @@ describe('DocPage', () => {
     if (record === undefined) throw new Error('fixture vault has no Work item');
     render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
     // M45.2 Task 6 (2026-08-28 plan): the corpus Work item wears `layout:`
-    // now, so the stack opens behind the strip's View details toggle.
+    // now, so the stack opens behind the strip's Show all properties toggle.
     fireEvent.click(screen.getByTestId('view-details-toggle'));
     expect(screen.getByTestId('page-properties')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Docs' })).toBeNull();
@@ -719,7 +719,31 @@ describe('DocPage', () => {
     const links = await screen.findByTestId('doc-links');
     const backlinks = links.querySelector<HTMLElement>('[data-section="backlinks"]');
     if (backlinks === null) throw new Error('no Backlinks section');
-    expect(within(backlinks).getAllByTestId('doc-link-row').length).toBeGreaterThan(0);
+    const occurrences = within(backlinks).getByTestId('source-occurrences');
+    const rows = await within(occurrences).findAllByRole('button', {
+      name: /dec-offline-window-72h/,
+    });
+    expect(rows).toHaveLength(3);
+    expect(within(occurrences).getByTestId('source-occurrences-count').textContent).toBe(
+      '3 occurrences on 3 pages',
+    );
+    expect(
+      within(occurrences).getByRole('button', { name: /^The offline guarantee:/ }),
+    ).toBeTruthy();
+    expect(
+      within(occurrences).getByRole('button', { name: /^Warn past the 72-hour offline window:/ }),
+    ).toBeTruthy();
+    fireEvent.click(
+      within(occurrences).getByRole('button', {
+        name: /^Three work items reference a 72-hour window that is only written down in one decision:/,
+      }),
+    );
+    await waitFor(() =>
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'doc',
+        path: 'inbox/capture-2026-07-28-1642.md',
+      }),
+    );
   });
 
   it('falls back gracefully when the doc no longer exists', () => {

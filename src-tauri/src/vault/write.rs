@@ -447,6 +447,16 @@ impl PathLock {
     pub(super) fn covers(&self, abs: &Path) -> bool {
         self.joined.iter().any(|path| path == abs)
     }
+
+    /// Recovery records the actual lock identity while the single-file
+    /// capture owns it, so expiry can wait even after the vault disappears.
+    pub(super) fn recovery_key(&self, abs: &Path) -> Result<&str, String> {
+        if self.covers(abs) && self.keys.len() == 1 {
+            Ok(&self.keys[0])
+        } else {
+            Err("recovery capture requires its single target lock".into())
+        }
+    }
 }
 
 impl Drop for PathLock {
@@ -471,6 +481,60 @@ impl Drop for PathLock {
 /// waiting on itself. Waits have no timeout: writers are short and make no
 /// network calls.
 pub(crate) fn lock_paths(vault: &Path, rels: &[&str]) -> Result<PathLock, String> {
+    lock_paths_checked(vault, rels, || lock_authorized_paths(vault, rels))
+}
+// Keep the acquire/recheck handoff scoped; tests can place an identity change
+// at this exact handoff without sleeps or a global mutable hook.
+fn lock_paths_checked(
+    vault: &Path,
+    rels: &[&str],
+    acquire: impl FnOnce() -> Result<PathLock, String>,
+) -> Result<PathLock, String> {
+    lock_paths_checked_with_limits(
+        vault,
+        rels,
+        crate::workspace_service::boundary::limits(),
+        acquire,
+    )
+}
+fn lock_paths_checked_with_limits(
+    vault: &Path,
+    rels: &[&str],
+    bounds: crate::workspace_service::boundary::Limits,
+    acquire: impl FnOnce() -> Result<PathLock, String>,
+) -> Result<PathLock, String> {
+    crate::workspace_service::authority::guard_legacy(vault).map_err(|e| e.message)?;
+    check_legacy_targets(vault, rels, bounds)?;
+    let held = acquire()?;
+    // Each operation phase gets a fresh inspection; all actual targets within
+    // that phase share one budget, including carried rename sidecars.
+    check_legacy_targets(vault, rels, bounds)?;
+    Ok(held)
+}
+fn check_legacy_targets(
+    vault: &Path,
+    rels: &[&str],
+    bounds: crate::workspace_service::boundary::Limits,
+) -> Result<(), String> {
+    if rels.len() > bounds.entries {
+        return Err(crate::workspace_service::boundary::limit().message);
+    }
+    let targets: Vec<_> = rels
+        .iter()
+        .map(|rel| safe_join(vault, rel).map(|path| (*rel, path.is_dir())))
+        .collect::<Result<_, _>>()?;
+    crate::workspace_service::boundary::guard_legacy_targets_with_limits(vault, &targets, bounds)
+        .map_err(|e| e.message)
+}
+pub(crate) fn lock_selected_path(vault: &Path, rel: &str) -> Result<PathLock, String> {
+    match crate::workspace_service::authority::resolve(vault).map_err(|e| e.message)? {
+        crate::workspace_service::authority::Authority::Selected => {
+            lock_authorized_paths(vault, &[rel])
+        }
+        _ => Err("Selected authority is required.".into()),
+    }
+}
+fn lock_authorized_paths(vault: &Path, rels: &[&str]) -> Result<PathLock, String> {
     let mut keys: Vec<(String, &str)> = Vec::new();
     let mut joined = Vec::new();
     for rel in rels {
@@ -480,6 +544,22 @@ pub(crate) fn lock_paths(vault: &Path, rels: &[&str]) -> Result<PathLock, String
             keys.push((key, rel));
         }
     }
+    take_path_locks(keys, joined)
+}
+
+/// A cleanup lock grants no file-write coverage. Its key was recorded by
+/// the actual capture, not supplied over IPC; no filesystem lookup is needed.
+pub(super) struct RecoveryLock {
+    _held: PathLock,
+}
+
+pub(super) fn lock_recovery(key: &str) -> Result<RecoveryLock, String> {
+    Ok(RecoveryLock {
+        _held: take_path_locks(vec![(key.to_owned(), "recovery target")], Vec::new())?,
+    })
+}
+
+fn take_path_locks(keys: Vec<(String, &str)>, joined: Vec<PathBuf>) -> Result<PathLock, String> {
     let me = std::thread::current().id();
     let (table, released) = path_locks();
     let mut held = table.lock().unwrap_or_else(PoisonError::into_inner);
@@ -624,6 +704,40 @@ fn rewrite_note_outcome<D: Door>(
     next: impl FnOnce(&str) -> Result<String, String>,
     by: &WriteReceipt<D>,
 ) -> Result<(Landing, bool), NoteWriteError> {
+    rewrite_note_with_recovery(
+        vault,
+        rel,
+        extensions,
+        expect,
+        mode,
+        keep_identical,
+        next,
+        by,
+        None,
+    )
+}
+
+/// Only the selected ordinary human save doors supply recovery. The generic
+/// agent/metadata/canvas funnels keep their existing, explicit coverage.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the existing funnel plus the optional human recovery request"
+)]
+fn rewrite_note_with_recovery<D: Door>(
+    vault: &Path,
+    rel: &str,
+    extensions: &[&str],
+    expect: Option<&str>,
+    mode: WriteMode,
+    keep_identical: bool,
+    next: impl FnOnce(&str) -> Result<String, String>,
+    by: &WriteReceipt<D>,
+    recovery: Option<(
+        &super::recovery::Journal,
+        Option<&str>,
+        &std::cell::RefCell<super::recovery::Outcome>,
+    )>,
+) -> Result<(Landing, bool), NoteWriteError> {
     let target = note_join(vault, rel, extensions)?;
     let lock = lock_paths(vault, &[rel])?;
     let current = if extensions == CANVAS {
@@ -646,8 +760,22 @@ fn rewrite_note_outcome<D: Door>(
     let content = next(&current)?;
     let changed = content != current;
     if mode == WriteMode::Commit && (changed || !keep_identical) {
+        let prepared = recovery
+            .map(|(journal, bypass, _)| {
+                journal.prepare(&lock, vault, rel, &current, &content, bypass)
+            })
+            .transpose()?;
+        if prepared.is_some() {
+            crate::crash::stop_point("recovery-prepared");
+            crate::crash::crash_point("recovery-prepared");
+        }
         write_file(&lock, &target, &content)?;
         shadow_write(vault, rel, &content, "vault.write", by);
+        if let (Some(prepared), Some((journal, _, outcome))) = (prepared, recovery) {
+            crate::crash::stop_point("recovery-written");
+            crate::crash::crash_point("recovery-written");
+            *outcome.borrow_mut() = journal.finish(prepared);
+        }
     }
     Ok((
         Landing {
@@ -882,6 +1010,33 @@ pub(super) fn note_join(vault: &Path, rel: &str, extensions: &[&str]) -> Result<
     Ok(judge_note(vault, rel, extensions)?.joined)
 }
 
+/// Read-only recovery target validation shares the note door's containment,
+/// scanner visibility and governed-alias rules without opening a write grant.
+pub(crate) fn draft_recovery_target(vault: &Path, rel: &str) -> Result<PathBuf, String> {
+    note_join(vault, rel, &["md", "mmd", "canvas"])
+}
+
+/// Validate an explicit body-only Create without serializing metadata or
+/// adopting a title. The original remains a separate retained draft.
+pub(crate) fn validate_draft_recovery_create(
+    vault: &Path,
+    original: &str,
+    destination: &str,
+    content: &str,
+) -> Result<(), String> {
+    note_join(vault, original, MARKDOWN)?;
+    crate::knowledge::guard_human_write(original)?;
+    note_join(vault, destination, MARKDOWN)?;
+    crate::knowledge::guard_human_write(destination)?;
+    if lock_key(vault, original)? == lock_key(vault, destination)? {
+        return Err("Choose a different page from the original draft target.".into());
+    }
+    if parse::split_frontmatter(content).0.is_some() {
+        return Err("The body would become page properties. Save recovery data instead.".into());
+    }
+    Ok(())
+}
+
 /// `note_join`'s judgement, keeping why it refused (M54.10).
 fn judge_note(vault: &Path, rel: &str, extensions: &[&str]) -> Result<Resolved, NoTarget> {
     let resolved = resolve(vault, rel)?;
@@ -989,7 +1144,20 @@ pub(crate) fn concept_refusal(rel: &str) -> Option<String> {
 }
 
 fn read_file(vault: &Path, rel: &str) -> Result<String, String> {
-    std::fs::read_to_string(safe_join(vault, rel)?).map_err(|e| format!("{rel}: {e}"))
+    read_file_before_content_read(vault, rel, || {})
+}
+
+fn read_file_before_content_read(
+    vault: &Path,
+    rel: &str,
+    before_content_read: impl FnOnce(),
+) -> Result<String, String> {
+    let mut source =
+        crate::workspace_service::boundary::open_legacy_file(vault, rel).map_err(|e| e.message)?;
+    before_content_read();
+    let mut content = String::new();
+    std::io::Read::read_to_string(&mut source, &mut content).map_err(|e| format!("{rel}: {e}"))?;
+    Ok(content)
 }
 
 /// Recompose a file from a raw frontmatter block (with trailing newline) and
@@ -1525,6 +1693,146 @@ pub fn save_note(
     )
 }
 
+/// Protected ordinary human save: the same composition, lock, writer and
+/// receipt as `save_note`, with explicit journal service and one-use choice.
+pub fn save_note_with_recovery(
+    vault: &Path,
+    rel: &str,
+    body: &str,
+    expect: Option<&str>,
+    journal: &super::recovery::Journal,
+    bypass: Option<&str>,
+    by: &WriteReceipt<Human>,
+) -> Result<super::recovery::RecoveryWrite, NoteWriteError> {
+    let expect = expect.map(normalize_expect_hash).transpose()?;
+    human_recovery_write(
+        vault,
+        rel,
+        MARKDOWN_OR_DIAGRAM,
+        expect.as_deref(),
+        |current| Ok(compose_saved(rel, current, body)),
+        journal,
+        bypass,
+        by,
+    )
+}
+
+pub fn save_source_body_with_recovery(
+    vault: &Path,
+    rel: &str,
+    body: &str,
+    journal: &super::recovery::Journal,
+    bypass: Option<&str>,
+    by: &WriteReceipt<Human>,
+) -> Result<super::recovery::RecoveryWrite, NoteWriteError> {
+    human_recovery_write(
+        vault,
+        rel,
+        MARKDOWN,
+        None,
+        |current| replace_source_body(current, body).map_err(String::from),
+        journal,
+        bypass,
+        by,
+    )
+}
+
+/// Restore an exact recorded copy as a human write. The expected current
+/// hash is checked under the same lock as capture and replacement. It never
+/// creates a missing page and never routes a governed page through raw bytes.
+pub fn restore_recovery(
+    vault: &Path,
+    rel: &str,
+    id: &str,
+    expect: &str,
+    journal: &super::recovery::Journal,
+    bypass: Option<&str>,
+    by: &WriteReceipt<Human>,
+) -> Result<super::recovery::RecoveryWrite, NoteWriteError> {
+    crate::knowledge::guard_human_write(rel)?;
+    let expected = normalize_expect_hash(expect)?;
+    let bytes = journal.read(vault, rel, id)?;
+    let content = String::from_utf8(bytes).map_err(|_| "recovery_copy_invalid_utf8".to_string())?;
+    human_recovery_write(
+        vault,
+        rel,
+        MARKDOWN_OR_DIAGRAM,
+        Some(&expected),
+        |_| Ok(content),
+        journal,
+        bypass,
+        by,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "ordinary human funnel with mandatory recovery service and existing receipt"
+)]
+fn human_recovery_write(
+    vault: &Path,
+    rel: &str,
+    extensions: &[&str],
+    expect: Option<&str>,
+    next: impl FnOnce(&str) -> Result<String, String>,
+    journal: &super::recovery::Journal,
+    bypass: Option<&str>,
+    by: &WriteReceipt<Human>,
+) -> Result<super::recovery::RecoveryWrite, NoteWriteError> {
+    crate::knowledge::guard_human_write(rel)?;
+    let outcome = std::cell::RefCell::new(super::recovery::Outcome::Off);
+    let (landing, _) = rewrite_note_with_recovery(
+        vault,
+        rel,
+        extensions,
+        expect,
+        WriteMode::Commit,
+        false,
+        next,
+        by,
+        Some((journal, bypass, &outcome)),
+    )?;
+    Ok(super::recovery::RecoveryWrite {
+        hash: landing.after,
+        recovery: outcome.into_inner(),
+    })
+}
+
+/// Replace only the exact body suffix, retaining every metadata prefix byte.
+/// No new frontmatter may be introduced through this body-only door.
+pub fn replace_source_body(current: &str, body: &str) -> Result<String, NoteWriteError> {
+    let (before, suffix) = parse::split_frontmatter(current);
+    let prefix = &current[..current.len() - suffix.len()];
+    let after = format!("{prefix}{body}");
+    let (next, next_body) = parse::split_frontmatter(&after);
+    if before != next || next_body != body {
+        return Err(
+            "Source body edits cannot change page properties or their body boundary."
+                .to_string()
+                .into(),
+        );
+    }
+    Ok(after)
+}
+
+/// The ordinary human source presentation shares the existing locked,
+/// guarded, receipted rewrite funnel. Knowledge remains outside this door.
+pub fn save_source_body(
+    vault: &Path,
+    rel: &str,
+    body: &str,
+    by: &WriteReceipt<Human>,
+) -> Result<String, NoteWriteError> {
+    rewrite_note(
+        vault,
+        rel,
+        MARKDOWN,
+        None,
+        |current| replace_source_body(current, body).map_err(String::from),
+        by,
+    )
+}
+
 /// The bytes `save_note` turns `current` into for a new body: the existing
 /// frontmatter block with the body composed under it. A note that has NO
 /// block has its body as the whole file. A `.mmd` is the body itself.
@@ -1562,11 +1870,27 @@ pub fn read_note(vault: &Path, rel: &str) -> Result<String, String> {
 pub fn read_note_hashed(vault: &Path, rel: &str) -> Result<(String, String), String> {
     let content = read_file(vault, rel)?;
     let hash = crate::ledger::sha256_hex(content.as_bytes());
+    Ok((body_from_read(rel, content), hash))
+}
+fn body_from_read(rel: &str, content: String) -> String {
     if rel.ends_with(".mmd") {
-        return Ok((content, hash));
+        content
+    } else {
+        parse::split_frontmatter(&content).1.to_string()
     }
-    let (_, body) = parse::split_frontmatter(&content);
-    Ok((body.to_string(), hash))
+}
+/// Native exact read keeps a late boundary refusal typed until IPC serialization.
+pub(crate) fn read_note_checked(
+    vault: &Path,
+    rel: &str,
+) -> Result<String, crate::workspace_service::types::selected::CommandReadError> {
+    use crate::workspace_service::types::selected::CommandReadError;
+    let mut source = crate::workspace_service::boundary::open_legacy_file(vault, rel)
+        .map_err(CommandReadError::Authority)?;
+    let mut content = String::new();
+    std::io::Read::read_to_string(&mut source, &mut content)
+        .map_err(|e| CommandReadError::Legacy(format!("{rel}: {e}")))?;
+    Ok(body_from_read(rel, content))
 }
 
 /// A byte-exact note source and the hash of those same bytes (M60.10).
@@ -1882,8 +2206,20 @@ pub(crate) fn new_canvas_refusal(vault: &Path, folder: &str, slug: &str) -> Opti
 /// Read the whole markdown file, including its frontmatter and BOM, once.
 /// The caller carries its hash into a checked write; this read takes no lock.
 pub fn read_note_source(vault: &Path, rel: &str) -> Result<NoteSource, String> {
-    let target = note_join(vault, rel, MARKDOWN)?;
-    let content = std::fs::read_to_string(target).map_err(|e| format!("{rel}: {e}"))?;
+    read_note_source_before_content_read(vault, rel, || {})
+}
+
+// Operation-local handoff seam. The callback returns no authority or reader.
+// Production preserves note-kind validation, then reads and hashes one qualified descriptor.
+fn read_note_source_before_content_read(
+    vault: &Path,
+    rel: &str,
+    before_content_read: impl FnOnce(),
+) -> Result<NoteSource, String> {
+    note_join(vault, rel, MARKDOWN)?;
+    crate::workspace_service::boundary::guard_legacy_scope(vault, Some(rel), false)
+        .map_err(|e| e.message)?;
+    let content = read_file_before_content_read(vault, rel, before_content_read)?;
     let hash = crate::ledger::sha256_hex(content.as_bytes());
     Ok(NoteSource { content, hash })
 }
@@ -2724,6 +3060,14 @@ fn vault_walker(vault: &Path) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
 
 /// Every Collection in the vault: each folder holding a `collection.yml`.
 pub fn list_collections(vault: &Path) -> Result<Vec<CollectionYaml>, String> {
+    if matches!(
+        crate::workspace_service::authority::resolve(vault).map_err(|e| e.message)?,
+        crate::workspace_service::authority::Authority::Selected
+    ) {
+        return crate::workspace_service::selected::collections(vault).map_err(|e| e.message);
+    }
+    crate::workspace_service::boundary::guard_legacy_scope(vault, None, true)
+        .map_err(|e| e.message)?;
     let mut out = Vec::new();
     for item in vault_walker(vault) {
         if !item.file_type().is_file() || item.file_name().to_string_lossy() != COLLECTION_MARKER {
@@ -2785,6 +3129,14 @@ fn collection_of(vault: &Path, file: &Path) -> Option<String> {
 /// Every List in the vault, in all three on-disk shapes (see `ViewYaml`).
 /// Sorted by (collection, project, id) so the sidebar order is stable.
 pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
+    if matches!(
+        crate::workspace_service::authority::resolve(vault).map_err(|e| e.message)?,
+        crate::workspace_service::authority::Authority::Selected
+    ) {
+        return crate::workspace_service::selected::views(vault).map_err(|e| e.message);
+    }
+    crate::workspace_service::boundary::guard_legacy_scope(vault, None, true)
+        .map_err(|e| e.message)?;
     let mut views = Vec::new();
     collect_views_dir(vault, &vault.join("views"), None, &mut views)?;
 
@@ -2926,6 +3278,7 @@ pub fn save_view(
 /// Create a directory (and parents) inside the vault. Records nothing (see
 /// [`UNRECORDED`]).
 pub fn create_folder(vault: &Path, rel: &str, _by: &WriteReceipt<Human>) -> Result<(), String> {
+    let _held = lock_paths(vault, &[rel])?;
     let abs = safe_join(vault, rel)?;
     std::fs::create_dir_all(&abs).map_err(|e| e.to_string())
 }
@@ -3675,6 +4028,15 @@ mod tests {
             ),
             ("verify_frontmatter", "the ledger's projection"),
             ("save_note", "vault.write"),
+            ("save_source_body", "vault.write"),
+            ("save_note_with_recovery", "human_recovery_write's"),
+            ("save_source_body_with_recovery", "human_recovery_write's"),
+            ("restore_recovery", "human_recovery_write's"),
+            ("human_recovery_write", "rewrite_note_with_recovery's"),
+            (
+                "rewrite_note_with_recovery",
+                "vault.write through shadow_write, or nothing for identical bytes",
+            ),
             ("save_canvas", "vault.write"),
             ("create_canvas", "vault.create"),
             ("create_canvas_planned", "vault.create"),
@@ -3764,6 +4126,57 @@ mod tests {
             }
         }
         assert!(UNRECORDED.iter().all(|(_, why)| !why.is_empty()));
+    }
+
+    #[test]
+    fn recovery_save_source_and_restore_keep_the_guarded_human_stamp() {
+        let _recording = Recording::new("recovery-write-recording");
+        let vault = testutil::temp_vault("recovery-write-vault");
+        let config = testutil::temp_vault("recovery-write-journal");
+        let journal = super::super::recovery::Journal::open(&config).unwrap();
+        journal.set_enabled(&vault, true).unwrap();
+        let path = "notes/a.md";
+        let before = "---\nkind: note\n---\n# Before\n";
+        testutil::write(&vault, path, before);
+        // The existing operational log coalesces an autosave burst. Check
+        // each door immediately so a later correct stamp cannot hide a gap.
+        let expected = |hash: &str| -> Vec<Recorded> {
+            vec![(
+                "vault.write".into(),
+                path.into(),
+                Some(hash.into()),
+                Some(super::super::receipt::HUMAN_ACTOR.into()),
+                None,
+                None,
+            )]
+        };
+
+        let rich =
+            save_note_with_recovery(&vault, path, "# Rich\n", None, &journal, None, &human())
+                .unwrap();
+        assert_eq!(recorded(&vault), expected(&rich.hash));
+        let super::super::recovery::Outcome::Retained { id, .. } = rich.recovery else {
+            panic!("the acknowledged rich save must retain its preimage");
+        };
+        let source =
+            save_source_body_with_recovery(&vault, path, "# Source\n", &journal, None, &human())
+                .unwrap();
+        assert_eq!(recorded(&vault), expected(&source.hash));
+        let restored =
+            restore_recovery(&vault, path, &id, &source.hash, &journal, None, &human()).unwrap();
+        assert_eq!(std::fs::read_to_string(vault.join(path)).unwrap(), before);
+        assert_eq!(recorded(&vault), expected(&restored.hash));
+        assert!(
+            restore_recovery(&vault, path, &id, &source.hash, &journal, None, &human(),).is_err()
+        );
+        assert_eq!(
+            recorded(&vault),
+            expected(&restored.hash),
+            "a stale restore records nothing"
+        );
+        drop(journal);
+        let _ = std::fs::remove_dir_all(vault);
+        let _ = std::fs::remove_dir_all(config);
     }
 
     #[test]
@@ -4595,6 +5008,60 @@ mod tests {
         // Body is untouched.
         assert_eq!(body, "\r\n# Crlf note\r\n\r\nBody stays.\r\n");
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn source_body_replays_exact_byte_cases() {
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("../../fixtures/source-body-cases.json")).unwrap();
+        let vault = crate::vault::testutil::temp_vault("source-body-writes");
+        std::fs::create_dir_all(vault.join("notes")).unwrap();
+        for case in cases.as_array().unwrap() {
+            std::fs::write(
+                vault.join("notes/source.md"),
+                case["before"].as_str().unwrap(),
+            )
+            .unwrap();
+            let saved = save_source_body(
+                &vault,
+                "notes/source.md",
+                case["body"].as_str().unwrap(),
+                &human(),
+            );
+            if case["refused"].as_bool() == Some(true) {
+                assert!(saved.is_err());
+                assert_eq!(
+                    read(&vault, "notes/source.md"),
+                    case["before"].as_str().unwrap()
+                );
+            } else {
+                let expected = case["after"].as_str().unwrap();
+                assert_eq!(
+                    saved.unwrap(),
+                    crate::ledger::sha256_hex(expected.as_bytes())
+                );
+                assert_eq!(read(&vault, "notes/source.md"), expected);
+            }
+            let result = replace_source_body(
+                case["before"].as_str().unwrap(),
+                case["body"].as_str().unwrap(),
+            );
+            if case["refused"].as_bool() == Some(true) {
+                assert!(result.is_err(), "{}", case["name"]);
+            } else {
+                assert_eq!(
+                    result.unwrap(),
+                    case["after"].as_str().unwrap(),
+                    "{}",
+                    case["name"]
+                );
+            }
+        }
+        std::fs::remove_file(vault.join("notes/source.md")).unwrap();
+        assert!(
+            save_source_body(&vault, "notes/source.md", "must not recreate", &human()).is_err()
+        );
+        let _ = std::fs::remove_dir_all(vault);
     }
 
     #[test]
@@ -7938,4 +8405,51 @@ mod tests {
         assert_eq!(read(&vault, "notes/budget.md"), before);
         let _ = std::fs::remove_dir_all(vault);
     }
+
+    #[test]
+    fn checked_mention_body_cases_preserve_every_other_byte_when_admitted() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../shared/knowledge/mention-link-body.v1.json"
+        ))
+        .unwrap();
+        for case in cases["cases"].as_array().unwrap() {
+            let source = case["source"].as_str().unwrap();
+            if case["nativeEmptyMetadata"].as_bool() == Some(true) {
+                let (block, _) = parse::split_frontmatter(source);
+                let mapping =
+                    parse::parse_frontmatter(block.expect("recorded YAML envelope")).unwrap();
+                assert!(
+                    mapping.is_empty(),
+                    "{} has native empty metadata",
+                    case["id"]
+                );
+            }
+            let body = case["bodyAfter"].as_str().unwrap();
+            let after = compose_saved("notes/m97-source.md", source, body);
+            assert_eq!(
+                after,
+                case["nativeAfter"].as_str().unwrap(),
+                "{}",
+                case["id"]
+            );
+            let exact = source.replacen("Neon Orchard", "[[m97-target|Neon Orchard]]", 1);
+            if case["admitted"].as_bool().unwrap() {
+                assert_eq!(after, exact, "{} changes only the mention", case["id"]);
+            } else {
+                assert_ne!(
+                    after, exact,
+                    "{} demonstrates excluded normalization",
+                    case["id"]
+                );
+            }
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "boundary_write_tests.rs"]
+mod boundary_write_tests;
+
+#[cfg(all(test, unix))]
+#[path = "source_handoff_red_tests.rs"]
+mod source_handoff_red_tests;

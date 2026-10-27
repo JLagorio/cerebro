@@ -241,7 +241,7 @@ export function settleMockSession(sessionId: string): string[] {
   const refused: string[] = [];
   for (const [id, entry] of [...book]) {
     if (entry.card.session_id !== sessionId || entry.state === 'answering') continue;
-    refused.push(entry.card.tool_id);
+    if (entry.card.tool_id !== null && entry.card.tool_id !== '') refused.push(entry.card.tool_id);
     book.delete(id);
   }
   return refused;

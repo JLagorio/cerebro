@@ -167,7 +167,9 @@ export function RootTree() {
     });
   };
 
-  /** The words behind a badge's `?` (M92.10): the counts git did not take. */
+  /** The words behind a badge's `?` (M92.10): the counts git did not take.
+   *  Its title for a pointer, and hidden words in the row's name for
+   *  assistive tech, which a span's title does not reach. */
   const badgeTitle = (row: TreeRow): string | undefined => {
     const status = gitStatus[row.rootId];
     return status !== undefined && countsUnknown(status) === 'unread'
@@ -287,6 +289,9 @@ export function RootTree() {
                     className="flex-none rounded-sm bg-n-100 px-1 font-normal text-2xs text-n-500"
                   >
                     {gitBadge(row)}
+                    {badgeTitle(row) !== undefined && (
+                      <span className="sr-only">{` (${badgeTitle(row)})`}</span>
+                    )}
                   </span>
                 )}
                 {unavailable(row) && (

@@ -1,0 +1,2867 @@
+{
+  "version": 1,
+  "format": 2,
+  "authority": "sqlite_metadata",
+  "bindingVersion": 1,
+  "schemaVersion": 2,
+  "values": "shared/workspace/values.v1.json",
+  "revision": {
+    "pattern": "^[1-9][0-9]*$",
+    "max": "9223372036854775807"
+  },
+  "limits": {
+    "registryBytes": 65536,
+    "registryBindings": 128,
+    "markerBytes": 4096,
+    "bodyBytes": 16777216,
+    "databaseBytes": 67108864,
+    "records": 10000,
+    "aggregateMetadataBytes": 33554432,
+    "aggregateBodyBytes": 134217728,
+    "pathBytes": 4096,
+    "pathComponents": 256,
+    "retainedCarrierBytes": 1048576,
+    "retainedEntries": 1024
+  },
+  "boundaryLimits": {
+    "entries": 100000,
+    "depth": 128,
+    "pathBytes": 67108864,
+    "markerBytes": 4194304,
+    "singleMarkerBytes": 4096
+  },
+  "nativeCommands": [
+    {
+      "command": "managed_connections",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "managed_connection_add",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "managed_connection_disable",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "managed_connection_status",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "begin_gh_import",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "credential_acquisition",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "cancel_credential_acquisition",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "chat_recovery_inspect",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "conversation_context",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "conversation_retention",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "conversation_set_retention",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "conversation_list",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "conversation_messages",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "conversation_delete",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "conversation_prune",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "conversation_export",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "conversation_import",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "native_action_catalog",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "native_action_definition",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "mail_dismissals_read",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "mail_dismiss",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "mail_undismiss",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "mail_gate_read",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "calculate_sheets",
+      "scope": "payload_compute",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "sheet_restructure",
+      "scope": "payload_compute",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "pick_sheet_file",
+      "scope": "global_picker",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "sheet_fill",
+      "scope": "payload_compute",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "sheet_complete",
+      "scope": "payload_compute",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "probe_file",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "file_thumbnail",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "read_file_bytes",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "open_file_outside",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "reveal_file",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "quick_look_file",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "save_file_copy",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "client_tokens",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "create_client_token",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "revoke_client_token",
+      "scope": "global_stop_or_release",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "client_access_status",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "set_client_access",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "disable_allowed_enable_requires_legacy_active_root"
+    },
+    {
+      "command": "notification_permission",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "request_notification_permission",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "post_notification",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "pick_vault",
+      "scope": "global_picker",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "open_demo_vault",
+      "scope": "derived_demo_destinations",
+      "rootArgument": null,
+      "selectedDisposition": "guard_derived_paths_before_copy"
+    },
+    {
+      "command": "get_last_vault",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "panel_agent",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "set_panel_agent",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "scan_vault",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "canonical_scan",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "read_note",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "canonical_body_read",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "read_editor_body",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "canonical_editor_body_read",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "read_selected_property",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "canonical_property_read",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "patch_selected_metadata",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "guarded_metadata_patch",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "read_note_source",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "read_canvas_file",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "save_canvas_file",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "create_canvas_file",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "search_vault",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "resolve_source",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "find_source_occurrences",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "save_note",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "guarded_editor_save",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "recovery_status",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "set_recovery_enabled",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "list_recovery",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "read_recovery",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "delete_recovery",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "clear_recovery",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "recovery_failure",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "restore_recovery",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "export_recovery",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "probe_draft_target",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "choose_draft_export",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "commit_draft_export",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "cancel_draft_export",
+      "scope": "global_stop_or_release",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "create_recovered_page",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "update_frontmatter",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "verify_concept",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "capture_concept_edit",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "resolve_reconciliation",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "review_queue",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "revertable_applications",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "decide_proposal",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "revert_application",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "pipeline_overview",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "fleet_runs",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "fleet_runs_page",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "fleet_run_lineage",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "fleet_run_origin",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "fleet_subject_runs",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "fleet_run_detail",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "fleet_run_configuration",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "fleet_run_transcript",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "run_knowledge_writes",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "page_attribution",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "commit_runs",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "conversation_changes",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "vault_activity",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "page_activity",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "fleet_actor_summary",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "fleet_actor_summaries",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "job_ledger_read",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "reminder_state",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "reminder_claim",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "reminder_import",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "done_marks_read",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "done_mark",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "done_unmark",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "done_marks_import",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "job_ledger_claim",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "job_ledger_unclaim",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "job_ledger_stamp",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "job_ledger_import",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "set_global_pause",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "set_agent_paused",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "paused_agents",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "admit_wakes",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "release_assigned_wakes",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "wakes_pending",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "cancel_wakes",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "fleet_wakes",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "list_followups",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "claim_followup",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "cancel_followup",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "set_ambient_concurrency",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "set_lane_enabled",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "trigger_status",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "trigger_run",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "trigger_declare_r7_scope",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "trigger_r7_scope",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "trigger_record_pack",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "ambient_ingest_enabled",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "set_ambient_ingest",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "ingest_item_state",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "ask_question",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "converge",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "home_runs",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "home_changes",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "belief_chips",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "attention_lanes",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "resolve_held_items",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "create_note",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "set_note_title",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "list_views",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "retained_view_read",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "save_view",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "list_collections",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "retained_collection_read",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "save_collection",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "save_list",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "create_folder",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "rename_note",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "targets",
+        "argument": null,
+        "allowEmpty": false,
+        "targets": [
+          {
+            "argument": "from",
+            "kind": "tree"
+          },
+          {
+            "argument": "to",
+            "kind": "tree"
+          }
+        ]
+      }
+    },
+    {
+      "command": "delete_note",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "list_trash",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "restore_from_trash",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "apply_batch",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "starter_marker",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "install_starter_kit",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "decline_starter_kit",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "list_comments",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "start_comment_thread",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "reply_to_comment_thread",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "set_comment_thread_resolved",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "delete_comment",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "delete_comment_thread",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "start_thread_turn",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "list_folders",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "physical_folder_read",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "pick_files",
+      "scope": "global_picker",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "import_attachment",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "import_attachment_bytes",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "inspect_dropped",
+      "scope": "absolute_source_array",
+      "rootArgument": "paths",
+      "selectedDisposition": "deny_selected_source"
+    },
+    {
+      "command": "read_dropped_text",
+      "scope": "absolute_source",
+      "rootArgument": "path",
+      "selectedDisposition": "deny_selected_source"
+    },
+    {
+      "command": "extract_document",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "write_text_file",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "export_png",
+      "scope": "dialog_destination",
+      "rootArgument": null,
+      "selectedDisposition": "guard_picked_path_before_write"
+    },
+    {
+      "command": "export_svg",
+      "scope": "dialog_destination",
+      "rootArgument": null,
+      "selectedDisposition": "guard_picked_path_before_write"
+    },
+    {
+      "command": "export_csv",
+      "scope": "dialog_destination",
+      "rootArgument": null,
+      "selectedDisposition": "guard_picked_path_before_write"
+    },
+    {
+      "command": "export_sheet_xlsx",
+      "scope": "dialog_destination",
+      "rootArgument": null,
+      "selectedDisposition": "guard_picked_path_before_write"
+    },
+    {
+      "command": "ledger_head",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "ledger_status",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "start_watcher",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "selected_watcher_teardown_and_body_watch",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "read_connectors",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "save_connectors",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "connector_status",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "check_agent",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "check_cli_readiness",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "check_wake",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "agent_workspace",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "purge_agent_workspace",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "read_cli_transcript",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "run_agent",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "stop_agent",
+      "scope": "global_stop_or_release",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "agent_events_since",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "agent_context_usage",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "stop_all_agents",
+      "scope": "global_stop_or_release",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "answer_interaction",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "cancel_interaction",
+      "scope": "global_stop_or_release",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "list_interactions",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "pending_writes",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "decide_pending_write",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "claude_user_settings",
+      "scope": "optional_vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "log_frontend",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "pull_request_state",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "git_workspace_info",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "is_git_repo",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "init_git_repo",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_author_identity",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "get_modified_files",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_discard_file",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "get_file_history",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "get_file_diff",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "get_file_diff_at_commit",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "get_file_at_commit",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "restore_note_version",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "get_file_patch",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "get_commit_diff",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "get_vault_pulse",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "get_last_commit_info",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_commit",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_has_pending_changes",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_file_url",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_remote_status",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_pull",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_push",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_add_remote",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_disconnect_remote",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_clone",
+      "scope": "absolute_destination",
+      "rootArgument": "destination",
+      "selectedDisposition": "deny_selected_path_intersection"
+    },
+    {
+      "command": "get_conflict_files",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "get_conflict_mode",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_resolve_conflict",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_commit_conflict_resolution",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_abort_conflict",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "git_provider_status",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "list_roots",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "mount_root",
+      "scope": "absolute_mount_root",
+      "rootArgument": "path",
+      "selectedDisposition": "deny_selected_path_intersection"
+    },
+    {
+      "command": "unmount_root",
+      "scope": "global_stop_or_release",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "list_dir",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": "path",
+        "allowEmpty": true
+      }
+    },
+    {
+      "command": "read_file_text",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "root_git_workspace_info",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "root_git_remote_status",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "root_git_modified_files",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "root_git_pulse",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "root_git_file_url",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "root_git_fetch",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "root_git_pull_ff",
+      "scope": "root_id",
+      "rootArgument": "rootId",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "take_deep_link",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "app_link",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "reveal_in_finder",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "open_in_default_app",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "unsupported_selected",
+      "traversal": {
+        "kind": "tree",
+        "argument": null,
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "open_agent_link",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "write_clipboard",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "finish_quit",
+      "scope": "global_stop_or_release",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "cancel_quit",
+      "scope": "global_stop_or_release",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "set_page_full_width",
+      "scope": "vault_root",
+      "rootArgument": "vault",
+      "selectedDisposition": "one_key_cas_human_receipt",
+      "traversal": {
+        "kind": "file",
+        "argument": "path",
+        "allowEmpty": false
+      }
+    },
+    {
+      "command": "workspace_backup_availability",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "choose_workspace_backup",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "check_workspace_backup",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "choose_workspace_restore",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "commit_workspace_backup",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "commit_workspace_restore",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "cancel_workspace_backup_choice",
+      "scope": "global_effect",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "workspace_backup_operation",
+      "scope": "global_read",
+      "rootArgument": null,
+      "selectedDisposition": "global_allowed"
+    },
+    {
+      "command": "read_managed_action_access",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "set_managed_action_access",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_access",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_action_details",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_actions",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_answer_action",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_answer_wait",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_cancel",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_catalog",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_context",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_continue",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_document",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_publish",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_unpublish",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_reauthorize",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_run",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_runs",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_save",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_schedule",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_schedule_enable",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_schedule_pause",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_schedule_preview",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_schedule_remove",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_schedule_wake",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_start",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_validate",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_value",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    },
+    {
+      "command": "workflow_version",
+      "scope": "active_root",
+      "rootArgument": null,
+      "selectedDisposition": "unsupported_selected"
+    }
+  ],
+  "projectionCases": [
+    {
+      "name": "string stays string",
+      "source": {
+        "kind": "string",
+        "value": "007"
+      },
+      "expected": "007"
+    },
+    {
+      "name": "nested null remains recorded",
+      "source": {
+        "kind": "object",
+        "value": {
+          "empty": {
+            "kind": "null"
+          },
+          "array": {
+            "kind": "array",
+            "value": [
+              {
+                "kind": "null"
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "empty": null,
+        "array": [
+          null
+        ]
+      }
+    },
+    {
+      "name": "canonical max safe integer",
+      "source": {
+        "kind": "decimal",
+        "value": "9007199254740991"
+      },
+      "expected": 9007199254740991
+    },
+    {
+      "name": "unsupported decimal -0",
+      "source": {
+        "kind": "decimal",
+        "value": "-0"
+      },
+      "refused": "unsupported_projection"
+    },
+    {
+      "name": "unsupported decimal 0.1",
+      "source": {
+        "kind": "decimal",
+        "value": "0.1"
+      },
+      "refused": "unsupported_projection"
+    },
+    {
+      "name": "unsupported decimal 1e2",
+      "source": {
+        "kind": "decimal",
+        "value": "1e2"
+      },
+      "refused": "unsupported_projection"
+    },
+    {
+      "name": "unsupported decimal 9007199254740992",
+      "source": {
+        "kind": "decimal",
+        "value": "9007199254740992"
+      },
+      "refused": "unsupported_projection"
+    },
+    {
+      "name": "unsupported decimal 1e400",
+      "source": {
+        "kind": "decimal",
+        "value": "1e400"
+      },
+      "refused": "unsupported_projection"
+    },
+    {
+      "name": "relation identity cannot be dropped",
+      "source": {
+        "kind": "relation",
+        "spelling": "[[Elsewhere]]",
+        "fragment": null,
+        "resolution": {
+          "status": "unresolved"
+        }
+      },
+      "refused": "unsupported_projection"
+    },
+    {
+      "name": "prose link stays plain string",
+      "source": {
+        "kind": "string",
+        "value": "ordinary [[page]] prose"
+      },
+      "expected": "ordinary [[page]] prose"
+    }
+  ],
+  "fullWidthCases": [
+    {
+      "name": "wide adds one key",
+      "before": {
+        "kind": "object",
+        "value": {
+          "empty": {
+            "kind": "null"
+          }
+        }
+      },
+      "mode": "wide",
+      "expected": {
+        "kind": "object",
+        "value": {
+          "empty": {
+            "kind": "null"
+          },
+          "full_width": {
+            "kind": "boolean",
+            "value": true
+          }
+        }
+      },
+      "changed": true,
+      "fullWidth": true
+    },
+    {
+      "name": "wide no-op",
+      "before": {
+        "kind": "object",
+        "value": {
+          "full_width": {
+            "kind": "boolean",
+            "value": true
+          }
+        }
+      },
+      "mode": "wide",
+      "expected": {
+        "kind": "object",
+        "value": {
+          "full_width": {
+            "kind": "boolean",
+            "value": true
+          }
+        }
+      },
+      "changed": false,
+      "fullWidth": true
+    },
+    {
+      "name": "default removes only presentation key",
+      "before": {
+        "kind": "object",
+        "value": {
+          "empty": {
+            "kind": "null"
+          },
+          "full_width": {
+            "kind": "boolean",
+            "value": true
+          }
+        }
+      },
+      "mode": "default",
+      "expected": {
+        "kind": "object",
+        "value": {
+          "empty": {
+            "kind": "null"
+          }
+        }
+      },
+      "changed": true,
+      "fullWidth": false
+    },
+    {
+      "name": "default absent no-op",
+      "before": {
+        "kind": "object",
+        "value": {}
+      },
+      "mode": "default",
+      "expected": {
+        "kind": "object",
+        "value": {}
+      },
+      "changed": false,
+      "fullWidth": false
+    }
+  ]
+}

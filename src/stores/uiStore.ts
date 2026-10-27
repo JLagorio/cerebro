@@ -1,3 +1,4 @@
+import { requestLeave } from '@/app/leaveGuard';
 import type { PaneId } from '@/engine/panes';
 import { create } from 'zustand';
 import type { RunRecord } from '@/agent/runs';
@@ -933,17 +934,30 @@ export const useUiStore = create<UiState>((set, get) => ({
   // run that was mid-answer. Showing you something must never end the sentence
   // that referred to it.
   detailPane: null,
-  openDetail: (path, owner = null) =>
-    set((state) => ({
-      detailPath: path,
-      detailPane: owner,
-      aiPanelPresentation:
-        state.aiPanelPresentation === 'canvas' ? 'floating' : state.aiPanelPresentation,
-      detailSiblings:
-        state.siblingsByPane[owner ?? '*'] ??
-        (owner === null ? state.detailSiblings : (state.siblingsByPane['*'] ?? [])),
-    })),
-  closeDetail: () => set({ detailPath: null, detailPane: null }),
+  openDetail: (path, owner = null) => {
+    const before = get().detailPath;
+    const open = () =>
+      set((state) => ({
+        detailPath: path,
+        detailPane: owner,
+        aiPanelPresentation:
+          state.aiPanelPresentation === 'canvas' ? 'floating' : state.aiPanelPresentation,
+        detailSiblings:
+          state.siblingsByPane[owner ?? '*'] ??
+          (owner === null ? state.detailSiblings : (state.siblingsByPane['*'] ?? [])),
+      }));
+    if (before === null || before === path) open();
+    else requestLeave('peek', open, () => get().detailPath === before);
+  },
+  closeDetail: () => {
+    const before = get().detailPath;
+    if (before === null) return;
+    requestLeave(
+      'peek',
+      () => set({ detailPath: null, detailPane: null }),
+      () => get().detailPath === before,
+    );
+  },
   detailSiblings: [],
   siblingsByPane: {},
   setDetailSiblings: (paths, pane = '*') => {

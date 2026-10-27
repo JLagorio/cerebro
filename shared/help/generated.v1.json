@@ -1,0 +1,40 @@
+{
+  "format": 1,
+  "topics": [
+    {
+      "id": "knowledge",
+      "title": "Review knowledge",
+      "appVersion": "0.1.0",
+      "contentHash": "bd4dcab9fba1ce29014e0786127edea2271548248ba127808a29be29ae91cdba",
+      "body": "## Capture something you can check\n\nOpen the assistant and name the page or source you want it to learn from. Ask it to explain the claim and keep the evidence with the concept. An ordinary note and a knowledge concept have different purposes: a concept is a claim you can review as its sources change.\n\n## Review the evidence\n\n1. Open Knowledge, then Review. Open a concept from the queue.\n2. Read the claim. Open Details to inspect its evidence and follow the relevant source.\n3. Check that the source supports the claim, including its date and any qualifications.\n4. Use Verify in the review bar only when you have checked it yourself. Verification records your confirmation; an agent's confidence is not your review.\n\nIf the claim is wrong or its evidence is unavailable, leave it unverified and ask the assistant to correct or recheck it. A proposed change may wait for your approval. Review what will change before allowing it.\n\nKnowledge has Concepts, Review and Activity tabs. Activity explains recorded changes and background work. An unavailable section means its read failed; it does not mean there is nothing to review.\n"
+    },
+    {
+      "id": "reviewed-work",
+      "title": "Work with an agent",
+      "appVersion": "0.1.0",
+      "contentHash": "12c51029401c776f37bdd816c463d121629f6e2254e203e5354aad28e835b5f5",
+      "body": "## Give an agent a small, clear task\n\nStart with a disposable page or a small folder. Open an agent from the Library, read its Instructions, and check its properties before running it. New agents start paused.\n\nChoose the folders it may read and write, the tools it needs, and whether it must ask before making changes. Connector access is a separate grant. Give it only the access needed for the task, and save the property changes with Done.\n\n## Supervise the result\n\n1. Once you have checked its instructions and permissions, use Resume on the agent's page. A paused agent cannot be called.\n2. Tell the assistant what outcome you want, which agent should do it, and which page or folder is in scope.\n3. When it asks a question or requests approval, read the proposed action and its target before answering. Declining leaves that action unapproved.\n4. Open the agent's Runs tab to inspect recorded work. Follow the changed pages and check the actual result.\n5. Pause the agent again after the supervised task if you are not ready for further scheduled or triggered work. Pausing is not an undo of completed actions.\n\nSome requests wait in Knowledge → Review under Waiting on you when nobody is watching. A queued request is not a completed change. A failed or interrupted run may have made earlier changes, so inspect the recorded work before trying again.\n\nFor mail, ask for a draft you can review and send yourself. The shipped Draft reply recipe needs an approved Gmail connector and does not send mail.\n"
+    },
+    {
+      "id": "imports",
+      "title": "Bring in a source",
+      "appVersion": "0.1.0",
+      "contentHash": "19c7b8c7cb1dfc0ad2cc9887894f04acfb8ebdde8dbdd46a9edbd2d512e8d4b0",
+      "body": "## Keep track of where a copy came from\n\nFor a Notion page, ask the assistant to fetch the page through your approved connector and import it into a folder you name. The import uses the fetched result and records its source. Notion databases are not part of this page importer.\n\nRead the import result before continuing. Unsupported or incomplete material may require a composed copy, which is marked as composed by the assistant. Check its formatting and links against the original.\n\n## Import the same page again\n\nAn unchanged imported copy can be updated in place. A copy you edited is left alone; the result explains that it was preserved. Moving the copy does not remove its source identity. Do not delete your edited copy just to make an update proceed: compare the versions and decide what you want to keep first.\n\nCSV and spreadsheet imports are separate import flows. Review their destination and any reported conversion losses. Choosing a file does not create a page; the explicit Import action does. Check the new page before relying on converted formulas or values.\n\nFetching connected material can also create a local working source copy, separately from importing an editable page. Review source and mail settings before requesting private material. Granting connector access does not import every document in that account.\n"
+    },
+    {
+      "id": "schedules",
+      "title": "Schedule an agent",
+      "appVersion": "0.1.0",
+      "contentHash": "45ac7d04b6f4144ef333610144befd0d8f96cff9347fc4032fbaa6096ad6edc3",
+      "body": "## Start with a paused agent\n\nOpen the agent's page and check Instructions, Reads, Writes in and its tool permissions. Set its Schedule in properties, then choose Done. Inspect the displayed schedule before resuming the agent.\n\nIn Settings → Knowledge, Learn on its own controls background work and is off by default. With it off, schedules do not fire. Enable it deliberately when you are ready for background work in this vault.\n\n## Check what happened\n\nKeep Cerebro open and your computer awake for scheduled desktop work. This is not an always-on cloud scheduler. An overdue schedule is not a promise to replay every missed occurrence.\n\nOpen the agent's Runs tab and Knowledge → Activity to inspect recorded attempts and outcomes. Waiting, skipped, failed and completed work are different states. If an approval is waiting, review its target before allowing it.\n\nPause the agent or turn off Learn on its own when you want to stop new scheduled background work. Inspect an already running task separately; changing a schedule is not an undo of earlier actions.\n"
+    },
+    {
+      "id": "recovery",
+      "title": "Recover from a problem",
+      "appVersion": "0.1.0",
+      "contentHash": "871548106be7da2d62e5fc581318c2856213f4fec420e8517eb73632d3f48acb",
+      "body": "## A page could not save\n\nKeep the page open and read the failure message. Retry saves the retained draft without requiring another edit. A navigation or quit request may stay on the page until the save succeeds or a conflict is resolved.\n\nIf another app changed the page, review the reconciliation choices before deciding which text to keep. A deleted target is not recreated automatically. Keep a separate copy of important text before closing a failed editing session.\n\nUnsaved drafts retained by this session are not a backup after a crash, logout or process exit. Page History shows recorded Git versions when available. Settings → Recently deleted can restore files removed through Cerebro's Trash, provided the destination is free. Outside deletions and uncommitted outside edits may not have a recoverable version.\n\n## The assistant is unavailable\n\nOpen Settings → Assistant and inspect the Claude Code status. Cerebro uses your own installed Claude Code and its sign-in. If a run specifically says you are not signed in, open Claude Code in Terminal and use /login there. An unsuccessful status check alone does not establish that the program is missing or that you are signed out.\n\n## A connector is unavailable\n\nInspect the connector in Settings → Assistant. Check the account, connection and selected tool permissions. An unavailable inventory does not prove an existing grant is absent. Use Retry where offered and inspect the result before changing saved permissions.\n\nDo not paste passwords or secret tokens into a page or conversation to repair a connection. Use the connector's own connection flow. A successful connection check does not mean a previously failed action ran; inspect its result before trying it again.\n"
+    }
+  ]
+}

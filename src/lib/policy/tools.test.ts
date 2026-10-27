@@ -77,6 +77,10 @@ describe('the shared manifest is one artifact', () => {
       'read_canvas',
       'knowledge_about',
       'list_inbox',
+      'list_actions',
+      'get_action_definition',
+      'get_action_effect',
+      'get_action_effect_details',
     ]);
   });
 });
@@ -968,6 +972,7 @@ describe('toolFacts', () => {
     }
     expect(toolFacts('propose_create_belief')?.fold).toBeNull();
     expect(toolFacts('create_note')?.fold).toBeNull();
+    expect(toolFacts('prepare_action')?.fold).toBeNull();
     expect(toolFacts('suggest_view')?.renderer).toBe('view');
     expect(toolFacts('suggest_view')?.fold).toBeNull();
     expect(toolFacts('hand_to')?.renderer).toBe('handoff');

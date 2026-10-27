@@ -397,6 +397,59 @@ function closeCount(message: ChatMessage): ChatMessage {
   return typeof message.workedMs === 'number' ? { ...message, workedMs: null } : message;
 }
 
+/** Parent-tagged child evidence must belong to an Agent call in this turn.
+ * Call IDs alone cannot move a result between different child threads.
+ * CLI denials deliberately name no parent and keep their existing global
+ * lookup; the four tool events below carry an explicit thread contract. */
+function hasUnownedChildEvidence(message: ChatMessage, event: AgentStreamEvent): boolean {
+  if ('parent' in event && event.parent !== undefined) {
+    const parent = findCall(message.tools, event.parent);
+    if (parent === null || !startsSubagent(parent.name)) return true;
+  }
+  switch (event.kind) {
+    case 'ToolStart':
+    case 'ToolDone':
+    case 'ToolPayload':
+    case 'ToolResult': {
+      const call = findCall(message.tools, event.tool_id);
+      if (event.kind === 'ToolResult' && event.data.type === 'agent') {
+        if (call === null || !startsSubagent(call.name)) return true;
+        const recorded = call.subagent?.agentId;
+        if (named(recorded) && named(event.data.agent_id) && recorded !== event.data.agent_id) {
+          return true;
+        }
+      }
+      if (call !== null) {
+        if (
+          event.kind === 'ToolStart' &&
+          call.name !== event.tool_name &&
+          (event.parent !== undefined ||
+            startsSubagent(call.name) ||
+            startsSubagent(event.tool_name))
+        )
+          return true;
+        return call.parent !== event.parent;
+      }
+      return event.kind !== 'ToolStart' && event.parent !== undefined;
+    }
+    case 'SubagentStarted':
+    case 'SubagentProgress':
+    case 'SubagentDone': {
+      const call = findCall(message.tools, event.tool_id);
+      if (call === null || !startsSubagent(call.name)) return true;
+      const recorded = call.subagent?.agentId;
+      return (
+        event.kind === 'SubagentStarted' &&
+        named(recorded) &&
+        named(event.agent_id) &&
+        recorded !== event.agent_id
+      );
+    }
+    default:
+      return false;
+  }
+}
+
 /** Apply one event to the assistant message of its turn. Unknown kinds, and
  * kinds that are not about the message (Init, UserPrompt, PrLink,
  * Interaction, Done), change nothing. `session` is the turn's Claude Code
@@ -407,6 +460,11 @@ export function applyEvent(
   mode: ReduceMode,
   session: string | null = null,
 ): ChatMessage {
+  if (hasUnownedChildEvidence(message, event)) {
+    return message.childTraceUnavailable === true
+      ? message
+      : { ...message, childTraceUnavailable: true };
+  }
   const live = message.live ?? EMPTY_LIVE;
   switch (event.kind) {
     case 'TextDelta': {
@@ -987,45 +1045,61 @@ function withReasoning(cached: MessagePart[], rebuilt: MessagePart[]): MessagePa
  * unfinished takes how it ended. A reply the rebuild also holds (by id,
  * anchor or a call) takes back its reasoning, its anchor, and, when it had
  * none, its parts, if its answer reads the same. The same array comes back
- * when nothing changed.
+ * when nothing changed. Healing uses only one matched reply and requires
+ * compatible call names, parents and known child identities. Conflicting or
+ * ambiguous attribution keeps the cached reply's content and marks its child
+ * details unavailable; a partial rebuild never grafts another child's words.
  */
 export function healFromTranscript(cached: ChatMessage[], rebuilt: ChatMessage[]): ChatMessage[] {
-  const rows = new Map<string, ToolCall>();
-  const collect = (tools: ToolCall[]) => {
-    for (const tool of tools) {
-      rows.set(tool.id, tool);
-      if (tool.subagent !== undefined) collect(tool.subagent.tools);
-    }
+  // null records an ambiguous key rather than letting the last row win.
+  const index = <T>(map: Map<string, T | null>, key: string, value: T) => {
+    map.set(key, map.has(key) && map.get(key) !== value ? null : value);
   };
-  const byId = new Map<string, ChatMessage>();
-  const byAnchor = new Map<string, ChatMessage>();
-  const byCall = new Map<string, ChatMessage>();
+  const rowsOf = (tools: ToolCall[]): Map<string, ToolCall | null> => {
+    const rows = new Map<string, ToolCall | null>();
+    const collect = (list: ToolCall[]) => {
+      for (const tool of list) {
+        index(rows, tool.id, tool);
+        if (tool.subagent !== undefined) collect(tool.subagent.tools);
+      }
+    };
+    collect(tools);
+    return rows;
+  };
+  const byId = new Map<string, ChatMessage | null>();
+  const byAnchor = new Map<string, ChatMessage | null>();
+  const byCall = new Map<string, ChatMessage | null>();
+  const anchorKey = (anchor: NonNullable<ChatMessage['anchor']>) =>
+    JSON.stringify([anchor.sessionId, anchor.uuid]);
   for (const message of rebuilt) {
-    collect(message.tools);
     if (message.role !== 'assistant') continue;
-    byId.set(message.id, message);
-    if (message.anchor !== undefined) byAnchor.set(message.anchor.uuid, message);
-    for (const tool of message.tools) byCall.set(tool.id, message);
+    index(byId, message.id, message);
+    if (message.anchor !== undefined) index(byAnchor, anchorKey(message.anchor), message);
+    for (const tool of message.tools) index(byCall, tool.id, message);
   }
 
-  const healTools = (tools: ToolCall[]): ToolCall[] => {
+  const healTools = (tools: ToolCall[], rows: Map<string, ToolCall | null>): ToolCall[] => {
     let touched = false;
     const next = tools.map((tool) => {
-      const healed = healTool(tool);
+      const healed = healTool(tool, rows);
       if (healed !== tool) touched = true;
       return healed;
     });
     return touched ? next : tools;
   };
 
-  const healRun = (run: SubagentRun, row: SubagentRun | undefined): SubagentRun => {
+  const healRun = (
+    run: SubagentRun,
+    row: SubagentRun | undefined,
+    rows: Map<string, ToolCall | null>,
+  ): SubagentRun => {
     let next = run;
     if (row !== undefined && run.parts.length === 0 && run.tools.length === 0) {
       if (row.parts.length > 0 || row.tools.length > 0) {
         next = { ...next, parts: row.parts, tools: row.tools };
       }
     } else {
-      const tools = healTools(run.tools);
+      const tools = healTools(run.tools, rows);
       if (tools !== run.tools) next = { ...next, tools };
     }
     if (row === undefined) return next;
@@ -1047,10 +1121,10 @@ export function healFromTranscript(cached: ChatMessage[], rebuilt: ChatMessage[]
 
   /** What the rebuilt row with this id adds to a cached one: the same row
    * when nothing. */
-  const healTool = (tool: ToolCall): ToolCall => {
+  const healTool = (tool: ToolCall, rows: Map<string, ToolCall | null>): ToolCall => {
     const row = rows.get(tool.id);
     let next = tool;
-    if (row !== undefined) {
+    if (row !== undefined && row !== null) {
       const complete = !tool.done && row.done;
       const payload = tool.payload === undefined && row.payload !== undefined;
       const result = tool.result === undefined && row.result !== undefined;
@@ -1072,33 +1146,64 @@ export function healFromTranscript(cached: ChatMessage[], rebuilt: ChatMessage[]
     if (next.subagent === undefined) {
       return row?.subagent === undefined ? next : { ...next, subagent: row.subagent };
     }
-    const run = healRun(next.subagent, row?.subagent);
+    const run = healRun(next.subagent, row?.subagent, rows);
     return run === next.subagent ? next : { ...next, subagent: run };
   };
 
   /** The rebuilt reply a cached one is: by id, by anchor, or by a call. */
-  const twinOf = (message: ChatMessage): ChatMessage | undefined => {
+  const twinOf = (message: ChatMessage): ChatMessage | null | undefined => {
     const byItsId = byId.get(message.id);
     if (byItsId !== undefined) return byItsId;
     if (message.anchor !== undefined) {
-      const anchored = byAnchor.get(message.anchor.uuid);
+      const anchored = byAnchor.get(anchorKey(message.anchor));
       if (anchored !== undefined) return anchored;
     }
+    let candidate: ChatMessage | undefined;
     for (const tool of message.tools) {
       const holder = byCall.get(tool.id);
-      if (holder !== undefined) return holder;
+      if (
+        holder === null ||
+        (holder !== undefined && candidate !== undefined && holder !== candidate)
+      )
+        return null;
+      if (holder !== undefined) candidate = holder;
     }
-    return undefined;
+    return candidate;
   };
 
   let changed = false;
   const healed = cached.map((message) => {
     if (message.role !== 'assistant') return message;
     let next = message;
-    const tools = healTools(message.tools);
-    if (tools !== message.tools) next = { ...next, tools };
     const twin = twinOf(message);
-    if (twin !== undefined) {
+    const rows = rowsOf(twin?.tools ?? []);
+    const held = rowsOf(message.tools);
+    const conflict =
+      twin === null ||
+      [...rows.values(), ...held.values()].some((row) => row === null) ||
+      [...held.values()].some((tool) => {
+        if (tool === null) return false;
+        const row = rows.get(tool.id);
+        if (row === undefined || row === null) return false;
+        return (
+          tool.name !== row.name ||
+          tool.parent !== row.parent ||
+          (tool.subagent?.agentId !== undefined &&
+            row.subagent?.agentId !== undefined &&
+            tool.subagent.agentId !== row.subagent.agentId)
+        );
+      });
+    if (conflict && next.childTraceUnavailable !== true) {
+      next = { ...next, childTraceUnavailable: true };
+    }
+    if (twin !== undefined && twin !== null) {
+      if (twin.childTraceUnavailable === true && next.childTraceUnavailable !== true) {
+        next = { ...next, childTraceUnavailable: true };
+      }
+    }
+    if (!conflict && twin !== undefined && twin !== null) {
+      const tools = healTools(message.tools, rows);
+      if (tools !== message.tools) next = { ...next, tools };
       if (next.anchor === undefined && twin.anchor !== undefined) {
         next = { ...next, anchor: twin.anchor };
       }
@@ -1190,6 +1295,7 @@ export function replaceLastTurn(
     } = m;
     return {
       ...kept,
+      ...(last.childTraceUnavailable === true ? { childTraceUnavailable: true } : {}),
       text: last.text,
       tools: keepLiveCalls(last.tools, m.tools),
       ...(last.parts === undefined ? {} : { parts: last.parts }),

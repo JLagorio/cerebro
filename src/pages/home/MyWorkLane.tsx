@@ -10,9 +10,10 @@ import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { Lane } from './Lane';
 import { TaskRow } from './TaskRow';
+import { SelectedTaskRecovery } from '@/editor/SelectedTaskRecovery';
 
 export function MyWorkLane({ now, ctx }: { now: Date; ctx: BandContext }) {
-  const { tasks, loading, toggle, unreadable = [] } = useDocTasks();
+  const { tasks, loading, toggle, unreadable = [], recovering = [], toggleUnavailable } = useDocTasks();
   const entries = useVaultStore((s) => s.entries);
   const status = useVaultStore((s) => s.status);
   const schema = useSchema();
@@ -75,6 +76,8 @@ export function MyWorkLane({ now, ctx }: { now: Date; ctx: BandContext }) {
       ),
   );
   return (
+    <>
+    {recovering.map(owner => <SelectedTaskRecovery key={owner.key.ownerId} owner={owner} />)}
     <Lane
       id="mywork"
       state={state}
@@ -114,9 +117,10 @@ export function MyWorkLane({ now, ctx }: { now: Date; ctx: BandContext }) {
       }
       renderRow={(row) =>
         row.task === undefined ? undefined : (
-          <TaskRow task={row.task} onToggle={(value) => void toggle(row.task!, value)} />
+          <TaskRow task={row.task} disabledReason={toggleUnavailable?.(row.task)} onToggle={(value) => void toggle(row.task!, value)} />
         )
       }
     />
+    </>
   );
 }

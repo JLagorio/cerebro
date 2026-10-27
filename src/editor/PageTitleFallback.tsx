@@ -14,6 +14,8 @@ export function PageTitleFallback({
   bodyVisible = true,
   settleRef,
   flushPendingSave,
+  onRecoveryDraft,
+  applyRecoveryDraft,
 }: {
   title: string;
   editor: CerebroEditor;
@@ -21,6 +23,8 @@ export function PageTitleFallback({
   bodyVisible?: boolean;
   settleRef: React.RefObject<(() => void) | null>;
   flushPendingSave: () => Promise<void>;
+  onRecoveryDraft?: (text: string | null) => void;
+  applyRecoveryDraft?: (apply: () => void) => void;
 }) {
   const [draft, setDraft] = useState(title);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -40,7 +44,8 @@ export function PageTitleFallback({
     const settle = () => {
       const value = pending.current.trim();
       if (!readOnly && value !== '' && value !== baseline.current && !hasTitleBlock(editor))
-        spliceTitleIntoBlocks(editor, value);
+        if (applyRecoveryDraft) applyRecoveryDraft(() => spliceTitleIntoBlocks(editor, value));
+        else spliceTitleIntoBlocks(editor, value);
     };
     const unregister = registerFlush(async () => {
       settle();
@@ -52,7 +57,7 @@ export function PageTitleFallback({
       unregister();
       settle();
     };
-  }, [editor, readOnly, flushPendingSave, settleRef]);
+  }, [editor, readOnly, flushPendingSave, settleRef, applyRecoveryDraft]);
   useEffect(() => {
     const node = ref.current;
     if (node === null) return;
@@ -69,7 +74,8 @@ export function PageTitleFallback({
     const next = value.trim();
     if (readOnly || next === '' || (!enter && next === title)) return;
     const origin = ref.current;
-    spliceTitleIntoBlocks(editor, next);
+    if (applyRecoveryDraft) applyRecoveryDraft(() => spliceTitleIntoBlocks(editor, next));
+    else spliceTitleIntoBlocks(editor, next);
     if (enter) {
       if (bodyVisible) {
         enterPageBody(editor, editor.document[0].id, true);
@@ -113,6 +119,7 @@ export function PageTitleFallback({
       readOnly={readOnly}
       onChange={(event) => {
         pending.current = event.target.value;
+        onRecoveryDraft?.(event.target.value);
         setDraft(event.target.value);
         if (!composing.current && !(event.nativeEvent as InputEvent).isComposing)
           commit(false, event.target.value, event.target.selectionStart);
@@ -135,6 +142,7 @@ export function PageTitleFallback({
         } else if (event.key === 'Escape') {
           event.stopPropagation();
           pending.current = title;
+          onRecoveryDraft?.(null);
           setDraft(title);
         }
       }}

@@ -11,8 +11,9 @@ vi.mock('@/agent/agentIpc', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/agent/agentIpc')>();
   return {
     ...actual,
-    checkAgent: vi.fn(async () => ({
-      installed: true,
+    readCliReadiness: vi.fn(async () => ({
+      state: 'available' as const,
+      backend: 'native' as const,
       version: '2.1.250 (Claude Code)',
       path: '/opt/claude/bin/claude',
     })),
@@ -26,6 +27,7 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { makeEntry } from '@/engine/testHelpers';
 import { resetMockFs } from '@/lib/mockIpc';
 import * as agentIpc from '@/agent/agentIpc';
+import { __resetCliReadiness } from '@/agent/useCliReadiness';
 import * as ipc from '@/lib/ipc';
 import { connectorFocus } from '@/agent/elements/connectorRow';
 import { useUiStore } from '@/stores/uiStore';
@@ -48,6 +50,7 @@ async function renderSettings(name: string) {
 
 describe('SettingsPage', () => {
   beforeEach(() => {
+    __resetCliReadiness();
     useVaultStore.setState({ vaultPath: '/demo-vault', status: 'ready', error: null });
     useUiStore.setState({ toasts: [], settingsFocus: null });
   });
@@ -400,21 +403,17 @@ describe('SettingsPage', () => {
     });
 
     it('says when Claude Code is not found', async () => {
-      vi.mocked(agentIpc.checkAgent).mockResolvedValueOnce({
-        installed: false,
-        version: null,
-        path: null,
-      });
+      vi.mocked(agentIpc.readCliReadiness).mockResolvedValueOnce({ state: 'missing' });
       await renderSettings('Assistant');
       await vi.waitFor(() =>
         expect(status().textContent).toBe(
-          'Claude Code was not found on this machine. Install it, then reopen Cerebro.',
+          'Claude Code was not found on this machine. Install it, then choose Check again.',
         ),
       );
     });
 
     it("says when it couldn't check", async () => {
-      vi.mocked(agentIpc.checkAgent).mockRejectedValueOnce(new Error('ipc down'));
+      vi.mocked(agentIpc.readCliReadiness).mockRejectedValueOnce(new Error('ipc down'));
       await renderSettings('Assistant');
       await vi.waitFor(() =>
         expect(status().textContent).toBe("Couldn't check for Claude Code on this machine."),

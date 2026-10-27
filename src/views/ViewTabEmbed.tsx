@@ -1,3 +1,4 @@
+import { selectedViewIssue } from '@/engine/selectedEntryProjection';
 import { SearchBox } from '@/views/ViewControlIcons';
 import { searchEntries } from '@/engine/viewFilters';
 import { Icon } from '@/components/ui/Icon';
@@ -86,6 +87,7 @@ export function ViewTabEmbed({
     );
   }
   const { surface, filtered } = resolution;
+  const selectedUnavailable = surface.unavailable ?? selectedViewIssue(surface.entries, schema, surface.presentation, undefined, sourceType, search);
   // ViewBlock's wiring: the universe from the source type over the RESOLVED
   // rows. The synthetic ListSource is exact — `chainTypes` reads only `type`,
   // and a list's `project` narrowing already happened inside resolveSurface.
@@ -148,8 +150,9 @@ export function ViewTabEmbed({
         />
       )}
       <ViewCanvas
+        unavailable={selectedUnavailable}
         embedded
-        entries={searchEntries(surface.entries, search)}
+        entries={selectedUnavailable ? [] : searchEntries(surface.entries, search)}
         allEntries={entries}
         presentation={surface.presentation}
         schema={schema}

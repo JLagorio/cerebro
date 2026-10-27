@@ -1,0 +1,12 @@
+{
+  "schema_version": 2,
+  "retention_seconds": 604800,
+  "global_bytes": 104857600,
+  "entry_bytes": 10485760,
+  "max_entries": 1000,
+  "selected_join_bytes": 1024,
+  "max_vaults": 256,
+  "max_path_bytes": 4096,
+  "max_bypasses": 128,
+  "bypass_seconds": 600
+}

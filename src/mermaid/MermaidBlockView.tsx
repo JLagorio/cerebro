@@ -1,3 +1,5 @@
+import { registerSavePreparation } from '@/editor/openPages';
+import { useRecoveryBuffer } from '@/editor/recoveryBuffers';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
@@ -110,6 +112,10 @@ export function MermaidBlockView({
   // (see the visual pane below) and every op commits through onChangeCode as
   // it happens, so there is never anything uncommitted to hold in state.
   const [draft, setDraft] = useState(code);
+  const recovery = useRecoveryBuffer('mermaid-block-code');
+  useEffect(() => {
+    if (draft === code) recovery.clear();
+  }, [code, draft, recovery]);
   const [lightboxSvg, setLightboxSvg] = useState<string | null>(null);
   const [fullScreen, setFullScreen] = useState(false);
   // Stage C (M29.18): flowcharts get a visual/code toggle; every other
@@ -145,10 +151,11 @@ export function MermaidBlockView({
     setEditing(false);
     // Only code mode ever holds an uncommitted draft — visual ops already
     // landed through onChangeCode as they happened.
-    if (editMode === 'code' && draft !== code) onChangeCode(draft);
+    if (editMode === 'code' && draft !== code) recovery.commit(() => onChangeCode(draft));
   };
 
   const cancel = () => {
+    recovery.clear();
     setDraft(code);
     setEditing(false);
   };
@@ -168,12 +175,18 @@ export function MermaidBlockView({
    * document page's own unmount save had already read an empty buffer.
    * CodeOverlay carries the same reasoning at greater length.
    */
-  const flushRef = useRef({ code, draft, editing, editMode, onChangeCode });
-  flushRef.current = { code, draft, editing, editMode, onChangeCode };
+  const flushRef = useRef({ code, draft, editing, editMode, onChangeCode, recovery });
+  flushRef.current = { code, draft, editing, editMode, onChangeCode, recovery };
   useLayoutEffect(() => {
-    return () => {
+    const prepare = () => {
       const f = flushRef.current;
-      if (f.editing && f.editMode === 'code' && f.draft !== f.code) f.onChangeCode(f.draft);
+      if (f.editing && f.editMode === 'code' && f.draft !== f.code)
+        f.recovery.commit(() => f.onChangeCode(f.draft));
+    };
+    const stop = registerSavePreparation(prepare);
+    return () => {
+      stop();
+      prepare();
     };
   }, []);
 
@@ -289,7 +302,7 @@ export function MermaidBlockView({
                 // visual pane renders `code` directly, never `draft` — so
                 // cmd+z from here on targets real history, not a session
                 // with no external trace.
-                if (draft !== code) onChangeCode(draft);
+                if (draft !== code) recovery.commit(() => onChangeCode(draft));
                 setEditMode('visual');
               }
             }}
@@ -368,7 +381,10 @@ export function MermaidBlockView({
             ariaLabel="Mermaid source"
             value={draft}
             placeholder={'graph TD\n  A[Idea] --> B[Shipped]'}
-            onChange={setDraft}
+            onChange={(text) => {
+              recovery.set(text, code);
+              setDraft(text);
+            }}
             onKeyDown={(e) => {
               // BlockNote hotkeys must not fire while typing in the source box;
               // only the keys the editor claims stop here. The app's (⌘K, ⌘J,

@@ -46,6 +46,7 @@ export interface ButtonProps {
   disabled?: boolean;
   /** Explicit keyboard participation for native macOS/WebKit focus settings. */
   tabIndex?: number;
+  'aria-label'?: React.AriaAttributes['aria-label'];
   'aria-pressed'?: React.AriaAttributes['aria-pressed'];
   title?: string;
   onClick?: React.MouseEventHandler<HTMLButtonElement>;
@@ -70,6 +71,7 @@ export function Button({
   fullWidth,
   disabled,
   tabIndex,
+  'aria-label': label,
   'aria-pressed': pressed,
   title,
   onClick,
@@ -84,6 +86,7 @@ export function Button({
       type={type}
       disabled={disabled}
       tabIndex={tabIndex}
+      aria-label={label}
       aria-pressed={pressed}
       title={title}
       onClick={onClick}

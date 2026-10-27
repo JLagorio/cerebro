@@ -38,6 +38,12 @@ const RS = 'src-tauri/src/';
  * owner's rule (M54): a command with no caller is flagged here, not deleted.
  */
 const UNCALLED: Readonly<Record<string, string>> = {
+  native_action_catalog:
+    'M96 retained original-run catalog read. Provider-free empty-catalog acceptance passed; the Settings/assistant catalog consumer and granted provider actions remain unavailable.',
+  native_action_definition:
+    'M96 retained original-run definition read. Ungranted refusal passed in the native harness; positive granted definitions and the app consumer are still pending.',
+  check_agent:
+    'M6 compatibility status door retained under the M54 owner rule. M93.5 Settings and assistant use check_cli_readiness; this old door now propagates discovery failures instead of reporting installed=false.',
   ambient_ingest_enabled:
     "M26.4i's per-vault spending switch for ambient ingest. No surface reads it, so ambient ingest stays off.",
   set_ambient_ingest:
@@ -71,6 +77,7 @@ const EVENTS: readonly string[] = [
   'cerebro://ui-action',
   'comments-changed',
   'vault-changed',
+  'workspace-backup-changed',
 ];
 
 // --- Spelling ---------------------------------------------------------------
@@ -280,7 +287,12 @@ interface RawCommand {
 }
 
 /** Every `#[tauri::command]` fn in one file, read from its attribute down. */
-function commandsIn(file: string, lines: readonly string[], problems: string[]): RawCommand[] {
+function commandsIn(
+  file: string,
+  lines: readonly string[],
+  problems: string[],
+  fixture?: 'native-quit-fixture',
+): RawCommand[] {
   const found: RawCommand[] = [];
   lines.forEach((line, i) => {
     const t = line.trim();
@@ -289,10 +301,6 @@ function commandsIn(file: string, lines: readonly string[], problems: string[]):
       problems.push(`${at}: a bare #[command] is refused: write #[tauri::command]`);
     } else if (!t.startsWith('#[tauri::command')) {
       return;
-    } else if (t !== '#[tauri::command]' && t !== '#[tauri::command(async)]') {
-      problems.push(
-        `${at}: ${t} is refused: Tauri must take the command's name and keys from the fn as written`,
-      );
     }
     const rest = lines.slice(i + 1, i + 81).join('\n');
     let k = skipSpace(rest, 0);
@@ -305,6 +313,24 @@ function commandsIn(file: string, lines: readonly string[], problems: string[]):
       return;
     }
     const name = fn[1];
+    const fixtureWireName =
+      fixture === 'native-quit-fixture' && file === 'quit_profile.rs'
+        ? NATIVE_QUIT_WIRE_NAMES[name]
+        : undefined;
+    // Production still refuses every rename, including these two spellings.
+    // Only the separately audited module may use its exact Tauri wire alias.
+    const approvedAlias =
+      fixtureWireName !== undefined && t === `#[tauri::command(rename = "${fixtureWireName}")]`;
+    if (
+      !/^#\[\s*command\b/.test(t) &&
+      !approvedAlias &&
+      (fixtureWireName !== undefined ||
+        (t !== '#[tauri::command]' && t !== '#[tauri::command(async)]'))
+    ) {
+      problems.push(
+        `${at}: ${t} is refused: Tauri must take the command's name and keys from the fn as written`,
+      );
+    }
     let p = skipSpace(rest, k + fn[0].length);
     if (rest[p] === '<') p = skipSpace(rest, closeOf(rest, p) + 1);
     const close = rest[p] === '(' ? closeOf(rest, p) : -1;
@@ -331,7 +357,7 @@ function eventOf(after: string, consts: ReadonlyMap<string, ReadonlySet<string>>
   return values?.size === 1 ? [...values][0] : null;
 }
 
-function rustSide(files: ReadonlyMap<string, string>): RustSide {
+function rustSide(files: ReadonlyMap<string, string>, fixture?: 'native-quit-fixture'): RustSide {
   const problems: string[] = [];
   const raw = new Map<string, string[]>();
   const code = new Map<string, string[]>();
@@ -353,7 +379,7 @@ function rustSide(files: ReadonlyMap<string, string>): RustSide {
   }
 
   const found = new Map<string, RawCommand[]>();
-  for (const [file, lines] of code) found.set(file, commandsIn(file, lines, problems));
+  for (const [file, lines] of code) found.set(file, commandsIn(file, lines, problems, fixture));
 
   const commands = new Map<string, RustCommand>();
   const registered = new Set<string>();
@@ -1212,16 +1238,806 @@ function readTree(root: string, keep: (path: string) => boolean, prefix = ''): M
   return out;
 }
 
+/** The only renamed commands admitted by the separate native fixture audit. */
+const NATIVE_QUIT_WIRE_NAMES: Readonly<Record<string, string>> = {
+  native_smoke_cancel_quit: 'cancel_quit',
+  native_smoke_finish_quit: 'finish_quit',
+};
+
+function nativeSmokeBoundary(lib: string, cargo: string): void {
+  expect([...lib.matchAll(/\bmod native_read_smoke;/g)]).toHaveLength(1);
+  expect(lib).toMatch(/#\[cfg\(feature = "native-read-smoke"\)\]\s*mod native_read_smoke;/);
+  expect(lib).toMatch(
+    /#\[cfg\(feature = "native-read-smoke"\)\]\s*pub use native_read_smoke::main as native_read_smoke_main;/,
+  );
+  const features = /\[features\]\n([\s\S]*?)(?=\n\[)/.exec(cargo)?.[1] ?? '';
+  expect(features.replace(/#[^\n]*/g, '').replace(/\s/g, '')).toBe(
+    'native-read-smoke=[]native-credential-smoke=["native-read-smoke"]native-keychain-smoke=["native-read-smoke"]native-action-smoke=["native-read-smoke"]',
+  );
+}
+
+/** Reads one declaration/body without changing the bytes passed to the scanner. */
+function nativeItem(source: string, declaration: string): string {
+  const starts = source.split(declaration);
+  expect(starts).toHaveLength(2);
+  const tail = starts[1];
+  const open = tail.indexOf('{');
+  let close = -1;
+  let depth = 0;
+  for (let i = open; i >= 0 && i < tail.length; i += 1) {
+    if (tail[i] === '"') i = endOfString(tail, i);
+    else if (tail[i] === '{') depth += 1;
+    else if (tail[i] === '}' && --depth === 0) {
+      close = i;
+      break;
+    }
+  }
+  expect(open).toBeGreaterThanOrEqual(0);
+  expect(close).toBeGreaterThan(open);
+  return (declaration + tail.slice(0, close + 1)).replace(/\s+/g, '');
+}
+
+function nativeSmokeAudit(files: ReadonlyMap<string, string>): RustSide {
+  // Two exempt fixture command files plus exact managed/profile and shared production sources.
+  // Only the same two physical files are excluded by real(); every other source stays strict.
+  expect([...files.keys()].sort()).toEqual([
+    'credential_commands.rs',
+    'native_managed_action_smoke.rs',
+    'native_quit_smoke.rs',
+    'native_read_smoke.rs',
+    'native_workflow_smoke.rs',
+    'production-lib.rs',
+  ]);
+  const entry = files.get('native_read_smoke.rs') ?? '';
+  const quit = files.get('native_quit_smoke.rs') ?? '';
+  const credentials = files.get('credential_commands.rs') ?? '';
+  const managed = files.get('native_managed_action_smoke.rs') ?? '';
+  const workflow = files.get('native_workflow_smoke.rs') ?? '';
+  const workflowCode = workflow.split(/\r?\n/).map(codeOf).join('\n');
+  const production = files.get('production-lib.rs') ?? '';
+  const managedCode = managed.split(/\r?\n/).map(codeOf).join('\n');
+  const productionCode = production.split(/\r?\n/).map(codeOf).join('\n');
+  const entryCode = entry.split(/\r?\n/).map(codeOf).join('\n');
+  const quitCode = quit.split(/\r?\n/).map(codeOf).join('\n');
+  // Bind the logical path to the one actual declaration and the original file
+  // contents. No source rewriting, fabricated declarations or stripped attrs.
+  expect([...entryCode.matchAll(/\bmod\s+quit_profile\b/g)]).toHaveLength(1);
+  expect([...entryCode.matchAll(/#\[path\s*=\s*"native_quit_smoke.rs"\]/g)]).toHaveLength(1);
+  expect(entryCode).toMatch(/#\[path = "native_quit_smoke.rs"\]\s*mod quit_profile;/);
+  expect([...entryCode.matchAll(/#\[path\s*=\s*"([^"]+)"\]/g)].map((m) => m[1])).toEqual([
+    'native_child_claim_smoke.rs',
+    'native_child_freeze_smoke.rs',
+    'native_credential_import_smoke.rs',
+    'native_credentials_smoke.rs',
+    'native_delegation_smoke.rs',
+    'native_quit_smoke.rs',
+    'native_managed_action_smoke.rs',
+    'native_workflow_smoke.rs',
+  ]);
+  expect([...entryCode.matchAll(/\bmod\s+(\w+)\s*;/g)].map((m) => m[1])).toEqual([
+    'child_claim_profile',
+    'child_freeze_profile',
+    'credential_import_profile',
+    'credential_profile',
+    'delegation_profile',
+    'quit_profile',
+    'managed_action_profile',
+    'workflow_profile',
+  ]);
+  expect(entryCode).toMatch(/#\[cfg\(feature\s*=\s*"native-action-smoke"\)\]\s*#\[path\s*=\s*"native_managed_action_smoke.rs"\]\s*mod managed_action_profile;/);
+  expect([...managedCode.matchAll(/#\[path\b|\bmod\s+\w+\s*;/g)]).toEqual([]);
+  expect([...quitCode.matchAll(/#\[path\b|\bmod\s+\w+\s*;/g)]).toEqual([]);
+  // One closed native workflow journey, no new handler or authority factory.
+  expect(entryCode).toMatch(/#\[path = "native_workflow_smoke.rs"\]\s*mod workflow_profile;/);
+  expect([...workflowCode.matchAll(/#\[path\b|\bmod\s+\w+\s*;|#\[tauri::command/g)]).toEqual([]);
+  expect(workflowCode).toContain('use crate::workflow_commands as commands;');
+  expect(nativeItem(workflowCode, 'pub(super) fn selected(')).toContain('value=="--quit-workflow-pinned"');
+  expect(nativeItem(workflowCode, 'fn entered<T>(')).toContain('checked(name,payload,||tauri::async_runtime::block_on(future))');
+  expect(nativeItem(workflowCode, 'pub(super) fn capture(')).toContain('if!paths.workflow_pinned{returnErr("workflow-profile-absent");}open(app,window,&paths.vault_a)?;');
+  expect(nativeItem(entryCode, 'async fn capture_native_reads(')).toContain('ifpaths.workflow_pinned{returnworkflow_profile::capture(&app,&window,&mutcases);}');
+  expect(workflowCode).not.toMatch(/\brun_agent\b|\bRuntimeOwner\b|\bSecretStore\b|\bworkflow_rows\b|\.execute(?:_batch)?\s*\(|\bCommand::new\b/);
+  const workflowCommands = [...new Set([...workflowCode.matchAll(/\bcommands::(workflow_\w+)\s*\(/g)].map((m) => m[1]))].sort();
+  expect(workflowCommands).toEqual(['workflow_answer_wait', 'workflow_context', 'workflow_continue', 'workflow_document', 'workflow_publish', 'workflow_run', 'workflow_save', 'workflow_start', 'workflow_unpublish', 'workflow_version']);
+  for (const name of workflowCommands) {
+    expect(real().rust.commands.get(name)?.file).toBe('workflow_commands.rs');
+  }
+  const problems: string[] = [];
+  expect(entryCode).toMatch(/^use crate::credential_commands;$/m);
+  expect([...entryCode.matchAll(/\buse\s+crate::credential_commands\s*;/g)]).toHaveLength(1);
+  expect(handlerEntries(entryCode, problems)).toEqual([
+    'capture_native_reads',
+    'native_managed_action_probe',
+    'crate::read_managed_action_access',
+    'crate::set_managed_action_access',
+    'crate::list_interactions',
+    'crate::answer_interaction',
+    'crate::stop_agent',
+    'credential_commands::begin_gh_import',
+    'credential_commands::credential_acquisition',
+    'credential_commands::cancel_credential_acquisition',
+    'quit_profile::native_smoke_cancel_quit',
+    'quit_profile::native_smoke_finish_quit',
+  ]);
+  expect(problems).toEqual([]);
+  const side = rustSide(
+    new Map([
+      ['lib.rs', entry],
+      ['quit_profile.rs', quit],
+      ['credential_commands.rs', credentials],
+      ['managed_action_profile.rs', managed],
+      ['workflow_profile.rs', workflow],
+    ]),
+    'native-quit-fixture',
+  );
+  // The production scanner deliberately does not guess crate-root imports.
+  // These exact five imports are independently resolved below from unchanged
+  // production source and registrations; no other diagnostic is tolerated.
+  const imported = ['read_managed_action_access', 'set_managed_action_access', 'list_interactions', 'answer_interaction', 'stop_agent'];
+  expect(side.problems).toEqual(imported.map((name) =>
+    `${RS}lib.rs: generate_handler! registers crate::${name}, but ${RS}crate.rs or ${RS}crate/mod.rs holds no #[tauri::command] fn ${name}`,
+  ));
+  const sharedProblems: string[] = [];
+  const shared = commandsIn('lib.rs', productionCode.split('\n'), sharedProblems);
+  const sharedHandlers = handlerEntries(productionCode, sharedProblems);
+  expect(sharedProblems).toEqual([]);
+  const injected: Record<string, readonly (readonly [string, string])[]> = {
+    read_managed_action_access: [['app', 'tauri::AppHandle'], ['window', 'tauri::WebviewWindow']],
+    set_managed_action_access: [['app', 'tauri::AppHandle'], ['window', 'tauri::WebviewWindow']],
+    list_interactions: [['state', "tauri::State<'_,agent::AgentState>"]],
+    answer_interaction: [['app', 'tauri::AppHandle'], ['window', 'tauri::WebviewWindow'], ['state', "tauri::State<'_,agent::AgentState>"], ['mcp_state', "tauri::State<'_,mcp::McpState>"]],
+    stop_agent: [['state', "tauri::State<'_,agent::AgentState>"]],
+  };
+  for (const [name, keys] of [
+    ['read_managed_action_access', ['run']],
+    ['set_managed_action_access', ['run', 'request']],
+    ['list_interactions', ['vault']],
+    ['answer_interaction', ['vault', 'id', 'answer', 'updatedInput']],
+    ['stop_agent', ['run']],
+  ] as const) {
+    expect(sharedHandlers.filter((handler) => handler === name)).toHaveLength(1);
+    const declarations = shared.filter((command) => command.name === name);
+    expect(declarations).toHaveLength(1);
+    const expected = real().rust.commands.get(name);
+    expect(expected?.file).toBe('lib.rs');
+    expect(expected?.params.map((param) => param.key)).toEqual(keys);
+    expect(declarations[0].params.filter((param) => ['app', 'window', 'state', 'mcp_state'].includes(param.name)).map((param) => [param.name, param.type.replace(/\s/g, '')])).toEqual(injected[name]);
+    const wire = declarations[0].params.filter((param) => !['app', 'window', 'state', 'mcp_state'].includes(param.name));
+    expect(wire.map((param) => camel(param.name))).toEqual(keys);
+    expect(wire.map((param) => param.type.replace(/\s/g, ''))).toEqual(expected?.params.map((param) => param.type.replace(/\s/g, '')));
+  }
+  expect(nativeItem(productionCode, 'async fn read_managed_action_access(')).toContain('actions::native_owner::read_managed_action_access(&app,&window,run)');
+  expect(nativeItem(productionCode, 'async fn set_managed_action_access(')).toContain('actions::native_owner::set_managed_action_access(&app,&window,run,request)');
+  expect(nativeItem(productionCode, 'fn answer_interaction(')).toContain('actions::native_owner::answer_held_managed_interaction(&app,&window,Path::new(&vault),&id,&answer,updated_input.as_ref(),)');
+  expect(nativeItem(productionCode, 'fn stop_agent(')).toContain('state.stop(run)');
+  expect([...side.commands.keys()]).toEqual([
+    'capture_native_reads',
+    'native_managed_action_probe',
+    'begin_gh_import',
+    'credential_acquisition',
+    'cancel_credential_acquisition',
+    'native_smoke_cancel_quit',
+    'native_smoke_finish_quit',
+  ]);
+  expect(side.commands.get('capture_native_reads')?.params).toEqual([
+    { name: 'probe', key: 'probe', type: 'Option<quit_profile::Probe>', optional: true },
+  ]);
+  expect(side.commands.get('native_managed_action_probe')?.params).toEqual([
+    { name: 'probe', key: 'probe', type: 'serde_json::Value', optional: false },
+  ]);
+  for (const name of Object.keys(NATIVE_QUIT_WIRE_NAMES)) {
+    expect(side.commands.get(name)?.params).toEqual([]);
+  }
+  for (const [name, keys] of [
+    ['begin_gh_import', ['connectionId', 'host', 'login', 'expectedRevision']],
+    ['credential_acquisition', ['attemptId']],
+    ['cancel_credential_acquisition', ['attemptId']],
+  ] as const) {
+    const command = side.commands.get(name);
+    expect(command?.file).toBe('credential_commands.rs');
+    expect(command?.params.map((param) => param.key)).toEqual(keys);
+    expect(command?.params.every((param) => !param.optional)).toBe(true);
+    expect(real().rust.commands.get(name)).toEqual(command);
+  }
+  expect([...side.events]).toEqual([]);
+  // These wire declarations are outside the production scan's one-level struct
+  // reader. Their exact closed shapes, serde spelling and bounds are audited
+  // here; the command still requires the one typed Probe argument.
+  for (const declaration of [
+    'pub(super) enum Stage { Flush, SettleFirst, Leave, SettleSecond, Writer, Retry, Cleanup, Heartbeat, ShellMounted, }',
+    'pub(super) enum Edge { Enter, Complete, }',
+    'pub(super) struct Snapshot { latest_draft: String, generation: u64, acknowledged_generation: u64, in_flight_generation: Option<u64>, failed: bool, payload_sha256: String, }',
+    'pub(super) struct OwnerKey { vault_id: String, path: String, owner_id: String, }',
+    'pub(super) struct PhaseBatch { binding: String, format: u8, owner_key: OwnerKey, owner_instance: String, snapshots: Vec<Value>, events: Vec<Vec<Value>>, broken: Value, }',
+    'pub(super) enum Stayed { Legacy { ms: f64, snapshot: Snapshot, }, Selected { ms: f64, snapshot: Value, binding: String, sequence: u64, }, }',
+    'pub(super) enum Probe { Ready, BindAttempt, PhaseBatch(PhaseBatch), WaitLateWindow { binding: String, }, Stage { stage: Stage, edge: Edge, ms: f64, snapshot: Snapshot, }, Stayed(Stayed), HangArmed { ms: f64, snapshot: Snapshot, }, }',
+  ]) {
+    expect(nativeItem(quitCode, declaration.slice(0, declaration.indexOf('{')).trim())).toBe(
+      declaration.replace(/\s+/g, ''),
+    );
+  }
+  expect(quitCode).toMatch(/#\[serde\(rename_all = "kebab-case"\)\]\s*pub\(super\) enum Stage/);
+  expect(quitCode).toMatch(/#\[serde\(rename_all = "kebab-case"\)\]\s*pub\(super\) enum Edge/);
+  expect(quitCode).toMatch(
+    /#\[serde\(rename_all = "camelCase", deny_unknown_fields\)\]\s*pub\(super\) struct Snapshot/,
+  );
+  expect(quitCode).toMatch(
+    /#\[serde\(tag = "kind", rename_all = "kebab-case", deny_unknown_fields\)\]\s*pub\(super\) enum Probe/,
+  );
+  for (const name of ['OwnerKey', 'PhaseBatch']) {
+    expect(quitCode).toContain(
+      '#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub(super) struct ' + name,
+    );
+  }
+  expect(quitCode).toMatch(
+    /#\[serde\(untagged, deny_unknown_fields\)\]\s*pub\(super\) enum Stayed/,
+  );
+  const legacy = nativeItem(quitCode, 'fn legacy_stayed_snapshot(');
+  expect(legacy).toContain('Probe::Stayed(Stayed::Legacy{snapshot,..})=>Ok(Some(snapshot)),');
+  expect(legacy).toContain(
+    'Probe::Stayed(Stayed::Selected{..})=>Err("quit-late-consumer-unimplemented"),',
+  );
+  const decoder = nativeItem(quitCode, 'fn decode_phase_batch(');
+  expect(decoder).toContain('batch.snapshots.len()>192||');
+  expect(decoder).toContain('batch.events.len()>192{');
+  expect(decoder).toContain('serde_json::to_vec(&wire).map_err(|_|INVALID)?.len()>2048{');
+  const probe = nativeItem(quitCode, 'pub(super) async fn probe(');
+  expect(probe).toContain('letcase=active(app).ok_or("not-quit-profile")?;');
+  expect(probe).toContain('returnErr("quit-probe-before-bootstrap");');
+  expect(probe).toContain(
+    '||!ms.is_finite()||*ms<0.0||*ms>60000.0||snapshot.latest_draft.len()>128||snapshot.generation>4||snapshot.payload_sha256.len()!=64||!snapshot.payload_sha256.bytes().all(|b|b.is_ascii_hexdigit())',
+  );
+  expect(probe).toContain('trace.broken=true;returnErr("quit-probe-bounds-or-order");');
+  expect(probe).toContain('letlegacy_stayed=legacy_stayed_snapshot(&probe)?;');
+  expect(probe.indexOf('letlegacy_stayed=')).toBeLessThan(probe.indexOf('letmutlaunch='));
+  expect(probe).toContain(
+    'Probe::BindAttempt|Probe::PhaseBatch(_)|Probe::WaitLateWindow{..}=>{returnErr("quit-late-consumer-unimplemented");}',
+  );
+  const record = nativeItem(quitCode, 'fn record(');
+  expect(record).toContain('let_=append_rows(&muttrace,vec![(event,data)]);');
+  const append = nativeItem(quitCode, 'fn append_rows(');
+  expect(append).toContain('iftrace.frozen{returnErr("quit-trace-frozen");}');
+  expect(append).toContain(
+    'iftrace.rows.len()>=192||trace.rows.len().saturating_add(events.len())>192{trace.broken=true;returnErr("quit-trace-cap");}',
+  );
+  expect(append).toContain(
+    'ifserde_json::to_vec(&row).map_or(true,|bytes|bytes.len()>2048){trace.broken=true;returnErr("quit-trace-row-cap");}',
+  );
+  expect(append.indexOf('rows.push(row);')).toBeLessThan(append.indexOf('forrowinrows{'));
+  expect(append).toContain(
+    'forrowinrows{log::info!(target:TARGET,"{}",row);trace.rows.push(row);}',
+  );
+  // This is the real selected consumer; the legacy refusal below stays closed.
+  expect(nativeItem(quitCode, 'fn selected(')).toBe(
+    'fnselected(case:Case)->bool{matches!(case,Case::LateIpc150|Case::LateIpc350)}',
+  );
+  expect(probe).toContain('ifselected(case){');
+  expect(probe).toContain('letaction=app.state::<Trace>().late_probe(&app.state(),case,&probe)?;');
+  expect(probe.indexOf('letaction=')).toBeLessThan(probe.indexOf('letlegacy_stayed='));
+  expect(probe).toContain(
+    'tauri::async_runtime::spawn_blocking(move||wait_late_window(handle,ticket)).await',
+  );
+  const lateProbe = nativeItem(quitCode, 'fn late_probe(');
+  expect(lateProbe).toContain('if!selected(case){returnErr("quit-late-case");}');
+  expect(lateProbe).toContain('letread=self.observe(quit)?;self.commit(&read,|inner|{');
+  expect(lateProbe).toContain('letdecoded=decode_phase_batch(batch)?;');
+  expect(lateProbe).toContain(
+    'events.push(("phase-batch-accepted",accepted));append_rows(inner,events)?;',
+  );
+  expect(lateProbe).toContain('||!ms.is_finite()||*ms<batch.last_ms||*ms>60000.0||');
+  expect(lateProbe).toContain(
+    'inner.late.as_mut().ok_or("quit-late-binding")?.wait=WaitState::Reserved;',
+  );
+  const waitWorker = nativeItem(quitCode, 'fn wait_late_window(');
+  expect(waitWorker).toContain('app.state::<Trace>().admit_wait(&app.state(),&ticket)?');
+  expect(waitWorker).toContain('app.state::<Trace>().release_wait(&app.state(),&ticket)');
+  expect(waitWorker).not.toContain('.lock()');
+  const intake = nativeItem(quitCode, 'fn read_native(');
+  expect(intake).toContain('letobservation=state.smoke_observation();');
+  expect(intake).toContain('ifobservation.broken{returnErr("quit-native-observation-broken");}');
+  const admit = nativeItem(quitCode, 'fn admit_wait(');
+  expect(admit).toContain('letSome(arm)=late.armelse{returnOk(None);};');
+  expect(admit).toContain(
+    'arm.checked_add(late.duration).ok_or("quit-native-clock-unrepresentable")?;',
+  );
+  expect(admit).toContain(
+    'due.checked_sub(Duration::from_millis(250)).ok_or("quit-native-clock-unrepresentable")?;',
+  );
+  expect(admit).toContain(
+    'due.checked_sub(Duration::from_millis(150)).ok_or("quit-native-clock-unrepresentable")?;',
+  );
+  expect(admit).toContain('||now>=target||target>=late.ceiling');
+  const release = nativeItem(quitCode, 'fn release_wait(');
+  expect(release).toContain('pending_matches(&read,late)?;');
+  expect(release).toContain(
+    '||read.observation.observed_at<window.target||read.observation.observed_at>=window.upper||now<window.target||now>=window.upper',
+  );
+  const ingress = nativeItem(quitCode, 'fn cancel_ingress(');
+  expect(ingress).toContain(
+    'letWaitState::Released(released)=late.waitelse{returnErr("quit-cancel-order");};',
+  );
+  expect(ingress).toContain(
+    '||entered<released||entered<window.target||entered>=window.upper||read.observation.observed_at<entered||read.observation.observed_at>=window.upper||Instant::now()>=window.upper',
+  );
+  expect(ingress).toContain('late.wait=WaitState::Consumed;');
+  const selectedCancel = nativeItem(quitCode, 'async fn selected_cancel(');
+  expect(selectedCancel).toContain('tauri::async_runtime::spawn_blocking(move||{');
+  expect(selectedCancel).toContain('handle.state::<Trace>().injection_entry(&handle.state(),&ticket,case,entered)?;');
+  expect(selectedCancel).toContain('std::thread::sleep(Duration::from_millis(case.delay()));');
+  expect(selectedCancel).toContain('.await.map_err(|_|"quit-delay-worker")??;');
+  expect(selectedCancel).toContain(
+    'app.state::<Trace>().cancel_dispatch(&app.state(),&ticket,case)?;crate::shell::quit::cancel_quit(app.state());app.state::<Trace>().cancel_return(&app.state(),&ticket)',
+  );
+  const exit = nativeItem(quitCode, 'pub(super) fn exit(');
+  expect(exit).toContain('iflate{let_=app.state::<Trace>().sync(&app.state());}');
+  expect(exit).toContain('iflate{trace.frozen=true;}');
+  expect(exit).toContain(
+    'iflate{report["format"]=json!(2);report["measurementContract"]=json!("late-window-v1");}',
+  );
+  expect(exit).toContain('ifbytes.len()<=65536{');
+  const capture = nativeItem(entryCode, 'async fn capture_native_reads(');
+  expect(capture).toContain(
+    'ifquit_profile::enabled(&app){returnmatchprobe{None=>quit_profile::bootstrap(&app,&window),Some(probe)=>quit_profile::probe(&app,probe).await,};}ifprobe.is_some(){returnErr("probe-requires-quit-profile");}',
+  );
+  expect(capture).toContain('tauri::async_runtime::spawn_blocking(move||{');
+  const cancel = nativeItem(quitCode, 'pub(super) async fn native_smoke_cancel_quit(');
+  expect(cancel).toContain('letcase=active(&app).ok_or("not-quit-profile")?;');
+  expect(cancel).toContain(
+    'letentered=Instant::now();letcase=active(&app).ok_or("not-quit-profile")?;',
+  );
+  expect(cancel).toContain('ifselected(case){returnmatchselected_cancel(&app,case,entered).await{');
+  expect(cancel).toContain('crate::shell::quit::cancel_quit(app.state());');
+  const finish = nativeItem(quitCode, 'pub(super) fn native_smoke_finish_quit(');
+  expect(finish).toContain('if!enabled(&app){returnErr("not-quit-profile".into());}');
+  expect(finish).toContain('letresult=crate::shell::quit::finish_quit(app.clone(),app.state());');
+  // The Value carrier is immediately decoded into this one closed probe type.
+  // It is measurement-only and remains profile/started-session gated.
+  const managedEntry = nativeItem(entryCode, 'async fn native_managed_action_probe(');
+  expect(managedEntry).toContain('#[cfg(feature="native-action-smoke")]{returnmanaged_action_profile::probe(app,window,probe).await;}');
+  expect(managedEntry).toContain('#[cfg(not(feature="native-action-smoke"))]{let_=(app,window,probe);Err("managed-action-profile-not-enabled")}');
+  expect(nativeItem(managedCode, 'enum Probe')).toBe('enumProbe{Progress{stage:Progress},Access{card_id:String},BeforeAnswer{card_id:String},Answered{card_id:String,answered_id:String},Stopped{card_id:String,refused:bool},DestroyWindow{card_id:String},Finish,Fail{stage:String}}');
+  expect(managedCode.replace(/\s/g, '')).toContain('#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]enumProbe');
+  expect(nativeItem(managedCode, 'enum Progress')).toBe('enumProgress{AccessMountRequested,MountWait,MountReady,ClickDispatched,AccessCallback,AccessReadReturned,AccessWriteReturned}');
+  const managedProbe = nativeItem(managedCode, 'pub(super) async fn probe(');
+  expect(managedProbe).toContain('letparsed:Probe=serde_json::from_value(value).map_err(|_|"managed-probe-shape")?;');
+  expect(managedProbe).toContain('if!enabled(&app){returnErr("managed-profile-absent");}');
+  expect(managedProbe).toContain('seat.as_mut().ok_or("managed-profile-not-started")?;');
+  expect(managedProbe).toContain('ifsession.progress.len()>=16{returnErr("managed-progress-bound");}');
+  expect(nativeItem(managedCode, 'fn card(')).toContain('found.run.as_ref().map(|run|run.get())!=Some(session.handle.run)');
+  expect(nativeItem(managedCode, 'fn card(')).toContain('found.session_id!=session.handle.session_id');
+  const entryCompact = entryCode.replace(/\s/g, '');
+  expect(entryCompact).toContain('#[cfg(feature="native-action-smoke")]if!matches!(invoke.message.command(),"capture_native_reads"|"native_managed_action_probe"|"native_smoke_cancel_quit"|"native_smoke_finish_quit")');
+  expect(entryCompact).toContain('crate::workspace_service::native_admission::request(invoke.message.command(),invoke.message.payload()).and_then(|request|crate::workspace_service::authority::context().and_then(|context|crate::workspace_service::native_admission::dispatch_checked(&context,request,||generated(invoke))))');
+  return side;
+}
+
+function nativeSmokeFiles(): Map<string, string> {
+  return new Map(
+    ['native_read_smoke.rs', 'native_quit_smoke.rs', 'credential_commands.rs', 'native_managed_action_smoke.rs', 'native_workflow_smoke.rs', 'production-lib.rs'].map((file) => [
+      file,
+      readFileSync(join(REPO, RS, file === 'production-lib.rs' ? 'lib.rs' : file), 'utf8'),
+    ]),
+  );
+}
+
 let tree: { rust: RustSide; side: TsSide } | undefined;
 function real(): { rust: RustSide; side: TsSide } {
   tree ??= {
-    rust: rustSide(readTree('src-tauri/src', (path) => path.endsWith('.rs'))),
+    // These two exact files form the separately audited fixture command boundary.
+    // Every other Rust file, including other smoke profiles, stays in this scan.
+    rust: rustSide(
+      readTree(
+        'src-tauri/src',
+        (path) =>
+          path.endsWith('.rs') &&
+          path !== 'native_read_smoke.rs' &&
+          path !== 'native_quit_smoke.rs',
+      ),
+    ),
     side: tsSide(readTree('src', (path) => /\.tsx?$/.test(path), 'src/')),
   };
   return tree;
 }
 
+describe('the closed native quit fixture audit', () => {
+  it.each([
+    ['workflow profile widened', 'native_workflow_smoke.rs', 'value == "--quit-workflow-pinned"', 'value != "--unknown"'],
+    ['workflow outer admission bypass', 'native_workflow_smoke.rs', 'checked(name, payload, || tauri::async_runtime::block_on(future))', 'Ok(tauri::async_runtime::block_on(future))'],
+    ['workflow original opening bypass', 'native_workflow_smoke.rs', 'open(app,window,&paths.vault_a)?;', 'open(app,window,&paths.vault_b)?;'],
+    ['workflow production facade substitution', 'native_workflow_smoke.rs', 'use crate::workflow_commands as commands;', 'use crate::fixture_commands as commands;'],
+    ['workflow CLI execution', 'native_workflow_smoke.rs', 'const WORKFLOW:', 'fn forbidden() { run_agent(); }\nconst WORKFLOW:'],
+    ['workflow raw writer', 'native_workflow_smoke.rs', 'const WORKFLOW:', 'fn forbidden() { db.execute_batch("DELETE"); }\nconst WORKFLOW:'],
+    ['managed profile ungated', 'native_read_smoke.rs', '#[cfg(feature="native-action-smoke")]\n#[path="native_managed_action_smoke.rs"]', '#[path="native_managed_action_smoke.rs"]'],
+    ['managed probe optional', 'native_read_smoke.rs', 'probe:serde_json::Value', 'probe:Option<serde_json::Value>'],
+    ['managed probe ungated fallback', 'native_read_smoke.rs', 'Err("managed-action-profile-not-enabled")', 'Ok(serde_json::Value::Null)'],
+    ['managed probe extra variant', 'native_managed_action_smoke.rs', 'enum Probe{', 'enum Probe{Extra,'],
+    ['managed probe unknown fields', 'native_managed_action_smoke.rs', 'tag="kind",rename_all="snake_case",deny_unknown_fields', 'tag="kind",rename_all="snake_case"'],
+    ['managed progress unbounded', 'native_managed_action_smoke.rs', 'session.progress.len()>=16', 'session.progress.len()>=160'],
+    ['managed probe no original session', 'native_managed_action_smoke.rs', 'if !enabled(&app)', 'if false'],
+    ['managed card foreign run', 'native_managed_action_smoke.rs', 'found.run.as_ref().map(|run|run.get())!=Some(session.handle.run)', 'false'],
+    ['managed outer admission bypass', 'native_read_smoke.rs', 'native_admission::dispatch_checked(&context,request,||generated(invoke))', 'Ok(generated(invoke))'],
+    ['extra root command', 'native_read_smoke.rs', 'crate::stop_agent,', 'crate::stop_agent,\ncrate::start_watcher,'],
+    ['changed root command', 'native_read_smoke.rs', 'crate::stop_agent,', 'crate::stop_all_agents,'],
+    ['root command payload change', 'production-lib.rs', '    run: u64,\n) -> Result<actions::native_owner::RunActionAccessView', '    run: String,\n) -> Result<actions::native_owner::RunActionAccessView'],
+    ['root command injected window removed', 'production-lib.rs', 'async fn read_managed_action_access(\n    app: tauri::AppHandle,\n    window: tauri::WebviewWindow,', 'async fn read_managed_action_access(\n    app: tauri::AppHandle,'],
+    ['selected injected delay admission bypass', 'native_quit_smoke.rs', '.injection_entry(&handle.state(), &ticket, case, entered)?;', '.injection_entry(&handle.state(), &ticket, case, entered).ok();'],
+    ['wire alias', 'native_quit_smoke.rs', 'rename = "cancel_quit"', 'rename = "anything_else"'],
+    [
+      'missing alias',
+      'native_quit_smoke.rs',
+      '#[tauri::command(rename = "cancel_quit")]',
+      '#[tauri::command]',
+    ],
+    [
+      'argument-key rename',
+      'native_quit_smoke.rs',
+      'rename = "cancel_quit"',
+      'rename = "cancel_quit", rename_all = "snake_case"',
+    ],
+    [
+      'module path',
+      'native_read_smoke.rs',
+      '#[path = "native_quit_smoke.rs"]',
+      '#[path = "different.rs"]',
+    ],
+    [
+      'duplicate module binding',
+      'native_read_smoke.rs',
+      'mod quit_profile;',
+      'mod quit_profile;\n#[path = "native_quit_smoke.rs"]\nmod second_quit;',
+    ],
+    [
+      'extra module',
+      'native_read_smoke.rs',
+      'mod quit_profile;',
+      'mod quit_profile;\nmod extra_fixture;',
+    ],
+    [
+      'extra nested module',
+      'native_quit_smoke.rs',
+      'mod tests {',
+      'mod extra_fixture;\nmod tests {',
+    ],
+    [
+      'extra command',
+      'native_quit_smoke.rs',
+      'pub(super) fn watchdog(',
+      '#[tauri::command]\npub(super) fn watchdog(',
+    ],
+    [
+      'extra registration',
+      'native_read_smoke.rs',
+      'capture_native_reads,',
+      'capture_native_reads,\nquit_profile::watchdog,',
+    ],
+    [
+      'extra capture parameter',
+      'native_read_smoke.rs',
+      'probe: Option<quit_profile::Probe>,',
+      'probe: Option<quit_profile::Probe>,\nextra: String,',
+    ],
+    [
+      'extra wrapper parameter',
+      'native_quit_smoke.rs',
+      'native_smoke_cancel_quit(app: AppHandle)',
+      'native_smoke_cancel_quit(app: AppHandle, extra: String)',
+    ],
+    [
+      'probe key',
+      'native_read_smoke.rs',
+      'probe: Option<quit_profile::Probe>',
+      'payload: Option<quit_profile::Probe>',
+    ],
+    [
+      'capture rename',
+      'native_read_smoke.rs',
+      '#[tauri::command]',
+      '#[tauri::command(rename = "capture_native_reads")]',
+    ],
+    [
+      'free-form probe',
+      'native_read_smoke.rs',
+      'Option<quit_profile::Probe>',
+      'Option<serde_json::Value>',
+    ],
+    [
+      'required probe',
+      'native_read_smoke.rs',
+      'Option<quit_profile::Probe>',
+      'quit_profile::Probe',
+    ],
+    [
+      'extra probe variant',
+      'native_quit_smoke.rs',
+      'pub(super) enum Probe {',
+      'pub(super) enum Probe {\nExtra,',
+    ],
+    [
+      'unknown probe fields',
+      'native_quit_smoke.rs',
+      'tag = "kind", rename_all = "kebab-case", deny_unknown_fields',
+      'tag = "kind", rename_all = "kebab-case"',
+    ],
+    [
+      'optional selected binding',
+      'native_quit_smoke.rs',
+      '        binding: String,',
+      '        binding: Option<String>,',
+    ],
+    [
+      'optional selected sequence',
+      'native_quit_smoke.rs',
+      '        sequence: u64,',
+      '        sequence: Option<u64>,',
+    ],
+    ['unknown stayed fields', 'native_quit_smoke.rs', 'untagged, deny_unknown_fields', 'untagged'],
+    [
+      'raw legacy snapshot',
+      'native_quit_smoke.rs',
+      'Legacy {\n        ms: f64,\n        snapshot: Snapshot,',
+      'Legacy {\n        ms: f64,\n        snapshot: Value,',
+    ],
+    [
+      'extra owner key',
+      'native_quit_smoke.rs',
+      'pub(super) struct OwnerKey {',
+      'pub(super) struct OwnerKey {\nextra: String,',
+    ],
+    [
+      'extra batch field',
+      'native_quit_smoke.rs',
+      'pub(super) struct PhaseBatch {',
+      'pub(super) struct PhaseBatch {\nextra: Value,',
+    ],
+    [
+      'unknown nested fields',
+      'native_quit_smoke.rs',
+      'rename_all = "camelCase", deny_unknown_fields',
+      'rename_all = "camelCase"',
+    ],
+    [
+      'unbounded batch snapshots',
+      'native_quit_smoke.rs',
+      'batch.snapshots.len() > 192',
+      'batch.snapshots.len() > 1920',
+    ],
+    [
+      'unbounded batch events',
+      'native_quit_smoke.rs',
+      'batch.events.len() > 192',
+      'batch.events.len() > 1920',
+    ],
+    [
+      'unbounded batch bytes',
+      'native_quit_smoke.rs',
+      'serde_json::to_vec(&wire).map_err(|_| INVALID)?.len() > 2048',
+      'serde_json::to_vec(&wire).map_err(|_| INVALID)?.len() > 20480',
+    ],
+    [
+      'unknown OwnerKey fields',
+      'native_quit_smoke.rs',
+      '#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub(super) struct OwnerKey',
+      '#[serde(rename_all = "camelCase")]\npub(super) struct OwnerKey',
+    ],
+    [
+      'unknown PhaseBatch fields',
+      'native_quit_smoke.rs',
+      '#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub(super) struct PhaseBatch',
+      '#[serde(rename_all = "camelCase")]\npub(super) struct PhaseBatch',
+    ],
+    ['unbounded probe time', 'native_quit_smoke.rs', '*ms > 60000.0', '*ms > 600000.0'],
+    [
+      'unbounded trace',
+      'native_quit_smoke.rs',
+      'trace.rows.len() >= 192',
+      'trace.rows.len() >= 1920',
+    ],
+    [
+      'event',
+      'native_quit_smoke.rs',
+      'pub(super) fn watchdog(app: &AppHandle) {',
+      'pub(super) fn watchdog(app: &AppHandle) {\napp.emit("extra-event", ());',
+    ],
+    ['non-quit probe admission', 'native_read_smoke.rs', 'if probe.is_some() {', 'if false {'],
+    [
+      'cancel bypass',
+      'native_quit_smoke.rs',
+      'crate::shell::quit::cancel_quit(app.state());\n    record(&app, "cancel-return"',
+      'app.exit(0);\n    record(&app, "cancel-return"',
+    ],
+    [
+      'finish bypass',
+      'native_quit_smoke.rs',
+      'let result = crate::shell::quit::finish_quit(app.clone(), app.state());',
+      'let result = Ok(());',
+    ],
+    [
+      'unawaited native probe',
+      'native_read_smoke.rs',
+      'quit_profile::probe(&app, probe).await',
+      'quit_profile::probe(&app, probe)',
+    ],
+    [
+      'unbounded expanded transaction',
+      'native_quit_smoke.rs',
+      'saturating_add(events.len()) > 192',
+      'saturating_add(events.len()) > 1920',
+    ],
+    ['unbounded expanded row', 'native_quit_smoke.rs', 'bytes.len() > 2048', 'bytes.len() > 20480'],
+    ['selected ownership bypass', 'native_quit_smoke.rs', 'if !selected(case)', 'if false'],
+    [
+      'selected reservation bypass',
+      'native_quit_smoke.rs',
+      'WaitState::Reserved;',
+      'WaitState::Unused;',
+    ],
+    [
+      'wait upper boundary admitted',
+      'native_quit_smoke.rs',
+      'now >= window.upper',
+      'now > window.upper',
+    ],
+    [
+      'IPC upper boundary admitted',
+      'native_quit_smoke.rs',
+      'entered >= window.upper',
+      'entered > window.upper',
+    ],
+    [
+      'reusable cancel slot',
+      'native_quit_smoke.rs',
+      'late.wait = WaitState::Consumed;',
+      'late.wait = WaitState::Unused;',
+    ],
+    [
+      'unfrozen selected report',
+      'native_quit_smoke.rs',
+      'trace.frozen = true;',
+      'trace.frozen = false;',
+    ],
+    ['unbounded report', 'native_quit_smoke.rs', 'bytes.len() <= 65536', 'bytes.len() <= 655360'],
+    [
+      'missing-arm substitution',
+      'native_quit_smoke.rs',
+      'let Some(arm) = late.arm',
+      'let Some(arm) = Some(Instant::now())',
+    ],
+    [
+      'window target changed',
+      'native_quit_smoke.rs',
+      'checked_sub(Duration::from_millis(250))',
+      'checked_sub(Duration::from_millis(200))',
+    ],
+  ])('refuses an unapproved %s', (_name, file, from, to) => {
+    const files = nativeSmokeFiles();
+    edit(files, file, from, to);
+    expect(() => nativeSmokeAudit(files)).toThrow();
+  });
+
+  it('refuses another physical file in the fixture boundary', () => {
+    const files = nativeSmokeFiles();
+    files.set('another_native_smoke.rs', '#[tauri::command]\nfn extra() {}');
+    expect(() => nativeSmokeAudit(files)).toThrow();
+  });
+
+  it('keeps other native smoke files in the strict production scan', () => {
+    const side = rustSide(
+      new Map([
+        ['lib.rs', 'tauri::generate_handler![]'],
+        ['another_native_smoke.rs', '#[tauri::command]\nfn extra() {}'],
+      ]),
+    );
+    expect(side.problems).toEqual([
+      'src-tauri/src/another_native_smoke.rs:1: #[tauri::command] fn extra is not in generate_handler!',
+    ]);
+  });
+
+  it('leaves renamed commands refused in the production scanner', () => {
+    const side = rustSide(
+      new Map([
+        [
+          'lib.rs',
+          'tauri::generate_handler![quit_profile::native_smoke_cancel_quit, quit_profile::native_smoke_finish_quit]',
+        ],
+        ['quit_profile.rs', readFileSync(join(REPO, RS, 'native_quit_smoke.rs'), 'utf8')],
+      ]),
+    );
+    expect(side.problems.filter((problem) => problem.includes('is refused'))).toHaveLength(2);
+  });
+
+  it.each([
+    [
+      'default feature',
+      'native-read-smoke = []',
+      'default = ["native-read-smoke"]\nnative-read-smoke = []',
+    ],
+    [
+      'feature alias',
+      'native-read-smoke = []',
+      'extra = ["native-read-smoke"]\nnative-read-smoke = []',
+    ],
+  ])('refuses a new %s', (_name, from, to) => {
+    const cargo = readFileSync(join(REPO, 'src-tauri/Cargo.toml'), 'utf8');
+    expect(cargo).toContain(from);
+    expect(() =>
+      nativeSmokeBoundary(readFileSync(join(REPO, RS, 'lib.rs'), 'utf8'), cargo.replace(from, to)),
+    ).toThrow();
+  });
+
+  it('refuses default inclusion of the smoke module', () => {
+    const lib = readFileSync(join(REPO, RS, 'lib.rs'), 'utf8');
+    const guarded = '#[cfg(feature = "native-read-smoke")]\nmod native_read_smoke;';
+    expect(lib).toContain(guarded);
+    expect(() =>
+      nativeSmokeBoundary(
+        lib.replace(guarded, 'mod native_read_smoke;'),
+        readFileSync(join(REPO, 'src-tauri/Cargo.toml'), 'utf8'),
+      ),
+    ).toThrow();
+  });
+});
+
 describe('the real tree', () => {
+  it('separately audits the only opt-in native smoke handler and its default-off boundary', () => {
+    const lib = readFileSync(join(REPO, RS, 'lib.rs'), 'utf8');
+    const cargo = readFileSync(join(REPO, 'src-tauri/Cargo.toml'), 'utf8');
+    nativeSmokeBoundary(lib, cargo);
+    const normalized = (text: string) => text.replace(/#[^\n]*/g, '').replace(/\s/g, '');
+    const connections = readFileSync(join(REPO, RS, 'connections/mod.rs'), 'utf8');
+    expect(connections).toMatch(
+      /#\[cfg\(feature = "native-keychain-smoke"\)\]\s*pub\(crate\) mod keychain_acceptance;/,
+    );
+    const acquisition = readFileSync(join(REPO, RS, 'actions/native_account_commands.rs'), 'utf8');
+    const acquisitionProblems: string[] = [];
+    expect(
+      commandsIn(
+        'actions/native_account_commands.rs',
+        acquisition.split(/\r?\n/).map(codeOf),
+        acquisitionProblems,
+      ),
+    ).toEqual([]);
+    expect(acquisitionProblems).toEqual([]);
+    // The admitted macOS credential worker uses fixed Rust adapters. Smoke
+    // harnesses remain opt-in; unsupported platforms do not gain native stores.
+    expect(connections).toMatch(
+      /#\[cfg\(any\(test, feature = "native-credential-smoke", target_os = "macos"\)\)\]\s*pub\(crate\) mod gh_credentials;/,
+    );
+    expect(connections).toMatch(/#\[cfg\(target_os = "macos"\)\]\s*mod keychain;/);
+    const secrets = readFileSync(join(REPO, RS, 'connections/secrets.rs'), 'utf8');
+    expect(secrets).toMatch(
+      /#\[cfg\(any\(test, feature = "native-keychain-smoke", target_os = "macos"\)\)\]\s*pub\(crate\) fn platform_secret_store\(/,
+    );
+    // The added feature has no command of its own and does not exempt another file.
+    const keychain = readFileSync(join(REPO, RS, 'connections/keychain_acceptance.rs'), 'utf8');
+    const keychainProblems: string[] = [];
+    expect(
+      commandsIn(
+        'connections/keychain_acceptance.rs',
+        keychain.split(/\r?\n/).map(codeOf),
+        keychainProblems,
+      ),
+    ).toEqual([]);
+    expect(keychainProblems).toEqual([]);
+    const binaries = [...cargo.matchAll(/\[\[bin\]\]\n([\s\S]*?)(?=\n\[)/g)];
+    expect(binaries).toHaveLength(1);
+    expect(normalized(binaries[0][1])).toBe(
+      'name="native-read-smoke"path="src/bin/native-read-smoke.rs"required-features=["native-read-smoke"]',
+    );
+    expect(cargo).toMatch(/^default-run = "cerebro"$/m);
+    expect(
+      readFileSync(join(REPO, RS, 'bin/native-read-smoke.rs'), 'utf8').replace(/\s/g, ''),
+    ).toBe('fnmain(){cerebro_lib::native_read_smoke_main();}');
+    nativeSmokeAudit(nativeSmokeFiles());
+    // No second module may import the exempt physical quit file.
+    for (const [file, source] of readTree('src-tauri/src', (path) => path.endsWith('.rs'))) {
+      if (file === 'native_read_smoke.rs') continue;
+      const code = source.split(/\r?\n/).map(codeOf).join('\n');
+      expect(code, file).not.toMatch(
+        /\bmod\s+native_quit_smoke\b|#\[path\s*=\s*"[^"]*native_quit_smoke\.rs"\]/,
+      );
+    }
+    expect(real().rust.commands.has('capture_native_reads')).toBe(false);
+  });
+
   it('the webview and Rust agree on every command', () => {
     const { rust, side } = real();
     expect(audit(rust, side, UNCALLED)).toEqual([]);
@@ -1975,6 +2791,14 @@ describe('the Rust commands', () => {
     ]);
   });
 
+  it('still names an unregistered command in another Rust file', () => {
+    const f = fixture();
+    f.rust.set('another_native.rs', '#[tauri::command]\nfn another_orphan() {}');
+    expect(check(f)).toEqual([
+      'src-tauri/src/another_native.rs: #[tauri::command] fn another_orphan is not in generate_handler!',
+    ]);
+  });
+
   it('names an entry with no fn', () => {
     const f = fixture();
     edit(
@@ -2076,5 +2900,91 @@ describe('the events', () => {
     expect(check(f)).toEqual([
       "src-tauri/src/agent/mod.rs: .emit's event is neither a string literal nor one const &str",
     ]);
+  });
+});
+
+describe('M96 public credential command routing', () => {
+  it.each([
+    ['begin_gh_import', ['connectionId', 'host', 'login', 'expectedRevision']],
+    ['credential_acquisition', ['attemptId']],
+    ['cancel_credential_acquisition', ['attemptId']],
+  ] as const)('m96_cmd_real_registration_and_selector_contract: %s', (name, keys) => {
+    const { rust } = real();
+    // Existing real registration is the reader/control, not a synthetic fixture.
+    expect(rust.commands.get('managed_connection_status')?.params.map((p) => p.key)).toEqual([
+      'connectionId',
+    ]);
+    expect(rust.commands.has('m96_unknown_credential_probe')).toBe(false);
+    const command = rust.commands.get(name);
+    expect(command, name + ' must be an individually registered production command').toBeDefined();
+    if (command === undefined) return;
+    expect(command.params.map((p) => p.key)).toEqual(keys);
+    expect(command.params.every((p) => !p.optional)).toBe(true);
+    for (const forbidden of ['vault', 'person', 'actor', 'owner', 'ticket', 'secret', 'adapter']) {
+      expect(command.params.map((p) => p.key)).not.toContain(forbidden);
+    }
+  });
+});
+
+// Removing the real shared path binding, adding a fixture lookalike or changing
+// any selector makes this closed audit fail, without exempting another file.
+describe('M96 closed shared credential fixture composition', () => {
+  it.each([
+    [
+      'wrong module',
+      'native_read_smoke.rs',
+      'use crate::credential_commands;',
+      'use crate::different_commands as credential_commands;',
+    ],
+    [
+      'fixture replacement',
+      'native_read_smoke.rs',
+      'credential_commands::begin_gh_import,',
+      'fixture_commands::begin_gh_import,',
+    ],
+    [
+      'extra credential command',
+      'native_read_smoke.rs',
+      'credential_commands::credential_acquisition,',
+      'credential_commands::credential_acquisition,\ncredential_commands::anything_else,',
+    ],
+    [
+      'extra authority selector',
+      'credential_commands.rs',
+      'expected_revision: u64,',
+      'expected_revision: u64,\nperson: String,',
+    ],
+    [
+      'missing injected window',
+      'credential_commands.rs',
+      'window: tauri::WebviewWindow,',
+      'window: String,',
+    ],
+  ])('refuses %s', (_name, file, from, to) => {
+    const files = nativeSmokeFiles();
+    const source = files.get(file) ?? '';
+    expect(source).toContain(from);
+    files.set(file, source.replace(from, to));
+    expect(() => nativeSmokeAudit(files)).toThrow();
+  });
+});
+
+// A missing registration or an added renderer authority selector breaks this
+// public read contract. The existing scanner reads the real production table.
+describe('M95 original-root history read routing', () => {
+  it('registers one bounded historical read with only the durable run selector', () => {
+    const { rust } = real();
+    expect(rust.commands.get('managed_connection_status')?.params.map((p) => p.key)).toEqual([
+      'connectionId',
+    ]);
+    const command = rust.commands.get('chat_recovery_inspect');
+    expect(command, 'chat_recovery_inspect must be registered in production').toBeDefined();
+    if (command === undefined) return;
+    expect(command.params.map((p) => p.key)).toEqual(['runId']);
+    expect(command.params.map((p) => p.type)).toEqual(['String']);
+    expect(command.params.every((p) => !p.optional)).toBe(true);
+    expect(rust.problems.filter((problem) => problem.includes('chat_recovery_inspect'))).toEqual(
+      [],
+    );
   });
 });

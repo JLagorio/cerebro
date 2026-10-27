@@ -22,6 +22,13 @@ describe('TranscriptNotice (M56.3)', () => {
     expect(notice().textContent).not.toContain(COPY);
   });
 
+  it('explains that a quota-trimmed cache has missing earlier content', () => {
+    render(<TranscriptNotice reason="cache_trimmed" retentionDays={null} cached />);
+    expect(notice().textContent).toContain('Earlier messages unavailable');
+    expect(notice().textContent).toContain('browser storage');
+    expect(notice().textContent).toContain(COPY);
+  });
+
   it('words a clear without naming a period', () => {
     render(<TranscriptNotice reason="cleared" retentionDays={30} cached={false} />);
     expect(notice().getAttribute('data-reason')).toBe('cleared');

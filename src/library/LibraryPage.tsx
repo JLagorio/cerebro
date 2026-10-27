@@ -1,28 +1,32 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  documentAdmission,
+  holdDocumentReader,
+  subscribeDocumentAdmission,
+} from '@/editor/documentAdmission';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { libraryIcon, libraryKind, libraryLabelPlural, type LibraryKind } from '@/engine/library';
 import {
-  skillDraft,
-  skillPatch,
-  templateDraft,
-  templatePatch,
-  type SkillDraft,
-  type TemplateDraft,
-} from '@/engine/libraryDraft';
-import { stampActivation, SCHEDULE_STAMP_FAILED, RESUME_STAMP_FAILED } from '@/agent/activation';
+  type LibraryDraftOwner,
+  libraryDraftKey,
+  loadLibraryDraftOwner,
+  retainedLibraryDraft,
+  type LibraryDraft as Draft,
+} from './libraryDraftOwner';
+import { registerSaveParticipant } from '@/editor/openPages';
+import { stampActivation, RESUME_STAMP_FAILED } from '@/agent/activation';
 import { recordIdentity } from '@/engine/identity';
-import { parseScheduleSet, nextSetFire, scheduleText } from '@/engine/skills';
+import { parseScheduleSet, nextSetFire } from '@/engine/skills';
 import { listTypes } from '@/engine/typeCatalog';
-import type { Entry, Schema } from '@/engine/types';
-import { readNoteSource, saveNote, setNoteTitle, updateFrontmatter } from '@/lib/ipc';
-import { splitFrontmatter } from '@/engine/frontmatter';
-import { isStaleContent } from '@/engine/staleContent';
-import { useNavStore } from '@/stores/navStore';
+import type { Entry, Schema, LibraryTab } from '@/engine/types';
+import { updateFrontmatter, writeClipboard } from '@/lib/ipc';
+import { useNavStore, usePaneId } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { FileNote } from './chrome';
 import { LibraryIndex } from './LibraryIndex';
+import { WorkflowLibrary } from './WorkflowLibrary';
 import { SkillEditor } from './SkillEditor';
 import { TemplateEditor } from './TemplateEditor';
 import { createLibraryItem, libraryItemPlace } from './libraryActions';
@@ -49,6 +53,7 @@ import { createLibraryItem, libraryItemPlace } from './libraryActions';
  * (AgentProperties).
  */
 export function LibraryPage() {
+  const pane = usePaneId();
   const selection = useNavStore((s) => s.selection);
   const navigate = useNavStore((s) => s.navigate);
   const entries = useVaultStore((s) => s.entries);
@@ -58,7 +63,7 @@ export function LibraryPage() {
   const toast = useUiStore((s) => s.toast);
   const [query, setQuery] = useState('');
 
-  const nav = selection.kind === 'library' ? selection : { tab: undefined, path: undefined };
+  const nav = selection.kind === 'library' ? selection : { tab: undefined, path: undefined, workflowId: undefined };
   const openPath = nav.path;
   const entry = useMemo(
     () => (openPath === undefined ? undefined : entries.find((e) => e.path === openPath)),
@@ -67,9 +72,28 @@ export function LibraryPage() {
   // The tab follows the open item when there is one: a skill opened from a
   // wikilink should not land you on whichever shelf you last browsed.
   const tab: LibraryKind =
-    entry !== undefined ? (libraryKind(entry) ?? 'skill') : (nav.tab ?? 'skill');
+    entry !== undefined ? (libraryKind(entry) ?? 'skill') : (nav.tab === 'workflow' ? 'skill' : (nav.tab ?? 'skill'));
 
-  const go = (next: { tab?: LibraryKind; path?: string }) => navigate({ kind: 'library', ...next });
+  const go = (next: { tab?: LibraryTab; path?: string; workflowId?: string }) => navigate({ kind: 'library', ...next });
+  const tabStrip = useRef<HTMLDivElement>(null);
+  const pendingTabFocus = useRef<{ tab: LibraryTab; source: Element | null; vault: string | null } | null>(null);
+  const changeTab = (next: LibraryTab) => {
+    const source = document.activeElement;
+    pendingTabFocus.current = tabStrip.current?.querySelector('[role="tablist"]')?.contains(source)
+      ? { tab: next, source, vault: vaultPath }
+      : null;
+    go({ tab: next });
+  };
+  useLayoutEffect(() => {
+    const pending = pendingTabFocus.current;
+    pendingTabFocus.current = null;
+    if (pending === null || pending.tab !== nav.tab || pending.vault !== vaultPath) return;
+    const active = document.activeElement;
+    // The tab's previous owner may have unmounted. Transfer only its focus;
+    // navigation from elsewhere must not steal a newer control's focus.
+    if (active !== document.body && active !== pending.source && !tabStrip.current?.querySelector('[role="tablist"]')?.contains(active)) return;
+    tabStrip.current?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
+  }, [nav.tab, vaultPath]);
   // An agent is a page (M55.12). A library path naming one — a stale link, a
   // history entry from before — forwards there, replacing this slot so Back
   // never lands on a selection that only forwards.
@@ -108,13 +132,19 @@ export function LibraryPage() {
     });
   };
 
+  if (nav.tab === 'workflow')
+    return <WorkflowLibrary key={vaultPath ?? 'no-vault'} vaultKey={vaultPath} workflowId={nav.workflowId} onTab={changeTab} tabStripRef={tabStrip} onSelect={(workflowId) => go({ tab: 'workflow', workflowId })} />;
+
   if (forwardTo !== null) return null;
 
-  if (entry === undefined) {
+  if (
+    entry === undefined &&
+    !(vaultPath && openPath && retainedLibraryDraft(vaultPath, openPath, pane))
+  ) {
     return (
       <LibraryIndex
         tab={tab}
-        onTab={(next) => go({ tab: next })}
+        onTab={changeTab} tabStripRef={tabStrip}
         query={query}
         onQuery={setQuery}
         entries={entries}
@@ -127,9 +157,9 @@ export function LibraryPage() {
 
   return (
     <LibraryEditor
-      key={entry.path}
+      key={`${vaultPath}:${pane}:${openPath}`}
       kind={tab}
-      path={entry.path}
+      path={openPath!}
       entries={entries}
       schemaTypes={typeNames(entries, schema)}
       onBack={() => go({ tab })}
@@ -145,8 +175,6 @@ function typeNames(entries: Entry[], schema: Schema): string[] {
     .map((t) => t.name);
 }
 
-type Draft = { kind: 'skill'; value: SkillDraft } | { kind: 'template'; value: TemplateDraft };
-
 function LibraryEditor({
   kind,
   path,
@@ -160,118 +188,125 @@ function LibraryEditor({
   schemaTypes: string[];
   onBack: () => void;
 }) {
+  const pane = usePaneId();
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
   const entry = entries.find((e) => e.path === path);
 
-  const [name, setName] = useState(entry?.title ?? '');
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [baseHash, setBaseHash] = useState<string | null>(null);
-  const [stale, setStale] = useState(false);
-  const [reload, setReload] = useState(0);
-
+  const [owner, setOwner] = useState<LibraryDraftOwner | null>(() =>
+    vaultPath === null ? null : (retainedLibraryDraft(vaultPath, path, pane) ?? null),
+  );
+  const admission = useSyncExternalStore(subscribeDocumentAdmission, () =>
+    vaultPath === null
+      ? null
+      : documentAdmission(libraryDraftKey(vaultPath, path, pane), owner ?? undefined),
+  );
+  useLayoutEffect(
+    () =>
+      vaultPath === null ? undefined : holdDocumentReader(libraryDraftKey(vaultPath, path, pane)),
+    [vaultPath, path, pane],
+  );
+  const [, redraw] = useState(0);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   useEffect(() => {
-    if (vaultPath === null || entry === undefined) return;
+    if (owner !== null || vaultPath === null || entry === undefined) return;
     let live = true;
-    void (async () => {
-      try {
-        const source = await readNoteSource(vaultPath, path);
-        if (!live) return;
-        const body = splitFrontmatter(source.content).body.replace(/^\n+/, '');
-        setName(entry.title);
-        setDraft(
-          kind === 'template'
-            ? { kind, value: templateDraft(entry, body) }
-            : { kind: 'skill', value: skillDraft(entry, body) },
-        );
-        setDirty(false);
-        setBaseHash(source.hash);
-        setStale(false);
-        setFailed(false);
-      } catch {
-        if (live) setFailed(true);
-      }
-    })();
+    let retired = false;
+    const stop = useVaultStore.subscribe((next, previous) => {
+      if (next.vaultPath !== previous.vaultPath) retired = true;
+    });
+    setFailed(null);
+    void loadLibraryDraftOwner(
+      libraryDraftKey(vaultPath, path, pane),
+      kind === 'template' ? kind : 'skill',
+      () => live && !retired,
+    )
+      .then((loaded) => {
+        if (live && !retired && loaded !== null) setOwner(loaded);
+      })
+      .catch((error) => {
+        if (live && !retired)
+          setFailed(error instanceof Error ? error.message : 'That file could not be read.');
+      });
     return () => {
       live = false;
+      stop();
     };
-    // Background scans preserve the draft and the version it was based on.
-    // Only opening another file or explicitly loading the new version resets it.
+    // A scan must not replace this editor's retained base or form.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vaultPath, path, kind, reload]);
-
-  const edit = useCallback((next: Draft) => {
-    setDraft(next);
-    setDirty(true);
-  }, []);
-
+  }, [vaultPath, path, kind, owner, pane, loadAttempt]);
+  // The editable form must enter the save registry before input can arrive.
+  useLayoutEffect(() => {
+    if (owner === null) return;
+    const unsubscribe = owner.subscribe(() => {
+      setCopied(false);
+      setCopyFailed(false);
+      redraw((value) => value + 1);
+    });
+    const detach = registerSaveParticipant(owner);
+    return () => {
+      unsubscribe();
+      detach();
+    };
+  }, [owner]);
+  const name = owner?.name ?? entry?.title ?? '';
+  const draft = owner?.draft ?? null;
+  const dirty = owner?.dirty ?? false;
+  const saving = (owner?.saving ?? false) || loading;
+  const stale = owner?.stale ?? false;
+  const edit = (next: Draft) => owner?.edit(name, next);
   const save = (overwrite = false) => {
-    if (vaultPath === null || draft === null || baseHash === null || saving) return;
-    setSaving(true);
+    void owner?.save(overwrite);
+  };
+  const loadNewVersion = () => {
+    if (saving || vaultPath === null || owner === null) return;
+    setLoading(true);
+    const decisionGeneration = owner.snapshot().generation;
+    let retired = false;
+    const stop = useVaultStore.subscribe((next, previous) => {
+      if (next.vaultPath !== previous.vaultPath) retired = true;
+    });
     void (async () => {
       try {
-        // Compare the loaded version before writing any part of this draft.
-        // Title and frontmatter still use their own locked writers afterward.
-        const body = draft.kind === 'template' ? draft.value.body : draft.value.instructions;
-        await saveNote(
-          vaultPath,
-          path,
-          body.endsWith('\n') ? body : `${body}\n`,
-          overwrite ? undefined : baseHash,
-        );
-        if (name.trim() !== '' && name.trim() !== entry?.title) {
-          await setNoteTitle(vaultPath, path, name.trim());
-        }
-        const hash = await updateFrontmatter(
-          vaultPath,
-          path,
-          draft.kind === 'skill' ? skillPatch(draft.value) : templatePatch(draft.value),
-        );
-        if (
-          draft.kind === 'skill' &&
-          entry !== undefined &&
-          scheduleText(draft.value.schedule) !== scheduleText(entry.properties.schedule)
-        ) {
-          if (
-            !(await stampActivation(
-              vaultPath,
-              recordIdentity(entry),
-              draft.value.schedule,
-              new Date(),
-            ))
-          )
-            toast(SCHEDULE_STAMP_FAILED);
-        }
-        setBaseHash(hash ?? (await readNoteSource(vaultPath, path)).hash);
         await rescan();
-        setDirty(false);
-        setStale(false);
-      } catch (err) {
-        if (isStaleContent(err)) setStale(true);
-        else toast(err instanceof Error ? err.message : "Couldn't save");
+        if (retired) return;
+        const replacement = await loadLibraryDraftOwner(
+          libraryDraftKey(vaultPath, path, pane),
+          draft?.kind ?? 'skill',
+          () => !retired,
+        );
+        if (retired || replacement === null) return;
+        if (owner.snapshot().generation !== decisionGeneration) {
+          toast('New edits were made while loading. Your draft is retained.');
+          return;
+        }
+        owner.discard();
+        setOwner(replacement);
+      } catch {
+        if (!retired) toast("Couldn't load the new version. Your draft is retained.");
       } finally {
-        setSaving(false);
+        stop();
+        setLoading(false);
       }
     })();
   };
 
-  const loadNewVersion = () => {
-    if (saving) return;
-    setSaving(true);
-    void rescan()
-      .then(() => setReload((value) => value + 1))
-      .catch(() => toast("Couldn't load the new version"))
-      .finally(() => setSaving(false));
-  };
-
-  if (failed || entry === undefined) {
+  if (admission?.kind === 'deferred')
+    return <div role="status">Page is moving. Wait for it to finish.</div>;
+  if (owner === null && (failed !== null || entry === undefined)) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-8">
-        <p className="m-0 text-sm text-n-500">That file could not be read.</p>
+        <p role="status" className="m-0 text-sm text-n-500">
+          {failed ?? 'That file could not be read.'}
+        </p>
+        <Button size="sm" onClick={() => setLoadAttempt((value) => value + 1)}>
+          Retry load
+        </Button>
         <Button size="sm" onClick={onBack}>
           Back to the library
         </Button>
@@ -279,7 +314,7 @@ function LibraryEditor({
     );
   }
 
-  const duty = dutyOf(kind, draft, entry.properties.paused === true);
+  const duty = dutyOf(kind, draft, (entry ?? owner?.entry)?.properties.paused === true);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="library-editor">
@@ -296,11 +331,11 @@ function LibraryEditor({
         <Icon name={libraryIcon(kind)} size={14} color="var(--synapse-500)" />
         <input
           value={name}
+          disabled={owner === null}
           aria-label="Name"
           data-testid="library-name"
           onChange={(e) => {
-            setName(e.target.value);
-            setDirty(true);
+            if (owner) owner.edit(e.target.value, owner.draft);
           }}
           className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 text-md font-semibold text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-400"
         />
@@ -324,6 +359,41 @@ function LibraryEditor({
         </Button>
       </div>
 
+      {owner !== null && (dirty || owner.message !== null || owner.refreshFailed) && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-3 border-b border-n-200 bg-n-50 px-6 py-3 text-sm text-n-700"
+        >
+          <p className="m-0 flex-1">
+            {entry === undefined
+              ? 'The file is missing. Your draft is retained; copy it or discard it.'
+              : (owner.message ??
+                (owner.refreshFailed
+                  ? 'Saved, but the library could not be refreshed.'
+                  : 'Unsaved draft. Save explicitly to apply these instructions and settings.'))}
+          </p>
+          {owner.message !== null && !stale && entry !== undefined && (
+            <Button size="sm" disabled={saving} onClick={() => save()}>
+              Retry save
+            </Button>
+          )}
+          <Button
+            size="sm"
+            onClick={() => {
+              setCopyFailed(false);
+              void writeClipboard(owner.snapshot().latestDraft)
+                .then(() => setCopied(true))
+                .catch(() => setCopyFailed(true));
+            }}
+          >
+            {copied ? 'Copied draft' : 'Copy draft'}
+          </Button>
+          {copyFailed && <span>Couldn't copy. Your draft is retained.</span>}
+          <Button size="sm" disabled={saving} onClick={() => owner.discard()}>
+            Discard draft
+          </Button>
+        </div>
+      )}
       {stale && (
         <div
           data-testid="library-stale"
@@ -331,7 +401,8 @@ function LibraryEditor({
           className="flex flex-wrap items-center gap-3 border-b border-n-200 bg-n-50 px-6 py-3 text-sm text-n-700"
         >
           <p className="m-0 flex-1">
-            “{entry.title}” changed on disk since you opened it, so nothing was saved.
+            “{entry?.title ?? owner?.entry.title}” changed on disk. Your draft is retained; any
+            earlier acknowledged Save stays on disk.
           </p>
           <Button size="sm" disabled={saving} onClick={loadNewVersion}>
             Load the new version

@@ -9,6 +9,12 @@ import {
   holdEditor,
   editorHoldersOf,
   subscribeEditorHolders,
+  registerSavePreparation,
+  retainDocumentOwner,
+  releaseDocumentOwner,
+  retainedDocumentOwner,
+  unresolvedOpenPages,
+  documentPresentationOf,
 } from './openPages';
 import { coalescedRefresh } from '@/lib/trailingRefresh';
 
@@ -43,6 +49,23 @@ async function hasSettled(promise: Promise<unknown>): Promise<boolean> {
  * save must not hold the turn forever.
  */
 describe('flushOpenPages', () => {
+  it('retains a clean body owner with unresolved child bytes after release', async () => {
+    const key = { vaultId: 'vault', path: 'a.md', ownerId: 'p1' };
+    const owner = retainDocumentOwner(key, 'saved body', async () => ({
+      kind: 'file',
+      contentHash: 'disk',
+    }));
+    const childDrafts = { sheets: '{"cell":"exact refused text"}' };
+    const state = owner.snapshot();
+    vi.spyOn(owner, 'snapshot').mockReturnValue({ ...state, childDrafts });
+    releaseDocumentOwner(owner);
+    expect(retainedDocumentOwner(key)).toBe(owner);
+    expect(unresolvedOpenPages()).toEqual([
+      expect.objectContaining({ childDrafts, blocked: 'choice' }),
+    ]);
+    expect((await flushOpenPages()).unresolvedOwnerIds).toHaveLength(1);
+  });
+
   it('waits for every registered flush', async () => {
     const a = deferred();
     const b = deferred();
@@ -60,7 +83,9 @@ describe('flushOpenPages', () => {
     registerFlush(() => {
       throw new Error('gone');
     });
-    await expect(flushOpenPages()).resolves.toBeUndefined();
+    const report = await flushOpenPages();
+    expect(report.outcomes.filter((outcome) => outcome.kind === 'failed')).toHaveLength(2);
+    expect(report.unresolvedOwnerIds).toHaveLength(2);
   });
 
   it('gives up on a hung flush once its budget is spent', async () => {
@@ -74,6 +99,34 @@ describe('flushOpenPages', () => {
     expect(done).toBe(true);
     // Its timer is cleared, not left to fire into nothing.
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('reports an already failed retained owner even after its view releases', async () => {
+    const owner = retainDocumentOwner(
+      { vaultId: 'vault', path: 'a.md', ownerId: 'p1' },
+      'initial',
+      async () => {
+        throw new Error('full');
+      },
+    );
+    owner.edit('exact failed text');
+    await owner.flush();
+    const report = await flushOpenPages();
+    expect(report.unresolvedOwnerIds).toHaveLength(1);
+    expect(unresolvedOpenPages()[0].latestDraft).toBe('exact failed text');
+  });
+
+  it('settles mounted child buffers before registered parent serialization', async () => {
+    let buffer = 'before';
+    const seen: string[] = [];
+    registerFlush(async () => {
+      seen.push(buffer);
+    });
+    registerSavePreparation(() => {
+      buffer = 'latest exact source';
+    });
+    await flushOpenPages();
+    expect(seen).toEqual(['latest exact source']);
   });
 
   it('makes no timer when no page is open', async () => {
@@ -208,4 +261,24 @@ it('editor owners are counted, reference-stable, and released independently of p
   peek();
   stop();
   expect(hear).toHaveBeenCalledTimes(4);
+});
+
+it('releases a clean source payload but remembers its presentation without document bytes', async () => {
+  const key = { vaultId: '/vault', path: 'source.md', ownerId: 'p1' };
+  const owner = retainDocumentOwner(key, 'raw\r\n', async () => ({
+    kind: 'file',
+    contentHash: 'ack',
+  }));
+  owner.present('raw\r\n', 'source');
+  releaseDocumentOwner(owner);
+  expect(retainedDocumentOwner(key)).toBeUndefined();
+  expect(documentPresentationOf(key)).toBe('source');
+  const reopened = retainDocumentOwner(key, 'new authoritative raw', async () => ({
+    kind: 'file',
+    contentHash: 'next',
+  }));
+  expect(reopened.snapshot().latestDraft).toBe('new authoritative raw');
+  reopened.present('new authoritative raw', 'rich');
+  releaseDocumentOwner(reopened);
+  expect(documentPresentationOf(key)).toBe('rich');
 });

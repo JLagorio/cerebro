@@ -61,8 +61,17 @@
   width: 100%;
   color: var(--text-primary);
 }
+/* The name never gives way to what follows it: a summary longer than the
+   line ("Changes land when this turn ends") wraps under itself instead of
+   cutting the card's name short. */
 .cb-ai-rail-section-title {
+  flex: none;
   font-weight: var(--w-medium);
+}
+.cb-ai-rail-section-heading .cb-ai-trace-description {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .cb-ai-rail-section-none {
   color: var(--text-muted);
@@ -80,4 +89,9 @@
   padding-top: var(--sp-2);
   color: var(--text-secondary);
   overflow-wrap: break-word;
+}
+/* A card is raised, and dark's raised ground is the quiet badge's own fill
+   (--n-100): one step above the card keeps the pill in both themes. */
+.cb-ai-rail-section .cb-ai-badge-secondary {
+  background: var(--n-200);
 }

@@ -29,6 +29,7 @@ pub mod ancestry;
 pub mod authority;
 pub mod candidates;
 pub mod commit;
+pub mod connector_ownership;
 pub mod coverage;
 pub mod evals;
 pub mod expand;

@@ -1,4 +1,5 @@
 import { useEntryScroll } from '@/app/useEntryState';
+import { useTableSelectionReveal } from '@/views/useTableSelectionReveal';
 import type { EntryStateKey } from '@/stores/navStore';
 import * as listCursor from '@/engine/listCursor';
 import { copyPageLinks } from '@/app/recordActions';
@@ -27,7 +28,7 @@ import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel, type RelationConfig } from '@/detail/AddPropertyPanel';
 import { FieldEditor } from '@/detail/FieldEditor';
-import { AnchoredFieldStatus } from '@/detail/AnchoredFieldStatus';
+import { TitleCell } from '@/views/TitleCell';
 import { useDragGesture } from '@/hooks/useDragGesture';
 import {
   aggregate,
@@ -368,154 +369,6 @@ const TableCell = memo(function TableCell({
   );
 });
 
-/**
- * The name cell's value: an ordinary editable cell (M19.3).
- *
- * The title used to BE the opener — a button that navigated on click — which
- * made the name the one cell in the grid you could not edit, and left the
- * `maximize-2` glyph beside it as `aria-hidden` decoration that answered no
- * click at all. That shape came from M15 and fixed a real defect the honest
- * way round would also have fixed: the previous opener was `display:none`
- * until hover, so it was absent from the DOM and from the tab order and there
- * was no keyboard path into a record. Making the title the button removed the
- * affordance instead of making it focusable. The Open pill beside this is
- * focusable, so both can be true now.
- *
- * Modelled on FieldEditor's text branch, minus its `w-40`: a fixed width blows
- * the flex line inside a fixed-width sticky cell.
- */
-function TitleCell({
-  entry,
-  onCommit,
-}: {
-  entry: Entry;
-  onCommit: (title: string) => Promise<boolean>;
-}) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
-  const failed = failure !== null;
-  const busy = useRef(false);
-  const failedRef = useRef(false);
-  const dismissed = useRef(false);
-  const mounted = useRef(true);
-  const input = useRef<HTMLInputElement>(null);
-  const statusId = useId();
-  const editing = useEditingLease(entry.path);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-
-  if (draft === null) {
-    return (
-      <button
-        type="button"
-        data-cell-primary
-        onClick={(e) => {
-          e.stopPropagation();
-          dismissed.current = false;
-          failedRef.current = false;
-          setFailure(null);
-          editing(true);
-          setDraft(entry.title);
-        }}
-        className={TABLE_ANATOMY.title}
-      >
-        {entry.title}
-      </button>
-    );
-  }
-
-  const commit = async () => {
-    if (busy.current || dismissed.current) return;
-    const next = draft.trim();
-    if (next === '') {
-      failedRef.current = true;
-      setFailure('Enter a title. Your draft is kept.');
-      return;
-    }
-    const field = input.current;
-    const restoreGrid = document.activeElement === field;
-    const grid = field?.closest<HTMLElement>('[role=grid]');
-    busy.current = true;
-    setPending(true);
-    const ok = next === entry.title || (await onCommit(next));
-    busy.current = false;
-    if (!mounted.current) return;
-    setPending(false);
-    if (ok) {
-      dismissed.current = true;
-      setDraft(null);
-      editing(false);
-      if (
-        restoreGrid &&
-        (document.activeElement === field || document.activeElement === document.body)
-      ) {
-        queueMicrotask(() => grid?.focus());
-      }
-    } else {
-      failedRef.current = true;
-      setFailure(
-        "Couldn't save title. Your draft is kept. Press Enter to retry or Escape to cancel.",
-      );
-      if (
-        restoreGrid &&
-        (document.activeElement === field || document.activeElement === document.body)
-      ) {
-        input.current?.focus();
-      }
-    }
-  };
-
-  return (
-    <span className="relative flex min-w-0 flex-1">
-      <input
-        ref={input}
-        autoFocus
-        type="text"
-        aria-label="Title"
-        aria-invalid={failed || undefined}
-        aria-busy={pending || undefined}
-        aria-describedby={pending || failed ? statusId : undefined}
-        readOnly={pending}
-        value={draft}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          failedRef.current = false;
-          setFailure(null);
-        }}
-        onClick={(e) => e.stopPropagation()}
-        onBlur={() => {
-          if (!failedRef.current) void commit();
-        }}
-        onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing) return;
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            void commit();
-          }
-          if (e.key === 'Escape') {
-            e.stopPropagation();
-            if (busy.current) return;
-            const grid = input.current?.closest<HTMLElement>('[role=grid]');
-            dismissed.current = true;
-            setDraft(null);
-            editing(false);
-            grid?.focus();
-          }
-        }}
-        className="h-7 min-w-0 flex-1 rounded-md border border-cortex-500 px-1.5 text-ui text-n-900 shadow-[var(--ring)] outline-none"
-      />
-      <AnchoredFieldStatus anchor={input} id={statusId} error={failed}>
-        {pending ? 'Saving title…' : failure}
-      </AnchoredFieldStatus>
-    </span>
-  );
-}
-
 /** Indent per nesting level, matching the group-band step. */
 const INDENT = 16;
 
@@ -569,7 +422,10 @@ function RowGutter({
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLButtonElement | null>(null);
   // Laid out always, faded in on hover — see GUTTER.
-  const reveal = checked || selecting || open ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
+  const reveal =
+    checked || selecting || open
+      ? 'opacity-100'
+      : 'opacity-0 focus:opacity-100 group-hover:opacity-100';
 
   return (
     <div
@@ -822,6 +678,7 @@ const TableRowBody = memo(function TableRowBody({
    * slot. Bound to the row so the cells never have to know their row index. */
   cellProps: (col: number) => RowKeyboardCellProps;
 }) {
+  const titleEditing = useEditingLease(entry.path);
   // M3.5: route by kind — a Project record opens its page, everything else
   // opens the detail panel. No sidebar special-casing needed.
   // M9.3: in-place — the table IS the context, so opening a row must not
@@ -949,7 +806,11 @@ const TableRowBody = memo(function TableRowBody({
           <span className="h-4 w-4 flex-none" />
         ) : null}
         {showTypeIcon && <Icon name={style.icon} size={13} color={style.color ?? 'var(--n-400)'} />}
-        <TitleCell entry={entry} onCommit={(title) => onRename(entry, title)} />
+        <TitleCell
+          entry={entry}
+          onCommit={(title) => onRename(entry, title)}
+          onEditingChange={titleEditing}
+        />
         {bulkFailure !== undefined && (
           <span title={bulkFailure} aria-label={bulkFailure} className="flex-none text-danger-500">
             <Icon name="circle-alert" size={13} />
@@ -2195,6 +2056,7 @@ export function TableView(props: TableViewProps) {
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEntryScroll(scrollRef, entryScrollKey ?? null);
+  useTableSelectionReveal(scrollRef, { entries, vault: bulkVault, scope });
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [available, setAvailable] = useState(0);
   // True while columns remain to the right of the fold. The horizontal
@@ -2999,7 +2861,9 @@ export function TableView(props: TableViewProps) {
                       );
                     }}
                     className={`h-3.5 w-3.5 flex-none accent-cortex-500 ${
-                      checked.length > 0 ? 'opacity-100' : 'opacity-0 group-hover/head:opacity-100'
+                      checked.length > 0
+                        ? 'opacity-100'
+                        : 'opacity-0 focus:opacity-100 group-hover/head:opacity-100'
                     }`}
                   />
                 )}

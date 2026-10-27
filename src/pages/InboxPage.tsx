@@ -405,7 +405,7 @@ function OrganizeSection({
         {/* Once typed, the type's declared fields are the rest of the form —
             the same strip-and-stack the record surfaces mount, not a second
             form. A laid-out type leads with its heading strip (the triage
-            fields), and the full stack rides the same View details expander
+            fields), and the full stack rides the same property expander
             the record page uses (M45.1). */}
         {entry.type !== null && (
           <div className="mt-1">

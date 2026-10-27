@@ -10,6 +10,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { useUndoStore } from '@/stores/undoStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { loadTrash, restoreItem, trashPath } from './trashActions';
+import { __resetOpenPages, retainDocumentOwner } from '@/editor/openPages';
 
 const VAULT = '/demo-vault';
 const PAGE = 'notes/plan.md';
@@ -19,6 +20,7 @@ const toasts = () => useUiStore.getState().toasts.map((t) => t.message);
 const listed = (path: string) => useVaultStore.getState().entries.some((e) => e.path === path);
 
 beforeEach(async () => {
+  __resetOpenPages();
   resetMockFs();
   vi.clearAllMocks();
   useUiStore.setState({ toasts: [] });
@@ -28,6 +30,20 @@ beforeEach(async () => {
 });
 
 describe('trashPath', () => {
+  it('does not trash a page whose visible draft cannot save', async () => {
+    const owner = retainDocumentOwner(
+      { vaultId: VAULT, path: PAGE, ownerId: 'p1' },
+      BYTES,
+      async () => {
+        throw new Error('disk_full');
+      },
+    );
+    owner.edit('Exact draft that must not disappear');
+    await owner.flush();
+    expect(await trashPath(PAGE, 'Plan')).toBeNull();
+    expect(ipc.deleteNote).not.toHaveBeenCalled();
+    expect(fs().get(PAGE)).toBe(BYTES);
+  });
   it('moves the page to the Trash, toasts, rescans and returns the item', async () => {
     const item = await trashPath(PAGE, 'Plan');
     expect(item).toMatchObject({ path: PAGE, kind: 'file', title: 'Plan', pages: 1 });

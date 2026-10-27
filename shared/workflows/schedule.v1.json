@@ -1,0 +1,6 @@
+{
+  "formatVersion": 1,
+  "clock": "utc_elapsed",
+  "maxObservationGapMs": 5000,
+  "coalesceLookbackMs": 86400000
+}

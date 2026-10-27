@@ -1,0 +1,2473 @@
+{
+  "version": 1,
+  "types": {
+    "ChatRecoveryInspection": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ChatRecoveryInspection",
+      "type": "object",
+      "required": [
+        "brokerInventory",
+        "effects",
+        "externalEffectsCoverage",
+        "generationCoverage",
+        "issues",
+        "origin"
+      ],
+      "properties": {
+        "brokerInventory": {
+          "$ref": "#/definitions/BrokerInventory"
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/HistoryEffect"
+          }
+        },
+        "externalEffectsCoverage": {
+          "$ref": "#/definitions/ExternalEffectsCoverage"
+        },
+        "generationCoverage": {
+          "$ref": "#/definitions/GenerationCoverage"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/HistoryIssue"
+          }
+        },
+        "origin": {
+          "$ref": "#/definitions/HistoryOrigin"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ActionAttemptSummary": {
+          "type": "object",
+          "required": [
+            "attemptId",
+            "dispatchedAt",
+            "observedAt",
+            "ordinal",
+            "outcomeSummary",
+            "receiptId",
+            "remoteEffectReference",
+            "state"
+          ],
+          "properties": {
+            "attemptId": {
+              "type": "string"
+            },
+            "dispatchedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "observedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ordinal": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "outcomeSummary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "receiptId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "remoteEffectReference": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/definitions/InvocationState"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ActionEffectDetails": {
+          "type": "object",
+          "required": [
+            "account",
+            "approval",
+            "attempts",
+            "definitionDigest",
+            "effect",
+            "inputDigest",
+            "preview",
+            "revision",
+            "target"
+          ],
+          "properties": {
+            "account": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/EffectAccount"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "approval": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/EffectApproval"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "attempts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ActionAttemptSummary"
+              }
+            },
+            "definitionDigest": {
+              "type": "string"
+            },
+            "effect": {
+              "$ref": "#/definitions/ActionEffectRef"
+            },
+            "inputDigest": {
+              "type": "string"
+            },
+            "preview": {
+              "$ref": "#/definitions/SafeEffectPreview"
+            },
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/EffectTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "ActionEffectRef": {
+          "type": "object",
+          "required": [
+            "accountLabel",
+            "approvalId",
+            "canReconcile",
+            "canRetry",
+            "invocationId",
+            "state"
+          ],
+          "properties": {
+            "accountLabel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "approvalId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "canReconcile": {
+              "type": "boolean"
+            },
+            "canRetry": {
+              "type": "boolean"
+            },
+            "invocationId": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/definitions/InvocationState"
+            }
+          },
+          "additionalProperties": false
+        },
+        "BrokerInventory": {
+          "type": "object",
+          "required": [
+            "inspectedRunIds",
+            "observedCount",
+            "overflow",
+            "reasons",
+            "state"
+          ],
+          "properties": {
+            "inspectedRunIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "observedCount": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "overflow": {
+              "type": "boolean"
+            },
+            "reasons": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/HistoryReason"
+              }
+            },
+            "state": {
+              "$ref": "#/definitions/InventoryState"
+            }
+          },
+          "additionalProperties": false
+        },
+        "DetailsRead": {
+          "type": "string",
+          "enum": [
+            "available",
+            "denied",
+            "unavailable"
+          ]
+        },
+        "EffectAccount": {
+          "type": "object",
+          "required": [
+            "accountId",
+            "accountRevision",
+            "label"
+          ],
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "accountRevision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "EffectApproval": {
+          "type": "object",
+          "required": [
+            "approvalId",
+            "approvedInputDigest",
+            "approvedPreview",
+            "askedInputDigest",
+            "expiresAt",
+            "revision"
+          ],
+          "properties": {
+            "approvalId": {
+              "type": "string"
+            },
+            "approvedInputDigest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "approvedPreview": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeEffectPreview"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "askedInputDigest": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": "string"
+            },
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            }
+          },
+          "additionalProperties": false
+        },
+        "EffectTarget": {
+          "type": "object",
+          "required": [
+            "kind",
+            "label",
+            "safeReference"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "safeReference": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ExternalEffectsCoverage": {
+          "type": "object",
+          "required": [
+            "reason",
+            "state"
+          ],
+          "properties": {
+            "reason": {
+              "$ref": "#/definitions/ExternalEffectsReason"
+            },
+            "state": {
+              "$ref": "#/definitions/UnknownCoverageState"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ExternalEffectsReason": {
+          "type": "string",
+          "enum": [
+            "unbrokered_execution_not_covered"
+          ]
+        },
+        "GenerationCoverage": {
+          "type": "object",
+          "required": [
+            "reason",
+            "state"
+          ],
+          "properties": {
+            "reason": {
+              "$ref": "#/definitions/GenerationReason"
+            },
+            "state": {
+              "$ref": "#/definitions/UnknownCoverageState"
+            }
+          },
+          "additionalProperties": false
+        },
+        "GenerationReason": {
+          "type": "string",
+          "enum": [
+            "root_only_no_generation_binding"
+          ]
+        },
+        "HistoryEffect": {
+          "type": "object",
+          "required": [
+            "details",
+            "detailsRead",
+            "effect",
+            "reason"
+          ],
+          "properties": {
+            "details": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ActionEffectDetails"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "detailsRead": {
+              "$ref": "#/definitions/DetailsRead"
+            },
+            "effect": {
+              "$ref": "#/definitions/ActionEffectRef"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HistoryReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "HistoryIssue": {
+          "type": "object",
+          "required": [
+            "reason"
+          ],
+          "properties": {
+            "reason": {
+              "$ref": "#/definitions/HistoryReason"
+            }
+          },
+          "additionalProperties": false
+        },
+        "HistoryOrigin": {
+          "type": "object",
+          "required": [
+            "actorId",
+            "appClosePrecision",
+            "cliSessionId",
+            "endedAt",
+            "historicalAppSessionId",
+            "nativeCloseKind",
+            "nativeClosedAt",
+            "outcome",
+            "rootAttemptId",
+            "runId",
+            "startedAt",
+            "storeId",
+            "vaultId"
+          ],
+          "properties": {
+            "actorId": {
+              "type": "string"
+            },
+            "appClosePrecision": {
+              "type": "string"
+            },
+            "cliSessionId": {
+              "type": "string"
+            },
+            "endedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "historicalAppSessionId": {
+              "type": "string"
+            },
+            "nativeCloseKind": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "nativeClosedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "outcome": {
+              "type": "string"
+            },
+            "rootAttemptId": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            },
+            "startedAt": {
+              "type": "string"
+            },
+            "storeId": {
+              "type": "string"
+            },
+            "vaultId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "HistoryReason": {
+          "type": "string",
+          "enum": [
+            "invalid_record",
+            "stored_payload_limit",
+            "aggregate_limit",
+            "output_limit",
+            "overflow",
+            "metadata_limit",
+            "account_denied",
+            "account_unavailable"
+          ]
+        },
+        "InventoryState": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "incomplete"
+          ]
+        },
+        "InvocationState": {
+          "type": "string",
+          "enum": [
+            "prepared",
+            "awaiting_approval",
+            "ready",
+            "dispatched",
+            "succeeded",
+            "failed",
+            "outcome_unknown",
+            "cancelled"
+          ]
+        },
+        "PreviewField": {
+          "type": "object",
+          "required": [
+            "label",
+            "value"
+          ],
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "SafeEffectPreview": {
+          "type": "object",
+          "required": [
+            "fields",
+            "redactedFields",
+            "summary"
+          ],
+          "properties": {
+            "fields": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/PreviewField"
+              }
+            },
+            "redactedFields": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "UnknownCoverageState": {
+          "type": "string",
+          "enum": [
+            "unknown"
+          ]
+        }
+      }
+    },
+    "InvocationState": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "InvocationState",
+      "type": "string",
+      "enum": [
+        "prepared",
+        "awaiting_approval",
+        "ready",
+        "dispatched",
+        "succeeded",
+        "failed",
+        "outcome_unknown",
+        "cancelled"
+      ]
+    },
+    "ActionSubjectView": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ActionSubjectView",
+      "type": "object",
+      "required": [
+        "actorId",
+        "childJobId",
+        "clientId",
+        "runId",
+        "vaultId"
+      ],
+      "properties": {
+        "actorId": {
+          "type": "string"
+        },
+        "childJobId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runId": {
+          "type": "string"
+        },
+        "vaultId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ActionEffectDetails": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ActionEffectDetails",
+      "type": "object",
+      "required": [
+        "account",
+        "approval",
+        "attempts",
+        "definitionDigest",
+        "effect",
+        "inputDigest",
+        "preview",
+        "revision",
+        "target"
+      ],
+      "properties": {
+        "account": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectAccount"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectApproval"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ActionAttemptSummary"
+          }
+        },
+        "definitionDigest": {
+          "type": "string"
+        },
+        "effect": {
+          "$ref": "#/definitions/ActionEffectRef"
+        },
+        "inputDigest": {
+          "type": "string"
+        },
+        "preview": {
+          "$ref": "#/definitions/SafeEffectPreview"
+        },
+        "revision": {
+          "$ref": "#/definitions/SafeCounter"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ActionAttemptSummary": {
+          "type": "object",
+          "required": [
+            "attemptId",
+            "dispatchedAt",
+            "observedAt",
+            "ordinal",
+            "outcomeSummary",
+            "receiptId",
+            "remoteEffectReference",
+            "state"
+          ],
+          "properties": {
+            "attemptId": {
+              "type": "string"
+            },
+            "dispatchedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "observedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ordinal": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "outcomeSummary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "receiptId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "remoteEffectReference": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/definitions/InvocationState"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ActionEffectRef": {
+          "type": "object",
+          "required": [
+            "accountLabel",
+            "approvalId",
+            "canReconcile",
+            "canRetry",
+            "invocationId",
+            "state"
+          ],
+          "properties": {
+            "accountLabel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "approvalId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "canReconcile": {
+              "type": "boolean"
+            },
+            "canRetry": {
+              "type": "boolean"
+            },
+            "invocationId": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/definitions/InvocationState"
+            }
+          },
+          "additionalProperties": false
+        },
+        "EffectAccount": {
+          "type": "object",
+          "required": [
+            "accountId",
+            "accountRevision",
+            "label"
+          ],
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "accountRevision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "EffectApproval": {
+          "type": "object",
+          "required": [
+            "approvalId",
+            "approvedInputDigest",
+            "approvedPreview",
+            "askedInputDigest",
+            "expiresAt",
+            "revision"
+          ],
+          "properties": {
+            "approvalId": {
+              "type": "string"
+            },
+            "approvedInputDigest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "approvedPreview": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SafeEffectPreview"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "askedInputDigest": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": "string"
+            },
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            }
+          },
+          "additionalProperties": false
+        },
+        "EffectTarget": {
+          "type": "object",
+          "required": [
+            "kind",
+            "label",
+            "safeReference"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "safeReference": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "InvocationState": {
+          "type": "string",
+          "enum": [
+            "prepared",
+            "awaiting_approval",
+            "ready",
+            "dispatched",
+            "succeeded",
+            "failed",
+            "outcome_unknown",
+            "cancelled"
+          ]
+        },
+        "PreviewField": {
+          "type": "object",
+          "required": [
+            "label",
+            "value"
+          ],
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "SafeEffectPreview": {
+          "type": "object",
+          "required": [
+            "fields",
+            "redactedFields",
+            "summary"
+          ],
+          "properties": {
+            "fields": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/PreviewField"
+              }
+            },
+            "redactedFields": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "PrepareAction": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "PrepareAction",
+      "type": "object",
+      "required": [
+        "accountId",
+        "actionId",
+        "connectionId",
+        "definitionDigest",
+        "input",
+        "requestKey",
+        "snapshotDigest"
+      ],
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "actionId": {
+          "type": "string"
+        },
+        "connectionId": {
+          "type": "string"
+        },
+        "definitionDigest": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "requestKey": {
+          "type": "string"
+        },
+        "snapshotDigest": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PreparedAction": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "PreparedAction",
+      "type": "object",
+      "required": [
+        "approvalId",
+        "effect",
+        "preview"
+      ],
+      "properties": {
+        "approvalId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effect": {
+          "$ref": "#/definitions/ActionEffectRef"
+        },
+        "preview": {
+          "$ref": "#/definitions/SafeEffectPreview"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ActionEffectRef": {
+          "type": "object",
+          "required": [
+            "accountLabel",
+            "approvalId",
+            "canReconcile",
+            "canRetry",
+            "invocationId",
+            "state"
+          ],
+          "properties": {
+            "accountLabel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "approvalId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "canReconcile": {
+              "type": "boolean"
+            },
+            "canRetry": {
+              "type": "boolean"
+            },
+            "invocationId": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/definitions/InvocationState"
+            }
+          },
+          "additionalProperties": false
+        },
+        "InvocationState": {
+          "type": "string",
+          "enum": [
+            "prepared",
+            "awaiting_approval",
+            "ready",
+            "dispatched",
+            "succeeded",
+            "failed",
+            "outcome_unknown",
+            "cancelled"
+          ]
+        },
+        "PreviewField": {
+          "type": "object",
+          "required": [
+            "label",
+            "value"
+          ],
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "SafeEffectPreview": {
+          "type": "object",
+          "required": [
+            "fields",
+            "redactedFields",
+            "summary"
+          ],
+          "properties": {
+            "fields": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/PreviewField"
+              }
+            },
+            "redactedFields": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "ActionCatalogPage": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ActionCatalogPage",
+      "type": "object",
+      "required": [
+        "descriptors",
+        "nextCursor",
+        "snapshotDigest"
+      ],
+      "properties": {
+        "descriptors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ActionDescriptor"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshotDigest": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ActionDescriptor": {
+          "type": "object",
+          "required": [
+            "actionId",
+            "definitionDigest",
+            "status"
+          ],
+          "properties": {
+            "actionId": {
+              "type": "string"
+            },
+            "definitionDigest": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/definitions/CatalogStatus"
+            }
+          },
+          "additionalProperties": false
+        },
+        "CatalogStatus": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "callable"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "status"
+              ],
+              "properties": {
+                "reason": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "unsupported"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "reason",
+                "status"
+              ],
+              "properties": {
+                "reason": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "unavailable"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    },
+    "ActionDefinitionView": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ActionDefinition",
+      "type": "object",
+      "required": [
+        "actionId",
+        "adapterRevision",
+        "cancel",
+        "definitionDigest",
+        "effectClass",
+        "inputSchema",
+        "inputSchemaDigest",
+        "outputSchema",
+        "outputSchemaDigest",
+        "reconcile",
+        "requiredCapabilities",
+        "retry"
+      ],
+      "properties": {
+        "actionId": {
+          "type": "string"
+        },
+        "adapterRevision": {
+          "type": "string"
+        },
+        "cancel": {
+          "type": "boolean"
+        },
+        "definitionDigest": {
+          "type": "string"
+        },
+        "effectClass": {
+          "$ref": "#/definitions/EffectClass"
+        },
+        "inputSchema": {
+          "type": "string"
+        },
+        "inputSchemaDigest": {
+          "type": "string"
+        },
+        "outputSchema": {
+          "type": "string"
+        },
+        "outputSchemaDigest": {
+          "type": "string"
+        },
+        "reconcile": {
+          "type": "boolean"
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "retry": {
+          "$ref": "#/definitions/RetryContract"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "EffectClass": {
+          "type": "string",
+          "enum": [
+            "read",
+            "local_write",
+            "external_draft",
+            "external_mutation",
+            "external_send",
+            "external_publish",
+            "external_delete"
+          ]
+        },
+        "RetryContract": {
+          "type": "string",
+          "enum": [
+            "never",
+            "idempotent",
+            "reconcile_first"
+          ]
+        }
+      }
+    },
+    "ActionError": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ActionError",
+      "type": "object",
+      "required": [
+        "code",
+        "message",
+        "retryDisposition"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ActionErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryDisposition": {
+          "$ref": "#/definitions/RetryDisposition"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ActionErrorCode": {
+          "type": "string",
+          "enum": [
+            "invalid_input",
+            "unsupported_schema",
+            "limit_exceeded",
+            "definition_mismatch",
+            "not_found",
+            "request_key_conflict",
+            "revision_conflict",
+            "denied",
+            "unavailable"
+          ]
+        },
+        "RetryDisposition": {
+          "type": "string",
+          "enum": [
+            "never",
+            "refresh",
+            "reconcile"
+          ]
+        }
+      }
+    },
+    "ActionReadError": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ActionReadError",
+      "type": "object",
+      "required": [
+        "code",
+        "message",
+        "retryDisposition"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ActionReadErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryDisposition": {
+          "$ref": "#/definitions/RetryDisposition"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ActionReadErrorCode": {
+          "type": "string",
+          "enum": [
+            "not_found",
+            "denied",
+            "unavailable"
+          ]
+        },
+        "RetryDisposition": {
+          "type": "string",
+          "enum": [
+            "never",
+            "refresh",
+            "reconcile"
+          ]
+        }
+      }
+    },
+    "ConnectionStatus": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ConnectionStatus",
+      "type": "object",
+      "required": [
+        "account",
+        "cleanupPending",
+        "connectionId",
+        "health",
+        "login",
+        "observedAt",
+        "remoteRevocation",
+        "revision",
+        "revocationGeneration",
+        "secretRevision"
+      ],
+      "properties": {
+        "account": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccountBinding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cleanupPending": {
+          "type": "boolean"
+        },
+        "connectionId": {
+          "type": "string"
+        },
+        "health": {
+          "$ref": "#/definitions/ConnectionHealth"
+        },
+        "login": {
+          "type": "string"
+        },
+        "observedAt": {
+          "type": "string"
+        },
+        "remoteRevocation": {
+          "$ref": "#/definitions/RemoteRevocation"
+        },
+        "revision": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 1.0
+        },
+        "revocationGeneration": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "secretRevision": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "AccountBinding": {
+          "type": "object",
+          "required": [
+            "accountId",
+            "accountRevision",
+            "issuer",
+            "scopeDigest",
+            "subject"
+          ],
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "accountRevision": {
+              "type": "integer",
+              "maximum": 9007199254740991.0,
+              "minimum": 1.0
+            },
+            "issuer": {
+              "type": "string"
+            },
+            "scopeDigest": {
+              "type": "string"
+            },
+            "subject": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ConnectionHealth": {
+          "type": "string",
+          "enum": [
+            "sign_in_required",
+            "ready",
+            "unavailable",
+            "unsupported",
+            "disabled"
+          ]
+        },
+        "RemoteRevocation": {
+          "type": "string",
+          "enum": [
+            "not_attempted"
+          ]
+        }
+      }
+    },
+    "ConnectionError": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ConnectionError",
+      "type": "string",
+      "enum": [
+        "sign_in_required",
+        "invalid_selection",
+        "stale_revision",
+        "not_found",
+        "unavailable",
+        "unsupported",
+        "identity_mismatch",
+        "cancelled",
+        "source_changed",
+        "unsafe_path",
+        "invalid_config"
+      ]
+    },
+    "ManagedConnectionPage": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ManagedConnectionPage",
+      "description": "Safe account metadata page. Cursor is a selector, never native authority.",
+      "type": "object",
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConnectionStatus"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "AccountBinding": {
+          "type": "object",
+          "required": [
+            "accountId",
+            "accountRevision",
+            "issuer",
+            "scopeDigest",
+            "subject"
+          ],
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "accountRevision": {
+              "type": "integer",
+              "maximum": 9007199254740991.0,
+              "minimum": 1.0
+            },
+            "issuer": {
+              "type": "string"
+            },
+            "scopeDigest": {
+              "type": "string"
+            },
+            "subject": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ConnectionHealth": {
+          "type": "string",
+          "enum": [
+            "sign_in_required",
+            "ready",
+            "unavailable",
+            "unsupported",
+            "disabled"
+          ]
+        },
+        "ConnectionStatus": {
+          "type": "object",
+          "required": [
+            "account",
+            "cleanupPending",
+            "connectionId",
+            "health",
+            "login",
+            "observedAt",
+            "remoteRevocation",
+            "revision",
+            "revocationGeneration",
+            "secretRevision"
+          ],
+          "properties": {
+            "account": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AccountBinding"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cleanupPending": {
+              "type": "boolean"
+            },
+            "connectionId": {
+              "type": "string"
+            },
+            "health": {
+              "$ref": "#/definitions/ConnectionHealth"
+            },
+            "login": {
+              "type": "string"
+            },
+            "observedAt": {
+              "type": "string"
+            },
+            "remoteRevocation": {
+              "$ref": "#/definitions/RemoteRevocation"
+            },
+            "revision": {
+              "type": "integer",
+              "maximum": 9007199254740991.0,
+              "minimum": 1.0
+            },
+            "revocationGeneration": {
+              "type": "integer",
+              "maximum": 9007199254740991.0,
+              "minimum": 0.0
+            },
+            "secretRevision": {
+              "type": "integer",
+              "maximum": 9007199254740991.0,
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "RemoteRevocation": {
+          "type": "string",
+          "enum": [
+            "not_attempted"
+          ]
+        }
+      }
+    },
+    "CredentialAcquisitionView": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "CredentialAcquisitionView",
+      "description": "Safe lifecycle projection. Internal person/ticket/secret authority is never serialized through this view; no public completion accepts it as proof.",
+      "type": "object",
+      "required": [
+        "attemptId",
+        "connectionId",
+        "error",
+        "expectedRevision",
+        "host",
+        "login",
+        "observedAt",
+        "revocationGeneration",
+        "state"
+      ],
+      "properties": {
+        "attemptId": {
+          "type": "string"
+        },
+        "connectionId": {
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConnectionError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 1.0
+        },
+        "host": {
+          "type": "string"
+        },
+        "login": {
+          "type": "string"
+        },
+        "observedAt": {
+          "type": "string"
+        },
+        "revocationGeneration": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        },
+        "state": {
+          "$ref": "#/definitions/AcquisitionState"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "AcquisitionState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "installed",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "ConnectionError": {
+          "type": "string",
+          "enum": [
+            "sign_in_required",
+            "invalid_selection",
+            "stale_revision",
+            "not_found",
+            "unavailable",
+            "unsupported",
+            "identity_mismatch",
+            "cancelled",
+            "source_changed",
+            "unsafe_path",
+            "invalid_config"
+          ]
+        }
+      }
+    },
+    "RunActionAccessView": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "RunActionAccessView",
+      "type": "object",
+      "required": [
+        "accessRequestId",
+        "accessRevision",
+        "accounts",
+        "definitions",
+        "grants",
+        "runId"
+      ],
+      "properties": {
+        "accessRequestId": {
+          "description": "Current original held access-request card, not a fabricated invocation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "accessRevision": {
+          "description": "Digest of this exact origin/grant-set/current account/catalog metadata. Native validates it again in the same transaction before replacing choices.",
+          "type": "string"
+        },
+        "accounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RunActionAccountChoice"
+          }
+        },
+        "definitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ActionDefinition"
+          }
+        },
+        "grants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RunActionGrantView"
+          }
+        },
+        "runId": {
+          "description": "Actual original durable id for metadata only; never a writer capability.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "ActionDefinition": {
+          "type": "object",
+          "required": [
+            "actionId",
+            "adapterRevision",
+            "cancel",
+            "definitionDigest",
+            "effectClass",
+            "inputSchema",
+            "inputSchemaDigest",
+            "outputSchema",
+            "outputSchemaDigest",
+            "reconcile",
+            "requiredCapabilities",
+            "retry"
+          ],
+          "properties": {
+            "actionId": {
+              "type": "string"
+            },
+            "adapterRevision": {
+              "type": "string"
+            },
+            "cancel": {
+              "type": "boolean"
+            },
+            "definitionDigest": {
+              "type": "string"
+            },
+            "effectClass": {
+              "$ref": "#/definitions/EffectClass"
+            },
+            "inputSchema": {
+              "type": "string"
+            },
+            "inputSchemaDigest": {
+              "type": "string"
+            },
+            "outputSchema": {
+              "type": "string"
+            },
+            "outputSchemaDigest": {
+              "type": "string"
+            },
+            "reconcile": {
+              "type": "boolean"
+            },
+            "requiredCapabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "retry": {
+              "$ref": "#/definitions/RetryContract"
+            }
+          },
+          "additionalProperties": false
+        },
+        "EffectClass": {
+          "type": "string",
+          "enum": [
+            "read",
+            "local_write",
+            "external_draft",
+            "external_mutation",
+            "external_send",
+            "external_publish",
+            "external_delete"
+          ]
+        },
+        "GrantInputView": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "all_valid_inputs"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "inputDigest",
+                "kind"
+              ],
+              "properties": {
+                "inputDigest": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "exact_canonical_input"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "RetryContract": {
+          "type": "string",
+          "enum": [
+            "never",
+            "idempotent",
+            "reconcile_first"
+          ]
+        },
+        "RunActionAccountChoice": {
+          "type": "object",
+          "required": [
+            "accountId",
+            "accountRevision",
+            "connectionId",
+            "label",
+            "revocationGeneration"
+          ],
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "accountRevision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "connectionId": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "revocationGeneration": {
+              "$ref": "#/definitions/SafeCounter"
+            }
+          },
+          "additionalProperties": false
+        },
+        "RunActionGrantView": {
+          "type": "object",
+          "required": [
+            "accountId",
+            "actionId",
+            "available",
+            "connectionId",
+            "definitionDigest",
+            "grantId",
+            "inputScope",
+            "revision"
+          ],
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "actionId": {
+              "type": "string"
+            },
+            "available": {
+              "type": "boolean"
+            },
+            "connectionId": {
+              "type": "string"
+            },
+            "definitionDigest": {
+              "type": "string"
+            },
+            "grantId": {
+              "type": "string"
+            },
+            "inputScope": {
+              "$ref": "#/definitions/GrantInputView"
+            },
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            }
+          },
+          "additionalProperties": false
+        },
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        }
+      }
+    },
+    "SetRunActionAccess": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "SetRunActionAccess",
+      "type": "object",
+      "required": [
+        "completeRequestId",
+        "expectedAccessRevision",
+        "selections"
+      ],
+      "properties": {
+        "completeRequestId": {
+          "description": "An explicit Done may finish this exact original access request, including a deliberate empty selection. Null changes access without answering a wait.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expectedAccessRevision": {
+          "type": "string"
+        },
+        "selections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RunActionGrantSelection"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "GrantInputSelection": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "all_valid_inputs"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "input",
+                "kind"
+              ],
+              "properties": {
+                "input": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "exact_canonical_input"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "RunActionGrantSelection": {
+          "description": "Preserve exact original rows without round-tripping hidden canonical input. A new selection always supplies new explicit input-scope material; it never changes the meaning of an existing exact-input grant implicitly.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "expectedRevision",
+                "grantId",
+                "kind"
+              ],
+              "properties": {
+                "expectedRevision": {
+                  "$ref": "#/definitions/SafeCounter"
+                },
+                "grantId": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "preserve"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "selection"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "new"
+                  ]
+                },
+                "selection": {
+                  "$ref": "#/definitions/RunActionSelection"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "RunActionSelection": {
+          "type": "object",
+          "required": [
+            "accountId",
+            "accountRevision",
+            "actionId",
+            "connectionId",
+            "definitionDigest",
+            "inputScope",
+            "revocationGeneration"
+          ],
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "accountRevision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "actionId": {
+              "type": "string"
+            },
+            "connectionId": {
+              "type": "string"
+            },
+            "definitionDigest": {
+              "type": "string"
+            },
+            "inputScope": {
+              "$ref": "#/definitions/GrantInputSelection"
+            },
+            "revocationGeneration": {
+              "$ref": "#/definitions/SafeCounter"
+            }
+          },
+          "additionalProperties": false
+        },
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        }
+      }
+    },
+    "SetRunActionAccessResult": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "SetRunActionAccessResult",
+      "oneOf": [
+        {
+          "description": "Only known commit produces Changed. sourceCurrent is a fresh observation of the ORIGINAL source after commit, not execution authority. requestClosed confirms only the exact access-choice wait consumed explicit Done; false never rolls back the already committed grants and must not trigger resend.",
+          "type": "object",
+          "required": [
+            "requestClosed",
+            "sourceCurrent",
+            "state",
+            "view"
+          ],
+          "properties": {
+            "requestClosed": {
+              "type": "boolean"
+            },
+            "sourceCurrent": {
+              "type": "boolean"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "changed"
+              ]
+            },
+            "view": {
+              "$ref": "#/definitions/RunActionAccessView"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "The original classified transaction could not establish whether commit occurred. This never claims changed/refused; UI disables blind resubmit.",
+          "type": "object",
+          "required": [
+            "message",
+            "state"
+          ],
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "commit_unknown"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "error",
+            "state"
+          ],
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ActionError"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "refused"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ],
+      "definitions": {
+        "ActionDefinition": {
+          "type": "object",
+          "required": [
+            "actionId",
+            "adapterRevision",
+            "cancel",
+            "definitionDigest",
+            "effectClass",
+            "inputSchema",
+            "inputSchemaDigest",
+            "outputSchema",
+            "outputSchemaDigest",
+            "reconcile",
+            "requiredCapabilities",
+            "retry"
+          ],
+          "properties": {
+            "actionId": {
+              "type": "string"
+            },
+            "adapterRevision": {
+              "type": "string"
+            },
+            "cancel": {
+              "type": "boolean"
+            },
+            "definitionDigest": {
+              "type": "string"
+            },
+            "effectClass": {
+              "$ref": "#/definitions/EffectClass"
+            },
+            "inputSchema": {
+              "type": "string"
+            },
+            "inputSchemaDigest": {
+              "type": "string"
+            },
+            "outputSchema": {
+              "type": "string"
+            },
+            "outputSchemaDigest": {
+              "type": "string"
+            },
+            "reconcile": {
+              "type": "boolean"
+            },
+            "requiredCapabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "retry": {
+              "$ref": "#/definitions/RetryContract"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ActionError": {
+          "type": "object",
+          "required": [
+            "code",
+            "message",
+            "retryDisposition"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "#/definitions/ActionErrorCode"
+            },
+            "message": {
+              "type": "string"
+            },
+            "retryDisposition": {
+              "$ref": "#/definitions/RetryDisposition"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ActionErrorCode": {
+          "type": "string",
+          "enum": [
+            "invalid_input",
+            "unsupported_schema",
+            "limit_exceeded",
+            "definition_mismatch",
+            "not_found",
+            "request_key_conflict",
+            "revision_conflict",
+            "denied",
+            "unavailable"
+          ]
+        },
+        "EffectClass": {
+          "type": "string",
+          "enum": [
+            "read",
+            "local_write",
+            "external_draft",
+            "external_mutation",
+            "external_send",
+            "external_publish",
+            "external_delete"
+          ]
+        },
+        "GrantInputView": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "all_valid_inputs"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "inputDigest",
+                "kind"
+              ],
+              "properties": {
+                "inputDigest": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "exact_canonical_input"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "RetryContract": {
+          "type": "string",
+          "enum": [
+            "never",
+            "idempotent",
+            "reconcile_first"
+          ]
+        },
+        "RetryDisposition": {
+          "type": "string",
+          "enum": [
+            "never",
+            "refresh",
+            "reconcile"
+          ]
+        },
+        "RunActionAccessView": {
+          "type": "object",
+          "required": [
+            "accessRequestId",
+            "accessRevision",
+            "accounts",
+            "definitions",
+            "grants",
+            "runId"
+          ],
+          "properties": {
+            "accessRequestId": {
+              "description": "Current original held access-request card, not a fabricated invocation.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "accessRevision": {
+              "description": "Digest of this exact origin/grant-set/current account/catalog metadata. Native validates it again in the same transaction before replacing choices.",
+              "type": "string"
+            },
+            "accounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/RunActionAccountChoice"
+              }
+            },
+            "definitions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ActionDefinition"
+              }
+            },
+            "grants": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/RunActionGrantView"
+              }
+            },
+            "runId": {
+              "description": "Actual original durable id for metadata only; never a writer capability.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "RunActionAccountChoice": {
+          "type": "object",
+          "required": [
+            "accountId",
+            "accountRevision",
+            "connectionId",
+            "label",
+            "revocationGeneration"
+          ],
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "accountRevision": {
+              "$ref": "#/definitions/SafeCounter"
+            },
+            "connectionId": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "revocationGeneration": {
+              "$ref": "#/definitions/SafeCounter"
+            }
+          },
+          "additionalProperties": false
+        },
+        "RunActionGrantView": {
+          "type": "object",
+          "required": [
+            "accountId",
+            "actionId",
+            "available",
+            "connectionId",
+            "definitionDigest",
+            "grantId",
+            "inputScope",
+            "revision"
+          ],
+          "properties": {
+            "accountId": {
+              "type": "string"
+            },
+            "actionId": {
+              "type": "string"
+            },
+            "available": {
+              "type": "boolean"
+            },
+            "connectionId": {
+              "type": "string"
+            },
+            "definitionDigest": {
+              "type": "string"
+            },
+            "grantId": {
+              "type": "string"
+            },
+            "inputScope": {
+              "$ref": "#/definitions/GrantInputView"
+            },
+            "revision": {
+              "$ref": "#/definitions/SafeCounter"
+            }
+          },
+          "additionalProperties": false
+        },
+        "SafeCounter": {
+          "type": "integer",
+          "maximum": 9007199254740991.0,
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

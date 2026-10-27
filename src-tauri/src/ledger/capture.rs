@@ -166,15 +166,15 @@ pub fn capture_from_json(
 
 /// Run one in-app capture of `path`, and record the projection under `by`
 /// when the capture changed its bytes (M58.1).
-fn recorded<E>(
+fn recorded<T, E>(
     vault: &Path,
     path: &str,
     by: &WriteReceipt<ConceptDoor>,
-    capture: impl FnOnce() -> Option<Result<(), E>>,
-) -> Option<Result<(), E>> {
+    capture: impl FnOnce() -> Option<Result<T, E>>,
+) -> Option<Result<T, E>> {
     let before = crate::vault::write::snapshot(vault, &[path]);
     let captured = capture();
-    if matches!(captured, Some(Ok(()))) {
+    if matches!(captured, Some(Ok(_))) {
         crate::vault::write::record_changed(vault, &before, by);
     }
     captured
@@ -1133,7 +1133,7 @@ pub fn capture_body_edit(
     body: &str,
     expect: Option<&str>,
     by: &WriteReceipt<ConceptDoor>,
-) -> Option<Result<(), crate::vault::write::NoteWriteError>> {
+) -> Option<Result<String, crate::vault::write::NoteWriteError>> {
     let expected = match expect
         .map(crate::vault::write::normalize_expect_hash)
         .transpose()
@@ -1155,7 +1155,7 @@ fn capture_body_edit_now(
     path: &str,
     body: &str,
     expect: Option<&str>,
-) -> Option<Result<(), crate::vault::write::NoteWriteError>> {
+) -> Option<Result<String, crate::vault::write::NoteWriteError>> {
     shadow::with_writer(vault, |writer| {
         crate::vault::write::check_note_expectation(vault, path, expect)?;
         let krel = path
@@ -1195,9 +1195,25 @@ fn capture_body_edit_now(
             diff,
             schema::OverrideOrigin::InApp,
             Capture::InApp,
-        )
-        .map_err(Into::into)
+        )?;
+        // Still under the ledger writer: the returned identity belongs to
+        // the authoritative materialized projection, never a later rescan.
+        let state = current_state(writer, vault)?;
+        let projection = project_belief(&state, &belief_id)?;
+        confirm_body_projection(vault, path, &projection.bytes)
     })
+}
+
+fn confirm_body_projection(
+    vault: &Path,
+    path: &str,
+    expected: &str,
+) -> Result<String, crate::vault::write::NoteWriteError> {
+    let actual = crate::vault::write::read_note_source(vault, path)?;
+    if actual.content != expected {
+        return Err("projection_confirmation_failed: materialized projection differs from its authoritative bytes".to_string().into());
+    }
+    Ok(actual.hash)
 }
 
 /// The M23.7 valve, frontmatter half: an in-app patch to a projection's
@@ -1850,6 +1866,22 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn body_ack_refuses_unconfirmed_or_deleted_projection() {
+        let vault = crate::vault::testutil::temp_vault("body-ack-confirmation");
+        std::fs::create_dir_all(vault.join("knowledge")).unwrap();
+        std::fs::write(vault.join("knowledge/a.md"), "outside").unwrap();
+        assert!(confirm_body_projection(&vault, "knowledge/a.md", "expected").is_err());
+        std::fs::remove_file(vault.join("knowledge/a.md")).unwrap();
+        assert!(confirm_body_projection(&vault, "knowledge/a.md", "expected").is_err());
+        std::fs::write(vault.join("knowledge/a.md"), "expected").unwrap();
+        assert_eq!(
+            confirm_body_projection(&vault, "knowledge/a.md", "expected").unwrap(),
+            crate::ledger::sha256_hex(b"expected")
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
     #[test]
     fn a_body_capture_rechecks_its_hash_under_the_ledger_writer() {
         let _sink = crate::runtime::sink::test_lock();

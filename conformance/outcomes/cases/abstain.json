@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "id": "abstain",
+  "title": "Abstain on unavailable evidence",
+  "adapter": "source_location",
+  "inputs": {
+    "vectors": [
+      "revoked scope hides locator",
+      "foreign vault hides locator",
+      "malformed frontmatter property is unavailable"
+    ]
+  },
+  "allowedEffects": [],
+  "forbiddenEffects": [
+    "send",
+    "verify"
+  ],
+  "expectedSources": [
+    {
+      "id": "revoked scope hides locator",
+      "status": "unavailable"
+    },
+    {
+      "id": "foreign vault hides locator",
+      "status": "unavailable"
+    },
+    {
+      "id": "malformed frontmatter property is unavailable",
+      "status": "unavailable"
+    }
+  ],
+  "expectedArtifacts": [],
+  "injections": [],
+  "requiredCapabilities": [
+    "answer_quality"
+  ]
+}

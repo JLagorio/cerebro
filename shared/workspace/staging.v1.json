@@ -1,0 +1,46 @@
+{
+  "format": 1,
+  "authority": "sqlite_metadata",
+  "marker": ".cerebro/workspace-format.json",
+  "manifest": ".cerebro/staged-manifest.json",
+  "database": "workspace.db",
+  "archive": "originals",
+  "limits": {
+    "entries": 12000,
+    "files": 6000,
+    "depth": 32,
+    "file_bytes": 8388608,
+    "total_bytes": 134217728,
+    "manifest_bytes": 8388608,
+    "marker_bytes": 16384,
+    "metadata_bytes": 16777216,
+    "database_bytes": 67108864
+  },
+  "excluded_components": {
+    ".git": "operational_git",
+    ".ssh": "private_credentials",
+    ".aws": "private_credentials",
+    ".gnupg": "private_credentials"
+  },
+  "excluded_paths": {
+    ".cerebro/connectors.json": "private_credentials",
+    ".cerebro/runtime.db": "operational_runtime",
+    ".cerebro/runtime.db-wal": "operational_runtime",
+    ".cerebro/runtime.db-shm": "operational_runtime",
+    ".cerebro/credentials": "private_credentials",
+    ".cerebro/tokens": "private_credentials"
+  },
+  "excluded_filename_patterns": [
+    { "directory": ".cerebro", "prefix": ".connectors.json.", "suffix": ".tmp", "reason": "private_credentials" }
+  ],
+  "private_filename_prefixes": [".env"],
+  "activation_blockers": [
+    "semantic_conversion_producer_not_adopted",
+    "governed_codec_and_ledger_semantics_not_accepted",
+    "consumer_cutover_matrix_incomplete",
+    "coordinated_crash_recovery_not_accepted",
+    "backup_restore_rehearsal_not_accepted",
+    "minimum_client_release_not_recorded"
+  ],
+  "retained_conversion_prefixes": [".cerebro/", ".trash/", ".comments/", ".claude/"]
+}

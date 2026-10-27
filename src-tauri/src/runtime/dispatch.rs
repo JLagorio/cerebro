@@ -1070,6 +1070,25 @@ fn finalize_inner(
     check: bool,
     now: DateTime<Utc>,
 ) -> Result<bool, String> {
+    // Recheck under the finalizer's IMMEDIATE transaction as well as selection.
+    // Any protected child identity routes only to coherent child settlement,
+    // even when child recovery failed or its joins are incomplete/corrupt.
+    let protected: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM child_job_claims WHERE run_id=?1)
+         OR EXISTS(SELECT 1 FROM action_native_runs WHERE run_id=?1 AND (source_kind='job' OR child_job_id IS NOT NULL))
+         OR EXISTS(SELECT 1 FROM child_job_reservations WHERE reserved_run_id=?1)",
+        [run_id], |r| r.get(0),
+    ).map_err(|e| format!("child recovery routing unavailable: {e}"))?;
+    if protected {
+        return Err("child lifecycle requires retained-owner settlement".into());
+    }
+    let workflow_owned: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM workflow_run_origins WHERE native_run_id=?1)",
+        [run_id], |row| row.get(0),
+    ).map_err(|error| format!("workflow lifecycle routing unavailable: {error}"))?;
+    if workflow_owned {
+        return Err("workflow lifecycle requires retained-owner settlement".into());
+    }
     let (vault_id, store_uuid, lane, mode, reserved_total, reserved_output, started_at): (
         Option<String>,
         Option<String>,
@@ -1413,9 +1432,9 @@ pub fn begin_attended(
         "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, outcome, \
          usage_state, input_tokens, output_tokens, cache_read, cache_write, \
          reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected, \
-         actor, parent_run_id, counters_booked, cause) \
+         actor, parent_run_id, counters_booked, cause, configuration_capture) \
          VALUES (?1, ?2, ?3, 'attended', 'agent', ?4, 'running', 'pending', 0, 0, 0, 0, 0, 0, \
-                 0, 0, 0, ?5, ?6, 1, ?7)",
+                 0, 0, 0, ?5, ?6, 1, ?7, CASE WHEN ?2 IS NOT NULL AND ?3 IS NOT NULL THEN 'required' ELSE 'legacy' END)",
         rusqlite::params![
             run_id,
             vault_id,
@@ -1428,6 +1447,80 @@ pub fn begin_attended(
     )
     .map_err(|e| format!("runs (attended, open): {e}"))?;
     Ok(())
+}
+
+/// Closed cause metadata for the one native workflow run writer. It grants no
+/// execution and is accepted only inside the original owner transaction.
+#[derive(Clone,Copy)]
+pub(crate) enum WorkflowOperationCause<'a>{
+    Manual,
+    Schedule{activation:&'a str,epoch:&'a str,occurrence:&'a str,due:DateTime<Utc>},
+}
+impl WorkflowOperationCause<'_>{
+    pub(crate) fn recorded(self,workflow:&str)->Result<RunCause,String>{
+        match self{
+            Self::Manual=>Ok(RunCause::new(super::cause::CauseKind::Manual,Some(workflow),None,None)),
+            Self::Schedule{activation,epoch,occurrence,due}=>{
+                let exact=|value:&str,len|value.len()==len&&value.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b));
+                if !exact(activation,32)||!exact(epoch,32)||!exact(occurrence,64){return Err("invalid original schedule identity".into());}
+                let detail=format!("activation:{activation} epoch:{epoch} occurrence:{occurrence}");
+                let due=due.to_rfc3339_opts(chrono::SecondsFormat::Millis,true);
+                Ok(RunCause::new(super::cause::CauseKind::Schedule,Some(workflow),Some(&detail),Some(&due)))
+            }
+        }
+    }
+}
+
+/// One native-owned non-CLI workflow operation. The caller already owns its
+/// authenticated opening and the transaction containing FLOW/origin rows.
+#[expect(clippy::too_many_arguments,reason="the owning start binds each original run identity and recorded cause explicitly")]
+pub(crate) fn begin_workflow_operation_rows(conn:&Connection,run_id:&str,vault:&str,store:&str,actor:&str,workflow:&str,cause:WorkflowOperationCause<'_>,now:DateTime<Utc>)->Result<(),String>{
+    if conn.is_autocommit()||run_id.len()!=32||!run_id.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b))||actor!=format!("workflow:{run_id}"){return Err("workflow operation requires original owner transaction and identity".into());}
+    let cause=cause.recorded(workflow)?;
+    begin_attended(conn,run_id,Some(vault),Some(store),Some(actor),None,Some(&cause),now)?;
+    // No model was invoked by this operation. Preserve unknown usage rather
+    // than interpreting the storage counters as a measured model zero.
+    let changed=conn.execute("UPDATE runs SET usage_state='unknown',writes_booked=1 WHERE run_id=?1 AND outcome='running' AND actor=?2",rusqlite::params![run_id,actor]).map_err(|e|e.to_string())?;
+    if changed!=1{return Err("workflow operation row missing".into());}Ok(())
+}
+
+// Actual child admission is bookkeeping before any CLI exists. This is the
+// sole child runs INSERT owner; neither claim nor history modules write one.
+#[cfg(feature = "native-read-smoke")]
+pub(crate) fn begin_unstarted_child(
+    conn: &Connection,
+    parent: &super::native_runs::NativeRun,
+    allocation: &super::child_jobs::Allocation,
+    now: DateTime<Utc>,
+) -> Result<(), String> {
+    if conn.is_autocommit() {
+        return Err("child admission needs owner transaction".into());
+    }
+    let actor = format!("job:{}", allocation.job_id);
+    if actor.len()
+        > crate::actions::schema::admission_rules()
+            .limits
+            .identity_bytes
+    {
+        return Err("child actor exceeds native identity bound".into());
+    }
+    let cause = RunCause::new(
+        super::cause::CauseKind::Handoff,
+        Some("cerebro-researcher"),
+        Some(&allocation.job_id),
+        None,
+    );
+    begin_attended(
+        conn,
+        &allocation.run_id,
+        Some(&parent.vault_id),
+        Some(&parent.store_uuid),
+        Some(&actor),
+        Some(&parent.run_id),
+        Some(&cause),
+        now,
+    )?;
+    record_cli_session(conn, &allocation.run_id, &allocation.session_id)
 }
 
 /// A personal-token session is an attributed run, not a model invocation.
@@ -1524,7 +1617,7 @@ pub fn book_partial_writes(
 /// never a finished run, never an ambient claim.
 pub fn discard_unstarted_attended(conn: &Connection, run_id: &str) -> Result<(), String> {
     conn.execute(
-        "DELETE FROM runs WHERE run_id = ?1 AND mode = 'attended' AND outcome = 'running'",
+        "DELETE FROM runs WHERE run_id = ?1 AND mode = 'attended' AND outcome = 'running' AND configuration_capture IN ('legacy','required') AND NOT EXISTS(SELECT 1 FROM workflow_run_origins w WHERE w.native_run_id=runs.run_id)",
         [run_id],
     )
     .map_err(|e| format!("runs (attended, discard): {e}"))?;
@@ -1554,7 +1647,12 @@ pub fn recover_orphaned_attended(
         let mut statement = conn
             .prepare(
                 "SELECT run_id FROM runs WHERE mode = 'attended' AND outcome = 'running' \
-                 AND started_at < ?1 ORDER BY run_id",
+                 AND started_at < ?1 \
+                 AND NOT EXISTS(SELECT 1 FROM child_job_claims c WHERE c.run_id=runs.run_id) \
+                 AND NOT EXISTS(SELECT 1 FROM action_native_runs n WHERE n.run_id=runs.run_id AND (n.source_kind='job' OR n.child_job_id IS NOT NULL)) \
+                 AND NOT EXISTS(SELECT 1 FROM child_job_reservations s WHERE s.reserved_run_id=runs.run_id) \
+                 AND NOT EXISTS(SELECT 1 FROM workflow_run_origins w WHERE w.native_run_id=runs.run_id) \
+                 ORDER BY run_id",
             )
             .map_err(|e| e.to_string())?;
         let rows = statement
@@ -1630,7 +1728,8 @@ pub fn meter_attended(
          input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens, \
          cache_read = excluded.cache_read, cache_write = excluded.cache_write \
          WHERE runs.mode = 'attended' \
-         AND runs.outcome IN ('running', 'abandoned_usage_unknown')",
+         AND runs.outcome IN ('running', 'abandoned_usage_unknown') \
+         AND NOT EXISTS(SELECT 1 FROM workflow_run_origins w WHERE w.native_run_id=runs.run_id)",
             rusqlite::params![
                 run_id,
                 vault_id,
@@ -1678,7 +1777,7 @@ pub fn record_cli_session(conn: &Connection, run_id: &str, id: &str) -> Result<(
         ));
     }
     conn.execute(
-        "UPDATE runs SET cli_session_id = ?2 WHERE run_id = ?1",
+        "UPDATE runs SET cli_session_id = ?2 WHERE run_id = ?1 AND NOT EXISTS(SELECT 1 FROM workflow_run_origins w WHERE w.native_run_id=runs.run_id)",
         rusqlite::params![run_id, id],
     )
     .map_err(|e| format!("runs (cli session): {e}"))?;
@@ -3956,6 +4055,11 @@ mod tests {
         let mut writers = Vec::new();
         for file in &files {
             let text = std::fs::read_to_string(file).unwrap();
+            // A standalone fixture may enforce test-only compilation on the
+            // entire file, rather than enclosing its code in an inline module.
+            if text.starts_with("#![cfg(test)]\n") {
+                continue;
+            }
             // Production code is what precedes the file's test module.
             let production = text
                 .find("#[cfg(test)]\nmod tests")
@@ -5250,4 +5354,26 @@ mod tests {
         drop(conn);
         let _ = std::fs::remove_dir_all(dir);
     }
+}
+
+/// Mirror only an actual finite FLOW terminal state into its exact native
+/// operation, within the caller's transaction. Generic CLI settlement stays out.
+pub(crate) fn finish_workflow_operation_rows(conn:&Connection,workflow:&str)->Result<(),String>{
+ if conn.is_autocommit(){return Err("workflow terminalization requires a caller transaction".into());}
+ let row:Option<(String,String,String,String,String,String,String,String,i64,bool)>=conn.query_row("SELECT o.native_run_id,o.authority_id,o.owner_person,o.vault_id,o.store_uuid,o.actor_id,o.canonical_vault_path,w.state,w.updated_at,o.revoked_at IS NOT NULL FROM workflow_run_origins o JOIN workflow_runs w ON w.run_id=o.workflow_run_id AND w.act_run_id=o.native_run_id AND w.owner_person=o.owner_person AND w.vault_id=o.vault_id AND w.store_uuid=o.store_uuid AND w.actor_id=o.actor_id AND w.configuration_digest=o.configuration_digest AND w.definition_hash=o.definition_hash AND w.grant_digest=o.permission_digest WHERE o.workflow_run_id=?1",[workflow],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?))).optional().map_err(|e|e.to_string())?;
+ let Some((run,authority,owner,vault,store,actor,path,state,updated,revoked))=row else{let origin_exists:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM workflow_run_origins WHERE workflow_run_id=?1)",[workflow],|r|r.get(0)).map_err(|e|e.to_string())?;return if origin_exists{Err("workflow native linkage changed".into())}else{Ok(())};};
+ if !matches!(state.as_str(),"succeeded"|"failed"|"cancelled"){return Err("workflow is not terminal".into());}
+ let native=conn.query_row(super::native_runs::RUN_SQL,[&run],super::native_runs::NativeRun::read).map_err(|e|e.to_string())?;
+ if native.authority_id!=authority||native.revision!=1||native.owner_person!=owner||native.vault_id!=vault||native.store_uuid!=store||native.actor_id!=actor||actor!=format!("workflow:{run}")||native.source_kind!="attended_operation"||native.canonical_vault_path!=path||native.vault_path!=path||native.actual_vault.as_deref()!=Some(vault.as_str())||native.actual_store.as_deref()!=Some(store.as_str())||native.actual_actor.as_deref()!=Some(actor.as_str())||native.cli_session_id.is_some()||native.actual_cli.is_some()||native.parent_run_id.is_some()||native.actual_parent.is_some()||native.client_id.is_some()||native.child_job_id.is_some(){return Err("workflow native operation identity changed".into());}
+ let creation:String=conn.query_row("SELECT creation_session_id FROM workflow_run_origins WHERE workflow_run_id=?1",[workflow],|r|r.get(0)).map_err(|e|e.to_string())?;
+ if native.app_session_id!=creation{return Err("workflow native creation identity changed".into());}
+ let close=if state=="cancelled"{if revoked{"revoked"}else{"stopped"}}else{"completed"};
+ let closed:Option<String>=conn.query_row("SELECT closed_at FROM action_native_runs WHERE run_id=?1",[&run],|r|r.get(0)).map_err(|e|e.to_string())?;
+ if native.outcome==state&&native.ended_at.is_some()&&native.ended_at==closed&&native.close_kind.as_deref()==Some(close){return Ok(());}
+ if native.outcome!="running"||native.ended_at.is_some()||native.close_kind.is_some()||closed.is_some(){return Err("workflow native operation was already settled differently".into());}
+ let now=DateTime::<Utc>::from_timestamp_millis(updated).ok_or("workflow terminal timestamp is unavailable")?;
+ let changed=conn.execute("UPDATE runs SET outcome=?2,ended_at=?3,usage_state='unknown',lease_expires_at=NULL WHERE run_id=?1 AND outcome='running' AND ended_at IS NULL",rusqlite::params![run,state,stamp(now)]).map_err(|e|e.to_string())?;
+ if changed!=1{return Err("workflow native operation changed before settlement".into());}
+ let changed=conn.execute("UPDATE action_native_runs SET close_kind=?2,closed_at=?3 WHERE run_id=?1 AND authority_id=?4 AND revision=1 AND close_kind IS NULL AND closed_at IS NULL",rusqlite::params![run,close,stamp(now),authority]).map_err(|e|e.to_string())?;
+ if changed!=1{return Err("workflow native provenance changed before settlement".into());}Ok(())
 }

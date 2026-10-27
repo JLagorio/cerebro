@@ -15,17 +15,20 @@ import { turnSources } from './turnSources';
  *
  * A thread does not keep all a reply drew on: a call's structured result and
  * a subagent's steps are memory only, and come back from Claude Code's
- * session file (`healFromTranscript`). So the list is partial when that file
- * could not be read back, when a subagent that ran and used tools holds none
- * of its steps (a branch's copy, or a `subagents/` transcript gone), or when
- * a finished web call still holds no result, and says why, rather than
- * reading short as whole (CV-05). While the file is still being read, what
- * it will put back is not missing yet.
+ * session file (`healFromTranscript`). So the list may be short when that
+ * file could not be read back, when a subagent that ran and used tools holds
+ * none of its steps (a branch's copy, or a `subagents/` transcript gone), or
+ * when a finished web call still holds no result, and says why rather than
+ * reading short as whole (CV-05): partial over the lines it has; with none,
+ * unavailable when the file could not be read, and not recorded when it read
+ * and a reply lost what it drew on, never "None". While the file is still
+ * being read, what it will put back is not missing yet.
  */
 
-/** The card's state (CV-44): a list, nothing to list, or a list that may be
- *  short of what the conversation drew on. */
-export type RailSourcesState = 'ready' | 'empty' | 'partial';
+/** The card's state (CV-44): a list; nothing to list; nothing listed though
+ *  a reply is known to have lost what it drew on; a list that may be short;
+ *  or nothing listed with the session file unread, so nothing can tell. */
+export type RailSourcesState = 'ready' | 'empty' | 'not-recorded' | 'partial' | 'unavailable';
 
 /** Why the list may be short. */
 export type RailSourcesMissing =
@@ -117,6 +120,16 @@ function replySources(message: ChatMessage): ReplySources {
   return part;
 }
 
+/** The card's state, from how many lines it lists and why the list may be
+ *  short: a list known to be short is partial; nothing listed is unavailable
+ *  when the session file could not be read, not recorded when a reply lost
+ *  what it drew on, and empty only when nothing is known to be missing. */
+function stateOf(lines: number, missing: RailSourcesMissing | null): RailSourcesState {
+  if (lines > 0) return missing === null ? 'ready' : 'partial';
+  if (missing === null) return 'empty';
+  return missing === 'transcript' ? 'unavailable' : 'not-recorded';
+}
+
 /** The last list made, with the parts it was made from and why it may be
  *  short. */
 let last: {
@@ -157,11 +170,7 @@ export function railSources(
     return last.list;
   }
   const cited = mergeSources(from);
-  const list: RailSources = {
-    state: missing !== null ? 'partial' : cited.length > 0 ? 'ready' : 'empty',
-    cited,
-    missing,
-  };
+  const list: RailSources = { state: stateOf(cited.length, missing), cited, missing };
   last = { from, missing, list };
   return list;
 }

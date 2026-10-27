@@ -156,9 +156,11 @@ SourceReturnOrigin =
   QuickOpen { vaultId, pane, visitId, snapshot: QuickOpenSnapshot } |
   Conversation { vaultId, threadId, turnId, presentation, scrollAnchor }
 SourceOpenRequest { requestId, locator, origin, intent: default|full_page|beside }
-openSource(request) -> NavOutcome
-returnToSourceOrigin(requestId) -> restored|origin_unavailable
+openSource(request) -> Promise<NavOutcome>
+returnToSourceOrigin(requestId) -> Promise<restored|origin_unavailable>
 ```
+
+M97.2 implementation ruling (2026-10-23): source opening awaits the existing scoped resolver before navigation. The UI has a vault path, while locators carry registered vault IDs; treating those as equal would permit a foreign locator to open an unrelated same-relative path. Async preflight retains the originating pane/visit and cancels on superseding requests, input, navigation or any vault transition, including A → B → A. Editor readiness still revalidates source/version before reveal.
 
 `src/app/sourceOpen.ts` coordinates the existing `useOpenPath`, `navigateIn`,
 `openPane` and peek APIs through `useSourceNavigation()`, which returns the
@@ -340,3 +342,5 @@ reproducible offline report with negative controls. Live quality and native sour
 reveal remain separately recorded. M93 owns save/history/native/scale repair, M95
 context and CLI normalization, M96 effects, and M98 preview/rehearsal. This draft
 does not claim new retrieval scores, successful live tasks or native validation.
+
+M97.2 repair contract amendment: Return awaits the existing save decision and revalidates the live visit/layout before reporting its outcome or reopening results. If the origin file is now held in another pane, reuse that holder instead of creating a second editor. A superseding navigation/return cancels the older result. This async return signature is required because dirty save acknowledgement can arrive later.

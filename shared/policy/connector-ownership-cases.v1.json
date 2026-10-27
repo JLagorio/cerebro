@@ -1,0 +1,648 @@
+{
+  "format": 1,
+  "entry_cases": [
+    {
+      "id": "legacy_absent_owner",
+      "entry": {},
+      "expected": "cli"
+    },
+    {
+      "id": "legacy_unknown_fields_preserved",
+      "entry": {
+        "headers": {
+          "Authorization": "synthetic"
+        },
+        "custom": {
+          "kept": true
+        }
+      },
+      "expected": "cli"
+    },
+    {
+      "id": "explicit_cli",
+      "entry": {
+        "executionOwner": "cli"
+      },
+      "expected": "cli"
+    },
+    {
+      "id": "managed_absent_reference",
+      "entry": {
+        "executionOwner": "cerebro"
+      },
+      "expected": "managed"
+    },
+    {
+      "id": "managed_disabled",
+      "entry": {
+        "executionOwner": "cerebro",
+        "enabled": false
+      },
+      "expected": "managed"
+    },
+    {
+      "id": "invalid_owner_null",
+      "entry": {
+        "executionOwner": null
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "invalid_owner_number",
+      "entry": {
+        "executionOwner": 7
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "invalid_owner_boolean",
+      "entry": {
+        "executionOwner": true
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "invalid_owner_empty",
+      "entry": {
+        "executionOwner": ""
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "invalid_owner_wrong_case",
+      "entry": {
+        "executionOwner": "Cerebro"
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "invalid_owner_wrong_cli_case",
+      "entry": {
+        "executionOwner": "CLI"
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "invalid_owner_unknown",
+      "entry": {
+        "executionOwner": "future"
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "invalid_owner_prototype_name",
+      "entry": {
+        "executionOwner": "__proto__"
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "invalid_owner_array",
+      "entry": {
+        "executionOwner": []
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "invalid_owner_object",
+      "entry": {
+        "executionOwner": {}
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "managed_reference_null",
+      "entry": {
+        "executionOwner": "cerebro",
+        "secretRef": null
+      },
+      "expected": "managed"
+    },
+    {
+      "id": "orphan_legacy_reference_null",
+      "entry": {
+        "secretRef": null
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "orphan_cli_reference_null",
+      "entry": {
+        "executionOwner": "cli",
+        "secretRef": null
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "managed_reference_number",
+      "entry": {
+        "executionOwner": "cerebro",
+        "secretRef": 7
+      },
+      "expected": "managed"
+    },
+    {
+      "id": "orphan_legacy_reference_number",
+      "entry": {
+        "secretRef": 7
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "orphan_cli_reference_number",
+      "entry": {
+        "executionOwner": "cli",
+        "secretRef": 7
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "managed_reference_boolean",
+      "entry": {
+        "executionOwner": "cerebro",
+        "secretRef": false
+      },
+      "expected": "managed"
+    },
+    {
+      "id": "orphan_legacy_reference_boolean",
+      "entry": {
+        "secretRef": false
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "orphan_cli_reference_boolean",
+      "entry": {
+        "executionOwner": "cli",
+        "secretRef": false
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "managed_reference_empty",
+      "entry": {
+        "executionOwner": "cerebro",
+        "secretRef": ""
+      },
+      "expected": "managed"
+    },
+    {
+      "id": "orphan_legacy_reference_empty",
+      "entry": {
+        "secretRef": ""
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "orphan_cli_reference_empty",
+      "entry": {
+        "executionOwner": "cli",
+        "secretRef": ""
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "managed_reference_string",
+      "entry": {
+        "executionOwner": "cerebro",
+        "secretRef": "synthetic-reference"
+      },
+      "expected": "managed"
+    },
+    {
+      "id": "orphan_legacy_reference_string",
+      "entry": {
+        "secretRef": "synthetic-reference"
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "orphan_cli_reference_string",
+      "entry": {
+        "executionOwner": "cli",
+        "secretRef": "synthetic-reference"
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "managed_reference_array",
+      "entry": {
+        "executionOwner": "cerebro",
+        "secretRef": []
+      },
+      "expected": "managed"
+    },
+    {
+      "id": "orphan_legacy_reference_array",
+      "entry": {
+        "secretRef": []
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "orphan_cli_reference_array",
+      "entry": {
+        "executionOwner": "cli",
+        "secretRef": []
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "managed_reference_object",
+      "entry": {
+        "executionOwner": "cerebro",
+        "secretRef": {
+          "version": 1,
+          "service": "synthetic",
+          "account": "synthetic"
+        }
+      },
+      "expected": "managed"
+    },
+    {
+      "id": "orphan_legacy_reference_object",
+      "entry": {
+        "secretRef": {
+          "version": 1,
+          "service": "synthetic",
+          "account": "synthetic"
+        }
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "orphan_cli_reference_object",
+      "entry": {
+        "executionOwner": "cli",
+        "secretRef": {
+          "version": 1,
+          "service": "synthetic",
+          "account": "synthetic"
+        }
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "invalid_owner_with_reference",
+      "entry": {
+        "executionOwner": null,
+        "secretRef": "synthetic"
+      },
+      "expected": "invalid"
+    },
+    {
+      "id": "non_object_entry",
+      "entry": null,
+      "expected": "invalid"
+    },
+    {
+      "id": "array_entry",
+      "entry": [],
+      "expected": "invalid"
+    }
+  ],
+  "policy_cases": [
+    {
+      "id": "supported_policy",
+      "patch": {},
+      "accepted": true
+    },
+    {
+      "id": "corrupt_json",
+      "raw": "{not json",
+      "accepted": false
+    },
+    {
+      "id": "null_root",
+      "value": null,
+      "accepted": false
+    },
+    {
+      "id": "array_root",
+      "value": [],
+      "accepted": false
+    },
+    {
+      "id": "unsupported_format",
+      "patch": {
+        "format": 2
+      },
+      "accepted": false
+    },
+    {
+      "id": "missing_format",
+      "patch": {
+        "format": null
+      },
+      "accepted": false
+    },
+    {
+      "id": "zero_version",
+      "patch": {
+        "artifact_version": 0
+      },
+      "accepted": false
+    },
+    {
+      "id": "fractional_version",
+      "patch": {
+        "artifact_version": 1.5
+      },
+      "accepted": false
+    },
+    {
+      "id": "unsafe_version",
+      "patch": {
+        "artifact_version": 9007199254740992
+      },
+      "accepted": false
+    },
+    {
+      "id": "blank_owner_field",
+      "patch": {
+        "owner_field": ""
+      },
+      "accepted": false
+    },
+    {
+      "id": "empty_owners",
+      "patch": {
+        "owners": []
+      },
+      "accepted": false
+    },
+    {
+      "id": "duplicate_owners",
+      "patch": {
+        "owners": [
+          {
+            "value": "cli",
+            "disposition": "cli"
+          },
+          {
+            "value": "cli",
+            "disposition": "managed"
+          }
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "unsorted_owners",
+      "patch": {
+        "owners": [
+          {
+            "value": "cli",
+            "disposition": "cli"
+          },
+          {
+            "value": "cerebro",
+            "disposition": "managed"
+          }
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "invalid_known_disposition",
+      "patch": {
+        "owners": [
+          {
+            "value": "cerebro",
+            "disposition": "invalid"
+          },
+          {
+            "value": "cli",
+            "disposition": "cli"
+          }
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "unknown_rule_field",
+      "patch": {
+        "owners": [
+          {
+            "value": "cerebro",
+            "disposition": "managed",
+            "extra": true
+          },
+          {
+            "value": "cli",
+            "disposition": "cli"
+          }
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "wrong_rule_value_type",
+      "patch": {
+        "owners": [
+          {
+            "value": 7,
+            "disposition": "managed"
+          },
+          {
+            "value": "cli",
+            "disposition": "cli"
+          }
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "unsupported_absent_default",
+      "patch": {
+        "absent_owner": "managed"
+      },
+      "accepted": false
+    },
+    {
+      "id": "permissive_unknown_default",
+      "patch": {
+        "unknown_owner": "cli"
+      },
+      "accepted": false
+    },
+    {
+      "id": "permissive_managed_marker",
+      "patch": {
+        "cli_with_managed_field": "cli"
+      },
+      "accepted": false
+    },
+    {
+      "id": "empty_markers",
+      "patch": {
+        "managed_only_fields": []
+      },
+      "accepted": false
+    },
+    {
+      "id": "duplicate_markers",
+      "patch": {
+        "managed_only_fields": [
+          "secretRef",
+          "secretRef"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "unsorted_markers",
+      "patch": {
+        "managed_only_fields": [
+          "secretRef",
+          "accountRef"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "owner_marker_conflict",
+      "patch": {
+        "managed_only_fields": [
+          "executionOwner"
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "id": "blank_reason",
+      "patch": {
+        "messages": {
+          "managed": "",
+          "invalid": "Connector ownership needs correction in .cerebro/connectors.json.",
+          "unavailable": "Connector ownership policy is unavailable."
+        }
+      },
+      "accepted": false
+    },
+    {
+      "id": "unknown_reason_field",
+      "patch": {
+        "messages": {
+          "managed": "Managed execution is unavailable for this connector.",
+          "invalid": "Connector ownership needs correction in .cerebro/connectors.json.",
+          "unavailable": "Connector ownership policy is unavailable.",
+          "extra": "unexpected"
+        }
+      },
+      "accepted": false
+    },
+    {
+      "id": "unknown_root_field",
+      "patch": {
+        "extra": true
+      },
+      "accepted": false
+    },
+    {
+      "id": "interprets_declared_owner_names",
+      "patch": {
+        "owners": [
+          {
+            "value": "cerebro",
+            "disposition": "managed"
+          },
+          {
+            "value": "custom",
+            "disposition": "cli"
+          }
+        ]
+      },
+      "accepted": true,
+      "probes": [
+        {
+          "entry": {
+            "executionOwner": "custom"
+          },
+          "expected": "cli"
+        },
+        {
+          "entry": {
+            "executionOwner": "cli"
+          },
+          "expected": "invalid"
+        }
+      ]
+    },
+    {
+      "id": "interprets_declared_field_names",
+      "patch": {
+        "owner_field": "runner",
+        "managed_only_fields": [
+          "reference"
+        ]
+      },
+      "accepted": true,
+      "probes": [
+        {
+          "entry": {
+            "runner": "cerebro"
+          },
+          "expected": "managed"
+        },
+        {
+          "entry": {
+            "runner": "cli",
+            "reference": null
+          },
+          "expected": "invalid"
+        },
+        {
+          "entry": {
+            "secretRef": null
+          },
+          "expected": "cli"
+        }
+      ]
+    },
+    {
+      "id": "integral_json_numbers",
+      "raw": "{\n  \"format\": 1.0,\n  \"artifact_version\": 1.0,\n  \"owner_field\": \"executionOwner\",\n  \"owners\": [\n    {\n      \"value\": \"cerebro\",\n      \"disposition\": \"managed\"\n    },\n    {\n      \"value\": \"cli\",\n      \"disposition\": \"cli\"\n    }\n  ],\n  \"absent_owner\": \"cli\",\n  \"unknown_owner\": \"invalid\",\n  \"managed_only_fields\": [\n    \"secretRef\"\n  ],\n  \"cli_with_managed_field\": \"invalid\",\n  \"messages\": {\n    \"managed\": \"Managed execution is unavailable for this connector.\",\n    \"invalid\": \"Connector ownership needs correction in .cerebro/connectors.json.\",\n    \"unavailable\": \"Connector ownership policy is unavailable.\"\n  }\n}\n",
+      "accepted": true
+    },
+    {
+      "id": "blank_managed_reason",
+      "patch": {
+        "messages": {
+          "managed": "   ",
+          "invalid": "Connector ownership needs correction in .cerebro/connectors.json.",
+          "unavailable": "Connector ownership policy is unavailable."
+        }
+      },
+      "accepted": false
+    },
+    {
+      "id": "control_in_reason",
+      "patch": {
+        "messages": {
+          "managed": "Managed execution is unavailable for this connector.",
+          "invalid": "bad\nreason",
+          "unavailable": "Connector ownership policy is unavailable."
+        }
+      },
+      "accepted": false
+    },
+    {
+      "id": "non_ascii_owner_name",
+      "patch": {
+        "owners": [
+          {
+            "value": "cerebro",
+            "disposition": "managed"
+          },
+          {
+            "value": "clí",
+            "disposition": "cli"
+          }
+        ]
+      },
+      "accepted": false
+    }
+  ]
+}

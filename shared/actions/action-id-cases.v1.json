@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "legacyColon": {
+    "minimumSegments": 2,
+    "firstCharacters": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "remainingCharacters": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+  },
+  "dotted": {
+    "minimumSegments": 2,
+    "firstCharacters": "abcdefghijklmnopqrstuvwxyz",
+    "remainingCharacters": "abcdefghijklmnopqrstuvwxyz0123456789_-"
+  },
+  "cases": [
+    {
+      "id": "github.issue.read",
+      "accepted": true
+    },
+    {
+      "id": "github.issue.create",
+      "accepted": true
+    },
+    {
+      "id": "vendor.action",
+      "accepted": true
+    },
+    {
+      "id": "vendor_2.action-name",
+      "accepted": true
+    },
+    {
+      "id": "legacy:issue-read",
+      "accepted": true
+    },
+    {
+      "id": "Legacy:Original_ID",
+      "accepted": true
+    },
+    {
+      "id": "github..issue",
+      "accepted": false
+    },
+    {
+      "id": ".github.issue",
+      "accepted": false
+    },
+    {
+      "id": "github.issue.",
+      "accepted": false
+    },
+    {
+      "id": "github.issue read",
+      "accepted": false
+    },
+    {
+      "id": "github.\nissue",
+      "accepted": false
+    },
+    {
+      "id": "github.2issue",
+      "accepted": false
+    },
+    {
+      "id": "github.Issue",
+      "accepted": false
+    },
+    {
+      "id": "",
+      "accepted": false
+    },
+    {
+      "id": "github",
+      "accepted": false
+    },
+    {
+      "id": ":read",
+      "accepted": false
+    },
+    {
+      "id": "fixture:",
+      "accepted": false
+    },
+    {
+      "id": "fixture::read",
+      "accepted": false
+    },
+    {
+      "id": "fixture:has space",
+      "accepted": false
+    },
+    {
+      "id": "fixture:bad\nread",
+      "accepted": false
+    },
+    {
+      "id": "fixture:\u00e9",
+      "accepted": false
+    },
+    {
+      "id": "fixture:$(read)",
+      "accepted": false
+    },
+    {
+      "id": "fixture:read;send",
+      "accepted": false
+    },
+    {
+      "id": "fixture:read/read",
+      "accepted": false
+    }
+  ]
+}

@@ -1,0 +1,455 @@
+{
+  "version": 1,
+  "provenance": {
+    "author": "Codex M97.7 fixture author; independent review: Codex /root/m95_generation_admission, 2026-10-26",
+    "basis": "Independent source-only review of every literal corpus/query/passage judgment by an agent other than the fixture author. Accepted means source relevance under scripts/outcomes/retrieval.ts, not human approval, reliable answer support, current-date truth, model quality or a release threshold. All 37 judgments accepted; prior launch-rumor dispute resolved as topical source relevance, with undated reliability unresolved. No retrieval or model execution occurred during this review."
+  },
+  "passages": [
+    {
+      "id": "budget",
+      "path": "visible/budget.md",
+      "quote": "The Harbor budget is 42 credits for the library roof."
+    },
+    {
+      "id": "deadline",
+      "path": "visible/deadline.md",
+      "quote": "Completion deadline: November 3."
+    },
+    {
+      "id": "alias",
+      "path": "visible/alias.md",
+      "quote": "The project link is [[phoenix|Lantern]]."
+    },
+    {
+      "id": "accent",
+      "path": "visible/accent.md",
+      "quote": "The café closes at six."
+    },
+    {
+      "id": "japanese",
+      "path": "visible/japanese.md",
+      "quote": "出荷 予定 は 十一月 三日 です。"
+    },
+    {
+      "id": "long",
+      "path": "visible/long.md",
+      "quote": "The latebodymarker appears after the production body cap."
+    },
+    {
+      "id": "imported",
+      "path": "visible/import.md",
+      "quote": "Harbor permits require review before construction."
+    },
+    {
+      "id": "task",
+      "path": "visible/task.md",
+      "quote": "Mina schedules the roof inspection."
+    },
+    {
+      "id": "launch-plan",
+      "path": "visible/launch-plan.md",
+      "quote": "The launch window is October 15."
+    },
+    {
+      "id": "launch-change",
+      "path": "visible/launch-change.md",
+      "quote": "The launch window changed to November 3 because permits are delayed."
+    },
+    {
+      "id": "launch-rumor",
+      "path": "visible/launch-rumor.md",
+      "quote": "An undated note repeats October 15 as the launch window."
+    },
+    {
+      "id": "private",
+      "path": "hidden/private.md",
+      "quote": "privatecanary is available only in the hidden folder."
+    },
+    {
+      "id": "cutoff-0",
+      "path": "visible/cutoff-00.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-1",
+      "path": "visible/cutoff-01.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-2",
+      "path": "visible/cutoff-02.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-3",
+      "path": "visible/cutoff-03.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-4",
+      "path": "visible/cutoff-04.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-5",
+      "path": "visible/cutoff-05.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-6",
+      "path": "visible/cutoff-06.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-7",
+      "path": "visible/cutoff-07.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-8",
+      "path": "visible/cutoff-08.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-9",
+      "path": "visible/cutoff-09.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-10",
+      "path": "visible/cutoff-10.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-11",
+      "path": "visible/cutoff-11.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-12",
+      "path": "visible/cutoff-12.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-13",
+      "path": "visible/cutoff-13.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-14",
+      "path": "visible/cutoff-14.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-15",
+      "path": "visible/cutoff-15.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-16",
+      "path": "visible/cutoff-16.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-17",
+      "path": "visible/cutoff-17.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-18",
+      "path": "visible/cutoff-18.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-19",
+      "path": "visible/cutoff-19.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-20",
+      "path": "visible/cutoff-20.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-21",
+      "path": "visible/cutoff-21.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-22",
+      "path": "visible/cutoff-22.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-23",
+      "path": "visible/cutoff-23.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    },
+    {
+      "id": "cutoff-24",
+      "path": "visible/cutoff-24.md",
+      "quote": "cutoffneedle marks this synthetic source."
+    }
+  ],
+  "judgments": [
+    {
+      "queryId": "exact",
+      "passageId": "budget",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The passage explicitly gives the named Harbor budget; accept source relevance."
+    },
+    {
+      "queryId": "paraphrase",
+      "passageId": "deadline",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "Completion deadline directly addresses finishing time. The query does not identify a project or speaker, so accept a potentially useful source, not a unique or contextually proven answer."
+    },
+    {
+      "queryId": "alias",
+      "passageId": "alias",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "Lantern is the explicit display alias in the project wikilink; accept source relevance without claiming alias indexing."
+    },
+    {
+      "queryId": "accent",
+      "passageId": "accent",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The source explicitly concerns a café, the same lexical item as cafe with an accent difference; accept relevance without claiming normalization performance."
+    },
+    {
+      "queryId": "multilingual",
+      "passageId": "japanese",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The query words 出荷 予定 appear together in a sentence giving a shipping schedule; accept source relevance."
+    },
+    {
+      "queryId": "long",
+      "passageId": "long",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact requested marker occurs in the source; accept relevance independently of whether the production body cap admits the passage."
+    },
+    {
+      "queryId": "imported",
+      "passageId": "imported",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The passage explicitly names Harbor permits and their review prerequisite; accept relevance. The import shape is synthetic and proves no importer behavior."
+    },
+    {
+      "queryId": "mixed",
+      "passageId": "task",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The Task passage names Mina and roof inspection; both query concepts appear literally."
+    },
+    {
+      "queryId": "counterevidence",
+      "passageId": "launch-plan",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The passage gives an October 15 launch window and is relevant to the neutral launch-window query; acceptance does not establish the current date."
+    },
+    {
+      "queryId": "counterevidence",
+      "passageId": "launch-change",
+      "role": "counterevidence",
+      "review": "accepted",
+      "rationale": "The passage explicitly changes the launch window to November 3, contradicting the October 15 statement in launch-plan. Accept counterevidence relative to that companion passage, not to a proposition asserted by the neutral query."
+    },
+    {
+      "queryId": "scope",
+      "passageId": "private",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact privatecanary term is present. Accept semantic relevance only; hidden/private.md lies outside visible and must stay outside the admitted denominator. Returning it is still a scope failure."
+    },
+    {
+      "queryId": "counterevidence",
+      "passageId": "launch-rumor",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "Resolve the prior dispute as accepted source relevance: the undated note explicitly discusses the launch window and repeats October 15. Staleness affects trust and answer support, which this evaluator does not measure; it does not make the source irrelevant."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-0",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-00.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-1",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-01.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-2",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-02.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-3",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-03.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-4",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-04.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-5",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-05.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-6",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-06.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-7",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-07.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-8",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-08.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-9",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-09.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-10",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-10.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-11",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-11.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-12",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-12.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-13",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-13.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-14",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-14.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-15",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-15.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-16",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-16.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-17",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-17.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-18",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-18.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-19",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-19.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-20",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-20.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-21",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-21.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-22",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-22.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-23",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-23.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    },
+    {
+      "queryId": "cutoff",
+      "passageId": "cutoff-24",
+      "role": "supporting",
+      "review": "accepted",
+      "rationale": "The exact cutoffneedle term occurs in visible/cutoff-24.md. Accept this distinct source alongside all 24 other identical-text cutoff sources; no ranking was observed or selected."
+    }
+  ]
+}

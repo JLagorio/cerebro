@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "limit_source": {
+    "artifact": "shared/policy/subagents.v1.json",
+    "depth_env": "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH",
+    "concurrent_env": "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",
+    "admissions_env": "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION"
+  },
+  "execution": {
+    "read_only": true,
+    "desktop_awake_only": true,
+    "max_elapsed_seconds": 600,
+    "max_result_bytes": 262144
+  },
+  "input_bounds": {
+    "max_spec_bytes": 65536,
+    "max_objective_bytes": 16384,
+    "max_evidence_refs": 64,
+    "max_path_bytes": 512,
+    "max_identity_bytes": 128,
+    "max_evidence_file_bytes": 16777216,
+    "max_evidence_total_bytes": 67108864
+  },
+  "result_schema_ids": [
+    "read_evidence_summary.v1"
+  ],
+  "refusal_destiny": "operational"
+}

@@ -1,0 +1,781 @@
+{
+  "version": 1,
+  "scope": {
+    "vault": "/test-only-selected-entry-projection",
+    "path": "page.md",
+    "field": "flag"
+  },
+  "provenance": "actual_disposable_native_scan_read_property_patch_request_ack",
+  "sanitizedPresentationFields": [
+    "Entry.createdAt",
+    "Entry.modifiedAt"
+  ],
+  "originalStamp": "cfg(test) scoped at actual mint before native transaction, not rewritten after commit",
+  "samples": {
+    "number": {
+      "request": {
+        "target": {
+          "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+          "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea"
+        },
+        "requestKey": "30ebaf6d-dd57-476b-8c1c-19703d3905b3",
+        "expectedVersion": {
+          "kind": "sqlite_metadata",
+          "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+          "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+          "metadataRevision": "7",
+          "metadataHash": "7bc939d7275a505fdff6ec1e911cdfc618a32f59ba56b3daf5f6cd2d5139bbda",
+          "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+        },
+        "changes": [
+          {
+            "op": "set",
+            "key": "flag",
+            "value": {
+              "kind": "decimal",
+              "value": "1e400"
+            }
+          }
+        ],
+        "phase": "start",
+        "original": null
+      },
+      "ack": {
+        "kind": "applied",
+        "operation": {
+          "target": {
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea"
+          },
+          "path": "page.md",
+          "requestKey": "30ebaf6d-dd57-476b-8c1c-19703d3905b3",
+          "operationId": "8dbadc70-6318-4f8e-93ac-2f8a9c0d0001",
+          "version": {
+            "kind": "sqlite_metadata",
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+            "metadataRevision": "8",
+            "metadataHash": "21dfedeac18a3006bbb446d582a24832b2f24bf0962a929b2da6c99d2851d21a",
+            "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+          },
+          "receipt": {
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "epoch": "12",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+            "previousRevision": "7",
+            "revision": "8",
+            "metadataBeforeHash": "7bc939d7275a505fdff6ec1e911cdfc618a32f59ba56b3daf5f6cd2d5139bbda",
+            "metadataAfterHash": "21dfedeac18a3006bbb446d582a24832b2f24bf0962a929b2da6c99d2851d21a",
+            "bodyBeforeHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+            "bodyAfterHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+            "actor": "human:me",
+            "runId": null,
+            "approvedBy": null,
+            "operation": "metadata.patch",
+            "at": "2026-10-27T00:00:00+00:00"
+          }
+        },
+        "currentVersion": {
+          "kind": "sqlite_metadata",
+          "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+          "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+          "metadataRevision": "8",
+          "metadataHash": "21dfedeac18a3006bbb446d582a24832b2f24bf0962a929b2da6c99d2851d21a",
+          "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+        },
+        "reconcileRequired": false
+      },
+      "before": {
+        "entries": [
+          {
+            "path": "page.md",
+            "filename": "page.md",
+            "folder": "",
+            "project": null,
+            "title": "Canonical body",
+            "type": "Task",
+            "properties": {
+              "code": "before",
+              "flag": 1,
+              "type": "Task"
+            },
+            "relationships": {},
+            "outgoingLinks": [
+              "body-link"
+            ],
+            "snippet": "type: Agent tools: ['writenote'] A body-link stays body.",
+            "createdAt": "2000-01-01T00:00:00Z",
+            "modifiedAt": "2000-01-01T00:00:00Z",
+            "parseError": null,
+            "hash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+            "authority": {
+              "kind": "sqlite_metadata",
+              "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+              "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+              "metadataRevision": "7",
+              "metadataHash": "7bc939d7275a505fdff6ec1e911cdfc618a32f59ba56b3daf5f6cd2d5139bbda",
+              "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+            },
+            "canonicalProperties": {
+              "value": {
+                "kind": "object",
+                "value": {
+                  "code": {
+                    "kind": "string",
+                    "value": "before"
+                  },
+                  "flag": {
+                    "kind": "decimal",
+                    "value": "1"
+                  },
+                  "type": {
+                    "kind": "string",
+                    "value": "Task"
+                  }
+                }
+              },
+              "unavailableLegacyKeys": []
+            },
+            "bodyObservation": {
+              "coherence": "paired",
+              "observedBodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+            }
+          },
+          {
+            "path": "task-type.md",
+            "filename": "task-type.md",
+            "folder": "",
+            "project": null,
+            "title": "Task",
+            "type": "Type",
+            "properties": {
+              "fields": {
+                "code": "text",
+                "flag": "number",
+                "nullable": "text",
+                "present": "text"
+              },
+              "type": "Type"
+            },
+            "relationships": {},
+            "outgoingLinks": [],
+            "snippet": "",
+            "createdAt": "2000-01-01T00:00:00Z",
+            "modifiedAt": "2000-01-01T00:00:00Z",
+            "parseError": null,
+            "hash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451",
+            "authority": {
+              "kind": "sqlite_metadata",
+              "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+              "recordId": "f0af7737-ab3a-4754-9e12-91f0378ceaa0",
+              "metadataRevision": "1",
+              "metadataHash": "77cf5fbc25325e2465aa10f277ff838554dbe9c9005ffa6c556d0886b2440dc2",
+              "bodyHash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451"
+            },
+            "canonicalProperties": {
+              "value": {
+                "kind": "object",
+                "value": {
+                  "fields": {
+                    "kind": "object",
+                    "value": {
+                      "code": {
+                        "kind": "string",
+                        "value": "text"
+                      },
+                      "flag": {
+                        "kind": "string",
+                        "value": "number"
+                      },
+                      "nullable": {
+                        "kind": "string",
+                        "value": "text"
+                      },
+                      "present": {
+                        "kind": "string",
+                        "value": "text"
+                      }
+                    }
+                  },
+                  "type": {
+                    "kind": "string",
+                    "value": "Type"
+                  }
+                }
+              },
+              "unavailableLegacyKeys": []
+            },
+            "bodyObservation": {
+              "coherence": "paired",
+              "observedBodyHash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451"
+            }
+          }
+        ],
+        "field": {
+          "target": {
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea"
+          },
+          "path": "page.md",
+          "field": "flag",
+          "version": {
+            "kind": "sqlite_metadata",
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+            "metadataRevision": "7",
+            "metadataHash": "7bc939d7275a505fdff6ec1e911cdfc618a32f59ba56b3daf5f6cd2d5139bbda",
+            "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+          },
+          "value": {
+            "kind": "present",
+            "value": {
+              "kind": "decimal",
+              "value": "1"
+            }
+          },
+          "observedBodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+          "coherence": "paired",
+          "editable": true,
+          "readOnlyReason": null
+        }
+      },
+      "after": {
+        "entries": [
+          {
+            "path": "page.md",
+            "filename": "page.md",
+            "folder": "",
+            "project": null,
+            "title": "Canonical body",
+            "type": "Task",
+            "properties": {
+              "code": "before",
+              "type": "Task"
+            },
+            "relationships": {},
+            "outgoingLinks": [
+              "body-link"
+            ],
+            "snippet": "type: Agent tools: ['writenote'] A body-link stays body.",
+            "createdAt": "2000-01-01T00:00:00Z",
+            "modifiedAt": "2000-01-01T00:00:00Z",
+            "parseError": null,
+            "hash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+            "authority": {
+              "kind": "sqlite_metadata",
+              "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+              "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+              "metadataRevision": "8",
+              "metadataHash": "21dfedeac18a3006bbb446d582a24832b2f24bf0962a929b2da6c99d2851d21a",
+              "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+            },
+            "canonicalProperties": {
+              "value": {
+                "kind": "object",
+                "value": {
+                  "code": {
+                    "kind": "string",
+                    "value": "before"
+                  },
+                  "flag": {
+                    "kind": "decimal",
+                    "value": "1e400"
+                  },
+                  "type": {
+                    "kind": "string",
+                    "value": "Task"
+                  }
+                }
+              },
+              "unavailableLegacyKeys": [
+                "flag"
+              ]
+            },
+            "bodyObservation": {
+              "coherence": "paired",
+              "observedBodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+            }
+          },
+          {
+            "path": "task-type.md",
+            "filename": "task-type.md",
+            "folder": "",
+            "project": null,
+            "title": "Task",
+            "type": "Type",
+            "properties": {
+              "fields": {
+                "code": "text",
+                "flag": "number",
+                "nullable": "text",
+                "present": "text"
+              },
+              "type": "Type"
+            },
+            "relationships": {},
+            "outgoingLinks": [],
+            "snippet": "",
+            "createdAt": "2000-01-01T00:00:00Z",
+            "modifiedAt": "2000-01-01T00:00:00Z",
+            "parseError": null,
+            "hash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451",
+            "authority": {
+              "kind": "sqlite_metadata",
+              "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+              "recordId": "f0af7737-ab3a-4754-9e12-91f0378ceaa0",
+              "metadataRevision": "1",
+              "metadataHash": "77cf5fbc25325e2465aa10f277ff838554dbe9c9005ffa6c556d0886b2440dc2",
+              "bodyHash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451"
+            },
+            "canonicalProperties": {
+              "value": {
+                "kind": "object",
+                "value": {
+                  "fields": {
+                    "kind": "object",
+                    "value": {
+                      "code": {
+                        "kind": "string",
+                        "value": "text"
+                      },
+                      "flag": {
+                        "kind": "string",
+                        "value": "number"
+                      },
+                      "nullable": {
+                        "kind": "string",
+                        "value": "text"
+                      },
+                      "present": {
+                        "kind": "string",
+                        "value": "text"
+                      }
+                    }
+                  },
+                  "type": {
+                    "kind": "string",
+                    "value": "Type"
+                  }
+                }
+              },
+              "unavailableLegacyKeys": []
+            },
+            "bodyObservation": {
+              "coherence": "paired",
+              "observedBodyHash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451"
+            }
+          }
+        ],
+        "field": {
+          "target": {
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea"
+          },
+          "path": "page.md",
+          "field": "flag",
+          "version": {
+            "kind": "sqlite_metadata",
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+            "metadataRevision": "8",
+            "metadataHash": "21dfedeac18a3006bbb446d582a24832b2f24bf0962a929b2da6c99d2851d21a",
+            "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+          },
+          "value": {
+            "kind": "present",
+            "value": {
+              "kind": "decimal",
+              "value": "1e400"
+            }
+          },
+          "observedBodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+          "coherence": "paired",
+          "editable": true,
+          "readOnlyReason": null
+        }
+      }
+    },
+    "date": {
+      "request": {
+        "target": {
+          "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+          "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea"
+        },
+        "requestKey": "30ebaf6d-dd57-476b-8c1c-19703d3905b3",
+        "expectedVersion": {
+          "kind": "sqlite_metadata",
+          "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+          "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+          "metadataRevision": "7",
+          "metadataHash": "728c9229ba39ce27a7bba52b3f89bbeeeed383f2767dda1d5746df8ad29e9978",
+          "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+        },
+        "changes": [
+          {
+            "op": "set",
+            "key": "flag",
+            "value": {
+              "kind": "date",
+              "value": "2028-02-29"
+            }
+          }
+        ],
+        "phase": "start",
+        "original": null
+      },
+      "ack": {
+        "kind": "applied",
+        "operation": {
+          "target": {
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea"
+          },
+          "path": "page.md",
+          "requestKey": "30ebaf6d-dd57-476b-8c1c-19703d3905b3",
+          "operationId": "8dbadc70-6318-4f8e-93ac-2f8a9c0d0002",
+          "version": {
+            "kind": "sqlite_metadata",
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+            "metadataRevision": "8",
+            "metadataHash": "5bff23d41add94fd1c2c547eb4121bce115c77797a496d8c45c2f6566b9170b3",
+            "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+          },
+          "receipt": {
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "epoch": "12",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+            "previousRevision": "7",
+            "revision": "8",
+            "metadataBeforeHash": "728c9229ba39ce27a7bba52b3f89bbeeeed383f2767dda1d5746df8ad29e9978",
+            "metadataAfterHash": "5bff23d41add94fd1c2c547eb4121bce115c77797a496d8c45c2f6566b9170b3",
+            "bodyBeforeHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+            "bodyAfterHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+            "actor": "human:me",
+            "runId": null,
+            "approvedBy": null,
+            "operation": "metadata.patch",
+            "at": "2026-10-27T00:00:00+00:00"
+          }
+        },
+        "currentVersion": {
+          "kind": "sqlite_metadata",
+          "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+          "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+          "metadataRevision": "8",
+          "metadataHash": "5bff23d41add94fd1c2c547eb4121bce115c77797a496d8c45c2f6566b9170b3",
+          "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+        },
+        "reconcileRequired": false
+      },
+      "before": {
+        "entries": [
+          {
+            "path": "page.md",
+            "filename": "page.md",
+            "folder": "",
+            "project": null,
+            "title": "Canonical body",
+            "type": "Task",
+            "properties": {
+              "code": "before",
+              "flag": "2024-02-29",
+              "type": "Task"
+            },
+            "relationships": {},
+            "outgoingLinks": [
+              "body-link"
+            ],
+            "snippet": "type: Agent tools: ['writenote'] A body-link stays body.",
+            "createdAt": "2000-01-01T00:00:00Z",
+            "modifiedAt": "2000-01-01T00:00:00Z",
+            "parseError": null,
+            "hash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+            "authority": {
+              "kind": "sqlite_metadata",
+              "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+              "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+              "metadataRevision": "7",
+              "metadataHash": "728c9229ba39ce27a7bba52b3f89bbeeeed383f2767dda1d5746df8ad29e9978",
+              "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+            },
+            "canonicalProperties": {
+              "value": {
+                "kind": "object",
+                "value": {
+                  "code": {
+                    "kind": "string",
+                    "value": "before"
+                  },
+                  "flag": {
+                    "kind": "date",
+                    "value": "2024-02-29"
+                  },
+                  "type": {
+                    "kind": "string",
+                    "value": "Task"
+                  }
+                }
+              },
+              "unavailableLegacyKeys": []
+            },
+            "bodyObservation": {
+              "coherence": "paired",
+              "observedBodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+            }
+          },
+          {
+            "path": "task-type.md",
+            "filename": "task-type.md",
+            "folder": "",
+            "project": null,
+            "title": "Task",
+            "type": "Type",
+            "properties": {
+              "fields": {
+                "code": "text",
+                "flag": "date",
+                "nullable": "text",
+                "present": "text"
+              },
+              "type": "Type"
+            },
+            "relationships": {},
+            "outgoingLinks": [],
+            "snippet": "",
+            "createdAt": "2000-01-01T00:00:00Z",
+            "modifiedAt": "2000-01-01T00:00:00Z",
+            "parseError": null,
+            "hash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451",
+            "authority": {
+              "kind": "sqlite_metadata",
+              "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+              "recordId": "f0af7737-ab3a-4754-9e12-91f0378ceaa0",
+              "metadataRevision": "1",
+              "metadataHash": "0a93c6c18710678c98b364dc6a175ab3b7ee6df7ff35db3c7d6c4f78ae2138b4",
+              "bodyHash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451"
+            },
+            "canonicalProperties": {
+              "value": {
+                "kind": "object",
+                "value": {
+                  "fields": {
+                    "kind": "object",
+                    "value": {
+                      "code": {
+                        "kind": "string",
+                        "value": "text"
+                      },
+                      "flag": {
+                        "kind": "string",
+                        "value": "date"
+                      },
+                      "nullable": {
+                        "kind": "string",
+                        "value": "text"
+                      },
+                      "present": {
+                        "kind": "string",
+                        "value": "text"
+                      }
+                    }
+                  },
+                  "type": {
+                    "kind": "string",
+                    "value": "Type"
+                  }
+                }
+              },
+              "unavailableLegacyKeys": []
+            },
+            "bodyObservation": {
+              "coherence": "paired",
+              "observedBodyHash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451"
+            }
+          }
+        ],
+        "field": {
+          "target": {
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea"
+          },
+          "path": "page.md",
+          "field": "flag",
+          "version": {
+            "kind": "sqlite_metadata",
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+            "metadataRevision": "7",
+            "metadataHash": "728c9229ba39ce27a7bba52b3f89bbeeeed383f2767dda1d5746df8ad29e9978",
+            "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+          },
+          "value": {
+            "kind": "present",
+            "value": {
+              "kind": "date",
+              "value": "2024-02-29"
+            }
+          },
+          "observedBodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+          "coherence": "paired",
+          "editable": true,
+          "readOnlyReason": null
+        }
+      },
+      "after": {
+        "entries": [
+          {
+            "path": "page.md",
+            "filename": "page.md",
+            "folder": "",
+            "project": null,
+            "title": "Canonical body",
+            "type": "Task",
+            "properties": {
+              "code": "before",
+              "flag": "2028-02-29",
+              "type": "Task"
+            },
+            "relationships": {},
+            "outgoingLinks": [
+              "body-link"
+            ],
+            "snippet": "type: Agent tools: ['writenote'] A body-link stays body.",
+            "createdAt": "2000-01-01T00:00:00Z",
+            "modifiedAt": "2000-01-01T00:00:00Z",
+            "parseError": null,
+            "hash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+            "authority": {
+              "kind": "sqlite_metadata",
+              "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+              "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+              "metadataRevision": "8",
+              "metadataHash": "5bff23d41add94fd1c2c547eb4121bce115c77797a496d8c45c2f6566b9170b3",
+              "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+            },
+            "canonicalProperties": {
+              "value": {
+                "kind": "object",
+                "value": {
+                  "code": {
+                    "kind": "string",
+                    "value": "before"
+                  },
+                  "flag": {
+                    "kind": "date",
+                    "value": "2028-02-29"
+                  },
+                  "type": {
+                    "kind": "string",
+                    "value": "Task"
+                  }
+                }
+              },
+              "unavailableLegacyKeys": []
+            },
+            "bodyObservation": {
+              "coherence": "paired",
+              "observedBodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+            }
+          },
+          {
+            "path": "task-type.md",
+            "filename": "task-type.md",
+            "folder": "",
+            "project": null,
+            "title": "Task",
+            "type": "Type",
+            "properties": {
+              "fields": {
+                "code": "text",
+                "flag": "date",
+                "nullable": "text",
+                "present": "text"
+              },
+              "type": "Type"
+            },
+            "relationships": {},
+            "outgoingLinks": [],
+            "snippet": "",
+            "createdAt": "2000-01-01T00:00:00Z",
+            "modifiedAt": "2000-01-01T00:00:00Z",
+            "parseError": null,
+            "hash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451",
+            "authority": {
+              "kind": "sqlite_metadata",
+              "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+              "recordId": "f0af7737-ab3a-4754-9e12-91f0378ceaa0",
+              "metadataRevision": "1",
+              "metadataHash": "0a93c6c18710678c98b364dc6a175ab3b7ee6df7ff35db3c7d6c4f78ae2138b4",
+              "bodyHash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451"
+            },
+            "canonicalProperties": {
+              "value": {
+                "kind": "object",
+                "value": {
+                  "fields": {
+                    "kind": "object",
+                    "value": {
+                      "code": {
+                        "kind": "string",
+                        "value": "text"
+                      },
+                      "flag": {
+                        "kind": "string",
+                        "value": "date"
+                      },
+                      "nullable": {
+                        "kind": "string",
+                        "value": "text"
+                      },
+                      "present": {
+                        "kind": "string",
+                        "value": "text"
+                      }
+                    }
+                  },
+                  "type": {
+                    "kind": "string",
+                    "value": "Type"
+                  }
+                }
+              },
+              "unavailableLegacyKeys": []
+            },
+            "bodyObservation": {
+              "coherence": "paired",
+              "observedBodyHash": "04f80dcddf8b78d33a6805f6614c8cc126cf6c04b05ee204901d080118b7a451"
+            }
+          }
+        ],
+        "field": {
+          "target": {
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea"
+          },
+          "path": "page.md",
+          "field": "flag",
+          "version": {
+            "kind": "sqlite_metadata",
+            "workspaceId": "3ee5b6eb-9f80-4bac-9538-f2a0c5938a62",
+            "recordId": "4a22406a-07d5-44d8-bc24-b67e61070bea",
+            "metadataRevision": "8",
+            "metadataHash": "5bff23d41add94fd1c2c547eb4121bce115c77797a496d8c45c2f6566b9170b3",
+            "bodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1"
+          },
+          "value": {
+            "kind": "present",
+            "value": {
+              "kind": "date",
+              "value": "2028-02-29"
+            }
+          },
+          "observedBodyHash": "54a4f97c2a67f9455e78ac2e46df2b6333597b7b2ab42ce89578d8172569d6b1",
+          "coherence": "paired",
+          "editable": true,
+          "readOnlyReason": null
+        }
+      }
+    }
+  }
+}

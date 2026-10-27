@@ -4,13 +4,10 @@
 
 .cb-work-content {
   width: 100%;
-  max-width: var(--surface-readable);
-  margin-inline: auto;
-  padding: var(--sp-4) 0 var(--sp-12);
 }
 
-.cb-work-groups {
-  padding-inline: var(--sp-6);
+.cb-work-group:first-child {
+  margin-top: 0;
 }
 
 .cb-work-group {
@@ -61,6 +58,8 @@
 
 .cb-work-status {
   display: flex;
+  min-width: 0;
+  overflow-wrap: anywhere;
   grid-column: 3;
   align-items: center;
   gap: var(--sp-2);
@@ -72,21 +71,7 @@
   container-type: inline-size;
 }
 
-.cb-library-page > .cb-page-header,
-.cb-library-controls,
-.cb-library-content {
-  width: 100%;
-  max-width: var(--surface-broad);
-  margin-inline: auto;
-  padding-inline: var(--sp-8);
-}
-
-.cb-library-page > .cb-page-header {
-  padding-top: var(--sp-12);
-  padding-bottom: var(--sp-6);
-}
-
-.cb-library-controls {
+.cb-library-controls.cb-composition-content {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -94,14 +79,27 @@
   padding-bottom: var(--sp-4);
 }
 
-.cb-library-content {
+/* Keep the existing one-row roving tablist usable when its labels exceed
+   the pane; only this control scrolls, with its 32px height unchanged. */
+.cb-library-controls > [role='tablist'] {
+  max-width: 100%;
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.cb-library-controls > [role='tablist']::-webkit-scrollbar {
+  display: none;
+}
+
+.cb-library-content.cb-composition-content {
   padding-top: var(--sp-2);
   padding-bottom: var(--sp-12);
 }
 
 .cb-library-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 292px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: var(--sp-4);
 }
 
@@ -172,16 +170,6 @@
 }
 
 @container (max-width: 560px) {
-  .cb-library-page > .cb-page-header,
-  .cb-library-controls,
-  .cb-library-content {
-    padding-inline: var(--sp-6);
-  }
-
-  .cb-library-page > .cb-page-header {
-    padding-top: var(--sp-8);
-  }
-
   .cb-work-row {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: var(--sp-1) var(--sp-3);
@@ -200,4 +188,44 @@
     grid-column: 1 / -1;
     grid-row: 2;
   }
+}
+
+/* Shared composition owns the pane inset; table cells and roster rows keep
+   their existing internal geometry and their own scrollports. */
+.cb-knowledge-tabs.cb-composition-content,
+.cb-knowledge-content.cb-composition-content {
+  padding-bottom: 0;
+}
+
+.cb-knowledge-tabs {
+  flex: none;
+}
+
+.cb-knowledge-page {
+  overflow-wrap: anywhere;
+}
+
+.cb-agents-page .cb-agents-content {
+  padding-top: 0;
+}
+
+/* Recent runs keeps its one native button and source order. Only Agents
+   wraps this fleet adapter; shared traces and other FleetSection hosts keep
+   their current presentation. The flexible actor/reason columns retain a
+   meaningful basis before complete trailing facts move to another line. */
+.cb-agents-page .cb-fleet-run-line {
+  flex-wrap: wrap;
+  row-gap: var(--sp-1);
+}
+
+.cb-agents-page .cb-fleet-run-line > .flex-1 {
+  flex-basis: 12ch;
+}
+
+.cb-agents-page .cb-fleet-fact {
+  flex: none;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: break-word;
 }

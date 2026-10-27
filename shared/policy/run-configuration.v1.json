@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "encoded_bytes": 65536,
+  "completed_retention_seconds": 7776000,
+  "per_vault_payload_bytes": 67108864,
+  "active_rows": "pinned",
+  "capacity": "expire_then_oldest_completed_then_refuse_before_launch",
+  "bodies": "never_retained",
+  "secret_environment_header_values": "never_retained",
+  "run_history_and_effect_receipts": "never_deleted_by_configuration_lifecycle",
+  "cleanup_batch_rows": 512,
+  "cleanup_tick_seconds": 60
+}

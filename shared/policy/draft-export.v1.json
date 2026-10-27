@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "max_bytes": 10485760,
+  "lease_seconds": 60,
+  "max_pending": 64,
+  "formats": ["json", "md", "mmd", "canvas"],
+  "bundle_formats": ["cerebro-retained-draft", "cerebro-retained-drafts"]
+}

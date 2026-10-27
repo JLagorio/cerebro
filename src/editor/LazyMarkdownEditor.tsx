@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react';
+import { StateMessage } from '@/components/ui/StateMessage';
 import type { MarkdownEditorProps } from './MarkdownEditor';
 
 // BlockNote (and shiki, lazily behind it) is by far the heaviest dependency
@@ -8,7 +9,16 @@ const Inner = lazy(() => import('./MarkdownEditor').then((m) => ({ default: m.Ma
 
 export function LazyMarkdownEditor(props: MarkdownEditorProps) {
   return (
-    <Suspense fallback={<div data-testid="markdown-editor-loading" />}>
+    <Suspense
+      fallback={
+        <StateMessage
+          state="loading"
+          title="Loading editor…"
+          compact
+          testId="markdown-editor-loading"
+        />
+      }
+    >
       <Inner {...props} />
     </Suspense>
   );

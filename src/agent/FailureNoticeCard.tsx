@@ -56,7 +56,7 @@ export function FailureNoticeCard({
   notice,
   raw,
   actions = {},
-  onRetry,
+  onReviewRecovery,
   onOpenPath,
   arrive = false,
 }: {
@@ -65,8 +65,8 @@ export function FailureNoticeCard({
   raw?: string;
   /** A handler per action this panel can carry out. */
   actions?: Partial<Record<string, () => void>>;
-  /** Re-send the question this answer belongs to (M15). */
-  onRetry?: () => void;
+  /** Inspect this reply without sending its question again. */
+  onReviewRecovery?: (opener: HTMLButtonElement) => void;
   /** Opens a page a stack frame names. */
   onOpenPath?: (path: string) => void;
   /** The turn failed while the conversation watched (components/ui/motion.ts). */
@@ -121,7 +121,7 @@ export function FailureNoticeCard({
           onOpenPath={onOpenPath === undefined ? undefined : (path) => onOpenPath(path)}
         />
       )}
-      {((handler !== undefined && label !== undefined) || onRetry !== undefined) && (
+      {((handler !== undefined && label !== undefined) || onReviewRecovery !== undefined) && (
         <div className="flex flex-wrap items-center gap-1.5">
           {handler !== undefined && label !== undefined && (
             <button
@@ -133,14 +133,15 @@ export function FailureNoticeCard({
               {label}
             </button>
           )}
-          {onRetry !== undefined && (
+          {onReviewRecovery !== undefined && (
             <button
               type="button"
-              data-testid="retry-turn"
-              onClick={onRetry}
+              data-testid="review-recovery"
+              tabIndex={0}
+              onClick={(event) => onReviewRecovery(event.currentTarget)}
               className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs text-danger-700 hover:border-danger-500"
             >
-              Retry
+              Review what happened
             </button>
           )}
         </div>

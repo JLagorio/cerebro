@@ -48,6 +48,13 @@ import { ScheduleField } from './ScheduleField';
 /** The tool picker's group for connector tools (M54.9). */
 const CONNECTOR_GROUP = 'Connectors';
 
+type ConnectorInventory =
+  | { kind: 'loading' }
+  | { kind: 'ready'; specs: ConnectorSpec[]; recorded: boolean }
+  | { kind: 'unavailable'; reason: 'read_failed' | 'invalid_configuration' };
+const LOADING_CONNECTORS: ConnectorInventory = { kind: 'loading' };
+const NO_CONNECTORS: ConnectorSpec[] = [];
+
 /**
  * An agent page's properties (M55.12; the agent builder of M18, rebuilt in
  * M18.4).
@@ -100,28 +107,79 @@ export function AgentProperties({ entry }: { entry: Entry }) {
   const entries = useVaultStore((s) => s.entries);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
-  const [connectorSpecs, setConnectorSpecs] = useState<ConnectorSpec[]>([]);
-  // Read on open rather than held in a store: the connector list lives in the
-  // vault's own `.cerebro/connectors.json`, is edited on another screen, and is
-  // small. Failing quietly to an empty list is right — the picker then says
-  // "this vault has no connectors enabled", which is also what a broken config
-  // means for a run (connectors.rs fails closed on an unreadable file).
+  const [connectorRequest, setConnectorRequest] = useState(0);
+  const [connectorRead, setConnectorRead] = useState<{
+    vault: string | null;
+    request: number;
+    inventory: ConnectorInventory;
+  } | null>(null);
+  // Scope the snapshot during render as well as completion: a newly selected
+  // vault must never display the previous vault's connector options, even
+  // before its effect runs. Retrying does not remount the grant editors.
+  const connectorInventory =
+    connectorRead?.vault === vaultPath && connectorRead?.request === connectorRequest
+      ? connectorRead.inventory
+      : LOADING_CONNECTORS;
+  const connectorSpecs =
+    connectorInventory.kind === 'ready' ? connectorInventory.specs : NO_CONNECTORS;
   useEffect(() => {
     if (vaultPath === null) return;
     let live = true;
+    let reason: 'read_failed' | 'invalid_configuration' = 'read_failed';
     void readConnectors(vaultPath)
       .then((raw) => {
-        if (live) setConnectorSpecs(parseConnectors(raw));
+        reason = 'invalid_configuration';
+        // The legacy parser intentionally accepts a missing file as empty.
+        // A malformed file is instead a failed inventory read for this UI.
+        if (raw.trim() !== '') {
+          const value: unknown = JSON.parse(raw);
+          if (
+            value === null ||
+            typeof value !== 'object' ||
+            !('servers' in value) ||
+            value.servers === null ||
+            typeof value.servers !== 'object' ||
+            Array.isArray(value.servers)
+          ) {
+            throw new Error('Malformed connector configuration');
+          }
+        }
+        if (live)
+          setConnectorRead({
+            vault: vaultPath,
+            request: connectorRequest,
+            inventory: { kind: 'ready', specs: parseConnectors(raw), recorded: raw.trim() !== '' },
+          });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (live)
+          setConnectorRead({
+            vault: vaultPath,
+            request: connectorRequest,
+            inventory: { kind: 'unavailable', reason },
+          });
+      });
     return () => {
       live = false;
     };
-  }, [vaultPath]);
+  }, [vaultPath, connectorRequest]);
   const vault = useMemo(() => vaultOptions(entries, connectorSpecs), [entries, connectorSpecs]);
 
   // Parsed on every render: the closed rows always say what the FILE says.
   const draft = agentDraft(entry, '');
+  const missingConnectors = (draft.connectors ?? []).filter(
+    (name) => !vault.connectors.some((connector) => connector.name === name),
+  );
+  const inventoryState =
+    connectorInventory.kind !== 'ready'
+      ? connectorInventory.kind
+      : !connectorInventory.recorded
+        ? 'not-recorded'
+        : missingConnectors.length > 0
+          ? 'partial'
+          : vault.connectors.length === 0
+            ? 'empty'
+            : 'ready';
   // The Settings shell ceiling, which caps what the record declares (M57.2).
   const ceiling = useUiStore((s) => s.agentShell);
   // And the web ceiling, which caps its `tools: web` (M57.7).
@@ -361,6 +419,41 @@ export function AgentProperties({ entry }: { entry: Entry }) {
         ),
       )}
 
+      <div
+        data-testid="agent-connector-inventory"
+        data-state={inventoryState}
+        role="status"
+        className="flex flex-wrap items-center gap-2 px-1.5 py-2 text-sm text-n-600"
+      >
+        {inventoryState === 'loading' ? (
+          <span>Loading connectors…</span>
+        ) : inventoryState === 'unavailable' ? (
+          <>
+            <span data-testid="section-unavailable">
+              Connector inventory unavailable.{' '}
+              {connectorInventory.kind === 'unavailable' &&
+              connectorInventory.reason === 'invalid_configuration'
+                ? 'The configuration could not be parsed. Check it in Settings.'
+                : 'The configuration could not be read.'}
+            </span>
+            <Button size="sm" onClick={() => setConnectorRequest((request) => request + 1)}>
+              Retry connectors
+            </Button>
+          </>
+        ) : inventoryState === 'not-recorded' ? (
+          <span>Connector configuration not recorded. Add connectors in Settings.</span>
+        ) : inventoryState === 'partial' ? (
+          <span>Some granted connectors are not enabled here: {missingConnectors.join(', ')}.</span>
+        ) : inventoryState === 'empty' ? (
+          <span>This vault has no connectors enabled. Add them in Settings.</span>
+        ) : (
+          <span>
+            {vault.connectors.length} {vault.connectors.length === 1 ? 'connector' : 'connectors'}{' '}
+            enabled in this vault.
+          </span>
+        )}
+      </div>
+
       {boundary(
         'tools',
         'Tools',
@@ -372,7 +465,12 @@ export function AgentProperties({ entry }: { entry: Entry }) {
             ? 'none'
             : `${draft.allowedTools.length} granted: ${draft.allowedTools.join(', ')}`,
         (d, set) => (
-          <ToolsEditor draft={d} set={set} connectors={vault.connectors} />
+          <ToolsEditor
+            draft={d}
+            set={set}
+            connectors={vault.connectors}
+            inventoryReady={connectorInventory.kind === 'ready'}
+          />
         ),
       )}
 
@@ -447,30 +545,25 @@ export function AgentProperties({ entry }: { entry: Entry }) {
             checked={d.connectors !== null}
             onChange={(on) => set({ ...d, connectors: on ? [] : null })}
           >
-            {vault.connectors.length === 0 ? (
-              <p className="m-0 text-2xs text-n-500">
-                This vault has no connectors enabled. Add them in Settings; an empty list here means
-                this agent reaches none of them either way.
-              </p>
-            ) : (
-              <Picker
-                testId="agent-connectors"
-                ariaLabel="Connectors this agent may reach"
-                addLabel="Add connector"
-                emptyLabel="None — it reaches no external system."
-                options={vault.connectors.map((c) => ({
-                  value: c.name,
-                  label: c.name,
-                  hint:
-                    c.transport === 'stdio'
-                      ? 'Runs a command on this machine'
-                      : 'Reaches a server over HTTP',
-                  icon: 'plug',
-                }))}
-                selected={d.connectors ?? []}
-                onChange={(next) => set({ ...d, connectors: next })}
-              />
-            )}
+            <Picker
+              testId="agent-connectors"
+              ariaLabel="Connectors this agent may reach"
+              addLabel="Add connector"
+              emptyLabel="None — it reaches no external system."
+              options={vault.connectors.map((c) => ({
+                value: c.name,
+                label: c.name,
+                hint:
+                  c.transport === 'stdio'
+                    ? 'Runs a command on this machine'
+                    : 'Reaches a server over HTTP',
+                icon: 'plug',
+              }))}
+              selected={d.connectors ?? []}
+              unavailableValues={connectorInventory.kind === 'ready' ? [] : (d.connectors ?? [])}
+              inventoryUnavailable={connectorInventory.kind !== 'ready'}
+              onChange={(next) => set({ ...d, connectors: next })}
+            />
           </GuardRow>
         ),
       )}
@@ -802,10 +895,12 @@ function ToolsEditor({
   draft,
   set,
   connectors,
+  inventoryReady,
 }: {
   draft: AgentDraft;
   set: (next: AgentDraft) => void;
   connectors: { name: string; transport: string }[];
+  inventoryReady: boolean;
 }) {
   // M54.9: a connector's tools are granted by name, so the picker offers one
   // entry per enabled connector for all of them, and a single tool already
@@ -874,6 +969,11 @@ function ToolsEditor({
         options={toolOptions}
         groupHint={toolGroupHints}
         selected={draft.allowedTools ?? []}
+        unavailableValues={
+          inventoryReady
+            ? []
+            : (draft.allowedTools ?? []).filter((value) => value.startsWith('mcp__'))
+        }
         onChange={(next) => set({ ...draft, allowedTools: next })}
       />
       {draft.allowedTools !== null && draft.allowedTools.length > 0 && (

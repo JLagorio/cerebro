@@ -154,6 +154,19 @@ describe('railConnectors', () => {
     );
   });
 
+  it('is unavailable, never empty, when the list does not parse, in Rust’s words', () => {
+    // connectors::connector_context pins every run to no connector for it.
+    const view = railConnectors(input({ list: listed('{"servers": {') }));
+    expect(view.state).toBe('unavailable');
+    expect(view.reason).toBe("this vault's connector list cannot be read");
+    expect(view.lines).toEqual([]);
+    expect(view.inherited).toBe(false);
+    // A list that parses to no servers is still an empty list.
+    expect(railConnectors(input({ list: listed('{"servers": {}}'), reach: reachOf() })).state).toBe(
+      'empty',
+    );
+  });
+
   it('is partial when the status read failed, its rows saying no state', () => {
     const view = railConnectors(
       input({ status: { kind: 'unavailable', reason: 'no runtime database' } }),
@@ -185,7 +198,13 @@ describe('railConnectors', () => {
     expect(view.state).toBe('ready');
     expect(view.inherited).toBe(true);
     expect(view.lines).toEqual([]);
-    expect(RAIL_CONNECTORS_WORDS.inherited).toContain('Cerebro never learns their names');
+    // Context's breakdown names their servers after a turn (M92.13), so the
+    // card never claims Cerebro cannot learn them.
+    expect(RAIL_CONNECTORS_WORDS.inherited).not.toMatch(/never learns/);
+    expect(RAIL_CONNECTORS_WORDS.inherited).toContain("Cerebro doesn't list or control them");
+    expect(RAIL_CONNECTORS_WORDS.inherited).toContain(
+      'After a turn, Context may name their servers',
+    );
     expect(RAIL_CONNECTORS_WORDS.inherited).toContain('cannot block their send tools by name');
     // No run recorded yet: a turn you watch would load them all the same.
     const unrecorded = railConnectors(input({ list: listed(''), status: status(), reach: null }));

@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { registerSavePreparation } from '@/editor/openPages';
+import { useRecoveryBuffer } from '@/editor/recoveryBuffers';
 import { IconButton } from '@/components/ui/IconButton';
 import { Switch } from '@/components/ui/Switch';
 import { HighlightedTextarea } from './HighlightedTextarea';
@@ -9,7 +11,7 @@ import { useDebounced } from './useDebounced';
  * The floating code panel (M29.25, spec D1). Auto-Update ON (default): edits
  * flow out through onChangeCode 250ms behind the keystroke — the same cadence
  * LivePreview renders at, so the canvas follows typing without a re-layout per
- * key. OFF: edits buffer locally, a dirty dot appears, and only Apply commits.
+ * key. OFF: edits buffer locally, a dirty dot appears, and Apply or an explicit page Save commits.
  *
  * The panel positions ITSELF as a top-left card and expects to be rendered
  * inside a `relative` box — hosts choose the box, not the offsets.
@@ -41,6 +43,13 @@ export function CodeOverlay({
   const [autoUpdate, setAutoUpdate] = useState(true);
   const debounced = useDebounced(draft, 250);
   const dirty = draft !== code;
+  const recovery = useRecoveryBuffer('diagram-code');
+  const recoveryRef = useRef(recovery);
+  recoveryRef.current = recovery;
+  useEffect(() => {
+    // Only an echo in the owning source proves this child reached the body.
+    if (draft === code) recovery.clear();
+  }, [code, draft, recovery]);
 
   // Latest-refs: the commit effect and the unmount flush read through these so
   // neither re-arms per keystroke or per parent render.
@@ -74,7 +83,8 @@ export function CodeOverlay({
   // flips ON over a buffered draft — turning Auto-Update on IS consenting to
   // the pending edits.
   useEffect(() => {
-    if (autoUpdate && debounced !== codeRef.current) changeRef.current(debounced);
+    if (autoUpdate && debounced !== codeRef.current)
+      recoveryRef.current.commit(() => changeRef.current(debounced));
     // codeRef/changeRef are latest-refs, so exhaustive-deps asks for neither
     // and no suppression is needed here. Their point is the dep that ISN'T:
     // `code`. Depping it would re-run this on an EXTERNAL edit while
@@ -84,37 +94,17 @@ export function CodeOverlay({
     // and stays quiet.)
   }, [debounced, autoUpdate]);
 
-  // A pending debounce must not die with the panel — DiagramPage's M29.23
-  // discipline extended one level down. Keystrokes younger than 250ms at
-  // close/navigation time flow out here; the host's own unmount flush (or
-  // BlockNote's history) takes it from there.
-  //
-  // Auto-Update OFF flushes too, since M29.53. It used to be gated on the
-  // switch, on the reading that "only Apply commits" — but that contract is
-  // about when the CANVAS re-lays-out under a half-typed line, not about
-  // whether the user's text survives. MEASURED: with the switch off, typing a
-  // line and pressing the X — labelled "Hide code", not "Discard" — took the
-  // bytes off the panel AND out of memory, with the page's save chip reading
-  // "Saved" throughout and the switch silently back ON when the panel was
-  // reopened. Escape on the surrounding dialog did the same with a dirty dot
-  // visibly on screen. Committing is one undo step away; that was not.
-  //
-  // useLayoutEffect, NOT useEffect, and the distinction is data loss. React
-  // runs passive cleanups PARENT-FIRST (measured: parent-layout, child-layout,
-  // parent-passive, child-passive). DiagramPage's unmount save is a passive
-  // cleanup gated on its own debounce timer being armed (DiagramPage.tsx:152-
-  // 157), so with a keystroke younger than 250ms it would read an empty buffer
-  // and write nothing — and this flush, arriving after, would call handleChange
-  // and arm a fresh 500ms timeout on an already-unmounted component, leaving
-  // the user's last bytes owned by an orphan timer that a window close or a
-  // torn-down context simply loses. Layout cleanups run in the mutation phase,
-  // so child-layout precedes parent-passive and the host still has the bytes
-  // when it looks. Pinned by "the flush beats a host's passive-cleanup save".
+  // Save/leave captures buffered source while the panel is still mounted,
+  // including Auto-update OFF. Hide also captures it: Hide is not Discard.
   useLayoutEffect(() => {
+    const prepare = () => {
+      if (draftRef.current !== codeRef.current)
+        recoveryRef.current.commit(() => changeRef.current(draftRef.current));
+    };
+    const stop = registerSavePreparation(prepare);
     return () => {
-      if (draftRef.current !== codeRef.current) {
-        changeRef.current(draftRef.current);
-      }
+      stop();
+      prepare();
     };
   }, []);
 
@@ -168,7 +158,7 @@ export function CodeOverlay({
             type="button"
             disabled={!dirty}
             onClick={() => {
-              if (dirty) onChangeCode(draft);
+              if (dirty) recovery.commit(() => onChangeCode(draft));
             }}
             className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50 disabled:opacity-45"
           >
@@ -182,7 +172,11 @@ export function CodeOverlay({
           ariaLabel="Mermaid source"
           value={draft}
           placeholder={'graph TD\n  A[Idea] --> B[Shipped]'}
-          onChange={setDraft}
+          onChange={(text) => {
+            recoveryRef.current.set(text, codeRef.current);
+            draftRef.current = text;
+            setDraft(text);
+          }}
           rows={Math.max(10, draft.split('\n').length + 1)}
         />
       </div>

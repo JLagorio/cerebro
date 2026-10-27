@@ -2,6 +2,7 @@
 import { join } from 'node:path';
 import { readdirSync, readFileSync } from 'node:fs';
 import { ESLint } from 'eslint';
+import ts from 'typescript';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 /**
@@ -56,6 +57,30 @@ describe('the roadmap acceptance cases', () => {
 });
 
 describe('engine/ imports only its allowlist', () => {
+  it('admits the generated workspace types and no neighboring generated module', async () => {
+    expect(
+      await railMessages(
+        'src/engine/probe.ts',
+        "import type { SelectedRecordVersion } from '@/lib/generated/workspace'; export type V = SelectedRecordVersion;",
+      ),
+    ).toEqual([]);
+    for (const path of ['@/lib/generated/private', '@/lib/generated/workspace/internal']) {
+      expect(
+        await railMessages('src/engine/probe.ts', `import type { V } from '${path}';`),
+      ).toHaveLength(1);
+    }
+  });
+
+  it('keeps the generated workspace leaf free of runtime code and imported dependencies', () => {
+    const path = join(REPO, 'src/lib/generated/workspace.ts');
+    const source = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest);
+    expect(source.statements.length).toBeGreaterThan(0);
+    for (const statement of source.statements) {
+      expect(ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement)).toBe(
+        true,
+      );
+    }
+  });
   it('admits only the pure consumer-domain data leaf', async () => {
     expect(
       await railMessages(

@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "selectedSchemaVersion": 4,
+  "operation": "metadata.patch",
+  "maxChanges": 64,
+  "maxRequestBytes": 262144,
+  "valueRules": "shared/workspace/values.v1.json",
+  "fieldKinds": "shared/schema/field-kinds.v1.json",
+  "ordinaryTargetRules": "shared/workspace/paired-change.v1.json",
+  "protectedKeys": [
+    "type",
+    "title",
+    "full_width",
+    "fields",
+    "statuses",
+    "folder",
+    "deadline"
+  ],
+  "provenanceKeys": "shared/import/sources.v1.json#agent_guard",
+  "supportedDeclaredKinds": [
+    "text",
+    "checkbox",
+    "email",
+    "phone",
+    "url",
+    "number",
+    "date"
+  ],
+  "supportedSetKinds": [
+    "string",
+    "boolean",
+    "null",
+    "decimal",
+    "date"
+  ],
+  "remove": "declared_stored_fields_only",
+  "duplicateKeys": "refuse",
+  "unchanged": "durable_request_without_receipt_or_epoch_increment",
+  "requestEvidence": "original_exact_payload_target_path_expected_version",
+  "schemaUpgrade": "explicit_staged_only",
+  "maxStoredRequestRows": 65536,
+  "maxStoredRequestBytes": 33554432,
+  "setKindsByDeclaredKind": {
+    "text": [
+      "string",
+      "null"
+    ],
+    "checkbox": [
+      "boolean",
+      "null"
+    ],
+    "email": [
+      "string",
+      "null"
+    ],
+    "phone": [
+      "string",
+      "null"
+    ],
+    "url": [
+      "string",
+      "null"
+    ],
+    "number": [
+      "decimal",
+      "null"
+    ],
+    "date": [
+      "date",
+      "null"
+    ]
+  }
+}

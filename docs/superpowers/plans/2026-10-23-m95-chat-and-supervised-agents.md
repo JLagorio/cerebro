@@ -14,7 +14,7 @@
 
 **Spec:** [Conversations and supervised child jobs](../specs/2026-10-23-m95-chat-and-supervised-agents-design.md).
 
-**Status:** DRAFT FOR OWNER REVIEW. Documentation only; none of the checks below was run. Proposed paths are labeled Create. Owner decisions and dependency gates must be resolved before implementing their dependent tasks.
+**Status:** Implementation authorized by the owner on 2026-10-23, on the existing branch alongside Claude's M92 work. See the [implementation record](2026-10-23-m93-m99-implementation-record.md) for actual evidence and remaining work. Proposed paths are labeled Create. Owner decisions and M92 dependency gates remain explicit; M95 is not complete.
 
 ## Global Constraints
 
@@ -23,7 +23,7 @@
 - Reasoning text remains memory-only and is optionally healed from CLI files under existing policy; the archive adds no reasoning persistence.
 - Only ACT computes retry/reconciliation authority and owns approval/effect state.
 - Unknown foreign outcomes remain `outcome_unknown`; a cancelled parent never proves an outside mutation was prevented.
-- Initial proposed limits reuse M91's one-level/two-concurrent/eight-per-session ceilings, plus a ten-minute child deadline and 256 KiB validated result cap.
+- Owner-approved supervised-job limits are read-only, one delegation level, two concurrent children per parent session, eight children per session, a ten-minute deadline including decision waits, a 256 KiB validated result cap, and desktop-awake execution only. Jobs remain disabled until actual backend isolation checks pass. Durable result-body retention is a separate, unapproved choice.
 - Recommended owner decision: keep completed normalized chat content for 90 days by default, with `off`, `30 days`, `90 days` and `forever` choices, explicit thread deletion and JSON/Markdown export.
 - A proposed 256 MiB content budget stops archive body admission with a visible warning when full; never silently evict unexpired/forever content.
 - Existing installations require an explicit retention choice before adding newly durable content; no retroactive whole-session copy.
@@ -212,7 +212,7 @@ requestKey:string,spec:ChildJobSpec)->Result<ChildAdmission,ChildRefusal>`;
 fields and resolves parent/Agent grants from authoritative records. CHAT durably maps trusted subject scope plus requestKey to allocated jobId/request digest before dispatch; same key/digest returns original admission after access checks, changed digest returns request_key_conflict. Chat persists parent run/attempt/delegation-slot key before submit; FLOW persists workflow run/step/attempt key before calling. Result schemas
 are versioned allowlisted local definitions, not arbitrary model-supplied code.
 
-- [ ] Owner approves limits and read-only first release; record desktop-awake scope. AX08 remains unavailable until a recorded backend proof passes independent scoped MCP credentials, parent-token noninheritance, raw connector denial, shell/filesystem bypass denial and required approval suspension support.
+- [x] Owner approved the [read-only limits and desktop-awake scope](../specs/2026-10-24-m95-supervised-job-decision.md) on 2026-10-24. AX08 remains unavailable until a recorded backend proof passes independent scoped MCP credentials, parent-token noninheritance, raw connector denial, shell/filesystem bypass denial and required approval suspension support.
 - [ ] Add table tests: child asks broader scope, revoked parent, Agent maximum broader than parent, unbound account, invalid schema/deadline/budget, depth two and ninth job, same-key replay, changed-digest conflict, crash after child admission before FLOW links it and crash before launch claim. Assert admission refusal or exact intersection; no greater Agent grant appears in child subject.
 - [ ] Implement CHAT-owned next numbered child_jobs migration, immutable admission and unique scoped request-key/digest mapping in runtime/child_jobs.rs. Allocate jobId and store scoped run/session mint intent transactionally before launch; derive execution subject through ACT. Recovery returns the original job across the FLOW-link crash window. Reuse policy artifacts for common ceilings; never twin new numeric rules in Rust and TS.
 - [ ] Run `cargo test child_jobs` and live capability cases through the sanitized kit. If CLI cannot meet the boundary, keep this mode disabled with a typed unsupported reason and finish foreground researcher acceptance independently. Do not substitute prompt-only isolation.

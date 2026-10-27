@@ -626,7 +626,8 @@ describe('AgentProperties', () => {
     for (const [, written] of patch.mock.calls) expect('recent' in written).toBe(false);
   });
 
-  it('says when this vault has no connectors enabled', () => {
+  it('says when a successful read finds no connectors enabled', async () => {
+    await ipc.saveConnectors('/vault', '{"servers":{}}');
     setup();
     expect(row('connectors').textContent).toContain(
       'none on its own; every approved one when you address it',
@@ -635,7 +636,7 @@ describe('AgentProperties', () => {
     fireEvent.click(
       within(editor).getByRole('checkbox', { name: /Limit which connectors this agent can reach/ }),
     );
-    expect(within(editor).getByText(/This vault has no connectors enabled/)).toBeTruthy();
+    expect(await screen.findByText(/This vault has no connectors enabled/)).toBeTruthy();
   });
 });
 

@@ -26,10 +26,11 @@ function setup(
     computed?: SheetComputed;
     current?: () => boolean;
     getPage?: () => Promise<string>;
+    beforeOpen?: () => boolean;
   } = {},
 ) {
   const getPage = options.getPage ?? vi.fn().mockResolvedValue('live unsaved page');
-  const before = vi.fn();
+  const before = options.beforeOpen ?? vi.fn();
   const view = render(
     <NotePathContext.Provider value="budget.md">
       <SheetExportMenu
@@ -94,5 +95,14 @@ it('a late serialization cannot open a save dialog after unmount or a vault roun
     useVaultStore.setState({ vaultPath: '/vault' });
   });
   await act(async () => resolve('old'));
+  expect(xlsx).not.toHaveBeenCalled();
+});
+
+it('keeps export closed when the focused cell cannot enter the page source', () => {
+  const { getPage } = setup({ computed, beforeOpen: () => false });
+  expect(screen.queryByTestId('sheet-export-xlsx')).toBeNull();
+  expect(screen.queryByTestId('sheet-export-csv')).toBeNull();
+  expect(getPage).not.toHaveBeenCalled();
+  expect(csv).not.toHaveBeenCalled();
   expect(xlsx).not.toHaveBeenCalled();
 });

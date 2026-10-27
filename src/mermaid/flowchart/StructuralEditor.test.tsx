@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/engine/types';
 import { CanvasViewport } from '../CanvasViewport';
 import { StructuralEditor, type NodePlacer } from './StructuralEditor';
+import { __resetOpenPages, flushOpenPages } from '@/editor/openPages';
 
 // vi.mock factories run during static import resolution — before this
 // module's own top-level consts would otherwise initialize — so the fixture
@@ -70,6 +71,7 @@ function mockSvg(svg: string): void {
 
 afterEach(() => {
   override.svg = null;
+  __resetOpenPages();
 });
 
 const CODE = 'flowchart TD\n  A[Start] --> B[End]';
@@ -108,6 +110,51 @@ const CLUSTERED_CODE = [
 ].join('\n');
 
 describe('StructuralEditor', () => {
+  it('prepares a focused node label on Save without requiring blur', async () => {
+    const changed = vi.fn();
+    render(<StructuralEditor code={CODE} onChangeCode={changed} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.dblClick(document.getElementById('flowchart-A-0')!);
+    const field = screen.getByLabelText('Node label');
+    fireEvent.change(field, { target: { value: 'Still focused' } });
+    expect(changed).not.toHaveBeenCalled();
+    await act(() => flushOpenPages());
+    expect(changed).toHaveBeenCalledWith(expect.stringContaining('A[Still focused]'));
+  });
+
+  it('prepares a focused edge label before saving its host diagram', async () => {
+    const changed = vi.fn();
+    render(<StructuralEditor code={CODE} onChangeCode={changed} />);
+    await waitFor(() => expect(document.getElementById('L_A_B_0')).not.toBeNull());
+    fireEvent.click(document.getElementById('L_A_B_0')!);
+    fireEvent.change(screen.getByLabelText('Edge label'), { target: { value: 'Pending label' } });
+    await act(() => flushOpenPages());
+    expect(changed).toHaveBeenCalledWith(expect.stringContaining('Pending label'));
+  });
+
+  it('prepares a focused subgraph label and keeps refused text unresolved', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const changed = vi.fn();
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={changed} />);
+    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
+    fireEvent.click(document.getElementById('ops')!);
+    const field = screen.getByLabelText('Subgraph title');
+    fireEvent.change(field, { target: { value: 'Delivery' } });
+    await act(() => flushOpenPages());
+    expect(changed).toHaveBeenCalledWith(expect.stringContaining('subgraph ops[Delivery]'));
+    changed.mockClear();
+    fireEvent.change(field, { target: { value: '' } });
+    let report: Awaited<ReturnType<typeof flushOpenPages>>;
+    await act(async () => {
+      report = await flushOpenPages();
+    });
+    expect(report!.unresolvedOwnerIds).not.toHaveLength(0);
+    expect(changed).not.toHaveBeenCalled();
+    expect((field as HTMLInputElement).value).toBe('');
+    fireEvent.keyDown(field, { key: 'Escape' });
+    const afterDiscard = await flushOpenPages();
+    expect(afterDiscard.unresolvedOwnerIds).toEqual([]);
+  });
   it('renders the diagram and selects a node on click', async () => {
     render(<StructuralEditor code={CODE} onChangeCode={() => {}} />);
     await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());

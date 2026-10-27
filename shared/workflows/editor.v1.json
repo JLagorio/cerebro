@@ -1,0 +1,6 @@
+{
+  "formatVersion": 1,
+  "maxRetainedSessions": 32,
+  "maxRetainedRunSessions": 32,
+  "maxRetainedScheduleSessions": 32
+}

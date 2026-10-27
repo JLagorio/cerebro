@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "clock": "2026-10-24T12:00:00.000Z",
+  "cases": [
+    "cases/passage.json",
+    "cases/repeated.json",
+    "cases/counterevidence.json",
+    "cases/abstain.json",
+    "cases/failed-save.json",
+    "cases/old-agent.json",
+    "cases/stale.json",
+    "cases/ask-first.json",
+    "cases/failed-child.json",
+    "cases/expired-auth.json",
+    "cases/mail-draft.json",
+    "cases/lost-response.json"
+  ]
+}

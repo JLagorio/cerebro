@@ -2,7 +2,7 @@
 
 Owner request (2026-10-23): "I like this UI can we figure that out too? both claude and chatgpt have that neat siderail style in full screen mode". This followed "Did we build sub agents logic and handling? and the UI to watch sub agents?", whose answer was that subagents show inline only and have no monitor.
 
-Status: PLANNED 2026-10-23, critique amendments folded in. The build starts only after M91's final gate is green. It lands as unstaged working-tree changes on `m53-macro-port`, and the owner commits. On 2026-10-23 the owner approved D4 (seated runs take their prompt on stdin, for the context breakdown) and a Plan card in the rail (O1, O2, O8). Probe step P ran the same day (§4): nothing stops M92.13, and P10 found a live argv bug that M92.0 fixes.
+Status: BUILT 2026-10-23 in waves W1–W5; final review and gate: see the [implementation record](2026-10-23-m92-implementation-record.md). On 2026-10-23 the owner approved D4 (seated runs take their prompt on stdin, for the context breakdown) and a Plan card in the rail (O1, O2, O8). Probe step P ran the same day (§4): nothing stops M92.13, and P10 found a live argv bug that M92.0 fixes.
 
 References:
 

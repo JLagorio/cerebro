@@ -1,4 +1,5 @@
-import { flushOpenPages, heldOpenPages } from '@/editor/openPages';
+import { saveBeforeAction } from '@/app/leaveGuard';
+import { heldOpenPages } from '@/editor/openPages';
 import type { BatchOp } from '@/engine/batch';
 import { appendDatabaseFence, canHoldDatabaseBlock } from '@/engine/databaseBlock';
 import { buildSchema } from '@/engine/schema';
@@ -32,7 +33,7 @@ export async function acceptViewSuggestion({
     if (current()) useUiStore.getState().toast(words);
   };
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return null;
     if (!current()) return null;
     const entries = await scanVault(vault);
     if (!current()) return null;

@@ -1,3 +1,5 @@
+import { flushSync } from 'react-dom';
+import { useSourceNavigation, sourceVisitOrigin } from './sourceOpen';
 import { kindFor } from '@/engine/fileKinds';
 import { openBesideIntent, withOpenBesideIntent } from '@/app/openIntent';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -94,14 +96,22 @@ export function QuickOpen() {
 }
 
 function QuickOpenBody() {
+  const [resume] = useState(() => useNavStore.getState().quickOpenResume);
+  useEffect(() => {
+    useNavStore.setState({ quickOpenResume: null });
+  }, []);
+  const { openSource } = useSourceNavigation();
+  const listRef = useRef<HTMLDivElement>(null);
+  const resumeRow = useRef(resume?.activeRowKey ?? null);
+
   // Capture the live page scope before autofocus and the modal layer mount.
   const [snapshot] = useState(() => {
     const chain = activeChain();
     return { chain, commands: availableCommands(chain) };
   });
   const listId = useId();
-  const [category, setCategory] = useState<Category>('all');
-  const [level, setLevel] = useState<Level>({ kind: 'root' });
+  const [category, setCategory] = useState<Category>(resume?.category ?? 'all');
+  const [level, setLevel] = useState<Level>(resume?.level ?? { kind: 'root' });
   const moved = useRef(false);
   const setQuickOpen = useUiStore((s) => s.setQuickOpen);
   const askAgent = useUiStore((s) => s.askAgent);
@@ -112,7 +122,7 @@ function QuickOpenBody() {
   const navigate = useNavStore((s) => s.navigate);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openLog = useOpenLogStore((s) => (vaultPath === null ? undefined : s.logs[vaultPath]));
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(resume?.query ?? '');
   const [activeIndex, setActiveIndex] = useState(0);
   // The query the highlight was last reset for (M59.4): it resets when the
   // query changes, never when rows arrive.
@@ -120,7 +130,7 @@ function QuickOpenBody() {
   const [highlightedFor, setHighlightedFor] = useState(highlightKey);
   // The query "All N matches" was chosen for: the expansion lasts until the
   // query changes.
-  const [expandedFor, setExpandedFor] = useState<string | null>(null);
+  const [expandedFor, setExpandedFor] = useState<string | null>(resume?.expandedFor ?? null);
   // Page text under the names (M59.4), once typing pauses.
   const content = useContentSearch(
     vaultPath,
@@ -372,8 +382,36 @@ function QuickOpenBody() {
         alias: '',
         path: hit.path,
         run: () => {
-          close();
-          openPath(hit.path);
+          if (hit.location) {
+            const origin = {
+              ...sourceVisitOrigin(hit.location.vaultId),
+              kind: 'QuickOpen' as const,
+              snapshot: {
+                query,
+                category,
+                level,
+                expandedFor,
+                activeRowKey: `page:${hit.path}`,
+                scrollTop: listRef.current?.scrollTop ?? 0,
+              },
+            };
+            // Finish Dialog's existing opener restoration before the source
+            // request captures focus ownership. Later focus moves cancel it.
+            const intent = openBesideIntent() ? 'beside' : 'default';
+            flushSync(close);
+            void openSource({
+              requestId: crypto.randomUUID(),
+              locator: hit.location,
+              origin,
+              intent,
+            });
+          } else {
+            close();
+            openPath(hit.path);
+            useUiStore
+              .getState()
+              .toast('Source context opened. This result has no supported passage location.');
+          }
         },
       },
     }));
@@ -451,10 +489,17 @@ function QuickOpenBody() {
   } else if (activeIndex === -1 && !moved.current && preferred >= 0) {
     setActiveIndex(preferred);
   }
-  const active = Math.min(activeIndex, results.length - 1);
+  const resumedIndex =
+    resumeRow.current === null ? -1 : results.findIndex((row) => row.key === resumeRow.current);
+  const active = resumedIndex >= 0 ? resumedIndex : Math.min(activeIndex, results.length - 1);
+  useEffect(() => {
+    if (!resume || query !== resume.query || content.status === 'pending') return;
+    if (listRef.current) listRef.current.scrollTop = resume.scrollTop;
+  }, [resume, query, content.status]);
   // Rows can move under a stationary cursor as the query changes. Only an
   // actual mouse move changes the keyboard highlight; enter alone does not.
   const mark = (index: number) => {
+    resumeRow.current = null;
     moved.current = true;
     setActiveIndex(index);
   };
@@ -510,7 +555,10 @@ function QuickOpenBody() {
             : `Search ${CHOOSER_TITLES[level.kind].toLowerCase()}…`
         }
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => {
+          resumeRow.current = null;
+          setQuery(e.target.value);
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Tab') {
             e.preventDefault();
@@ -570,6 +618,7 @@ function QuickOpenBody() {
       )}
       <div
         id={listId}
+        ref={listRef}
         role="listbox"
         aria-label="Quick open results"
         className="mt-1.5 max-h-[380px] overflow-y-auto"

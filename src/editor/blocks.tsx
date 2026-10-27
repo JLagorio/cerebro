@@ -31,7 +31,12 @@ import { parseSheetFence, SHEET_FENCE, sheetSourcesOf } from '@/engine/sheet/fen
 import { SheetView } from '@/sheet/SheetView';
 import { SheetGrid } from '@/sheet/SheetGrid';
 import { commitSheetEdits } from '@/sheet/commitSheets';
-import { registerSheetDraft, settleSheetDrafts } from '@/sheet/pendingSheets';
+import {
+  canPrepareSheetDraft,
+  notifySheetDraftChanged,
+  registerSheetDraft,
+  settleSheetDrafts,
+} from '@/sheet/pendingSheets';
 import type { CerebroEditor } from './MarkdownEditor';
 import { useSheetWorkbook } from '@/sheet/useSheetWorkbook';
 import {
@@ -388,12 +393,17 @@ function LiveSheetBlock({
             const { blocksToMarkdown } = await import('./markdown');
             return blocksToMarkdown(editor as CerebroEditor);
           }}
-          registerDraft={(flush) => registerSheetDraft(editor, id, flush)}
+          registerDraft={(flush, snapshot, restore) =>
+            registerSheetDraft(editor, id, flush, snapshot, {
+              sources: () => sheetSourcesOf(editor.document),
+              restore,
+            })
+          }
+          onDraftChange={() => notifySheetDraftChanged(editor)}
+          canPrepareDraft={() => canPrepareSheetDraft(editor, id)}
           onCommit={
             editor.isEditable
-              ? (edits) => {
-                  commitSheetEdits(editor as CerebroEditor, edits);
-                }
+              ? (edits) => commitSheetEdits(editor as CerebroEditor, edits)
               : undefined
           }
           onUndo={() => editor.undo()}

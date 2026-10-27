@@ -1,4 +1,5 @@
 [package]
+default-run = "cerebro"
 name = "cerebro"
 version = "0.1.0"
 description = "Cerebro — files-first work management"
@@ -7,6 +8,21 @@ resolver = "2"
 # Declared so the crate is not the one unlicensed node in its own dependency
 # graph (M32.6). Matches the Apache-2.0 LICENSE the DMG bundles and ships.
 license = "Apache-2.0"
+
+[features]
+# Explicit disposable native acceptance executable; never enabled by default.
+native-read-smoke = []
+# Authenticated disposable acquisition metadata only; no provider or secret adapters.
+native-credential-smoke = ["native-read-smoke"]
+# Packaged disposable Keychain adapter acceptance; never enabled by default.
+native-keychain-smoke = ["native-read-smoke"]
+# Explicit disposable fixed-provider action acceptance, never a default feature.
+native-action-smoke = ["native-read-smoke"]
+
+[[bin]]
+name = "native-read-smoke"
+path = "src/bin/native-read-smoke.rs"
+required-features = ["native-read-smoke"]
 
 [lib]
 name = "cerebro_lib"
@@ -25,6 +41,8 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
 serde_yaml = "0.9"
+# M99: bounded native syntax evidence before Serde discards anchors. Already locked, MIT.
+unsafe-libyaml = "=0.2.11"
 walkdir = "2"
 notify = "6"
 chrono = "0.4"
@@ -45,7 +63,7 @@ percent-encoding = "2"
 # segments, lives in app-data, never synced, never authoritative. `bundled`
 # compiles SQLite in — no system dependency, and one pinned SQLite version
 # is what makes rebuild-from-zero byte-deterministic.
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+rusqlite = { version = "0.40.1", features = ["bundled", "backup", "serialize"] }
 # `normalize_alias_v1` (M22.1): NFKC normalization tables. Rust/TS parity is
 # pinned by shared conformance vectors, not by trusting either runtime.
 unicode-normalization = "0.1"
@@ -81,6 +99,9 @@ regex = "=1.13.1"
 
 [dev-dependencies]
 ironcalc_base = { version = "=0.8.3", features = ["mock_time"] }
+# M99.1: Rust-owned wire schemas, exported and checked only by contract tests.
+# Already locked through Tauri; this adds no generator to the shipped binary.
+schemars = "=0.8.22"
 
 [target.'cfg(unix)'.dependencies]
 # Ending a run (M53.10, spawn.rs): std can neither send SIGTERM nor signal a
@@ -89,6 +110,15 @@ ironcalc_base = { version = "=0.8.3", features = ["mock_time"] }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# M96: fixed authenticated native identity read, no default proxies/cookies/HTTP2.
+reqwest = { version = "=0.13.4", default-features = false, features = ["rustls"] }
+# Existing Tauri runtime; select only owned request/deadline/cancellation futures.
+tokio = { version = "=1.53.1", features = ["time", "macros"] }
+# M96.2: owner-selected native Keychain. The safe crate constructs access control;
+# narrow SecItem FFI adds no-UI requests and validates size before copying data.
+security-framework = { version = "=3.7.0", default-features = false, features = ["OSX_10_15"] }
+security-framework-sys = { version = "=2.17.0", default-features = false, features = ["OSX_10_15"] }
+core-foundation = "=0.10.1"
 # M64.6: already locked through Tauri. Its notification plugin reports a
 # desktop permission as granted and identifies dev posts as Terminal; use
 # UNUserNotificationCenter directly, guarded by the installed bundle id.

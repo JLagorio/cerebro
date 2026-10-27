@@ -85,3 +85,24 @@
   height: 28px;
   background: transparent;
 }
+
+/* These roles are opt-in. A named ancestor measures the whole pane instead of
+   this header's own padded content box; existing variant consumers keep theirs. */
+.cb-page-header[data-composition] {
+  padding: var(--sp-8) var(--composition-inset) var(--sp-5);
+  border-bottom: 0;
+}
+
+.cb-page-header[data-composition='collection'] {
+  padding-block: var(--sp-10) var(--sp-6);
+}
+
+.cb-page-header[data-composition='collection'] .cb-page-heading {
+  font-size: 28px;
+  line-height: 36px;
+}
+
+.cb-page-header[data-composition='utility'] .cb-page-heading {
+  font-size: var(--fs-workspace-title);
+  line-height: var(--lh-workspace-title);
+}

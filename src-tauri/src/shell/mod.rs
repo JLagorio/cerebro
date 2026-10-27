@@ -47,6 +47,7 @@ pub mod links;
 pub mod notify;
 pub mod open;
 pub mod quit;
+use tauri::Manager;
 
 /// The one window's label, and the only one `capabilities/default.json`
 /// grants.
@@ -92,14 +93,25 @@ pub fn build_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
             }
         })
         .build()?;
+    // M96 is optional: unavailable native ownership never blocks this window.
+    crate::actions::native_owner::register(app.handle(), &window);
+    let backup_window = crate::workspace_service::backup_commands::register(app.handle(), &window);
     // M55.10: the close button and ⌘W save first. The window closes when
     // the app exits, after the webview's prepare or at its deadline.
     let handle = app.handle().clone();
-    window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+    window.on_window_event(move |event| match event {
+        tauri::WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
             quit::request(&handle);
         }
+        tauri::WindowEvent::Destroyed => {
+            backup_window.retire();
+            crate::actions::native_owner::retire(&handle);
+            handle
+                .state::<crate::draft_recovery_commands::DraftExportState>()
+                .clear();
+        }
+        _ => {}
     });
     Ok(())
 }
@@ -211,6 +223,21 @@ mod tests {
             main.background_throttling,
             Some(tauri::utils::config::BackgroundThrottlingPolicy::Disabled),
             "a hidden window must keep its timers running"
+        );
+
+        let smoke: tauri::Config = serde_json::from_str(include_str!(
+            "../../native-read-smoke/tauri.conf.json"
+        ))
+        .expect("native smoke config parses as tauri's own Config");
+        let smoke_main = smoke
+            .app
+            .windows
+            .iter()
+            .find(|window| window.label == MAIN_WINDOW)
+            .expect("native smoke config declares the main window");
+        assert_eq!(
+            smoke_main.background_throttling, main.background_throttling,
+            "native smoke must preserve production background scheduling policy"
         );
 
         // tauri-runtime's `WebviewAttributes::from(&WindowConfig)` copies the

@@ -20,8 +20,11 @@ design-system controls/AI Elements, Vitest, Playwright and packaged Tauri 2/WKWe
 
 **Spec:** [Cerebro UI design](../specs/2026-10-23-m94-ui-polish-and-journeys-design.md).
 
-**Status:** DRAFT FOR OWNER REVIEW. Documentation only; implementation is not
-authorized by this document. Every check below is future work, not a test result.
+**Status:** Implementation authorized by the owner on 2026-10-23, on the existing
+branch alongside Claude's M92 work. The [implementation record](2026-10-23-m93-m99-implementation-record.md)
+distinguishes verified slices from open work. The owner accepted the refined treatment on 2026-10-25; see the
+[composition decision](../specs/2026-10-25-m94-refined-composition-decision.md).
+Phase checklists remain requirements, not test results. M94 is not complete.
 Program sequencing and owner gates live in the
 [program design](../specs/2026-10-23-m93-m99-program-design.md) and
 [program plan](2026-10-23-m93-m99-master-roadmap.md).
@@ -109,6 +112,15 @@ native-observed and unverified evidence. No product API changes.
 `composition-sheet.md` under the review directory; extend
 `e2e/surface-system.spec.ts` for rendered role geometry.
 
+Execution amendment (2026-10-23): the dev-only `src/lab/CompositionLab.tsx`
+and a conditional entry in `src/lab/main.tsx` provide exact-width comparisons
+of the real shared primitives without changing production consumers. The
+focused geometry cases live in `e2e/m94-composition.spec.ts`; existing surface
+checks remain regression coverage. This fixture has no runtime reader and
+does not fabricate CV-44 reading states. It is excluded from production by the
+existing state-lab entry/build boundary. Owner comparison still precedes wider
+adoption; unchanged surfaces remain the baseline.
+
 **Interfaces:** Produces optional `PageHeader.composition` defined in the file
 map and CSS composition classes scoped to owning containers. Existing `variant`,
 title, actions and metadata props remain compatible. No new state/store.
@@ -120,6 +132,14 @@ title, actions and metadata props remain compatible. No new state/store.
 - [ ] Record owner disposition of proposed spacing, radii and typography exceptions. Commit the scoped contract and evidence under the assigned phase; no repository-wide CSS replacement.
 
 ## M94.3 — Four-surface first slice (UI02)
+
+Execution amendment (2026-10-23): after the independently reviewed M93.8
+source-read repair, the new presentation controls in
+`src/editor/NoteBodyEditor.tsx` adopt existing 28px Buttons and the editor's
+measured 54px page / 28px peek content gutter. This changes presentation only;
+the retained document owner, mode transitions and writer remain M93's.
+`e2e/m94-source-presentation.spec.ts` measures alignment, selected appearance,
+keyboard focus and zero-write switching in both themes and page/peek hosts.
 
 **Files:** Modify first-slice consumers in the file map plus
 `src/detail/AnchoredFieldStatus.tsx` only if demonstrated placement defects need

@@ -1,4 +1,6 @@
 import { Icon } from '@/components/ui/Icon';
+import { useEffect, useRef } from 'react';
+import { registerSavePreparation } from '@/editor/openPages';
 import { edgeAnimated, type EdgeEntry, type EdgeHead, type FlowchartModel } from './model';
 import { canAnimateEdge, deleteEdge, setEdgeAnimate, setEdgeArrow, setEdgeLabel } from './ops';
 
@@ -55,6 +57,19 @@ export function EdgeEditor({
   // Whether this expansion could carry an id at all — the same predicate
   // setEdgeAnimate refuses by, read here so the control can say so up front.
   const edgeCanAnimate = canAnimateEdge(model, edgeEditor.edge);
+  const prepare = useRef<() => void>(() => {});
+  prepare.current = () => {
+    if (edgeEditor.value === (edgeEditor.edge.label ?? '')) return;
+    apply(
+      setEdgeLabel(
+        model,
+        edgeEditor.edge,
+        edgeEditor.value.trim() === '' ? null : edgeEditor.value,
+      ),
+    );
+    onClose();
+  };
+  useEffect(() => registerSavePreparation(() => prepare.current()), []);
 
   return (
     <div

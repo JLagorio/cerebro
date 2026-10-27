@@ -18,14 +18,14 @@ import { parseStackTrace } from '@/engine/ai/stackFrames';
  */
 export function TurnError({
   error,
-  onRetry,
+  onReviewRecovery,
   onOpenPath,
   arrive = false,
 }: {
   /** What Claude Code said: the message's error. */
   error: string;
-  /** Re-send the question this answer belongs to (M15). */
-  onRetry?: () => void;
+  /** Inspect this reply without sending its question again. */
+  onReviewRecovery?: (opener: HTMLButtonElement) => void;
   /** Opens a page a stack frame names. */
   onOpenPath?: (path: string) => void;
   /** The turn failed while the conversation watched (components/ui/motion.ts). */
@@ -77,14 +77,15 @@ export function TurnError({
             </pre>
           </UnfoldDetails>
         )}
-        {onRetry !== undefined && (
+        {onReviewRecovery !== undefined && (
           <button
             type="button"
-            data-testid="retry-turn"
-            onClick={onRetry}
+            data-testid="review-recovery"
+            tabIndex={0}
+            onClick={(event) => onReviewRecovery(event.currentTarget)}
             className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs text-danger-700 hover:border-danger-500"
           >
-            Retry
+            Review what happened
           </button>
         )}
       </div>

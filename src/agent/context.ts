@@ -60,6 +60,7 @@ export interface ContextSnapshot {
   activeNote?: RecordSummary & { body?: string };
   linkedNotes?: { path: string; title: string; type: string | null }[];
   visibleRecords?: RecordSummary[];
+  visibleUnavailable?: string;
   visibleRecordsTruncated?: { shown: number; total: number };
   visibleFilters?: unknown;
   referencedNotes?: (RecordSummary & { body?: string })[];
@@ -177,6 +178,8 @@ export interface SnapshotInput {
   activeBody?: string | null;
   /** The rows the current surface is showing. */
   visible?: Entry[];
+  /** Original surface refused evaluation; never an apparently empty query. */
+  visibleUnavailable?: string;
   /** The active view's filters, so a subset is not mistaken for the whole. */
   filters?: unknown;
   /** `[[wikilinks]]` the user typed into the prompt. */
@@ -245,7 +248,8 @@ export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
     if (linked.length > 0) snapshot.linkedNotes = linked;
   }
 
-  if (visible !== undefined && visible.length > 0) {
+  if (input.visibleUnavailable) snapshot.visibleUnavailable = input.visibleUnavailable;
+  if (!input.visibleUnavailable && visible !== undefined && visible.length > 0) {
     snapshot.visibleRecords = visible.slice(0, MAX_RECORDS).map((e) => summarize(e, schema));
     if (visible.length > MAX_RECORDS) {
       // Say what was dropped. A silently truncated list reads as the whole

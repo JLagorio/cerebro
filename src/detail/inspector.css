@@ -615,7 +615,7 @@
   margin-left: 4px;
 }
 
-/* View details: the list's own last row, like the hidden-properties toggle. */
+/* Property disclosure: the list's own last row, like the hidden-properties toggle. */
 .cb-inspector .cb-heading-details {
   align-self: flex-start;
   margin-left: -8px;

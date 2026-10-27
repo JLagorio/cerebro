@@ -11,6 +11,10 @@ src-tauri/gen
 test-results
 playwright-report
 .claude
+# Preserve review packets and their byte-exact source evidence.
+.superpowers
+# Browser automation snapshots are evidence, not authored source.
+.playwright-mcp
 .vite
 pnpm-lock.yaml
 HardwareSoftware Security Engineering Tool
@@ -59,3 +63,29 @@ shared/import/
 src/engine/sheet/functions.json
 
 src-tauri/fixtures/sheets/
+
+# Rust-generated wire schemas; regenerate through the checked exporter.
+shared/workspace/contracts.v1.json
+shared/actions/contracts.v1.json
+shared/run-configuration/contracts.v1.json
+
+# Preserve the reviewed immutable format1 display-vocabulary formatting.
+shared/run-configuration/metadata-labels.v1.json
+
+# Authored Rust-owned protocol tables retain their reviewed case/row layout.
+# This is formatting ownership, not a generated-schema or self-digest claim.
+shared/workspace/authority.v2.json
+shared/workspace/staging.v1.json
+
+# Native restart audits hash these exact column-fixture bytes as columnsDigest.
+src-tauri/fixtures/native-restart-r1-columns.json
+src-tauri/fixtures/native-restart-r2-columns.json
+
+# Source-location grammar and caps are shared digest-pinned bytes (M97.1).
+shared/knowledge/
+
+# Raw Rust storage comparison reports preserve measured bytes and digests (M99.4).
+docs/superpowers/plans/2026-10-23-m99-store-comparison/*.json
+
+# Rust-owned conversation transport bytes.
+shared/conversations/contracts.v1.json

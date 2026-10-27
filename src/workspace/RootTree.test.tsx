@@ -230,8 +230,29 @@ describe('RootTree git badge', () => {
     render(<RootTree />);
 
     const badge = await screen.findByTestId('root-git-badge');
-    expect(badge.textContent).toBe('main ↑? ↓?');
+    expect(badge.firstChild?.textContent).toBe('main ↑? ↓?');
     expect(badge.getAttribute('title')).toBe(UNCOUNTED_WORDS.unread);
+    // A title reaches no reader: the row's own name says the same words.
+    const why = badge.querySelector('.sr-only');
+    expect(why?.textContent).toBe(` (${UNCOUNTED_WORDS.unread})`);
+    expect(
+      screen.getByRole('treeitem', {
+        name: (name) => name.startsWith('broken') && name.includes(UNCOUNTED_WORDS.unread),
+      }),
+    ).toBeTruthy();
+  });
+
+  it('adds no hidden words to a badge whose counts git took', async () => {
+    seedRoot({ path: '/repos/alpha', label: 'alpha', git: true });
+    seedRootGit('/repos/alpha', { branch: 'main', ahead: 2, behind: 1 });
+    await useRootsStore.getState().loadRoots();
+
+    render(<RootTree />);
+
+    const badge = await screen.findByTestId('root-git-badge');
+    await waitFor(() => expect(badge.textContent).toBe('main ↑2 ↓1'));
+    expect(badge.querySelector('.sr-only')).toBeNull();
+    expect(badge.hasAttribute('title')).toBe(false);
   });
 
   it('shows no counts for a branch that tracks no upstream', async () => {

@@ -1053,7 +1053,7 @@ describe('vaultStore.applyBatch (M60.6)', () => {
     }
   });
 
-  it('a batch already in flight cannot announce or repopulate Undo in a newer vault', async () => {
+  it('a batch holds its origin before writing and cannot notify or repopulate Undo in a newer vault', async () => {
     await useVaultStore.getState().openVault('/demo-vault');
     useUndoStore.getState().clear();
     useUiStore.setState({ toasts: [] });
@@ -1081,25 +1081,32 @@ describe('vaultStore.applyBatch (M60.6)', () => {
         }),
     );
     const announced = vi.fn();
+    const newerAnnounced = vi.fn();
+    let stopNewer = () => {};
     const stop = onExternalWrite(path, { pending: announced, settled: announced });
     try {
       const task = useVaultStore
         .getState()
         .applyBatch([{ op: 'patch', path, set: { status: 'done' } }], { undo: 'Set done' });
       await vi.waitFor(() => expect(ipc.applyBatch).toHaveBeenCalled());
+      expect(announced).toHaveBeenCalledTimes(1);
+      stop();
       useVaultStore.setState({
         vaultPath: '/other-vault',
         entriesVault: '/other-vault',
         entries: [],
       });
+      stopNewer = onExternalWrite(path, { pending: newerAnnounced, settled: newerAnnounced });
       answer();
       expect(await task).not.toBeNull();
       expect(useVaultStore.getState().entries).toEqual([]);
-      expect(announced).not.toHaveBeenCalled();
+      expect(announced).toHaveBeenCalledTimes(2);
+      expect(newerAnnounced).not.toHaveBeenCalled();
       expect(useUndoStore.getState().past).toEqual([]);
       expect(useUiStore.getState().toasts).toEqual([]);
     } finally {
       stop();
+      stopNewer();
     }
   });
   const ITEM = 'projects/guided-onboarding-ga/items/fld-1.md';
@@ -1333,6 +1340,21 @@ describe('human filing inherits in its one write (M63.4)', () => {
 describe('renaming a page with an open editor', () => {
   const path = 'projects/guided-onboarding-ga/items/fld-1.md';
 
+  it('refuses a title write while its body remains held after the last editor unmounts', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const before = mockFsDisk().get(path);
+    const stopHold = registerHold(() => path);
+    try {
+      expect(await useVaultStore.getState().setTitle(path, 'Must not bypass retained body')).toBe(
+        false,
+      );
+      expect(ipc.setNoteTitle).not.toHaveBeenCalled();
+      expect(mockFsDisk().get(path)).toBe(before);
+    } finally {
+      stopHold();
+    }
+  });
+
   it('settles the existing save before the rename and holds new saves through its rescan', async () => {
     await useVaultStore.getState().openVault('/demo-vault');
     const events: string[] = [];
@@ -1410,4 +1432,86 @@ describe('renaming a page with an open editor', () => {
       stopOwner();
     }
   });
+});
+
+it('keeps the authoritative batch result and Undo when refresh fails after acknowledgement', async () => {
+  await useVaultStore.getState().openVault('/demo-vault');
+  const path = useVaultStore.getState().entries.find((entry) => entry.type === 'Work item')!.path;
+  const rescan = useVaultStore.getState().rescan;
+  const refused = vi.fn();
+  let acknowledged: import('@/engine/batch').BatchApplied | undefined;
+  useVaultStore.setState({
+    rescan: vi.fn(async () => {
+      throw new Error('refresh unavailable');
+    }),
+  });
+  try {
+    const result = await useVaultStore
+      .getState()
+      .applyBatch([{ op: 'patch', path, set: { description: 'Acknowledged change' } }], {
+        undo: 'Update description',
+        onRefused: refused,
+        onApplied: (value) => {
+          acknowledged = value;
+        },
+      });
+    expect(result?.files[0].afterHash).toBeTruthy();
+    expect(acknowledged).toBe(result);
+    expect(mockFsDisk().get(path)).toContain('Acknowledged change');
+    expect(refused).not.toHaveBeenCalled();
+    expect(useUndoStore.getState().past.at(-1)?.label).toBe('Update description');
+  } finally {
+    useVaultStore.setState({ rescan });
+  }
+});
+
+it('an acknowledgement observer cannot turn an applied batch into a refusal', async () => {
+  await useVaultStore.getState().openVault('/demo-vault');
+  const path = useVaultStore.getState().entries.find((entry) => entry.type === 'Work item')!.path;
+  const refused = vi.fn();
+  const result = await useVaultStore
+    .getState()
+    .applyBatch([{ op: 'patch', path, set: { description: 'Still applied' } }], {
+      onRefused: refused,
+      onApplied: () => {
+        throw new Error('observer failed');
+      },
+    });
+  expect(result?.files[0].afterHash).toBeTruthy();
+  expect(mockFsDisk().get(path)).toContain('Still applied');
+  expect(refused).not.toHaveBeenCalled();
+});
+
+it('a caller origin retired while body saves flush prevents dispatch, but retirement after dispatch keeps the receipt and Undo', async () => {
+  await useVaultStore.getState().openVault('/demo-vault');
+  const path = useVaultStore.getState().entries.find((entry) => entry.type === 'Work item')!.path;
+  const before = mockFsDisk().get(path);
+  let current = true;
+  const stop = registerFlush(async () => {
+    current = false;
+  });
+  expect(
+    await useVaultStore
+      .getState()
+      .applyBatch([{ op: 'patch', path, set: { description: 'Do not dispatch' } }], {
+        stillCurrent: () => current,
+      }),
+  ).toBeNull();
+  expect(mockFsDisk().get(path)).toBe(before);
+  stop();
+  current = true;
+  const realBatch = mockBackend.applyBatch;
+  vi.mocked(ipc.applyBatch).mockImplementationOnce(async (...args) => {
+    current = false;
+    return realBatch(...args);
+  });
+  const applied = await useVaultStore
+    .getState()
+    .applyBatch([{ op: 'patch', path, set: { description: 'Already dispatched' } }], {
+      stillCurrent: () => current,
+      undo: 'Keep dispatched change',
+    });
+  expect(applied?.files[0].afterHash).toBeTruthy();
+  expect(mockFsDisk().get(path)).toContain('Already dispatched');
+  expect(useUndoStore.getState().past.at(-1)?.label).toBe('Keep dispatched change');
 });

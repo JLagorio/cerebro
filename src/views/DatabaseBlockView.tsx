@@ -1,3 +1,4 @@
+import { selectedViewIssue } from '@/engine/selectedEntryProjection';
 import { ViewControlIcons, SearchBox } from '@/views/ViewControlIcons';
 import { ViewSettingsPanel } from '@/views/ViewSettingsPanel';
 import { ViewToolbar } from '@/views/ViewToolbar';
@@ -178,6 +179,7 @@ export function DatabaseBlockView({
     [shown, database, entries, schema],
   );
 
+  const selectedUnavailable = surface?.unavailable ?? (surface === null ? undefined : selectedViewIssue(surface.entries, schema, surface.presentation, undefined, database, search));
   const fields = useMemo(
     () =>
       surface === null
@@ -227,6 +229,14 @@ export function DatabaseBlockView({
         <span className="text-n-700">
           No database named <strong className="font-medium">{resolved.database}</strong>
         </span>
+        {onChange !== undefined && (
+          <DatabasePicker
+            label="Choose another database"
+            entries={entries}
+            schema={schema}
+            onPick={(name) => onChange({ database: name, view: '' })}
+          />
+        )}
       </Shell>
     );
   }
@@ -354,8 +364,9 @@ export function DatabaseBlockView({
         <div className="mt-1 flex min-h-0 flex-col overflow-hidden">
           <ViewProblems problems={problems} source={resolved.database} />
           <ViewCanvas
+        unavailable={selectedUnavailable}
             embedded
-            entries={searchEntries(surface.entries, search)}
+            entries={selectedUnavailable ? [] : searchEntries(surface.entries, search)}
             allEntries={entries}
             presentation={surface.presentation}
             schema={schema}

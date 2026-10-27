@@ -127,6 +127,14 @@ export async function exportViewCsv(
         : resolveView(list!.definition, selection.view);
     if (['chart', 'dashboard', 'whiteboard'].includes(tab.presentation.type)) return false;
     const surface = resolveSurface(selection, entries, schema, views);
+    if (surface.unavailable) {
+      useUiStore.getState().toast(surface.unavailable.message);
+      return false;
+    }
+    if (surface.entries.some(entry => entry.authority?.kind === 'sqlite_metadata')) {
+      useUiStore.getState().toast('Exporting this selected view needs its canonical export reader. No file was created.');
+      return false;
+    }
     const source =
       selection.kind === 'type' ? { type: selection.name, project: null } : list!.definition.source;
     const output = viewCsv(surface.entries, surface.presentation, source, schema, entries);

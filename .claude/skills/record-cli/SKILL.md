@@ -35,8 +35,9 @@ header disagree, the header wins and this file gets fixed.
 - App runs, through the tee: a debug build only. Start `pnpm tauri dev`
   with `CEREBRO_RECORD_DIR` set, open the folder's `vault`, and use the app.
   Each run leaves `runs/<stamp>-<run>.stream.jsonl`, `.argv.json` and
-  `.end.json`, owner-only, and the child signs in from the same
-  `claude-config`. A release build records nothing.
+  `.end.json`, owner-only, and a seated run also `.stdin.jsonl` (its prompt
+  and context ask, raw; sanitize does not read it until M92.R). The child
+  signs in from the same `claude-config`. A release build records nothing.
 - For the scout's refused write, set `schedule:` on its record (the folder's
   `vault/records/agents/scout.md`) a few minutes ahead and wait.
 
@@ -52,6 +53,9 @@ header disagree, the header wins and this file gets fixed.
   (one flag per reviewed connector, written into the recording meta), an
   API-key source, another CLI version, or any hit in the post-scan. Its report
   is counts only, so it is safe to paste.
+- A seated run's `.stream.jsonl` also carries the context answer's
+  `memoryFiles` paths and `mcpTools` names (M92.13); sanitize drops them only
+  once its `ANSWER_DROP` learns them (M92.R).
 
 ## Commit
 

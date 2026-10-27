@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { boot, openAssistantPanel } from './boot';
 
 /**
@@ -18,6 +18,24 @@ async function send(page: Page, message: string) {
   await panel.getByLabel('Message the assistant').fill(message);
   await panel.getByRole('button', { name: 'Send' }).click();
   return panel;
+}
+
+async function reviewFailure(panel: Locator, failure: Locator, question: string) {
+  await expect(panel.getByTestId('chat-message')).toHaveCount(2);
+  await expect(panel.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+  const inspect = failure.getByRole('button', { name: 'Review what happened', exact: true });
+  await inspect.click();
+  const review = panel.getByRole('region', { name: 'Review what happened' });
+  await expect(review).toBeVisible();
+  await expect(review.getByText(question, { exact: true })).toBeVisible();
+  await expect(review).toContainText('may be incomplete');
+  await expect(panel.getByTestId('chat-message')).toHaveCount(2);
+  await expect(panel.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+  await review.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(review).toHaveCount(0);
+  await expect(inspect).toBeFocused();
+  await expect(failure).toBeVisible();
+  await expect(panel.getByTestId('chat-message')).toHaveCount(2);
 }
 
 test("agent failures: not signed in opens Settings at Claude Code's row", async ({ page }) => {
@@ -44,13 +62,15 @@ test('agent failures: a usage limit names when it resets', async ({ page }) => {
   await expect(card).toHaveAccessibleName("You've reached your Claude usage limit");
   await expect(card).toContainText('your weekly limit is used up');
   // playwright.config.ts pins the browser to UTC.
-  await expect(card.getByTestId('failure-notice-reset')).toHaveText('Resets Thu, Jan 1, 12:00 AM');
+  await expect(card.getByTestId('failure-notice-reset')).toHaveText(
+    /^Resets Thu, Jan 1(?:,| at) 12:00 AM$/,
+  );
   // What Claude Code said is one click away.
   await card.getByText('What Claude Code said').click();
   await expect(card.getByTestId('failure-notice-raw')).toContainText(
     "You've hit your weekly limit",
   );
-  await expect(card.getByTestId('retry-turn')).toBeVisible();
+  await reviewFailure(panel, card, 'fail: usage-limit');
 });
 
 test('agent failures: a failure Rust cannot type keeps the red box and its words', async ({
@@ -64,5 +84,5 @@ test('agent failures: a failure Rust cannot type keeps the red box and its words
     .filter({ hasText: 'API Error: 400 the request was not one Claude could take' });
   await expect(reply).toBeVisible();
   await expect(panel.getByTestId('failure-notice')).toHaveCount(0);
-  await expect(reply.getByTestId('retry-turn')).toBeVisible();
+  await reviewFailure(panel, reply, 'fail: unknown');
 });

@@ -1,5 +1,5 @@
 import { Icon } from '@/components/ui/Icon';
-import { FieldEditor, humanize } from '@/detail/FieldEditor';
+import { FieldEditor, humanize, type ScalarFieldDraft } from '@/detail/FieldEditor';
 import { foldsWhenUnset, kindMeta, splitByVisibility } from '@/engine/properties';
 import type { Entry, FieldDef, Schema } from '@/engine/types';
 
@@ -28,7 +28,7 @@ export function stripCells(
 /**
  * The key-property strip under a record's title (M45.1, spec §3.4): the
  * type's `layout.heading` fields as a horizontal wrap of labeled editors,
- * with the View details / Hide details expander that reveals the full
+ * with the Show all properties / Hide properties expander that reveals the full
  * property stack.
  *
  * `fields` is the RESOLVED heading — the hosts run `resolveLayout` and pass
@@ -48,6 +48,8 @@ export function HeadingProperties({
   toggleDisabled = false,
   showEmpty,
   onPatch,
+  scalarDrafts,
+  onScalarDraftChange,
 }: {
   entry: Entry;
   schema: Schema;
@@ -60,6 +62,8 @@ export function HeadingProperties({
   showEmpty?: boolean;
   /** Caller-owned draft, keyed so every strip cell edits the same record. */
   onPatch?: (patch: Record<string, unknown>) => void;
+  scalarDrafts?: Record<string, ScalarFieldDraft>;
+  onScalarDraftChange?: (field: string, draft: ScalarFieldDraft | null) => void;
 }) {
   const shown = stripCells(entry, schema, fields, showEmpty);
   if (shown.length === 0) return null;
@@ -80,6 +84,12 @@ export function HeadingProperties({
               schema={schema}
               compact
               chrome="strip"
+              scalarDraft={scalarDrafts?.[f.name]}
+              onScalarDraftChange={
+                onScalarDraftChange === undefined
+                  ? undefined
+                  : (draft) => onScalarDraftChange(f.name, draft)
+              }
               onPatch={onPatch === undefined ? undefined : (value) => onPatch({ [f.name]: value })}
             />
           </div>
@@ -96,7 +106,7 @@ export function HeadingProperties({
           title={toggleDisabled ? 'Finish editing before hiding properties' : undefined}
           className="cb-heading-details rounded-md border-0 bg-transparent px-2 py-1 text-metadata text-n-500 hover:bg-n-50 hover:text-n-700"
         >
-          {expanded ? 'Hide details' : 'View details'}
+          {expanded ? 'Hide properties' : 'Show all properties'}
         </button>
       )}
     </div>

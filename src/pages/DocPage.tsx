@@ -1,4 +1,6 @@
 import { PullRequestStrip } from '@/detail/PullRequestStrip';
+import { SelectedDocPage } from './SelectedDocPage';
+import { DeletedDraftRecovery, useRecoveryHold } from '@/editor/DeletedDraftRecoveryFace';
 import './pages.css';
 import { PageRunsTab } from '@/detail/PageRunsTab';
 import { PageAgentsTab } from '@/detail/PageAgentsTab';
@@ -41,6 +43,8 @@ import { ImportProvenance } from '@/detail/ImportProvenance';
 import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
 import { addSubPage } from '@/app/pageActions';
+import { savePageAsTemplate } from '@/app/templateActions';
+import { applyPageTemplate } from '@/app/applyPageTemplate';
 import { trashPath } from '@/app/trashActions';
 import { setTypeTabs } from '@/app/typeActions';
 import { isAgentEntry } from '@/engine/agents';
@@ -68,16 +72,8 @@ import { KnowledgeStrip } from '@/knowledge/KnowledgeStrip';
 import { ReviewPager } from '@/knowledge/ReviewQueue';
 import { useConcept } from '@/knowledge/useConcepts';
 import { conceptAskOf, sendAsk } from '@/agent/elements/decisionsAsks';
-import { createFolder, readNote, saveNote } from '@/lib/ipc';
-import { humanizeSlug, slugify } from '@/lib/slug';
-import {
-  applyTemplateBody,
-  applyTemplateFrontmatter,
-  listTemplates,
-  templateDisplayName,
-  TEMPLATES_DIR,
-  todayIso,
-} from '@/lib/templates';
+import { humanizeSlug } from '@/lib/slug';
+import { listTemplates, templateDisplayName } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
 import {
   DOC_COLUMN_MIN_WIDTH,
@@ -88,6 +84,7 @@ import {
   type PagePanel,
 } from '@/stores/uiStore';
 import { useMeasuredWidth } from '@/hooks/useMeasuredWidth';
+import { useVaultActionGuard } from '@/hooks/useVaultActionGuard';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 
 export type DocSelection = Extract<Selection, { kind: 'doc' }>;
@@ -100,9 +97,9 @@ export type DocSelection = Extract<Selection, { kind: 'doc' }>;
  */
 export function usePageAsideOpen(path: string | null): boolean {
   const isConcept = useConcept(path) !== null;
-  const exists = useEntry(path) !== null;
+  const entry = useEntry(path);
   const open = useUiStore((s) => (isConcept ? s.conceptPanelOpen : s.docPanelOpen));
-  return exists && open;
+  return entry !== null && entry.authority === undefined && open;
 }
 
 /**
@@ -118,7 +115,7 @@ export function isBlankBody(editor: CerebroEditor): boolean {
   let sawHeading = false;
   for (const block of editor.document) {
     if (block.type === 'heading') {
-      if (sawHeading) return false;
+      if (sawHeading || block.props.level !== 1 || block.children.length > 0) return false;
       sawHeading = true;
       continue;
     }
@@ -176,14 +173,27 @@ function BlankPageBar({
  */
 export function DocPage({ selection }: { selection: DocSelection }) {
   const entry = useEntry(selection.path);
+  const status = useVaultStore((state) => state.status);
+  const error = useVaultStore((state) => state.error);
+  if (status === 'error')
+    return (
+      <div role="alert" className="section-unavailable">
+        Workspace unavailable{error === null ? '' : `: ${error}`}
+      </div>
+    );
+  if (entry?.authority?.kind === 'sqlite_metadata') return <SelectedDocPage entry={entry} />;
+  return <LegacyDocPage selection={selection} />;
+}
+
+function LegacyDocPage({ selection }: { selection: DocSelection }) {
+  const entry = useEntry(selection.path);
   // Each page the column shows fades in as it arrives, the editor kept
   // (`usePageTurn`, pageFrame.css).
   const turn = usePageTurn(selection.path);
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
   const vaultPath = useVaultStore((s) => s.vaultPath);
-  const rescan = useVaultStore((s) => s.rescan);
-  const createItem = useVaultStore((s) => s.createItem);
+  const startAction = useVaultActionGuard(JSON.stringify([vaultPath, selection.path]));
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const navigate = useNavStore((s) => s.navigate);
   const schema = useSchema();
@@ -232,18 +242,14 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // page knows whether that mount is still on screen.
   const [mounted, setMounted] = useState<{
     path: string;
-    gen: number;
     editor: CerebroEditor;
   } | null>(null);
-  // Debounce controls, so out-of-editor writes can stop a stale in-editor
-  // body from being flushed back over them.
+  // Explicit title actions flush through the current editor owner.
   const editorControls = useRef<EditorReadyInfo | null>(null);
   const [saveState, setSaveState] = useState<EditorSaveState>('idle');
   // M9.7: reading a diff swaps the editor out for it, in place.
   const diffOpen = useUiStore((s) => s.diffView?.path === selection.path);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  // Bumped to force a reload after out-of-editor writes (template apply).
-  const [reloadGen, setReloadGen] = useState(0);
 
   // M38.2 — a record is a page too. Same canvas, plus the property surface
   // the panel shows, minus nothing.
@@ -278,9 +284,8 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     : activeTab === null || activeTab.content === 'overview';
 
   // The same editor remains live on related tabs so title edits, pending saves
-  // and comment anchors retain their owner. A diff or path/reload replaces it.
-  const mountLive =
-    mounted !== null && mounted.path === selection.path && mounted.gen === reloadGen && !diffOpen;
+  // and comment anchors retain their owner. A diff or path change replaces it.
+  const mountLive = mounted !== null && mounted.path === selection.path && !diffOpen;
   if (mounted !== null && !mountLive) setMounted(null);
   const editor = mountLive ? mounted.editor : null;
 
@@ -307,7 +312,10 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const [pageName, setPageName] = useState('');
   const [renaming, setRenaming] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [actionBusy, setBusy] = useState(false);
+  const templateScope = JSON.stringify([vaultPath, selection.path]);
+  const [templatePending, setTemplatePending] = useState<{ scope: string } | null>(null);
+  const busy = actionBusy || templatePending?.scope === templateScope;
   const menuButtonRef = useRef<HTMLDivElement | null>(null);
 
   // M70.2b — the page's comments, on every .md page this opens: docs,
@@ -323,20 +331,27 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     { openPanel: () => openSideRef.current('comments'), deepLink: selection.thread ?? null },
   );
 
-  if (entry === null) {
+  const recoveryHeld = useRecoveryHold(vaultPath, selection.path);
+  if (entry === null || recoveryHeld) {
     return (
-      <div className="flex min-w-0 flex-1 items-center justify-center">
-        <EmptyState
-          icon="file-x"
-          title="This page no longer exists"
-          description="It may have been renamed or moved to the Trash."
-          action={
-            <Button variant="secondary" onClick={() => navigate({ kind: 'home' })}>
-              Go home
-            </Button>
-          }
-        />
-      </div>
+      <DeletedDraftRecovery
+        vaultId={vaultPath}
+        path={selection.path}
+        fallback={
+          <div className="flex min-w-0 flex-1 items-center justify-center">
+            <EmptyState
+              icon="file-x"
+              title="This page no longer exists"
+              description="It may have been renamed or moved to the Trash."
+              action={
+                <Button variant="secondary" onClick={() => navigate({ kind: 'home' })}>
+                  Go home
+                </Button>
+              }
+            />
+          </div>
+        }
+      />
     );
   }
 
@@ -489,35 +504,17 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   const templates = listTemplates(entries);
 
-  // Fill this (blank) page from a template: body below the H1 + frontmatter,
-  // then force the editor to reload from disk.
+  // Applying a template uses one checked batch and the existing owner's
+  // outside-write reconciliation, preserving typing during the request.
   const applyTemplate = async (template: Entry) => {
     if (vaultPath === null || busy) return;
-    // Drop any pending debounce FIRST. Otherwise the reload below remounts
-    // the editor, its unmount flush serializes the pre-template body, and the
-    // template the user just picked is overwritten half a second later
-    // ("I clicked the template and nothing happened").
-    editorControls.current?.cancelPendingSave();
-    setBusy(true);
+    const current = startAction();
+    const pending = { scope: templateScope };
+    setTemplatePending(pending);
     try {
-      const vars = { title: entry.title, date: todayIso() };
-      const body = applyTemplateBody(await readNote(vaultPath, template.path), vars);
-      await saveNote(vaultPath, entry.path, body);
-      const frontmatter = applyTemplateFrontmatter(template, vars);
-      if (Object.keys(frontmatter).length > 0) {
-        await patchFrontmatter(entry.path, frontmatter);
-      }
-      await rescan();
-      // Cancel again: the awaits above gave the editor time to reschedule.
-      editorControls.current?.cancelPendingSave();
-      editorControls.current = null;
-      setMounted(null);
-      setSaveState('idle');
-      setReloadGen((g) => g + 1);
-    } catch {
-      toast("Couldn't apply template");
+      await applyPageTemplate(vaultPath, entry.path, template.path, current);
     } finally {
-      setBusy(false);
+      setTemplatePending((previous) => (previous === pending ? null : previous));
     }
   };
 
@@ -527,28 +524,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     if (vaultPath === null || busy) return;
     setBusy(true);
     try {
-      const body = await readNote(vaultPath, entry.path);
-      const lines = body.split('\n');
-      const h1 = lines.findIndex((l) => l.trim().startsWith('# '));
-      if (h1 >= 0) lines[h1] = '# {{title}}';
-      const frontmatter: Record<string, unknown> = {};
-      if (entry.type !== null) frontmatter.type = entry.type;
-      for (const [key, value] of Object.entries(entry.properties)) {
-        if (key !== 'full_width') frontmatter[key] = value;
-      }
-      for (const [key, targets] of Object.entries(entry.relationships)) {
-        frontmatter[key] = targets.map((t) => `[[${t}]]`);
-      }
-      await createFolder(vaultPath, TEMPLATES_DIR);
-      await createItem({
-        folder: TEMPLATES_DIR,
-        slug: slugify(entry.title) || 'template',
-        frontmatter,
-        body: lines.join('\n'),
-      });
-      toast(`Saved as template — find it under ${TEMPLATES_DIR}/`);
-    } catch {
-      toast("Couldn't save template");
+      await savePageAsTemplate(vaultPath, entry.path);
     } finally {
       setBusy(false);
     }
@@ -757,12 +733,12 @@ export function DocPage({ selection }: { selection: DocSelection }) {
       value={readOnlyFile || comments.path === null ? null : { start: comments.start }}
     >
       <NoteBodyEditor
-        key={`${entry.path}#${reloadGen}`}
+        key={entry.path}
         path={entry.path}
         onSaveState={setSaveState}
         onReady={(info) => {
           editorControls.current = info;
-          setMounted({ path: entry.path, gen: reloadGen, editor: info.editor });
+          setMounted({ path: entry.path, editor: info.editor });
         }}
         readOnly={readOnlyFile}
         sections={concept !== null}

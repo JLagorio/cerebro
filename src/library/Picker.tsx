@@ -41,6 +41,8 @@ export function Picker({
   ariaLabel,
   testId,
   groupHint,
+  unavailableValues = [],
+  inventoryUnavailable = false,
 }: {
   options: PickerOption[];
   selected: string[];
@@ -53,6 +55,10 @@ export function Picker({
   testId?: string;
   /** Per-group explanation, keyed by group name. */
   groupHint?: Record<string, string>;
+  /** Names retained while their inventory is loading or failed, not known absent. */
+  unavailableValues?: readonly string[];
+  /** The whole option inventory could not be read; selected chips remain editable. */
+  inventoryUnavailable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -62,7 +68,7 @@ export function Picker({
   // Anything selected that this vault does not offer. Kept, shown, and
   // removable — never silently dropped, because dropping one would rewrite
   // the user's policy behind their back on the next save.
-  const unknown = selected.filter((v) => !byValue.has(v));
+  const unknown = selected.filter((v) => !byValue.has(v) && !unavailableValues.includes(v));
 
   const groups = useMemo(() => {
     // A filter, not a ranking: option lists keep their designed order (M59.3).
@@ -100,17 +106,23 @@ export function Picker({
         )}
         {selected.map((value) => {
           const option = byValue.get(value);
+          const unavailable = option === undefined && unavailableValues.includes(value);
           return (
             <span
               key={value}
               data-testid="picker-chip"
-              data-unknown={option === undefined}
+              data-unknown={option === undefined && !unavailable}
+              data-unavailable={unavailable || undefined}
               className={`inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-1 text-2xs ${
-                option === undefined
+                option === undefined && !unavailable
                   ? 'border-danger-200 bg-danger-50 text-danger-700'
                   : 'border-n-200 bg-n-25 text-n-700'
               }`}
-              title={option?.hint ?? 'Not something this vault has — it will do nothing.'}
+              title={
+                unavailable
+                  ? 'Availability could not be checked. The grant is unchanged.'
+                  : (option?.hint ?? 'Not something this vault has — it will do nothing.')
+              }
             >
               {option?.icon !== undefined && <Icon name={option.icon} size={11} />}
               <span className="truncate">{option?.label ?? value}</span>
@@ -171,7 +183,11 @@ export function Picker({
           </div>
           <div className="max-h-[280px] overflow-y-auto p-1">
             {groups.length === 0 && (
-              <p className="m-0 px-2 py-3 text-center text-xs text-n-500">Nothing matches that.</p>
+              <p className="m-0 px-2 py-3 text-center text-xs text-n-500">
+                {inventoryUnavailable
+                  ? 'Options unavailable until the inventory is read.'
+                  : 'Nothing matches that.'}
+              </p>
             )}
             {groups.map(([group, members]) => (
               <div key={group}>

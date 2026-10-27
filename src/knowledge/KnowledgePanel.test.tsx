@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { listConcepts } from '@/engine/okf';
 import { makeEntry } from '@/engine/testHelpers';
@@ -249,9 +249,9 @@ describe('KnowledgePanel — sources as the Sources element (M91.14, CV-16)', ()
     expect(rows.map((row) => [row.dataset.kind, row.dataset.path])).toEqual([
       ['url', undefined],
       ['vault', 'records/decision.md'],
-      ['url', undefined],
-      ['url', undefined],
-      ['vault', undefined],
+      ['descriptor', undefined],
+      ['descriptor', undefined],
+      ['descriptor', undefined],
     ]);
     // A vault page opens in the app, named by its page's title.
     fireEvent.click(within(rows[1]).getByRole('button', { name: 'Open The decision' }));
@@ -274,6 +274,95 @@ describe('KnowledgePanel — sources as the Sources element (M91.14, CV-16)', ()
     expect(row.textContent).toMatch(/^1Cutover standup/);
     expect(within(row).getByTestId('source-author').textContent).toBe('Priya Nair');
     expect(row.querySelector('[data-slot="source"]')?.getAttribute('data-via')).toBe('text');
+  });
+
+  it('scope_descriptor_is_plain_text in both Sources and the concept Resource', () => {
+    const descriptor = 'all queries in project X';
+    const root = panel({ sources: [{ id: 'scope', resource: descriptor }], resource: descriptor });
+    const row = within(root).getByTestId('concept-source');
+    expect(within(root).getAllByText(descriptor, { exact: true })).toHaveLength(2);
+    expect(row.querySelector('[data-slot="source"]')).toBeNull();
+    expect(row.querySelector('[data-slot="trace-icon"]')).toBeNull();
+    expect(root.querySelector('[data-slot="source"]')).toBeNull();
+    expect(within(row).queryByRole('button')).toBeNull();
+    expect(within(row).queryByRole('link')).toBeNull();
+    expect(row.textContent).not.toMatch(/missing|read|supporting/i);
+    fireEvent.click(within(row).getByText(descriptor, { exact: true }));
+    expect(onOpenEntity).not.toHaveBeenCalled();
+    expect(within(root).queryByRole('button', { name: 'Verify' })).toBeNull();
+  });
+
+  it('missing_local_source_is_not_openable and keeps the listed order beside valid controls', () => {
+    const root = panel({
+      sources: [
+        { id: 'missing', resource: '/records/gone.md' },
+        { id: 'web', resource: 'https://example.com/standup', title: 'Standup' },
+        { id: 'page', resource: '/records/decision.md' },
+      ],
+    });
+    const rows = within(root).getAllByTestId('concept-source');
+    expect(rows.map((row) => row.firstElementChild?.textContent)).toEqual(['1', '2', '3']);
+    expect(rows[0].textContent).toContain('/records/gone.md');
+    expect(rows[0].textContent).toContain('Local source missing');
+    expect(rows[0].querySelector('[data-slot="source"]')).toBeNull();
+    expect(rows[0].querySelector('[data-slot="trace-icon"]')).toBeNull();
+    expect(within(rows[0]).queryByRole('button')).toBeNull();
+    expect(within(rows[0]).queryByRole('link')).toBeNull();
+    const web = within(rows[1]).getByRole('link');
+    expect(web.getAttribute('href')).toBe('https://example.com/standup');
+    expect(web.getAttribute('target')).toBe('_blank');
+    expect(web.getAttribute('rel')).toBe('noreferrer noopener');
+    expect(rows[1].querySelector('[data-slot="source"]')?.getAttribute('data-via')).toBe('text');
+    const local = within(rows[2]).getByRole('button', { name: 'Open The decision' });
+    expect(local.getAttribute('href')).toBeNull();
+    fireEvent.click(local);
+    expect(onOpenEntity).toHaveBeenCalledExactlyOnceWith('records/decision.md');
+    expect(rows[2].querySelector('[data-slot="source"]')?.getAttribute('data-via')).toBe('text');
+  });
+
+  it.each(['javascript:alert(1)', 'https://user:secret@example.com/report'])(
+    'unsafe_scheme_is_not_a_source_action: %s',
+    (resource) => {
+      const root = panel({ sources: [{ id: 'unsafe', resource }] });
+      const row = within(root).getByTestId('concept-source');
+      expect(row.textContent).toContain(resource);
+      expect(row.querySelector('[data-slot="source"]')).toBeNull();
+      expect(row.querySelector('[data-slot="trace-icon"]')).toBeNull();
+      expect(within(row).queryByRole('link')).toBeNull();
+      expect(within(row).queryByRole('button')).toBeNull();
+      fireEvent.click(row);
+      expect(onOpenEntity).not.toHaveBeenCalled();
+    },
+  );
+
+  it('resolved_vault_source_keeps_citation_number when the current listing later loses its entry', () => {
+    const root = panel({
+      sources: [
+        { id: 'page', resource: '/records/decision.md' },
+        { id: 'scope', resource: 'all queries in project X' },
+      ],
+    });
+    const before = within(root).getAllByTestId('concept-source');
+    expect(before.map((row) => row.firstElementChild?.textContent)).toEqual(['1', '2']);
+    fireEvent.click(within(before[0]).getByRole('button', { name: 'Open The decision' }));
+    expect(onOpenEntity).toHaveBeenCalledExactlyOnceWith('records/decision.md');
+    // This is absence from the supplied listing, not a fabricated failed read.
+    act(() => {
+      useVaultStore.setState({
+        entries: useVaultStore
+          .getState()
+          .entries.filter((entry) => entry.path !== 'records/decision.md'),
+      });
+    });
+    const after = within(root).getAllByTestId('concept-source');
+    expect(after.map((row) => row.firstElementChild?.textContent)).toEqual(['1', '2']);
+    expect(after[0].textContent).toContain('/records/decision.md');
+    expect(after[0].textContent).toContain('Local source missing');
+    expect(after[0].querySelector('[data-slot="source"]')).toBeNull();
+    expect(within(after[0]).queryByRole('button')).toBeNull();
+    expect(within(after[0]).queryByRole('link')).toBeNull();
+    fireEvent.click(after[0]);
+    expect(onOpenEntity).toHaveBeenCalledTimes(1);
   });
 });
 

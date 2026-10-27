@@ -15,10 +15,12 @@
 //! runtime DB. What a run spent stays on the operational side of D5 by
 //! construction rather than by everyone remembering.
 //!
-//! **Two of a run's numbers reach the renderer, and neither is a token count
-//! or a cost** (the owner's narrowings of the rule above). How much of its
+//! **Two of a run's numbers reach the renderer, and neither says what it
+//! spent** (the owner's narrowings of the rule above). How much of its
 //! model's context window a conversation has used, [`context_used`] of the
-//! run's latest turn (M91.5), reaches it only when it asks: the reader files
+//! run's latest turn (M91.5), with Claude Code's own breakdown of that window
+//! when a seated run answered its context ask (M92.13,
+//! `meter::ContextBreakdown`), reaches it only when it asks: the reader files
 //! it in a memory-only book (`meter::ContextBook`), and the composer pulls it
 //! with `agent_context_usage` when a turn ends, a thread opens or a branch
 //! starts, so it is never emitted, journaled, logged or stored. How long

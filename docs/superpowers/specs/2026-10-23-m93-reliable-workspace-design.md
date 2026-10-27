@@ -46,7 +46,9 @@ For source editing, recommend body-only presentation with exact untouched-prefix
 type NoteWriteAck =
   { kind: 'file'; contentHash: string } | { kind: 'governed'; projectionHash: string };
 type SaveOutcome =
+  | { kind: 'clean'; ownerId: string; generation: number }
   | { kind: 'acknowledged'; ownerId: string; generation: number; write: NoteWriteAck }
+  | { kind: 'committed'; ownerId: string; generation: number; source: 'guarded_field' }
   | { kind: 'failed'; ownerId: string; generation: number; code: string }
   | {
       kind: 'blocked';
@@ -56,6 +58,10 @@ type SaveOutcome =
     };
 type FlushReport = { outcomes: SaveOutcome[]; unresolvedOwnerIds: string[] };
 ```
+
+Implementation clarification (2026-10-23): a no-op flush of an already clean owner returns `clean`, without writing or fabricating a hash. Flush-report consumers treat `clean` as resolved.
+
+Field adaptation clarification (2026-10-23): an existing guarded field writer that returns success may report `committed` for its exact submitted generation. It does not report a file/projection hash the writer did not return. Local creation-form patches are draft changes, not guarded commits; they remain outside this channel. Current generations and unresolved child buffers are still inspected after any successful outcome.
 
 The file hash identifies bytes acknowledged by the authoritative write door, not a subsequent rescan. Existing `saveNote` returns hash or null for a governed projection; null must not become a fabricated hash. Extend the authoritative result to supply a projection hash only after guarded projection materialization/read confirmation. Human-facing actions still catch, toast and return typed outcomes rather than throwing (CV-03). Refresh failure after an acknowledged write is a refresh error, not failed durability.
 

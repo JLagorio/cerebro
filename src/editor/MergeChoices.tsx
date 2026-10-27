@@ -27,8 +27,18 @@ function show(blockId: string | null): void {
 export function MergeChoices({
   choices,
   onPick,
+  description,
+  disabled = false,
+  keepMineDisabled = false,
+  mineLabel = 'Keep yours',
+  currentLabel = 'Use new',
 }: {
   choices: readonly ChoiceView[];
+  description?: string;
+  disabled?: boolean;
+  keepMineDisabled?: boolean;
+  mineLabel?: string;
+  currentLabel?: string;
   onPick: (id: string, pick: 'mine' | 'theirs') => void;
 }) {
   if (choices.length === 0) return null;
@@ -40,8 +50,8 @@ export function MergeChoices({
       className="mx-1 mb-2 flex flex-col gap-2 rounded-lg border border-warn-500 bg-warn-50 px-3 py-2 text-sm text-warn-700"
     >
       <p className="m-0">
-        This page changed while you were editing. Where you both changed the same part, choose which
-        to keep. Nothing saves until you do.
+        {description ??
+          'This page changed while you were editing. Where you both changed the same part, choose which to keep. Nothing saves until you do.'}
       </p>
       {choices.map((choice) => (
         <div
@@ -62,19 +72,21 @@ export function MergeChoices({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              disabled={disabled || keepMineDisabled}
               data-testid="merge-keep-mine"
               onClick={() => onPick(choice.id, 'mine')}
               className="flex-none rounded-md border border-warn-500 bg-transparent px-2 py-0.5 text-xs font-medium text-warn-700 hover:bg-warn-500 hover:text-n-0"
             >
-              Keep yours
+              {mineLabel}
             </button>
             <button
               type="button"
+              disabled={disabled}
               data-testid="merge-take-theirs"
               onClick={() => onPick(choice.id, 'theirs')}
               className="flex-none rounded-md border border-warn-500 bg-transparent px-2 py-0.5 text-xs font-medium text-warn-700 hover:bg-warn-500 hover:text-n-0"
             >
-              Use new
+              {currentLabel}
             </button>
             {choice.firstBlockId !== null && (
               <button

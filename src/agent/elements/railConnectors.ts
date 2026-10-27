@@ -5,7 +5,7 @@ import {
 } from '@/agent/elements/connectorRow';
 import type { RunReach } from '@/agent/types';
 import type { RailSectionState } from '@/components/ai/Rail';
-import { parseConnectors } from '@/engine/connectors';
+import { readConnectorList, UNREADABLE_CONNECTOR_LIST } from '@/engine/connectors';
 
 /**
  * The rail's Connectors card (M92.9, §0 Q14, §2): the vault's connector
@@ -20,9 +20,10 @@ import { parseConnectors } from '@/engine/connectors';
  * quiet line that says so. A list that could not be read is unavailable,
  * and a status read that failed leaves the rows saying no state, partial. A
  * conversation whose runs never said what they reach is not recorded. With
- * no list, a turn you watch also loads the person's own connectors, whose
- * names Cerebro never learns, and the card says what that costs
- * (SECURITY.md). Wherever a run merged a connector, the card says that mail
+ * no list, a turn you watch also loads the person's own connectors, which
+ * Cerebro neither lists nor controls (only the Context card's breakdown
+ * may name their servers after a turn, M92.13), and the card says what that
+ * costs (SECURITY.md). Wherever a run merged a connector, the card says that mail
  * is drafted, never sent.
  *
  * Nothing here signs anyone in: a connector that needs it offers Sign in…,
@@ -47,7 +48,7 @@ export const RAIL_CONNECTORS_WORDS = {
   notRecordedDetail: 'A turn records it as it starts.',
   /** The inherited-connector limit (SECURITY.md, D15). */
   inherited:
-    'This vault has no connector list, so a turn you watch also loads your own Claude Code connectors. Cerebro never learns their names: it grants none of their tools, and it cannot block their send tools by name.',
+    "This vault has no connector list, so a turn you watch also loads your own Claude Code connectors. Cerebro doesn't list or control them: it grants none of their tools, and it cannot block their send tools by name. After a turn, Context may name their servers.",
   /** Said wherever a run merged a connector (D15, CV-62). */
   mail: 'Mail is drafted, never sent: Cerebro blocks the known send tools by name.',
   count: (loaded: number) => `${loaded} loaded`,
@@ -169,7 +170,8 @@ function unlisted(name: string, reach: RunReach): RailConnectorLine {
 /**
  * The card, from its reads, Settings' switch and approvals, and the run's
  * reach. Its state, first rule wins: no vault or the switch off is empty;
- * a read out makes no claim; a list that could not be read is unavailable;
+ * a read out makes no claim; a list that could not be read, or whose bytes
+ * do not parse, is unavailable;
  * a status read that failed is partial; no run's reach is not recorded;
  * nothing to list and nothing to say is empty; else ready.
  */
@@ -189,7 +191,17 @@ export function railConnectors({
   if (list.kind === 'unavailable') {
     return { ...quiet(RAIL_CONNECTORS_WORDS.none), state: 'unavailable', reason: list.reason };
   }
-  const specs = parseConnectors(list.raw);
+  // Bytes that do not parse are a list Rust cannot read either, never no
+  // connectors: it pins every run to none, in these words (CV-05).
+  const read = readConnectorList(list.raw);
+  if (read.kind === 'unreadable') {
+    return {
+      ...quiet(RAIL_CONNECTORS_WORDS.none),
+      state: 'unavailable',
+      reason: UNREADABLE_CONNECTOR_LIST,
+    };
+  }
+  const specs = read.specs;
   const listed = new Set(specs.map((spec) => spec.name));
   const lines: RailConnectorLine[] = specs.map((spec) => {
     const row = connectorRow(spec, approvals, status);

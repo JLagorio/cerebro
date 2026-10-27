@@ -10,8 +10,10 @@ import {
   citationName,
   citationNumber,
   indexCitations,
+  resourceTarget,
   sourceTarget,
 } from './citations';
+import resourceCases from '../../shared/knowledge/resource-target-cases.v1.json';
 import { blocksToMarkdown } from './markdown';
 import { MarkdownEditor, type CerebroEditor, type EditorReadyInfo } from './MarkdownEditor';
 import { NoteBodyEditor } from './NoteBodyEditor';
@@ -141,6 +143,22 @@ describe('sourceTarget', () => {
     expect(sourceTarget('/records/first.md', entries)).toEqual({ internal: 'records/first.md' });
     expect(sourceTarget('/records/missing.md', entries)).toBeNull();
     expect(sourceTarget('all sync telemetry in eu-west', entries)).toBeNull();
+  });
+
+  it.each([
+    'javascript:alert(1)',
+    'file:///etc/passwd',
+    'https://user:secret@example.com/report',
+    'https://example.com/re\nport',
+  ])('offers no actionable citation target for unsafe address %s', (resource) => {
+    expect(sourceTarget(resource, entries)).toBeNull();
+  });
+});
+
+describe('resource target classification shared cases', () => {
+  it.each(resourceCases.cases)('$id', (testCase) => {
+    expect(resourceTarget(testCase.resource, resourceCases.entries)).toEqual(testCase.target);
+    expect(sourceTarget(testCase.resource, resourceCases.entries)).toEqual(testCase.projection);
   });
 });
 
@@ -323,6 +341,45 @@ describe('the citation chip', () => {
     // A citation that leads nowhere is still shown — muted, not hidden.
     expect(loose.tagName).toBe('SPAN');
     expect(loose.className).toContain('bg-n-100');
+  });
+
+  it('keeps mixed source order and citation numbers while only actual local and safe URL pills open', async () => {
+    const mixed = [
+      { id: 'web', resource: 'https://example.com/report', title: 'Report' },
+      { id: 'missing', resource: '/records/gone.md', title: 'Gone' },
+      { id: 'scope', resource: 'all queries in project X', title: 'Queries' },
+      { id: 'unsafe', resource: 'https://user:secret@example.com/report', title: 'Inert address' },
+      { id: 'local', resource: '/records/first.md', title: 'Local page' },
+    ];
+    fs().set(
+      CONCEPT,
+      `---\ntype: Metric\ntitle: Sample\nsources: ${JSON.stringify(mixed)}\n---\n\n` +
+        'Local.[^local] Scope.[^scope] Web.[^web] Unsafe.[^unsafe] Missing.[^missing]\n',
+    );
+    useVaultStore.setState({
+      entries: [
+        makeEntry({ path: CONCEPT, type: 'Metric', properties: { sources: mixed } }),
+        makeEntry({ path: 'records/first.md', title: 'First record' }),
+      ],
+    });
+    render(<NoteBodyEditor path={CONCEPT} />);
+    await waitFor(() => expect(chips('ref')).toHaveLength(5));
+    expect(chips('ref').map((chip) => [chip.id, chip.label, chip.tag])).toEqual([
+      ['local', '5', 'BUTTON'],
+      ['scope', '3', 'SPAN'],
+      ['web', '1', 'A'],
+      ['unsafe', '4', 'SPAN'],
+      ['missing', '2', 'SPAN'],
+    ]);
+    const [local, scope, web, unsafe, missing] = refs();
+    for (const inert of [scope, unsafe, missing]) fireEvent.click(inert);
+    expect(open).not.toHaveBeenCalled();
+    expect(web.getAttribute('href')).toBe('https://example.com/report');
+    expect(web.getAttribute('target')).toBe('_blank');
+    expect(web.getAttribute('rel')).toBe('noreferrer noopener');
+    fireEvent.click(local);
+    expect(open).toHaveBeenCalledExactlyOnceWith('records/first.md');
+    expect(fs().get(CONCEPT)).toContain('Local.[^local] Scope.[^scope] Web.[^web]');
   });
 
   it('names an untitled outside link by its URL, and keeps the URL one hover away (M69.2)', async () => {

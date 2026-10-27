@@ -1,6 +1,7 @@
+import { saveBeforeAction } from '@/app/leaveGuard';
 import { PEOPLE_PACK } from '@/engine/packPeople';
 import { planPack, type Pack } from '@/engine/packs';
-import { flushOpenPages, heldOpenPages } from '@/editor/openPages';
+import { heldOpenPages } from '@/editor/openPages';
 import { scanVault } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { refusedAcrossVaults, useVaultStore } from '@/stores/vaultStore';
@@ -15,7 +16,7 @@ export async function installPack(pack: Pack = PEOPLE_PACK): Promise<boolean> {
   });
   const current = () => live && useVaultStore.getState().vaultPath === vault;
   try {
-    await flushOpenPages();
+    if (!(await saveBeforeAction('all', 'caller'))) return false;
     if (!current()) return false;
     if (heldOpenPages().length > 0)
       throw new Error('Finish saving the open pages before installing the pack.');

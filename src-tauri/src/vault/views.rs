@@ -420,6 +420,8 @@ pub(crate) fn resolve_database(entries: &[Entry], wanted: &str) -> Result<String
     Err(format!("schema_invalid: type: no note this run can read has type \"{wanted}\".{closest} Types in use: {}", names.join(", ")))
 }
 
+type CanonicalRuleValidator<'a> = dyn Fn(&query::Rule, &query::FieldInfo) -> Vec<String> + 'a;
+
 struct Checker<'a> {
     database: &'a str,
     vocabulary: &'a Vocabulary,
@@ -428,6 +430,7 @@ struct Checker<'a> {
     names: Vec<String>,
     problems: Vec<ViewProblem>,
     rules: usize,
+    canonical_rule: Option<&'a CanonicalRuleValidator<'a>>,
 }
 impl Checker<'_> {
     fn add(&mut self, path: &str, message: impl Into<String>) {
@@ -596,6 +599,10 @@ impl Checker<'_> {
             op: op.into(),
             value: map.get("value").cloned(),
         };
+        if let Some(validate) = self.canonical_rule {
+            for problem in validate(&rule, info) { self.add(path, problem); }
+            return;
+        }
         let value_problems = query::check_view_rule_value(&rule, info, self.kinds);
         if !value_problems.is_empty() {
             for problem in value_problems {
@@ -1008,6 +1015,30 @@ pub(crate) fn check(
     if let Some(info) = infos.get_mut("modifiedAt") {
         info.kind = FieldKind::LastEditedTime;
     }
+    check_facts(args, vocabulary, database, infos, &schema, None)
+}
+
+/// The existing view vocabulary/presentation checker, supplied canonical held
+/// field facts and a value validator by the guarded selected reader.
+pub(crate) fn check_canonical(
+    args: &Args,
+    vocabulary: &Vocabulary,
+    database: String,
+    infos: BTreeMap<String, query::FieldInfo>,
+    schema: &VaultSchema,
+    validate: &CanonicalRuleValidator<'_>,
+) -> Result<Suggestion, String> {
+    check_facts(args, vocabulary, database, infos, schema, Some(validate))
+}
+fn check_facts(
+    args: &Args,
+    vocabulary: &Vocabulary,
+    database: String,
+    infos: BTreeMap<String, query::FieldInfo>,
+    schema: &VaultSchema,
+    canonical_rule: Option<&CanonicalRuleValidator<'_>>,
+) -> Result<Suggestion, String> {
+    let kinds = schema::table()?;
     let mut names = Vec::new();
     for name in schema
         .type_named(&database)
@@ -1032,6 +1063,7 @@ pub(crate) fn check(
         names,
         problems: Vec::new(),
         rules: 0,
+        canonical_rule,
     };
     for key in args
         .view

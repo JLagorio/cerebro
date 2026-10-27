@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::parse;
+pub use crate::workspace_service::types::selected::{SelectedAuthorityKind, SelectedRecordVersion};
+pub(crate) use crate::workspace_service::types::selected::SelectedEntryProperties;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +33,17 @@ pub struct Entry {
     /// None means not recorded (the file could not be read), never the hash
     /// of nothing.
     pub hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<SelectedRecordVersion>,
+    /// Selected entries always retain their complete tagged canonical Object.
+    /// Keys unavailable to a legacy reader are explicit, never absent metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) canonical_properties: Option<SelectedEntryProperties>,
+    /// Human selected presentation only: actual visible bytes may differ from
+    /// authority.body_hash. This observation never changes canonical metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) body_observation:
+        Option<crate::workspace_service::selected::SelectedBodyObservation>,
 }
 
 impl Entry {
@@ -56,6 +69,9 @@ impl Entry {
             modified_at: "2026-07-28T00:00:00Z".into(),
             parse_error: None,
             hash: None,
+            authority: None,
+            canonical_properties: None,
+            body_observation: None,
         }
     }
 }
@@ -128,6 +144,9 @@ pub fn build_entry(
             modified_at,
             parse_error,
             hash,
+            authority: None,
+            canonical_properties: None,
+            body_observation: None,
         };
     }
     // M29.20: a `.mmd` file is RAW mermaid source, end to end. Mermaid's own
@@ -151,6 +170,9 @@ pub fn build_entry(
             modified_at,
             parse_error: None,
             hash,
+            authority: None,
+            canonical_properties: None,
+            body_observation: None,
         };
     }
     let stem = filename
@@ -215,6 +237,9 @@ pub fn build_entry(
         modified_at,
         parse_error,
         hash,
+        authority: None,
+        canonical_properties: None,
+        body_observation: None,
     }
 }
 

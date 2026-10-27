@@ -1179,6 +1179,8 @@ pub(crate) fn apply_batch_at(
     by: &WriteReceipt<Human>,
     now: &str,
 ) -> Result<BatchApplied, BatchError> {
+    crate::workspace_service::boundary::guard_legacy_scope(vault, None, true)
+        .map_err(|e| BatchError::Refused(e.message))?;
     if ops.len() > MAX_BATCH_OPS {
         return Err(too_many(ops.len()).into());
     }

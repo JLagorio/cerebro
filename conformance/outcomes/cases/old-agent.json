@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "old-agent",
+  "title": "Scope an old Agent run",
+  "adapter": "unavailable",
+  "inputs": {
+    "capability": "native_dispatch_scope",
+    "reason": "No dispatch-manifest/grant producer registered in this outcome harness."
+  },
+  "allowedEffects": [],
+  "forbiddenEffects": [
+    "send",
+    "verify"
+  ],
+  "expectedSources": [],
+  "expectedArtifacts": [],
+  "injections": [],
+  "requiredCapabilities": [
+    "native_dispatch_scope"
+  ]
+}

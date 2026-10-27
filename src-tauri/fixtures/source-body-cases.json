@@ -1,0 +1,56 @@
+[
+  {
+    "name": "BOM CRLF trailing fence spaces",
+    "before": "﻿---\r\ntitle: Kept\r\n--- \t\r\n\r\n<div>keep😀</div>\r\nbody\r\n",
+    "body": "\r\n<div>keep😀</div>\r\nchanged\r\n",
+    "after": "﻿---\r\ntitle: Kept\r\n--- \t\r\n\r\n<div>keep😀</div>\r\nchanged\r\n"
+  },
+  {
+    "name": "no metadata BOM retained",
+    "before": "﻿# 😀\ntext\n",
+    "body": "# 😀\nchanged\n",
+    "after": "﻿# 😀\nchanged\n"
+  },
+  {
+    "name": "unsupported fence and leading empty lines",
+    "before": "---\ntitle: Keep\n---\n\n\n```odd\r\nkeep\r\n```\r\n",
+    "body": "\n\n```odd\r\nchanged\r\n```\r\n",
+    "after": "---\ntitle: Keep\n---\n\n\n```odd\r\nchanged\r\n```\r\n"
+  },
+  {
+    "name": "ordinary plain body",
+    "before": "plain\n",
+    "body": "changed\n",
+    "after": "changed\n"
+  },
+  {
+    "name": "refuse new frontmatter",
+    "before": "# Plain\n",
+    "body": "---\nsecret: new\n---\nbody\n",
+    "refused": true
+  },
+  {
+    "name": "refuse frontmatter after BOM",
+    "before": "﻿# Plain\n",
+    "body": "---\nsecret: new\n---\nbody\n",
+    "refused": true
+  },
+  {
+    "name": "unterminated fence stays body",
+    "before": "---\nunfinished\n",
+    "body": "---\nunfinished changed\n",
+    "after": "---\nunfinished changed\n"
+  },
+  {
+    "name": "refuse to alter closing fence EOF boundary",
+    "before": "---\ntitle: Kept\n---",
+    "body": "would invalidate metadata",
+    "refused": true
+  },
+  {
+    "name": "refuse moving the body boundary of an EOF fence",
+    "before": "---\ntitle: Kept\n--- \t",
+    "body": "\nnew body",
+    "refused": true
+  }
+]

@@ -1,11 +1,20 @@
-import { holdEditor } from '@/editor/openPages';
+import { documentAdmission, waitForDocumentAdmission } from '@/editor/documentAdmission';
+import {
+  holdEditor,
+  registerSaveParticipant,
+  retainDocumentOwner,
+  retainedDocumentOwner,
+  releaseDocumentOwner,
+} from '@/editor/openPages';
+import type { DocumentOwner } from '@/editor/documentOwner';
 import { usePaneId } from '@/stores/navStore';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createRecoveryCapture, type RecoveryCapture } from '@/editor/recoveryBuffers';
 import type { SaveState } from '@/editor/NoteBodyEditor';
 import { readNote, saveNote } from '@/lib/ipc';
 import { useCommands } from '@/lib/keys/useKeys';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useEntry, useVaultStore } from '@/stores/vaultStore';
 
 /** How long a pause in editing waits before the source flushes to disk. */
 const SAVE_DEBOUNCE_MS = 500;
@@ -50,8 +59,10 @@ export interface DiagramFile {
   /** Step back / forward through this session's edits (M29.52). No-ops at the ends. */
   undo: () => void;
   redo: () => void;
+  retry: () => Promise<void>;
   canUndo: boolean;
   canRedo: boolean;
+  recoveryCapture: RecoveryCapture;
 }
 
 /**
@@ -77,8 +88,10 @@ export interface DiagramFile {
  */
 export function useDiagramFile(path: string): DiagramFile {
   const pane = usePaneId();
-  useEffect(() => holdEditor(path, pane), [path, pane]);
   const vaultPath = useVaultStore((s) => s.vaultPath);
+  useEffect(() => holdEditor(path, pane, vaultPath), [path, pane, vaultPath]);
+  const entry = useEntry(path);
+  const [readGeneration, setReadGeneration] = useState(0);
   const toast = useUiStore((s) => s.toast);
 
   const [code, setCode] = useState<string | null>(null);
@@ -92,35 +105,30 @@ export function useDiagramFile(path: string): DiagramFile {
   // always see the newest source without re-arming effects per keystroke.
   const latest = useRef('');
   const timer = useRef<number | null>(null);
-  const saving = useRef(false);
-  const queued = useRef(false);
+  const owner = useRef<DocumentOwner | null>(null);
+  const previousRecoveryCapture = useRef<RecoveryCapture | null>(null);
+  const recoveryCapture = useMemo(
+    () =>
+      createRecoveryCapture({
+        vaultId: vaultPath,
+        path,
+        ownerId: pane,
+        generation: readGeneration,
+      }),
+    [vaultPath, path, pane, readGeneration],
+  );
+  // Keep the memo calculation pure under StrictMode's ignored second call.
+  if (previousRecoveryCapture.current !== recoveryCapture) {
+    previousRecoveryCapture.current?.detach();
+    previousRecoveryCapture.current = recoveryCapture;
+  }
 
   const flushRef = useRef<() => Promise<void>>(async () => {});
   flushRef.current = async () => {
-    if (vaultPath === null) return;
-    if (saving.current) {
-      // A save is already on the wire; run again with the newer bytes when
-      // it lands rather than racing two writes to the same file.
-      queued.current = true;
-      return;
-    }
-    saving.current = true;
-    setSaveState('saving');
-    try {
-      await saveNote(vaultPath, path, latest.current);
-      saving.current = false;
-      if (queued.current) {
-        queued.current = false;
-        await flushRef.current();
-      } else {
-        setSaveState('saved');
-      }
-    } catch {
-      saving.current = false;
-      queued.current = false;
-      setSaveState('failed');
-      toast("Couldn't save diagram");
-    }
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+    const result = await owner.current?.flush();
+    if (result?.kind === 'failed') toast("Couldn't save diagram");
   };
 
   // The undo stack (M29.52). Strings, not diffs: a `.mmd` is small, the whole
@@ -141,6 +149,8 @@ export function useDiagramFile(path: string): DiagramFile {
    * state it just left onto the past and the stack could never advance.
    */
   const applyCode = (next: string, remember: boolean) => {
+    const target = recoveryCapture.owner();
+    if (target === null) return;
     if (remember) {
       const now = Date.now();
       if (past.current.length === 0 || now - lastPush.current > COALESCE_MS) {
@@ -152,6 +162,7 @@ export function useDiagramFile(path: string): DiagramFile {
       future.current = [];
     }
     latest.current = next;
+    target.edit(next);
     setCode(next);
     setSaveState('dirty');
     syncEnds();
@@ -165,6 +176,7 @@ export function useDiagramFile(path: string): DiagramFile {
   const handleChange = (next: string) => applyCode(next, true);
 
   const undo = () => {
+    if (recoveryCapture.owner() === null) return;
     const prev = past.current.pop();
     if (prev === undefined) return;
     future.current.push(latest.current);
@@ -172,6 +184,7 @@ export function useDiagramFile(path: string): DiagramFile {
   };
 
   const redo = () => {
+    if (recoveryCapture.owner() === null) return;
     const next = future.current.pop();
     if (next === undefined) return;
     past.current.push(latest.current);
@@ -194,48 +207,133 @@ export function useDiagramFile(path: string): DiagramFile {
     { id: 'diagram.redo', run: redo },
   ]);
 
-  // Load once per mount (the host's key makes a path change a fresh mount).
+  // The retained owner survives a failed save and a reopened presentation.
+  // Its writer always closes over the original vault/path, never current UI.
   useEffect(() => {
     let cancelled = false;
+    let own: DocumentOwner | null = null;
+    let stop = () => {};
+    let stopParticipant = () => {};
     setCode(null);
     setSaveState('idle');
     setLoadFailed(false);
-    // A fresh file is a fresh timeline. The host keys this hook on the path, so
-    // in practice this is a fresh mount too — but the effect also re-runs on a
-    // vault change, and undoing into another file's bytes would be a data bug,
-    // not a UI one.
     past.current = [];
     future.current = [];
     setEnds({ canUndo: false, canRedo: false });
     if (vaultPath === null) return;
-    void readNote(vaultPath, path)
-      .then((raw) => {
+    const key = { vaultId: vaultPath, path, ownerId: pane };
+    const attach = (initial: string) => {
+      if (cancelled) return;
+      const target = retainDocumentOwner(
+        key,
+        initial,
+        async (body, _format, _bypass, expectHash, destination = key) => {
+          const hash = await (expectHash === undefined
+            ? saveNote(destination.vaultId, destination.path, body)
+            : saveNote(destination.vaultId, destination.path, body, expectHash));
+          if (hash === null) throw new Error('unconfirmed_diagram_save');
+          return { kind: 'file', contentHash: hash };
+        },
+      );
+      own = target;
+      owner.current = target;
+      recoveryCapture.bind(target);
+      latest.current = target.snapshot().latestDraft;
+      setCode(latest.current);
+      const publish = () => {
         if (cancelled) return;
-        latest.current = raw;
-        setCode(raw);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadFailed(true);
+        if (target.recoveryRetired()) {
+          if (timer.current !== null) window.clearTimeout(timer.current);
+          timer.current = null;
+          recoveryCapture.detach();
+          setCode(null);
+          setLoadFailed(true);
+          setSaveState('idle');
+          return;
+        }
+        const state = target.snapshot();
+        latest.current = state.latestDraft;
+        setCode(state.latestDraft);
+        setSaveState(
+          state.inFlightGeneration !== null
+            ? 'saving'
+            : state.failure !== null
+              ? 'failed'
+              : state.generation > state.acknowledgedGeneration
+                ? 'dirty'
+                : state.generation > 0
+                  ? 'saved'
+                  : 'idle',
+        );
+      };
+      stop = target.subscribe(publish);
+      publish();
+      stopParticipant = registerSaveParticipant({
+        identity: target,
+        key,
+        snapshot: () => target.snapshot(),
+        prepare: () => {
+          if (timer.current !== null) window.clearTimeout(timer.current);
+          timer.current = null;
+        },
+        flush: async () => {
+          const result = await target.flush();
+          if (result.kind === 'failed') toast("Couldn't save diagram");
+          return result;
+        },
       });
+    };
+    void (async () => {
+      for (;;) {
+        if (
+          !(await waitForDocumentAdmission(
+            key,
+            () => !cancelled && useVaultStore.getState().vaultPath === vaultPath,
+          ))
+        )
+          return;
+        const retained = retainedDocumentOwner(key);
+        if (retained !== undefined) {
+          attach(retained.snapshot().latestDraft);
+          return;
+        }
+        const text = await readNote(vaultPath, path);
+        if (cancelled) return;
+        if (documentAdmission(key).kind === 'deferred') continue;
+        attach(text);
+        return;
+      }
+    })().catch(() => {
+      if (!cancelled) setLoadFailed(true);
+    });
     return () => {
       cancelled = true;
-    };
-  }, [vaultPath, path]);
-
-  // A pending debounce must not die with the host: flush it on unmount. This
-  // is only safe BECAUSE the host keys the caller on the path — a path change
-  // is a real unmount, so the flushRef this cleanup reads was last assigned
-  // by the dying instance and still closes over ITS path and bytes. (Without
-  // the key, the new path's render reassigned flushRef before this ran.)
-  useEffect(() => {
-    return () => {
-      if (timer.current !== null) {
-        window.clearTimeout(timer.current);
-        timer.current = null;
-        void flushRef.current();
+      const pending = timer.current !== null;
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      timer.current = null;
+      stop();
+      stopParticipant();
+      if (own !== null) {
+        if (pending) void own.flush();
+        releaseDocumentOwner(own, path);
       }
+      if (owner.current === own) owner.current = null;
     };
-  }, []);
+  }, [vaultPath, path, pane, toast, recoveryCapture]);
+  useEffect(() => {
+    if (loadFailed && entry && owner.current?.recoveryRetired())
+      setReadGeneration((generation) => generation + 1);
+  }, [loadFailed, entry]);
 
-  return { code, loadFailed, saveState, handleChange, undo, redo, ...ends };
+  return {
+    code,
+    loadFailed,
+    saveState,
+    handleChange,
+    undo,
+    redo,
+    retry: () => flushRef.current(),
+    recoveryCapture,
+    ...ends,
+  };
 }

@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "selectedSchemaVersion": 3,
+  "authorityRules": "shared/workspace/authority.v2.json",
+  "valueRules": "shared/workspace/values.v1.json",
+  "names": {
+    "lock": "selected.lock",
+    "pending": "pending-change",
+    "preparePrefix": ".prepare-",
+    "retiredPrefix": ".retired-",
+    "envelope": "intent.json",
+    "beforeBody": "before.body",
+    "afterBody": "after.body",
+    "targetTempPrefix": ".cerebro-pair-",
+    "targetTempSuffix": ".pending-body"
+  },
+  "limits": {
+    "envelopeBytes": 262144,
+    "artifactDirectories": 3,
+    "filesPerArtifact": 3,
+    "targetTemps": 1,
+    "logicalArtifactBytes": 118226944,
+    "sqliteRollbackBytes": 68157440
+  },
+  "blockedCanonicalTypes": ["Concept", "Agent", "Type", "Skill", "Collection"],
+  "operation": "page.body"
+}

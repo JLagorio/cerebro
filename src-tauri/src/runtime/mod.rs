@@ -35,12 +35,22 @@
 //! ([`status`]), and never half-creates tables. A process killed mid-step
 //! leaves the previous complete version, which the next open finishes.
 
+pub(crate) mod action_authority;
+pub(crate) mod action_invocations;
+mod physical_lease;
 pub mod activity;
 pub mod activity_tool;
 pub mod batch_journal;
 pub mod budget;
 pub mod catchup;
 pub mod cause;
+pub(crate) mod chat_generations;
+pub(crate) mod conversations;
+pub(crate) mod workflows;
+pub(crate) mod workflow_action_inputs;
+pub(crate) mod child_claim_history;
+#[cfg(any(test, feature = "native-read-smoke"))]
+pub(crate) mod child_jobs;
 pub mod client_tokens;
 pub mod connector_status;
 pub mod dispatch;
@@ -52,6 +62,7 @@ pub mod health;
 pub mod import;
 pub mod job_ledger;
 pub mod mail_dismissals;
+pub(crate) mod native_runs;
 pub mod normalize;
 pub mod operational;
 pub mod parked;
@@ -60,6 +71,7 @@ pub mod projection;
 pub mod read_only;
 pub mod recovery;
 pub mod reminders;
+pub(crate) mod run_configuration;
 pub mod scheduler;
 pub mod schema;
 pub mod scope;
@@ -131,7 +143,7 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// M63.2 records wake authors and run ancestry at 29.
 /// M63.8 adds an agent's durable self-followups at 30.
 /// M69.9b adds vault-scoped correspondent dismissals at 31.
-pub const USER_VERSION: i64 = 31;
+pub const USER_VERSION: i64 = 50;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -374,7 +386,559 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V31,
         validate: validate_v31,
     },
+    Migration {
+        to: 32,
+        sql: schema::SCHEMA_V32,
+        validate: validate_v32,
+    },
+    Migration {
+        to: 33,
+        sql: schema::SCHEMA_V33,
+        validate: validate_v33,
+    },
+    Migration {
+        to: 34,
+        sql: schema::SCHEMA_V34,
+        validate: validate_v34,
+    },
+    Migration {
+        to: 35,
+        sql: schema::SCHEMA_V35,
+        validate: validate_v35,
+    },
+    Migration {
+        to: 36,
+        sql: schema::SCHEMA_V36,
+        validate: validate_v36,
+    },
+    Migration {
+        to: 37,
+        sql: schema::SCHEMA_V37,
+        validate: validate_v37,
+    },
+    Migration {
+        to: 38,
+        sql: schema::SCHEMA_V38,
+        validate: validate_v38,
+    },
+    Migration {
+        to: 39,
+        sql: schema::SCHEMA_V39,
+        validate: validate_v39,
+    },
+    Migration {
+        to: 40,
+        sql: schema::SCHEMA_V40,
+        validate: validate_v40,
+    },
+    Migration {
+        to: 41,
+        sql: schema::SCHEMA_V41,
+        validate: validate_v41,
+    },
+    Migration {
+        to: 42,
+        sql: schema::SCHEMA_V42,
+        validate: validate_v42,
+    },
+    Migration { to: 43, sql: schema::SCHEMA_V43, validate: validate_v43 },
+    Migration { to: 44, sql: schema::SCHEMA_V44, validate: validate_v44 },
+    Migration { to: 45, sql: schema::SCHEMA_V45, validate: validate_v45 },
+    Migration { to: 46, sql: schema::SCHEMA_V46, validate: validate_v46 },
+    Migration { to: 47, sql: schema::SCHEMA_V47, validate: validate_v47 },
+    Migration { to: 48, sql: schema::SCHEMA_V48, validate: validate_v48 },
+    Migration { to: 49, sql: schema::SCHEMA_V49, validate: validate_v49 },
+    Migration { to: 50, sql: schema::SCHEMA_V50, validate: validate_v50 },
 ];
+
+fn validate_v46(conn:&Connection)->Result<(),String>{
+    for fragment in schema::SCHEMA_V46.split("CREATE ").skip(1){
+        let expected=format!("CREATE {}",fragment.trim().trim_end_matches(';'));
+        let name=expected.split_whitespace().nth(2).ok_or("physical action namespace schema unavailable")?;
+        let actual:String=conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",[name],|row|row.get(0)).map_err(|_|"physical action namespace table unavailable".to_owned())?;
+        if actual.trim()!=expected.trim(){return Err("physical action namespace constraints changed".into());}
+        let bad:i64=conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),[],|row|row.get(0)).map_err(|_|"physical action namespace foreign keys unavailable".to_owned())?;
+        if bad!=0{return Err("physical action namespace foreign keys invalid".into());}
+    }Ok(())
+}
+
+fn validate_v45(conn: &Connection) -> Result<(), String> {
+    let expected = schema::SCHEMA_V45.trim().trim_end_matches(';');
+    let actual: String = conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name='workflow_action_inputs'", [], |row| row.get(0))
+        .map_err(|_| "workflow action input table unavailable".to_owned())?;
+    if actual.trim() != expected { return Err("workflow action input constraints changed".into()); }
+    let bad: i64 = conn.query_row("SELECT count(*) FROM pragma_foreign_key_check('workflow_action_inputs')", [], |row| row.get(0))
+        .map_err(|_| "workflow action input foreign keys unavailable".to_owned())?;
+    if bad != 0 { return Err("workflow action input foreign keys invalid".into()); }
+    Ok(())
+}
+
+fn validate_v44(conn: &Connection) -> Result<(), String> {
+    let expected = schema::SCHEMA_V44.trim().trim_end_matches(';');
+    let actual: String = conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name='action_output_handoffs'", [], |row| row.get(0))
+        .map_err(|_| "action output handoff table unavailable".to_owned())?;
+    if actual.trim() != expected { return Err("action output handoff constraints changed".into()); }
+    let bad: i64 = conn.query_row("SELECT count(*) FROM pragma_foreign_key_check('action_output_handoffs')", [], |row| row.get(0))
+        .map_err(|_| "action output handoff foreign keys unavailable".to_owned())?;
+    if bad != 0 { return Err("action output handoff foreign keys invalid".into()); }
+    Ok(())
+}
+
+fn validate_v43(conn: &Connection) -> Result<(), String> {
+    for fragment in schema::SCHEMA_V43.split("CREATE ").skip(1) {
+        let expected = format!("CREATE {}", fragment.trim().trim_end_matches(';'));
+        let name = expected.split_whitespace().nth(2).ok_or("workflow schema unavailable")?;
+        let actual: String = conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1", [name], |row| row.get(0)).map_err(|_| "workflow table unavailable".to_owned())?;
+        if actual.trim() != expected.trim() { return Err("workflow constraints changed".into()); }
+        let bad: i64 = conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"), [], |row| row.get(0)).map_err(|_| "workflow foreign keys unavailable".to_owned())?;
+        if bad != 0 { return Err("workflow foreign keys invalid".into()); }
+    }
+    Ok(())
+}
+
+fn validate_v42(conn: &Connection) -> Result<(), String> {
+    for fragment in schema::SCHEMA_V42.split("CREATE ").skip(1) {
+        let expected = format!("CREATE {}", fragment.trim().trim_end_matches(';'));
+        let name = expected.split_whitespace().nth(2).ok_or("generation schema unavailable")?;
+        let actual: String = conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1", [name], |row| row.get(0)).map_err(|_| "generation table unavailable".to_owned())?;
+        if actual.trim() != expected.trim() {
+            return Err("generation constraints changed".into());
+        }
+        let bad: i64 = conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"), [], |row| row.get(0)).map_err(|_| "generation foreign keys unavailable".to_owned())?;
+        if bad != 0 { return Err("generation foreign keys invalid".into()); }
+    }
+    Ok(())
+}
+
+fn validate_v41(conn: &Connection) -> Result<(), String> {
+    for fragment in schema::SCHEMA_V41.split("CREATE ").skip(1) {
+        let expected = format!("CREATE {}", fragment.trim().trim_end_matches(';'));
+        let words: Vec<&str> = expected.split_whitespace().take(4).collect();
+        let (kind, name) = match words.as_slice() {
+            ["CREATE", "TABLE", name, ..] => ("table", *name),
+            ["CREATE", "TRIGGER", name, ..] => ("trigger", *name),
+            _ => return Err("child claim migration definition unavailable".into()),
+        };
+        let actual: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type=?1 AND name=?2",
+                rusqlite::params![kind, name],
+                |row| row.get(0),
+            )
+            .map_err(|_| "child claim migration object missing".to_owned())?;
+        if actual.trim() != expected.trim() {
+            return Err("child claim migration constraint changed".into());
+        }
+    }
+    let bad: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM pragma_foreign_key_check('child_job_claims')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| "child claim foreign keys unavailable".to_owned())?;
+    if bad != 0 {
+        return Err("child claim foreign keys invalid".into());
+    }
+    Ok(())
+}
+
+fn validate_v40(conn: &Connection) -> Result<(), String> {
+    for fragment in schema::SCHEMA_V40.split("CREATE ").skip(1) {
+        let expected = format!("CREATE {}", fragment.trim().trim_end_matches(';'));
+        let words: Vec<&str> = expected.split_whitespace().take(4).collect();
+        let (kind, name) = match words.as_slice() {
+            ["CREATE", "TABLE", name, ..] => ("table", *name),
+            ["CREATE", "TRIGGER", name, ..] => ("trigger", *name),
+            _ => return Err("grant freeze migration definition unavailable".into()),
+        };
+        let actual: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type=?1 AND name=?2",
+                rusqlite::params![kind, name],
+                |row| row.get(0),
+            )
+            .map_err(|_| "grant freeze migration object missing".to_owned())?;
+        if actual.trim() != expected.trim() {
+            return Err("grant freeze migration constraint changed".into());
+        }
+    }
+    let mut statement = conn
+        .prepare("SELECT name FROM pragma_table_xinfo('child_job_grant_freezes') ORDER BY cid")
+        .map_err(|_| "grant freeze metadata columns unavailable".to_owned())?;
+    let names: Vec<String> = statement
+        .query_map([], |row| row.get(0))
+        .and_then(|rows| rows.collect::<rusqlite::Result<_>>())
+        .map_err(|_| "grant freeze metadata columns unavailable".to_owned())?;
+    if names
+        != [
+            "slot_id",
+            "contract_digest",
+            "instruction_source_version",
+            "policy_digest",
+        ]
+    {
+        return Err("grant freeze metadata columns changed".into());
+    }
+    let bad: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM pragma_foreign_key_check('child_job_grant_freezes')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| "grant freeze foreign keys unavailable".to_owned())?;
+    let malformed: i64 = conn.query_row("SELECT count(*) FROM child_job_grant_freezes WHERE length(slot_id)<>32 OR slot_id GLOB '*[^0-9a-f]*' OR length(contract_digest)<>64 OR contract_digest GLOB '*[^0-9a-f]*' OR length(instruction_source_version)<>64 OR instruction_source_version GLOB '*[^0-9a-f]*' OR length(policy_digest)<>64 OR policy_digest GLOB '*[^0-9a-f]*'",[],|row|row.get(0))
+        .map_err(|_| "grant freeze metadata unavailable".to_owned())?;
+    if bad != 0 || malformed != 0 {
+        return Err("grant freeze metadata invalid".into());
+    }
+    Ok(())
+}
+
+fn validate_v39(conn: &Connection) -> Result<(), String> {
+    // Validate every explicitly named object against the one compiled DDL.
+    // SQLite stores CREATE text without its final semicolon. No duplicate
+    // constraint list can silently omit a new trigger or scoped index.
+    for fragment in schema::SCHEMA_V39.split("CREATE ").skip(1) {
+        let expected = format!("CREATE {}", fragment.trim().trim_end_matches(';'));
+        let words: Vec<&str> = expected.split_whitespace().take(5).collect();
+        let (kind, name) = match words.as_slice() {
+            ["CREATE", "UNIQUE", "INDEX", name, ..] => ("index", *name),
+            ["CREATE", "INDEX", name, ..] => ("index", *name),
+            ["CREATE", "TABLE", name, ..] => ("table", *name),
+            ["CREATE", "TRIGGER", name, ..] => ("trigger", *name),
+            _ => return Err("delegation migration object definition unavailable".into()),
+        };
+        let actual: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type=?1 AND name=?2",
+                rusqlite::params![kind, name],
+                |row| row.get(0),
+            )
+            .map_err(|_| "delegation migration object missing".to_owned())?;
+        if actual.trim() != expected.trim() {
+            return Err("delegation migration constraint changed".into());
+        }
+    }
+    for (table, expected) in [
+        (
+            "chat_delegation_intents",
+            &[
+                "slot_id",
+                "request_key",
+                "parent_run_id",
+                "attempt_id",
+                "authority_id",
+                "authority_revision",
+                "owner_person",
+                "vault_id",
+                "store_uuid",
+                "parent_cli_session_id",
+                "app_session_id",
+                "actor_id",
+                "slot_ordinal",
+            ][..],
+        ),
+        (
+            "child_job_reservations",
+            &[
+                "slot_id",
+                "job_id",
+                "reserved_run_id",
+                "reserved_cli_session_id",
+                "request_digest",
+                "deadline_at",
+                "elapsed_seconds",
+                "result_bytes",
+                "occupies_slot",
+            ][..],
+        ),
+    ] {
+        let mut statement = conn
+            .prepare("SELECT name FROM pragma_table_info(?1) ORDER BY cid")
+            .map_err(|_| "delegation columns unavailable".to_owned())?;
+        let names: Vec<String> = statement
+            .query_map([table], |row| row.get(0))
+            .and_then(|rows| rows.collect::<rusqlite::Result<_>>())
+            .map_err(|_| "delegation columns unavailable".to_owned())?;
+        if !names
+            .iter()
+            .map(String::as_str)
+            .eq(expected.iter().copied())
+        {
+            return Err("delegation metadata columns changed".into());
+        }
+        let bad: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_foreign_key_check(?1)",
+                [table],
+                |r| r.get(0),
+            )
+            .map_err(|_| "delegation foreign keys unavailable".to_owned())?;
+        if bad != 0 {
+            return Err("delegation foreign key mismatch".into());
+        }
+    }
+    let mismatched: i64 = conn.query_row(
+        "SELECT count(*) FROM chat_delegation_intents i JOIN chat_parent_attempts a ON a.parent_run_id=i.parent_run_id JOIN action_native_runs n ON n.run_id=i.parent_run_id WHERE i.attempt_id<>a.attempt_id OR i.authority_id<>a.authority_id OR i.authority_id<>n.authority_id OR i.authority_revision>n.revision OR i.owner_person<>n.owner_person OR i.vault_id<>n.vault_id OR i.store_uuid<>n.store_uuid OR i.parent_cli_session_id IS NOT n.cli_session_id OR i.app_session_id<>n.app_session_id OR i.actor_id<>n.actor_id OR n.source_kind<>'run' OR n.parent_run_id IS NOT NULL OR n.client_id IS NOT NULL OR n.child_job_id IS NOT NULL",
+        [], |r|r.get(0),
+    ).map_err(|_| "delegation native scope unavailable".to_owned())?;
+    let bad_reservations: i64 = conn.query_row(
+        "SELECT count(*) FROM child_job_reservations r JOIN chat_delegation_intents i ON i.slot_id=r.slot_id WHERE r.job_id=i.parent_run_id OR r.reserved_run_id=i.parent_run_id OR r.reserved_cli_session_id=i.parent_cli_session_id",
+        [], |r|r.get(0),
+    ).map_err(|_| "delegation reservation scope unavailable".to_owned())?;
+    let mut sessions = conn.prepare("SELECT parent_cli_session_id AS session FROM chat_delegation_intents UNION SELECT reserved_cli_session_id FROM child_job_reservations")
+        .map_err(|_| "delegation sessions unavailable".to_owned())?;
+    let rows = sessions
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(|_| "delegation sessions unavailable".to_owned())?;
+    for session in rows {
+        let session = session.map_err(|_| "delegation sessions unavailable".to_owned())?;
+        if !cause::is_cli_session_id(&session) {
+            return Err("delegation session identity invalid".into());
+        }
+    }
+    if mismatched != 0 || bad_reservations != 0 {
+        return Err("delegation native scope mismatch".into());
+    }
+    Ok(())
+}
+
+fn validate_v38(conn: &Connection) -> Result<(), String> {
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='chat_parent_attempts'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| "native parent-attempt table missing".to_owned())?;
+    for clause in [
+        "parent_run_id TEXT PRIMARY KEY NOT NULL",
+        "REFERENCES action_native_runs(run_id) ON DELETE CASCADE",
+        "attempt_id TEXT NOT NULL UNIQUE",
+        "CHECK(length(attempt_id)=32 AND NOT attempt_id GLOB '*[^0-9a-f]*')",
+        "authority_id TEXT NOT NULL UNIQUE",
+        "REFERENCES action_native_runs(authority_id) ON DELETE CASCADE",
+    ] {
+        if !sql.contains(clause) {
+            return Err("native parent-attempt constraint missing".into());
+        }
+    }
+    let mut columns = conn
+        .prepare("SELECT name FROM pragma_table_info('chat_parent_attempts') ORDER BY cid")
+        .map_err(|_| "native parent-attempt columns unavailable".to_owned())?;
+    let names = columns
+        .query_map([], |row| row.get::<_, String>(0))
+        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+        .map_err(|_| "native parent-attempt columns unavailable".to_owned())?;
+    if names != ["parent_run_id", "attempt_id", "authority_id"] {
+        return Err("native parent-attempt metadata columns changed".into());
+    }
+    let foreign_keys: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM pragma_foreign_key_check('chat_parent_attempts')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| "native parent-attempt foreign keys unavailable".to_owned())?;
+    let mismatched: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM chat_parent_attempts a JOIN action_native_runs n ON n.run_id=a.parent_run_id WHERE a.authority_id<>n.authority_id",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| "native parent-attempt join unavailable".to_owned())?;
+    if foreign_keys != 0 || mismatched != 0 {
+        return Err("native parent-attempt lineage mismatch".into());
+    }
+    Ok(())
+}
+
+fn validate_v36(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT configuration_capture,configuration_failure_code,configuration_disposed_at,configuration_publication_failure FROM runs").map_err(|_|"configuration run marker missing".to_owned())?;
+    conn.prepare("SELECT run_id,vault_id,store_uuid,format,captured_at,manifest_json,payload_bytes FROM run_configurations").map_err(|_|"configuration payload columns missing".to_owned())?;
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='run_configurations'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|_| "configuration payload table missing".to_owned())?;
+    for clause in [
+        "REFERENCES runs(run_id)",
+        "payload_bytes BETWEEN 1 AND 65536",
+        "length(CAST(manifest_json AS BLOB))=payload_bytes",
+        "json_extract(manifest_json,'$.run_id') IS run_id",
+        "json_extract(manifest_json,'$.vault_id') IS vault_id",
+        "json_extract(manifest_json,'$.store_uuid') IS store_uuid",
+    ] {
+        if !sql.contains(clause) {
+            return Err("configuration payload constraint missing".into());
+        }
+    }
+    let runs: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='runs'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|_| "configuration marker table missing".to_owned())?;
+    for clause in ["configuration_capture IN ('legacy','required','recorded','expired','deleted','capture_failed')","configuration_failure_code IN ('too_large','active_capacity','invalid_metadata','write_failed','interrupted')","configuration_publication_failure IN ('failed_before_start','failed_publication')"] {
+        if !runs.contains(clause){return Err("configuration marker constraint missing".into());}
+    }
+    let index:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='run_configurations_by_vault')",[],|r|r.get(0)).map_err(|_|"configuration index missing".to_owned())?;
+    if !index {
+        return Err("configuration index missing".into());
+    }
+    Ok(())
+}
+
+fn validate_v37(conn: &Connection) -> Result<(), String> {
+    validate_v35(conn)?;
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='action_account_grants'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("validating action namespace storage: {e}"))?;
+    if !sql.contains("(instr(action_id,':')>1 OR instr(action_id,'.')>1)") {
+        return Err("action namespace storage is missing its dotted shape".into());
+    }
+    let parent: i64 = conn.query_row(
+        "SELECT count(*) FROM pragma_foreign_key_list('action_account_grants') WHERE \"table\"='action_account_grants' AND \"from\"='parent_grant_id'", [], |r| r.get(0)
+    ).map_err(|e| format!("validating action parent grant: {e}"))?;
+    let failures: i64 = conn
+        .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+            r.get(0)
+        })
+        .map_err(|e| format!("validating action grant foreign keys: {e}"))?;
+    if parent != 1 || failures != 0 {
+        return Err("action grant foreign keys did not survive migration".into());
+    }
+    Ok(())
+}
+
+fn validate_v35(conn: &Connection) -> Result<(), String> {
+    for (table, columns) in [("action_native_runs", "run_id,authority_id,revision,owner_person,source_kind,app_session_id,parent_run_id,child_job_id,close_kind"),("action_account_grants", "grant_id,run_id,connection_id,account_identity_digest,input_scope,input_digest,capabilities_json,parent_grant_id,revision,revoked_at")] {
+        conn.prepare(&format!("SELECT {columns} FROM {table}"))
+            .map_err(|_| "validating native action admission rows".to_owned())?;
+    }
+    for name in [
+        "action_native_runs_by_owner_scope",
+        "action_native_runs_by_parent",
+        "action_native_runs_by_client",
+        "action_account_grants_active_all",
+        "action_account_grants_active_exact",
+        "action_account_grants_by_parent",
+    ] {
+        let present: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1)",
+                [name],
+                |r| r.get(0),
+            )
+            .map_err(|_| "validating native action admission indices".to_owned())?;
+        if !present {
+            return Err("native action admission index missing".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_v34(conn: &Connection) -> Result<(), String> {
+    for table in ["action_invocations", "action_approvals", "action_attempts"] {
+        conn.prepare(&format!("SELECT payload FROM {table}"))
+            .map_err(|_| "validating durable action tables".to_owned())?;
+    }
+    let index: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name='action_unresolved_fence'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|_| "validating durable action fence".to_owned())?;
+    if !index.contains("UNIQUE INDEX") || !index.contains("'dispatched','outcome_unknown'") {
+        return Err("durable action fence lacks required constraints".into());
+    }
+    Ok(())
+}
+
+fn validate_v33(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT observation_revision FROM managed_connections")
+        .map_err(|_| "validating connection observation revision".to_owned())?;
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name='managed_connections'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| "validating connection observation constraints".to_owned())?;
+    for clause in [
+        "observation_revision INTEGER NOT NULL DEFAULT 0",
+        "typeof(observation_revision) = 'integer'",
+        "observation_revision BETWEEN 0 AND 9007199254740991",
+    ] {
+        if !sql.contains(clause) {
+            return Err("connection observation revision lacks required constraints".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_v32(conn: &Connection) -> Result<(), String> {
+    for query in [
+        "SELECT connection_id,person,status,active_attempt,secret_ref FROM managed_connections",
+        "SELECT attempt_id,connection_id,person,payload FROM managed_connection_attempts",
+        "SELECT secret_id,connection_id,reference,disposition FROM managed_secret_cleanup",
+    ] {
+        conn.prepare(query)
+            .map_err(|_| "validating native connection metadata".to_owned())?;
+    }
+    // Check the executable constraints as well as column presence.
+    for (table, clauses) in [
+        (
+            "managed_connections",
+            vec![
+                "person LIKE 'human:_%'",
+                "json_valid(status)",
+                "9007199254740991",
+                "'sign_in_required', 'ready', 'unavailable', 'unsupported', 'disabled'",
+                "'not_attempted'",
+            ],
+        ),
+        (
+            "managed_connection_attempts",
+            vec![
+                "REFERENCES managed_connections (connection_id)",
+                "json_valid(payload)",
+                "'pending', 'installed', 'cancelled', 'failed'",
+                "'github.com'",
+            ],
+        ),
+        (
+            "managed_secret_cleanup",
+            vec![
+                "REFERENCES managed_connections (connection_id)",
+                "json_valid(reference)",
+                "secretRevision",
+                "disposition IN ('reserved', 'delete')",
+            ],
+        ),
+    ] {
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name=?1",
+                [table],
+                |row| row.get(0),
+            )
+            .map_err(|_| "validating native connection constraints".to_owned())?;
+        if clauses.iter().any(|clause| !sql.contains(clause)) {
+            return Err("native connection metadata lacks required constraints".into());
+        }
+    }
+    Ok(())
+}
 
 fn validate_v31(conn: &Connection) -> Result<(), String> {
     conn.prepare("SELECT vault_id,kind,value,dismissed_at FROM mail_dismissals")
@@ -1403,6 +1967,52 @@ mod tests {
             .query_row("SELECT count(*) FROM lane_registry", [], |row| row.get(0))
             .unwrap();
         assert_eq!(lanes, 7, "a second open must not re-seed the lane registry");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn original_v32_connections_gain_observation_cas_without_changing_their_binding() {
+        let dir = testutil::temp_vault("runtime-connection-observation-upgrade");
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        for migration in MIGRATIONS.iter().filter(|migration| migration.to <= 32) {
+            step(&conn, migration).unwrap();
+        }
+        assert_eq!(user_version(&conn).unwrap(), 32);
+        let status = r#"{"connectionId":"connection","revision":7,"login":"alice","health":"sign_in_required","account":null,"secretRevision":0,"revocationGeneration":2,"observedAt":"2026-10-24T00:00:00Z","cleanupPending":false,"remoteRevocation":"not_attempted"}"#;
+        conn.execute(
+            "INSERT INTO managed_connections(connection_id,person,status) VALUES(?1,?2,?3)",
+            rusqlite::params!["connection", "human:owner", status],
+        )
+        .unwrap();
+        drop(conn);
+        let conn = open(&dir).unwrap();
+        let observation = conn.query_row(
+            "SELECT observation_revision FROM managed_connections WHERE connection_id='connection'",
+            [],
+            |row| row.get::<_, i64>(0),
+        );
+        assert_eq!(
+            observation.ok(),
+            Some(0),
+            "an original V32 binding needs an initial observation CAS counter"
+        );
+        let preserved: String = conn
+            .query_row(
+                "SELECT status FROM managed_connections WHERE connection_id='connection'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved, status);
+        for invalid in ["-1", "1.5", "9007199254740992", "NULL"] {
+            assert!(conn
+                .execute_batch(&format!(
+                    "UPDATE managed_connections SET observation_revision={invalid}"
+                ))
+                .is_err());
+        }
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3099,4 +3709,102 @@ mod tests {
             let _ = std::fs::remove_dir_all(dir);
         }
     }
+}
+
+#[cfg(test)]
+#[path = "run_configuration_migration_tests.rs"]
+mod run_configuration_migration_tests;
+
+#[cfg(test)]
+mod action_namespace_tests;
+
+#[cfg(test)]
+mod chat_parent_attempt_migration_tests;
+
+#[cfg(test)]
+mod chat_delegation_migration_tests;
+
+fn validate_v47(conn:&Connection)->Result<(),String>{
+    for fragment in schema::SCHEMA_V47.split("CREATE ").skip(1){
+        let expected=format!("CREATE {}",fragment.trim().trim_end_matches(';'));
+        let name=expected.split_whitespace().nth(2).ok_or("workflow origin schema unavailable")?;
+        let actual:String=conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",[name],|r|r.get(0)).map_err(|_|"workflow origin table unavailable".to_owned())?;
+        if actual.trim()!=expected.trim(){return Err("workflow origin constraints changed".into());}
+        let bad:i64=conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),[],|r|r.get(0)).map_err(|_|"workflow origin foreign keys unavailable".to_owned())?;
+        if bad!=0{return Err("workflow origin foreign keys invalid".into());}
+    }Ok(())
+}
+
+
+#[cfg_attr(not(test),expect(dead_code,reason="native workflow producer follows causal ownership tests"))]
+pub(crate) mod workflow_submission;
+
+fn validate_v48(conn:&Connection)->Result<(),String>{
+ for fragment in schema::SCHEMA_V48.split("CREATE ").skip(1){
+  let expected=format!("CREATE {}",fragment.trim().trim_end_matches(';'));
+  let name=expected.split_whitespace().nth(2).ok_or("workflow activation schema unavailable")?;
+  let actual:String=conn.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",[name],|r|r.get(0)).map_err(|_|"workflow activation table unavailable".to_owned())?;
+  if actual.trim()!=expected.trim(){return Err("workflow activation constraints changed".into());}
+  let bad:i64=conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),[],|r|r.get(0)).map_err(|_|"workflow activation foreign keys unavailable".to_owned())?;
+  if bad!=0{return Err("workflow activation foreign keys invalid".into());}
+ }Ok(())
+}
+pub(crate) mod workflow_activations;
+
+#[cfg(test)]
+mod workflow_activation_upgrade_tests {
+ use super::*;
+ #[test]
+ fn v47_active_flow_input_survives_v48_and_reopens_at_actual_head(){
+  let dir=crate::vault::testutil::temp_vault("workflow-v47-to-v48");
+  let conn=connect(&runtime_db_path(&dir)).unwrap();
+  let mut ddl=String::from("BEGIN IMMEDIATE;");
+  for migration in MIGRATIONS.iter().filter(|migration|migration.to<=47){ddl.push_str(migration.sql);}
+  ddl.push_str("PRAGMA user_version=47;COMMIT;");conn.execute_batch(&ddl).unwrap();
+  let vault="c".repeat(32);let run="1".repeat(32);let reference="2".repeat(32);let key="3".repeat(32);let hash="a".repeat(64);
+  let input=r#"{"keep":9007199254740993.0000000000000001}"#;let input_digest=crate::ledger::sha256_hex(input.as_bytes());
+  conn.execute("INSERT INTO vault_registry(vault_id,vault_path,first_seen_at) VALUES(?1,'/synthetic/v47-flow','2026-10-26T00:00:00.000Z')",[&vault]).unwrap();
+  conn.execute("INSERT INTO workflow_runs(run_id,owner_person,vault_id,store_uuid,actor_id,workflow_id,definition_hash,input_schema_digest,start_key,start_digest,input_ref,input_digest,configuration_digest,grant_digest,state,cursor,revision,created_at,updated_at) VALUES(?1,'human:me',?2,'original-store','original-actor','old-workflow',?3,?3,?4,?3,?5,?6,?3,?3,'queued','done',1,60000,60000)",rusqlite::params![run,vault,hash,key,reference,input_digest]).unwrap();
+  conn.execute("INSERT INTO workflow_steps(run_id,step_id,definition_ordinal,kind,state,revision,updated_at) VALUES(?1,'done',0,'result','pending',1,60000)",[&run]).unwrap();
+  conn.execute("INSERT INTO workflow_values(run_id,value_ref,digest,role,step_id,ordinal,canonical_json,byte_count) VALUES(?1,?2,?3,'run_input','',0,?4,?5)",rusqlite::params![run,reference,input_digest,input,i64::try_from(input.len()).unwrap()]).unwrap();
+  assert_eq!(user_version(&conn).unwrap(),47);drop(conn);
+  let conn=open(&dir).unwrap();assert_eq!(user_version(&conn).unwrap(),USER_VERSION);validate_v48(&conn).unwrap();
+  let kept:(String,String,String,String,i64)=conn.query_row("SELECT r.state,r.store_uuid,r.actor_id,v.canonical_json,r.revision FROM workflow_runs r JOIN workflow_values v ON v.run_id=r.run_id AND v.value_ref=r.input_ref WHERE r.run_id=?1",[&run],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).unwrap();
+  assert_eq!(kept,("queued".into(),"original-store".into(),"original-actor".into(),input.into(),1));
+  assert_eq!(conn.query_row("SELECT count(*) FROM workflow_steps WHERE run_id=?1",[&run],|r|r.get::<_,i64>(0)).unwrap(),1);
+  assert_eq!(conn.query_row("SELECT count(*) FROM workflow_activations",[],|r|r.get::<_,i64>(0)).unwrap(),0,"migration never enables existing workflows");drop(conn);
+  let reopened=open_existing(&dir).unwrap();assert_eq!(user_version(&reopened).unwrap(),USER_VERSION);let body:String=reopened.query_row("SELECT canonical_json FROM workflow_values WHERE run_id=?1",[&run],|r|r.get(0)).unwrap();assert_eq!(body,input);drop(reopened);let _=std::fs::remove_dir_all(dir);
+ }
+}
+
+fn validate_v49(conn:&Connection)->Result<(),String>{
+    // Compare every emitted table/index/trigger to a fresh DDL-only model.
+    let expected=Connection::open_in_memory().map_err(|_|"archive schema model unavailable")?;
+    expected.execute_batch("CREATE TABLE chat_generations(generation_id TEXT,owner_person TEXT,vault_id TEXT,store_uuid TEXT);").map_err(|_|"archive schema model unavailable")?;
+    expected.execute_batch(schema::SCHEMA_V49).map_err(|_|"archive schema model unavailable")?;
+    let mut statement=expected.prepare("SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name LIKE 'conversation_%'").map_err(|_|"archive schema unavailable")?;
+    let rows=statement.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?))).map_err(|_|"archive schema unavailable")?;
+    for row in rows {
+        let (kind,name,sql)=row.map_err(|_|"archive schema unavailable")?;
+        let actual:String=conn.query_row("SELECT sql FROM sqlite_master WHERE type=?1 AND name=?2",rusqlite::params![kind,name],|row|row.get(0)).map_err(|_|"archive schema object missing")?;
+        if actual!=sql{return Err("archive schema constraints changed".into());}
+        if kind=="table" {
+            let bad:i64=conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),[],|row|row.get(0)).map_err(|_|"archive foreign keys unavailable")?;
+            if bad!=0{return Err("archive foreign keys invalid".into());}
+        }
+    } Ok(())
+}
+
+fn validate_v50(conn:&Connection)->Result<(),String>{
+    let expected=Connection::open_in_memory().map_err(|_|"legacy archive schema model unavailable")?;
+    expected.execute_batch("CREATE TABLE chat_generations(generation_id TEXT,owner_person TEXT,vault_id TEXT,store_uuid TEXT);").map_err(|_|"legacy archive schema model unavailable")?;
+    expected.execute_batch(schema::SCHEMA_V49).map_err(|_|"legacy archive schema model unavailable")?;
+    expected.execute_batch(schema::SCHEMA_V50).map_err(|_|"legacy archive schema model unavailable")?;
+    let mut statement=expected.prepare("SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL AND (name LIKE 'conversation_legacy_%' OR name LIKE 'conversation_archive_%')").map_err(|_|"legacy archive schema unavailable")?;
+    for row in statement.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?))).map_err(|_|"legacy archive schema unavailable")? {
+        let (kind,name,sql)=row.map_err(|_|"legacy archive schema unavailable")?;
+        let actual:String=conn.query_row("SELECT sql FROM sqlite_master WHERE type=?1 AND name=?2",rusqlite::params![kind,name],|row|row.get(0)).map_err(|_|"legacy archive schema object missing")?;
+        if actual!=sql{return Err("legacy archive schema constraints changed".into());}
+        if kind=="table" {let bad:i64=conn.query_row(&format!("SELECT count(*) FROM pragma_foreign_key_check('{name}')"),[],|row|row.get(0)).map_err(|_|"legacy archive foreign keys unavailable")?;if bad!=0{return Err("legacy archive foreign keys invalid".into());}}
+    }Ok(())
 }

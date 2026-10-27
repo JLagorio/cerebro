@@ -2,6 +2,7 @@ import { PaneRow } from '@/app/PaneRow';
 import { retainOsDropRouter } from '@/lib/osDrop';
 import { usePageAsideOpen } from '@/pages/DocPage';
 import { PaneLayoutHost } from '@/app/LastPlaceHost';
+import { RetainedSavesHost } from '@/editor/RetainedSavesHost';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AgentActions } from '@/agent/AgentActions';
 import { AiPanel } from '@/agent/AiPanel';
@@ -31,6 +32,7 @@ import { StatusBar } from '@/app/StatusBar';
 import { QuickOpen } from '@/app/QuickOpen';
 import { CreateLauncher } from '@/app/CreateLauncher';
 import { useQuitHost, useQuitting } from '@/app/quit';
+import { useWorkspaceBackupHost } from '@/workspace/useWorkspaceBackup';
 import { WindowTitle } from '@/app/WindowTitle';
 import { QuitScreen } from '@/app/QuitScreen';
 import { ChordHint } from '@/app/ChordHint';
@@ -151,6 +153,7 @@ function App() {
   // M55.10: ⌘Q, the close button and ⌘W save first. Above every early
   // return too, so the vault chooser answers a quit as well.
   useQuitHost();
+  useWorkspaceBackupHost();
   // M65.1: the one capture-phase key listener, and the General commands it
   // dispatches. Above every early return, so ⌘⇧L answers at the chooser too.
   useKeyRoot();
@@ -313,7 +316,7 @@ function App() {
   if (quitting) return <QuitScreen />;
 
   if (!vaultPath) {
-    return booted ? <VaultChooser /> : null;
+    return booted ? <><VaultChooser /><RetainedSavesHost /></> : null;
   }
 
   return (
@@ -506,6 +509,7 @@ function App() {
         {/* M45.2 — one mount, one signal: three menus raise uiStore.layoutEditor
           and this single App-level dialog is the only reader. */}
         <LayoutEditorDialog />
+        <RetainedSavesHost />
         <ToastHost />
         <ChordHint />
         <RenameLinksHost />

@@ -1,3 +1,4 @@
+import { followDocumentRename } from '@/editor/openPages';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useOpenLogStore } from '@/stores/openLogStore';
@@ -34,6 +35,7 @@ export function beginPointerRename(vault: string): () => void {
  * vault switch must never re-point the new vault's live panes. */
 export function followRename(vault: string, from: string, to: string): void {
   if (from === to) return;
+  followDocumentRename(vault, from, to);
   if (useVaultStore.getState().vaultPath === vault)
     safely(() => useNavStore.getState().replacePath(from, to));
   safely(() => remapLastPlace(vault, from, to));

@@ -1,3 +1,5 @@
+import { selectedEntryIssue, selectedPropertyKeys } from '@/engine/selectedEntryProjection';
+import { useSourcePropertyRow } from '@/editor/sourceReveal';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
@@ -36,6 +38,7 @@ export function recordPageSummary(entry: Entry, schema: Schema, entries: Entry[]
         .filter((field) => {
           if (field.visibility === 'hide') return false;
           const value = schema.resolveField(entry, field.name);
+          if (value.selectedValue?.kind === 'present' || value.unavailableReason) return value.display !== '';
           return (
             value.raw !== null &&
             value.raw !== undefined &&
@@ -49,7 +52,7 @@ export function recordPageSummary(entry: Entry, schema: Schema, entries: Entry[]
   const declared = new Set(type?.fields.map((field) => field.name) ?? []);
   const undeclared = new Set(
     visibleProperties([
-      ...Object.keys(entry.properties),
+      ...selectedPropertyKeys(entry),
       ...Object.keys(entry.relationships),
     ]).filter((name) => !declared.has(name) && name !== 'type' && name !== 'key'),
   );
@@ -68,6 +71,10 @@ export function RecordPageProperties({ entry, schema }: { entry: Entry; schema: 
   const [opened, setOpened] = useState(false);
   const [editing, setEditing] = useState(false);
   const manager = useRef<HTMLDivElement>(null);
+  const sourceField = useSourcePropertyRow(entry.path, entry.hash, manager, () => {
+    setOpened(true);
+    setShown(true);
+  });
   const [focusField, setFocusField] = useState<string | null>(null);
   const reveal = (field?: string) => {
     setFocusField(field ?? null);
@@ -93,6 +100,7 @@ export function RecordPageProperties({ entry, schema }: { entry: Entry; schema: 
   };
   return (
     <section className="cb-record-page-properties" aria-label="Record properties">
+      {(selectedEntryIssue(entry) ?? (entry.type ? schema.types.get(entry.type)?.unavailableReason : undefined)) && <p role="status" className="section-unavailable text-xs text-n-600">{selectedEntryIssue(entry) ?? (entry.type ? schema.types.get(entry.type)?.unavailableReason : undefined)}</p>}
       {summary.automatic ? (
         <div className="cb-record-summary" data-testid="record-summary">
           {summary.fields.map((field) => (
@@ -123,7 +131,7 @@ export function RecordPageProperties({ entry, schema }: { entry: Entry; schema: 
             className="cb-record-properties-toggle"
           >
             <Icon name={expanded ? 'chevron-up' : 'sliders-horizontal'} size={13} />
-            {expanded ? 'Hide properties' : 'Properties'}
+            {expanded ? 'Hide properties' : 'Show all properties'}
             {!expanded && summary.count > 0 && <span>{summary.count}</span>}
           </button>
         </div>
@@ -144,7 +152,12 @@ export function RecordPageProperties({ entry, schema }: { entry: Entry; schema: 
           data-testid="page-properties"
           className="cb-record-property-manager"
         >
-          <RecordProperties entry={entry} schema={schema} onEditingChange={setEditing} />
+          <RecordProperties
+            entry={entry}
+            schema={schema}
+            onEditingChange={setEditing}
+            sourceField={sourceField}
+          />
         </div>
       )}
     </section>

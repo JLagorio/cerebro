@@ -319,6 +319,11 @@ mod tests {
     /// Every production line of `source`: the `#[cfg(test)] mod tests` tail
     /// cut off, so a test's own call never counts as a door.
     fn production(source: &str) -> &str {
+        // Out-of-line test modules carry their own compile-time exclusion.
+        // A filename alone is not enough to exempt a source from the guard.
+        if source.starts_with("#![cfg(test)]\n") {
+            return "";
+        }
         source
             .find("#[cfg(test)]\nmod tests")
             .map_or(source, |cut| &source[..cut])
@@ -365,7 +370,9 @@ mod tests {
             let code = production(text);
             // A person's receipt: only the IPC commands mint one.
             for at in occurrences(code, "WriteReceipt::ipc(") {
-                if !matches!(rel.as_str(), "lib.rs" | "git_commands.rs") {
+                let recovery_door = rel == "recovery_commands.rs"
+                    && enclosing_fn(code, at).as_deref() == Some("restore_recovery");
+                if !matches!(rel.as_str(), "lib.rs" | "git_commands.rs") && !recovery_door {
                     problems.push(format!("{rel}: WriteReceipt::ipc at byte {at}"));
                 }
             }
