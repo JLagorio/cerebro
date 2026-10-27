@@ -64,7 +64,7 @@ mod saved_view;
     not(test),
     expect(
         unused_imports,
-        reason = "Native saved-view command integration follows causal service RED."
+        reason = "No native saved-view command reads canonical frames yet."
     )
 )]
 pub(crate) use saved_view::read_saved_view;
@@ -529,15 +529,14 @@ fn canonical_entry_type(record: &Record) -> Result<Option<String>, AuthorityErro
         )),
     }
 }
-fn entry_metadata(record: &Record) -> Result<EntryMetadata, AuthorityError> {
-    let entry_type = canonical_entry_type(record)?;
-    let PropertyValue::Object { value: fields } = &record.metadata else {
-        return Err(invalid("Canonical properties are not an object."));
-    };
+/// The legacy projection and the keys it cannot carry, sorted.
+fn legacy_projection(
+    fields: &BTreeMap<String, PropertyValue>,
+) -> (serde_json::Map<String, serde_json::Value>, Vec<String>) {
     let mut properties = serde_json::Map::new();
     let mut unavailable_legacy_keys = Vec::new();
     // One incompatible member must not erase the record or its other fields.
-    // The exact complete Object is retained below; this is compatibility only.
+    // The exact complete Object is retained by callers; this is compatibility only.
     for (key, stored) in fields {
         match value::legacy_value(stored) {
             Ok(projected) => {
@@ -547,6 +546,14 @@ fn entry_metadata(record: &Record) -> Result<EntryMetadata, AuthorityError> {
         }
     }
     unavailable_legacy_keys.sort();
+    (properties, unavailable_legacy_keys)
+}
+fn entry_metadata(record: &Record) -> Result<EntryMetadata, AuthorityError> {
+    let entry_type = canonical_entry_type(record)?;
+    let PropertyValue::Object { value: fields } = &record.metadata else {
+        return Err(invalid("Canonical properties are not an object."));
+    };
+    let (properties, unavailable_legacy_keys) = legacy_projection(fields);
     Ok(EntryMetadata {
         properties,
         entry_type,

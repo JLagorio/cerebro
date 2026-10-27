@@ -5,7 +5,7 @@ use super::{
     effect_record::PrepareAction,
     effect_types::{ActionSubjectView, PreparedAction},
 };
-use crate::runtime::workflows::{self as flow, Claim, Scope};
+use crate::runtime::workflows::{self as flow, Scope, StepClaim};
 use rusqlite::Connection;
 #[derive(Debug)]
 pub(super) struct PreparedWorkflowAction {
@@ -16,7 +16,7 @@ pub(super) struct PreparedWorkflowAction {
 pub(super) fn prepare_claim_rows(
     conn: &Connection,
     scope: Scope<'_>,
-    claim: &Claim,
+    claim: &StepClaim,
     context: &dyn MutationContext,
     subject: &ActionSubjectView,
     request: PrepareAction,

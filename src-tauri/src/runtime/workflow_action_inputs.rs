@@ -1,5 +1,5 @@
 //! Frozen workflow/ACT request identities; no duplicated input body or authority.
-use super::workflows::{self, Claim, Error, Scope};
+use super::workflows::{self, Error, Scope, StepClaim};
 use crate::actions::workflow_requests::{self, FrozenRequest, Selectors};
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -52,7 +52,7 @@ fn original_input(
 pub(crate) fn freeze_rows(
     conn: &Connection,
     scope: Scope<'_>,
-    claim: &Claim,
+    claim: &StepClaim,
     request: &FrozenRequest,
     configuration: &str,
 ) -> Result<(), Error> {

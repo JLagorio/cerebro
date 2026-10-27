@@ -76,7 +76,7 @@ fn begin(conn: &Connection, steps: &[Step<'_>]) -> Run {
 fn inspect(conn: &Connection, run: &str) -> Run {
     tx(conn, |c| inspect_rows(c, scope(), run)).unwrap()
 }
-fn claim(conn: &Connection, run: &Run) -> Claim {
+fn claim(conn: &Connection, run: &Run) -> StepClaim {
     tx(conn, |c| {
         claim_rows(c, scope(), &run.id, run.revision, "{}", "process-one", 101)
     })
@@ -86,7 +86,7 @@ fn count(conn: &Connection, table: &str) -> i64 {
     conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
         .unwrap()
 }
-fn timer(conn: &Connection) -> (Run, Claim, Wait) {
+fn timer(conn: &Connection) -> (Run, StepClaim, Wait) {
     let run = begin(conn, &pair(Kind::Timer));
     let claim = claim(conn, &run);
     let wait = tx(conn, |c| {
@@ -546,7 +546,7 @@ fn workflow_terminal_retention_off_removes_bodies_but_keeps_digests() {
     );
 }
 fn effect<'a>(
-    claim: &'a Claim,
+    claim: &'a StepClaim,
     state: EffectState,
     revision: u64,
     output: Option<&'a str>,

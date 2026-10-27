@@ -307,9 +307,21 @@ fn exact_unprojectable_metadata_survives_and_unknown_governed_types_refuse() {
         assert_eq!(f.stored(), metadata);
         assert_eq!(metadata_source(&f), exact_metadata);
         assert_eq!(selected::read_body(&f.root, "page.md").unwrap(), AFTER);
+        // The canonical scan keeps a value the page's legacy properties cannot
+        // carry exactly and names it, instead of refusing the vault (CV-05).
+        let scanned = selected::scan(&f.root).unwrap();
+        let page = scanned
+            .iter()
+            .find(|entry| entry.path == "page.md")
+            .unwrap();
+        assert!(
+            !page.properties.contains_key("large") && !page.properties.contains_key("relation")
+        );
+        let canonical = page.canonical_properties.as_ref().unwrap();
+        assert_eq!(canonical.unavailable_legacy_keys, ["large", "relation"]);
         assert_eq!(
-            selected::scan(&f.root).unwrap_err().kind,
-            AuthorityErrorKind::UnsupportedProjection
+            serde_json::to_value(&canonical.value).unwrap()["value"]["large"],
+            json!({"kind":"decimal","value":"1e400"})
         );
         for kind in [
             "Agent",

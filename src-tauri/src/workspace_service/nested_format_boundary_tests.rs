@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! P1 RED: real portable restore output must not become legacy via an ancestor.
 //! Admission sentinels launch no process; the ordinary list_dir control may invoke Git.
 //! The tests install fixture-local authority only and do not constitute Wry/native acceptance.

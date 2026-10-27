@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! Tests the actual guard/acquire/recheck handoff; no global hooks or sleeps.
 use super::*;
 use crate::vault::testutil;

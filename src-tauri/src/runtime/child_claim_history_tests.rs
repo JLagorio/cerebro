@@ -25,6 +25,14 @@ fn ready() -> Fixture {
     for migration in MIGRATIONS.iter().filter(|m| m.to == 40 || m.to == 41) {
         step(&f.conn, migration).unwrap();
     }
+    // Today's run writers and recovery skip runs a workflow originated, a
+    // table a later schema adds. This store predates workflows, so it holds
+    // none: an empty stand-in with the two columns those readers consult.
+    f.conn
+        .execute_batch(
+            "CREATE TABLE workflow_run_origins(workflow_run_id TEXT PRIMARY KEY NOT NULL, native_run_id TEXT NOT NULL UNIQUE)",
+        )
+        .unwrap();
     f.conn
         .execute(
             "UPDATE runs SET started_at=?1 WHERE run_id='historic-parent'",

@@ -2466,20 +2466,21 @@ fn served_row(row: &ToolRow) -> Value {
         "name": row.name,
         "description": substitute_tokens(&row.description),
         "inputSchema": substituted(&row.input_schema),
-        "annotations": annotations(&row.title, row.kind, row.idempotent, row.open_world),
+        "annotations": annotations(&row.title, row.kind, &row.door, row.idempotent, row.open_world),
         "_meta": search_meta(&row.search_hint, row.always_load),
     })
 }
 
 /// MCP's tool annotations. `readOnlyHint` lets the CLI run calls in
-/// parallel, so the manifest allows `read_only` only on the door that writes
-/// nothing at all. The loopback lets every call overlap: writes to one file
-/// take turns in `vault::write` (M55.1), and writes to different files may
-/// overlap.
-fn annotations(title: &str, kind: Kind, idempotent: bool, open_world: bool) -> Value {
+/// parallel, so it is drawn only for a `read_only` tool on the door that
+/// writes nothing at all: a managed read (M96) is `read_only` in the manifest
+/// but answers through the managed door, so it runs one at a time. The
+/// loopback lets every call overlap: writes to one file take turns in
+/// `vault::write` (M55.1), and writes to different files may overlap.
+fn annotations(title: &str, kind: Kind, door: &str, idempotent: bool, open_world: bool) -> Value {
     json!({
         "title": title,
-        "readOnlyHint": kind == Kind::ReadOnly,
+        "readOnlyHint": kind == Kind::ReadOnly && door == "none",
         "destructiveHint": kind == Kind::Destructive,
         "idempotentHint": idempotent,
         "openWorldHint": open_world,
@@ -2781,7 +2782,7 @@ pub fn proposal_tools(table: &crate::policy::table::PolicyTable) -> Result<Vec<V
                 "name": proposal_tool_name(op),
                 "description": describe(op, rule),
                 "inputSchema": proposal_schema(),
-                "annotations": annotations(&title, generated.kind, generated.idempotent, generated.open_world),
+                "annotations": annotations(&title, generated.kind, &generated.door, generated.idempotent, generated.open_world),
                 "_meta": search_meta(&generated.search_hint, generated.always_load),
             })
         })
@@ -18766,10 +18767,18 @@ mod tests {
             bearer(None, None, Some(owned(&["get_note", host]))),
             bearer(None, Some(vec![]), Some(vec![])),
         ];
+        // M96: the managed tools reach only an original attended run's seat
+        // that was handed the prompt tool; every other list leaves them out.
+        let unmanaged = |tools: Vec<Value>| -> Vec<Value> {
+            tools
+                .into_iter()
+                .filter(|tool| !managed_tool_name(tool["name"].as_str().unwrap_or_default()))
+                .collect()
+        };
         for grant in &grants {
             let book = seated_book(grant);
             for proposals in [false, true] {
-                let without = listed_tools(grant, proposals);
+                let without = unmanaged(listed_tools(grant, proposals));
                 assert!(
                     !names_of(&without).iter().any(|name| name == host),
                     "proposals={proposals}"
@@ -18780,7 +18789,12 @@ mod tests {
             }
             book.hand_prompt_tool(&grant.run_id);
             for proposals in [false, true] {
-                let without = listed_tools(grant, proposals);
+                let listed = listed_tools(grant, proposals);
+                let without = if original_attended_grant(grant) {
+                    listed
+                } else {
+                    unmanaged(listed)
+                };
                 let with = tools_list(grant, proposals, Some(&book));
                 assert_eq!(with[..with.len() - 1], without[..], "listed_tools first");
                 assert_eq!(with.last(), Some(&host_tool_entry()));
@@ -18794,7 +18808,7 @@ mod tests {
             book.close_seat(&grant.run_id);
             assert_eq!(
                 tools_list(grant, true, Some(&book)),
-                listed_tools(grant, true)
+                unmanaged(listed_tools(grant, true))
             );
         }
         // A client token's session is never shown it, whatever a book says.

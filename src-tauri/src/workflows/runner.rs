@@ -90,7 +90,7 @@ pub(crate) struct Prepared {
 }
 #[derive(Debug)]
 pub(crate) struct ReadWork {
-    pub claim: rows::Claim,
+    pub claim: rows::StepClaim,
     pub query: String,
     version: String,
     output_schema: String,
@@ -98,7 +98,7 @@ pub(crate) struct ReadWork {
 }
 #[derive(Debug)]
 pub(crate) struct ActionWork {
-    pub claim: rows::Claim,
+    pub claim: rows::StepClaim,
     pub request: FrozenRequest,
 }
 #[derive(Debug)]

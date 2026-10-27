@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! Actual rename lock scopes share one request budget in each acquisition phase.
 use super::*;
 use crate::workspace_service::boundary::{self, Limits};

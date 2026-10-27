@@ -46,7 +46,7 @@ impl Fixture {
             actor: &self.subject_view.actor_id,
         }
     }
-    fn start(&self, key: &str, act_run: &str) -> (flow::Run, flow::Claim) {
+    fn start(&self, key: &str, act_run: &str) -> (flow::Run, flow::StepClaim) {
         // Use the actual fixture's authority record to freeze scope metadata;
         // this read creates no ActionSubject. Only Harness owns that capability.
         let raw:String=self.conn.query_row("SELECT json_extract(value,'$.scope') FROM fixture_native_authority WHERE run_id=?1",[act_run],|row|row.get(0)).unwrap();
@@ -511,7 +511,7 @@ fn workflow_real_act_expired_dispatch_claim_blocks_after_retiring_approval() {
 
 fn receipt_register(
     f: &Fixture,
-    claim: &flow::Claim,
+    claim: &flow::StepClaim,
     id: &InvocationId,
 ) -> Result<(), flow::Error> {
     tx(&f.conn, |conn| {
@@ -547,7 +547,7 @@ fn receipt_consume(
 fn receipt_snapshot(f: &Fixture, run: &str) -> String {
     f.conn.query_row("SELECT json_array(r.state,r.revision,r.reserved_bytes,r.output_bytes,(SELECT json_group_array(json_array(role,canonical_json,digest,byte_count)) FROM workflow_values WHERE run_id=r.run_id),(SELECT json_group_array(json_array(state,output_json,output_digest,byte_count,ack_kind)) FROM action_output_handoffs WHERE workflow_run_id=r.run_id)) FROM workflow_runs r WHERE r.run_id=?1", [run], |row| row.get(0)).unwrap()
 }
-fn receipt_prepared(f: &Fixture, key: &str) -> (flow::Run, flow::Claim, InvocationId) {
+fn receipt_prepared(f: &Fixture, key: &str) -> (flow::Run, flow::StepClaim, InvocationId) {
     let (run, claim) = f.start(key, "run");
     let prepared = f.h.prepare(&claim.request_key, "first").unwrap();
     receipt_register(f, &claim, &prepared.effect.invocation_id)

@@ -1274,6 +1274,11 @@ mod tests {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();
+            // An out-of-line test module carries its own compile-time
+            // exclusion, as the receipt guard reads it (receipt.rs).
+            if text.starts_with("#![cfg(test)]\n") {
+                continue;
+            }
             let production = text
                 .find("#[cfg(test)]\nmod tests")
                 .map_or(text.as_str(), |cut| &text[..cut]);

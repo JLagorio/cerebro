@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! Source-reader handoff RED: two scoped-pipeline tests and five actual command controls.
 //! No Wry window, process admission, global hook, sleep or authority-bearing callback.
 use super::*;

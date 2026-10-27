@@ -545,10 +545,15 @@ mod tests {
         // M62 added describe_database, query_records, list_agenda and suggest_view;
         // M64 added read_activity; M63.7 added the in-memory submit_condition;
         // M63.8 added the self-only runtime booking schedule_followup.
+        // M96 added the five managed-action tools (list_actions,
+        // get_action_definition, prepare_action, get_action_effect and
+        // get_action_effect_details); only an original attended seat lists
+        // them (mcp::tools_list), and prepare_action holds every change for
+        // the person's own approval (CV-62).
         // All sit outside the proposal switch.
         let base = served(false);
         let table = PolicyTable::load().unwrap();
-        assert_eq!(base.len(), 38, "{base:?}");
+        assert_eq!(base.len(), 43, "{base:?}");
         assert!(base.contains("report_window_outcome"));
         assert!(base.contains(crate::assembly::prompt::SUBMIT_TOOL));
         assert!(base.is_disjoint(&expected(&table)));

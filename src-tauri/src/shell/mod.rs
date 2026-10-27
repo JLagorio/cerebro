@@ -116,6 +116,24 @@ pub fn build_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
+/// A hidden second window for the credential smoke profile alone
+/// (`native-credential-smoke`), which proves the credential commands refuse
+/// any window but main. Built here, beside the main window, so every window
+/// the app makes meets both guards: navigation by the link policy, and no new
+/// windows at all.
+#[cfg(feature = "native-credential-smoke")]
+pub(crate) fn build_untrusted_smoke_window(
+    app: &tauri::AppHandle,
+    label: &str,
+) -> tauri::Result<tauri::WebviewWindow> {
+    tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("index.html".into()))
+        .visible(false)
+        .incognito(true)
+        .on_navigation(|url| links::classify(url, None) == links::LinkVerdict::Allow)
+        .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+        .build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::links::{classify, LinkVerdict};

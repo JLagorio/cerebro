@@ -33,19 +33,8 @@ fn untrusted_window(app: &AppHandle) -> Result<WebviewWindow, &'static str> {
     let (send, receive) = std::sync::mpsc::sync_channel(1);
     let capture = app.clone();
     app.run_on_main_thread(move || {
-        let result = tauri::WebviewWindowBuilder::new(
-            &capture,
-            "credential-untrusted",
-            tauri::WebviewUrl::App("index.html".into()),
-        )
-        .visible(false)
-        .incognito(true)
-        .on_navigation(|url| {
-            crate::shell::links::classify(url, None) == crate::shell::links::LinkVerdict::Allow
-        })
-        .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
-        .build()
-        .map_err(|_| "credential-secondary-window");
+        let result = crate::shell::build_untrusted_smoke_window(&capture, "credential-untrusted")
+            .map_err(|_| "credential-secondary-window");
         // A late created window must not escape if the receiver timed out.
         if let Err(error) = send.try_send(result) {
             let value = match error {

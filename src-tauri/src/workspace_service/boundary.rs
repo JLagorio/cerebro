@@ -248,6 +248,16 @@ impl Inspection {
     // Per-file checks use the held inventory; they never repeat a recursive walk
     // or reread the selected registry for every note.
     pub(crate) fn open_file(&self, path: &Path) -> Result<fs::File, AuthorityError> {
+        self.open_file_or_io(path)?.map_err(|_| unavailable())
+    }
+    /// As [`Self::open_file`], but a witnessed file the OS will not open
+    /// (no permission, or gone since the inventory) is that file's own read
+    /// failure, not the scope's: the scan names it and the rest proceeds
+    /// (CV-05). Every containment and identity check still refuses the scope.
+    pub(crate) fn open_file_or_io(
+        &self,
+        path: &Path,
+    ) -> Result<std::io::Result<fs::File>, AuthorityError> {
         let actual = target(path)?;
         self.validate_requested_path(path)?;
         // A leaf link and its regular target have different identities.
@@ -259,8 +269,15 @@ impl Inspection {
             .file_name()
             .and_then(|s| s.to_str())
             .ok_or_else(unavailable)?;
-        let opened = crate::files::bytes::open_in(parent, "boundary-content", leaf)
-            .map_err(|_| unavailable())?;
+        let opened = match crate::files::bytes::open_in(parent, "boundary-content", leaf) {
+            Ok(opened) => opened,
+            // `not_found` is the descriptor door's word for every plain open
+            // failure (EACCES, ENOENT); an escape reads `outside` and refuses.
+            Err(refusal) if refusal.code == "not_found" => {
+                return Ok(Err(std::io::Error::other(refusal.message)));
+            }
+            Err(_) => return Err(unavailable()),
+        };
         if opened.path != actual
             || Identity::of(&opened.file.metadata().map_err(|_| unavailable())?) != witness.identity
         {
@@ -276,7 +293,7 @@ impl Inspection {
             }
         }
         self.validate_requested_path(path)?;
-        Ok(opened.file)
+        Ok(Ok(opened.file))
     }
     fn validate_requested_path(&self, requested: &Path) -> Result<(), AuthorityError> {
         let requested = lexical(requested)?;

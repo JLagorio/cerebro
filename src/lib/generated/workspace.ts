@@ -227,6 +227,49 @@ export type SelectedRecordVersion = {
   workspaceId: string;
 };
 
+export type SelectedSavedViewColumn = { kind: string; name: string };
+
+export type SelectedSavedViewFrame = {
+  capped: boolean;
+  columns: Array<SelectedSavedViewColumn>;
+  configuration: PropertyValue;
+  entries: Array<SelectedSavedViewRecord>;
+  layout: SelectedSavedViewLayout;
+  schemaEvidence: Array<SelectedSavedViewRecord>;
+  shown: number;
+  snapshotEpoch: string;
+  timezone: string;
+  today: string;
+  total: number;
+  typeRecord: SelectedSavedViewRecord;
+  viewId: string;
+  viewName: string;
+};
+
+export type SelectedSavedViewLayout = 'table' | 'list';
+
+export type SelectedSavedViewRecord = {
+  authority: SelectedRecordVersion;
+  canonicalProperties: SelectedEntryProperties;
+  createdAt: string;
+  filename: string;
+  folder: string;
+  hash: string;
+  modifiedAt: string;
+  outgoingLinks: Array<string>;
+  path: string;
+  project?: string | null;
+  snippet: string;
+  title: string;
+  type?: string | null;
+};
+
+export type SelectedSavedViewRequest = {
+  expectedVersion: SelectedRecordVersion;
+  target: SelectedEditorTarget;
+  viewId: string;
+};
+
 export type StoreError = { code: StoreErrorCode; message: string; retryable: boolean };
 
 export type StoreErrorCode = 'capability_unavailable';

@@ -7,7 +7,7 @@ use super::{
     native_db::AuthorityDb,
     schema,
 };
-use crate::runtime::workflows::{self as flow, Claim, Run, Scope};
+use crate::runtime::workflows::{self as flow, Run, Scope, StepClaim};
 use rusqlite::{params, Connection, OptionalExtension};
 
 fn unavailable<T>() -> Result<T, flow::Error> {
@@ -185,7 +185,7 @@ fn allocation(conn: &Connection, row: &Handoff) -> Result<(), flow::Error> {
 pub(super) fn register_rows(
     conn: &Connection,
     scope: Scope<'_>,
-    claim: &Claim,
+    claim: &StepClaim,
     context: &dyn MutationContext,
     subject: &ActionSubjectView,
     id: &InvocationId,

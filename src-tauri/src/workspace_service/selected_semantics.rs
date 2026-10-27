@@ -96,14 +96,14 @@ fn policy() -> Result<&'static Policy> {
         .as_ref()
         .map_err(|message| bad(message.clone()))
 }
-struct Row {
-    entry: Entry,
-    id: String,
-    properties: BTreeMap<String, PropertyValue>,
+pub(super) struct Row {
+    pub(super) entry: Entry,
+    pub(super) id: String,
+    pub(super) properties: BTreeMap<String, PropertyValue>,
 }
-struct Frame {
-    rows: Vec<Row>,
-    schema: VaultSchema,
+pub(super) struct Frame {
+    pub(super) rows: Vec<Row>,
+    pub(super) schema: VaultSchema,
     withheld: usize,
 }
 fn frame(root: &Path, admits: &dyn Fn(&str) -> bool) -> Result<Frame> {
@@ -116,11 +116,35 @@ fn frame(root: &Path, admits: &dyn Fn(&str) -> bool) -> Result<Frame> {
         .map_err(|_| missing("Canonical semantic snapshot is unavailable."))?;
     let snapshot = read_snapshot(&tx, &binding)?;
     check_pairing(&binding, &snapshot)?;
+    let frame = frame_rows(&binding, snapshot.records, admits)?;
+    store::handle_unmoved(&tx)?;
+    private_database(&binding)?;
+    if let Some(guard) = &guard {
+        guard.validate()?;
+    }
+    if authority::selected_binding(root)? != binding {
+        return Err(error(
+            AuthorityErrorKind::WrongIdentity,
+            "Canonical semantic binding changed.",
+        ));
+    }
+    tx.commit()
+        .map_err(|_| missing("Canonical semantic snapshot could not finish."))?;
+    Ok(frame)
+}
+/// Rows and declared schema from one already checked, still held snapshot.
+/// The caller owns the guard, transaction and final binding revalidation.
+pub(super) fn frame_rows(
+    binding: &SelectedBinding,
+    records: Vec<Record>,
+    admits: &dyn Fn(&str) -> bool,
+) -> Result<Frame> {
+    policy()?;
     let mut rows = Vec::new();
     let mut withheld = 0usize;
     let mut total = 0usize;
     let mut types = BTreeSet::new();
-    for record in snapshot.records {
+    for record in records {
         if !admits(&record.path) {
             withheld += 1;
             continue;
@@ -135,7 +159,7 @@ fn frame(root: &Path, admits: &dyn Fn(&str) -> bool) -> Result<Frame> {
         };
         let remaining = u64::try_from(rules().limits.aggregate_body_bytes.saturating_sub(total))
             .map_err(|_| unsupported("Canonical body budget is unavailable."))?;
-        let exact = body(&binding, &record, rules().limits.body_bytes.min(remaining))?;
+        let exact = body(binding, &record, rules().limits.body_bytes.min(remaining))?;
         total = total
             .checked_add(exact.len())
             .ok_or_else(|| unsupported("Canonical body budget exceeded."))?;
@@ -173,7 +197,7 @@ fn frame(root: &Path, admits: &dyn Fn(&str) -> bool) -> Result<Frame> {
                 unavailable_legacy_keys,
             },
         };
-        let entry = entry_with_metadata(&binding, &record, &exact, metadata)?;
+        let entry = entry_with_metadata(binding, &record, &exact, metadata)?;
         if entry.entry_type.as_deref() == Some("Type") && !types.insert(entry.title.to_lowercase())
         {
             return Err(unsupported(
@@ -195,19 +219,6 @@ fn frame(root: &Path, admits: &dyn Fn(&str) -> bool) -> Result<Frame> {
         row.entry.project = entry.project.clone();
     }
     let schema = VaultSchema::from_entries(&entries, schema::table().map_err(bad)?);
-    store::handle_unmoved(&tx)?;
-    private_database(&binding)?;
-    if let Some(guard) = &guard {
-        guard.validate()?;
-    }
-    if authority::selected_binding(root)? != binding {
-        return Err(error(
-            AuthorityErrorKind::WrongIdentity,
-            "Canonical semantic binding changed.",
-        ));
-    }
-    tx.commit()
-        .map_err(|_| missing("Canonical semantic snapshot could not finish."))?;
     Ok(Frame {
         rows,
         schema,
@@ -299,7 +310,7 @@ fn field(row: &Row, name: &str, schema: &VaultSchema) -> Option<PropertyValue> {
         },
     }
 }
-fn source<'a>(frame: &'a Frame, wanted: Option<&str>) -> Result<Vec<&'a Row>> {
+pub(super) fn source<'a>(frame: &'a Frame, wanted: Option<&str>) -> Result<Vec<&'a Row>> {
     let entries = frame
         .rows
         .iter()
@@ -318,7 +329,7 @@ fn source<'a>(frame: &'a Frame, wanted: Option<&str>) -> Result<Vec<&'a Row>> {
     rows.sort_by(|a, b| a.entry.path.cmp(&b.entry.path));
     Ok(rows)
 }
-fn canonical_infos(
+pub(super) fn canonical_infos(
     rows: &[&Row],
     wanted: Option<&str>,
     schema: &VaultSchema,
@@ -360,7 +371,7 @@ fn canonical_infos(
     }
     infos
 }
-fn checked_info<'a>(
+pub(super) fn checked_info<'a>(
     name: &str,
     infos: &'a BTreeMap<String, legacy::FieldInfo>,
 ) -> Result<&'a legacy::FieldInfo> {
@@ -537,14 +548,14 @@ fn compare(
     }
 }
 
-struct CheckedRule {
+pub(super) struct CheckedRule {
     field: String,
     op: String,
     targets: Vec<PropertyValue>,
     date: bool,
     multi: bool,
 }
-enum CheckedFilter {
+pub(super) enum CheckedFilter {
     All(Vec<CheckedFilter>),
     Any(Vec<CheckedFilter>),
     Rule(CheckedRule),
@@ -745,7 +756,7 @@ fn scalar_items(value: &PropertyValue, multi: bool, date: bool) -> Result<Vec<&P
         _ => Ok(vec![value]),
     }
 }
-fn checked_filter(
+pub(super) fn checked_filter(
     node: &legacy::FilterNode,
     rows: &[&Row],
     schema: &VaultSchema,
@@ -856,7 +867,7 @@ fn matches_rule(
         _ => any_ordered,
     })
 }
-fn matches_filter(
+pub(super) fn matches_filter(
     row: &Row,
     node: &CheckedFilter,
     schema: &VaultSchema,
@@ -942,7 +953,7 @@ struct SortKey {
     empty: bool,
     temporal: Option<TemporalSortKey>,
 }
-fn sorted<'a>(
+pub(super) fn sorted<'a>(
     rows: Vec<&'a Row>,
     sort: &[legacy::SortSpec],
     schema: &VaultSchema,

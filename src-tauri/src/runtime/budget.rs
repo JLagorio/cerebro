@@ -557,15 +557,7 @@ pub fn ensure_day(conn: &Connection, now: DateTime<Utc>) -> Result<Day, String> 
     // an edit made an hour ago is waiting for its handover, and reading the
     // window boundary off it would file today's spending under tomorrow.
     let governing = version_effective_at(conn, &stamp(now))?.unwrap_or(latest);
-    let mut window = window_containing(&governing.settings.timezone_id, now)?;
-    // A version that changed the timezone hands over at a boundary computed
-    // under the OLD zone, which need not be a local midnight in the new one.
-    // The first window under a new zone is therefore short, and saying so is
-    // better than back-dating it over hours the previous zone already
-    // accounted for.
-    if window.start_utc < governing.effective_window_start_utc {
-        window.start_utc = governing.effective_window_start_utc.clone();
-    }
+    let window = governed_window(&governing, now)?;
     conn.execute(
         "INSERT OR IGNORE INTO budget_days \
          (window_start_utc, window_end_utc, timezone_id, settings_version, settings_digest, \
@@ -594,6 +586,19 @@ pub fn ensure_day(conn: &Connection, now: DateTime<Utc>) -> Result<Day, String> 
     )
     .map_err(|e| format!("budget_days: {e}"))?;
     read_day(conn, &window.start_utc)
+}
+
+/// The window `now` falls in under the version governing it. A version that
+/// changed the timezone hands over at a boundary computed under the OLD zone,
+/// which need not be a local midnight in the new one. The first window under
+/// a new zone is therefore short, and saying so is better than back-dating it
+/// over hours the previous zone already accounted for.
+fn governed_window(governing: &Version, now: DateTime<Utc>) -> Result<Window, String> {
+    let mut window = window_containing(&governing.settings.timezone_id, now)?;
+    if window.start_utc < governing.effective_window_start_utc {
+        window.start_utc = governing.effective_window_start_utc.clone();
+    }
+    Ok(window)
 }
 
 pub fn read_day(conn: &Connection, window_start: &str) -> Result<Day, String> {
@@ -734,9 +739,42 @@ pub fn gate(
     now: DateTime<Utc>,
 ) -> Result<(Decision, Day), String> {
     let day = ensure_day(conn, now)?;
+    let asked = Asked {
+        vault_id,
+        store_uuid,
+        lane,
+        actor,
+        reservation,
+        now,
+    };
+    Ok((decide(conn, &day, &asked)?, day))
+}
+
+/// What one dispatch asks the gate, beside the day it is asked against.
+struct Asked<'a> {
+    vault_id: &'a str,
+    store_uuid: &'a str,
+    lane: &'a str,
+    actor: Option<&'a str>,
+    reservation: Reservation,
+    now: DateTime<Utc>,
+}
+
+/// The gate's reasons over a day already open. Reads only: `gate` and
+/// `preview_rows` share it, so a preview can never disagree with dispatch.
+/// An unreadable required row refuses rather than reading as permission.
+fn decide(conn: &Connection, day: &Day, asked: &Asked<'_>) -> Result<Decision, String> {
+    let &Asked {
+        vault_id,
+        store_uuid,
+        lane,
+        actor,
+        reservation,
+        now,
+    } = asked;
     let mut reasons: Vec<GateReason> = Vec::new();
 
-    if settings::global_pause(conn) {
+    if settings::global_pause_recorded(conn)? {
         reasons.push(GateReason::GlobalPause);
     }
     // The per-agent pause, beside the global one because they are the same
@@ -807,12 +845,11 @@ pub fn gate(
 
     reasons.sort();
     reasons.dedup();
-    let decision = if reasons.is_empty() {
+    Ok(if reasons.is_empty() {
         Decision::Proceed
     } else {
         Decision::Deferred(reasons)
-    };
-    Ok((decision, day))
+    })
 }
 
 fn lane_priority(conn: &Connection, lane: &str) -> Result<u64, String> {
@@ -905,7 +942,7 @@ pub fn ambient_leases_held(conn: &Connection, now: DateTime<Utc>) -> Result<usiz
 /// commits, and a ceiling lowered while a run is in flight takes effect on the
 /// NEXT claim rather than retroactively refusing one already granted.
 fn ambient_busy(conn: &Connection, now: DateTime<Utc>) -> Result<bool, String> {
-    Ok(ambient_leases_held(conn, now)? >= settings::ambient_concurrency(conn))
+    Ok(ambient_leases_held(conn, now)? >= settings::ambient_concurrency_recorded(conn)?)
 }
 
 /// Record what the gate saw and what it decided. Every column is the value
@@ -1663,17 +1700,32 @@ mod tests {
 )]
 pub(crate) fn preview_rows(
     conn: &Connection,
-    _vault_id: &str,
-    _store_uuid: &str,
-    _lane: &str,
-    _actor: Option<&str>,
-    _reservation: Reservation,
-    _now: DateTime<Utc>,
+    vault_id: &str,
+    store_uuid: &str,
+    lane: &str,
+    actor: Option<&str>,
+    reservation: Reservation,
+    now: DateTime<Utc>,
 ) -> Result<(Decision, Day), String> {
     if conn.is_autocommit() {
         return Err("budget preview requires an active transaction".into());
     }
-    Err("budget preview is unavailable".into())
+    // Settings and the day are read, never initialized: a preview that opened
+    // today's window would be a dispatch's first write.
+    let latest = latest_version(conn)?.ok_or("budget preview: no budget settings are recorded")?;
+    let governing = version_effective_at(conn, &stamp(now))?.unwrap_or(latest);
+    let window = governed_window(&governing, now)?;
+    let day = read_day(conn, &window.start_utc)
+        .map_err(|e| format!("budget preview: today's window is not recorded ({e})"))?;
+    let asked = Asked {
+        vault_id,
+        store_uuid,
+        lane,
+        actor,
+        reservation,
+        now,
+    };
+    Ok((decide(conn, &day, &asked)?, day))
 }
 
 #[cfg(test)]

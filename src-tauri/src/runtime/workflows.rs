@@ -75,7 +75,7 @@ pub(crate) enum Started {
     Observed(Run),
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Claim {
+pub(crate) struct StepClaim {
     pub run: String,
     pub step: String,
     pub ordinal: u64,
@@ -571,7 +571,11 @@ fn current(
     let step = step_row(conn, &run.id, run.cursor.as_deref().ok_or(Error::Stale)?)?;
     Ok((run, step))
 }
-fn claimed(conn: &Connection, scope: Scope<'_>, claim: &Claim) -> Result<(Run, StepRow), Error> {
+fn claimed(
+    conn: &Connection,
+    scope: Scope<'_>,
+    claim: &StepClaim,
+) -> Result<(Run, StepRow), Error> {
     let (run, step) = current(conn, scope, &claim.run, claim.run_revision)?;
     if run.cancel_requested
         || run.state != "running"
@@ -602,7 +606,7 @@ pub(crate) fn definition_step_limit() -> usize {
 pub(crate) fn check_claim_rows(
     conn: &Connection,
     scope: Scope<'_>,
-    claim: &Claim,
+    claim: &StepClaim,
 ) -> Result<(), Error> {
     claimed(conn, scope, claim).map(|_| ())
 }
@@ -643,7 +647,7 @@ pub(crate) fn claim_rows(
     input: &str,
     process: &str,
     now: i64,
-) -> Result<Claim, Error> {
+) -> Result<StepClaim, Error> {
     let (run, step) = current(conn, scope, id, expected)?;
     if run.state != "queued" || run.cancel_requested || step.state != "pending" || step.ordinal != 0
     {
@@ -699,7 +703,7 @@ pub(crate) fn claim_rows(
     if changed != 1 {
         return Err(Error::Stale);
     }
-    Ok(Claim {
+    Ok(StepClaim {
         run: id.into(),
         step: step.id,
         ordinal: 1,
@@ -818,7 +822,7 @@ fn finish_transition(
 pub(crate) fn finish_rows(
     conn: &Connection,
     scope: Scope<'_>,
-    claim: &Claim,
+    claim: &StepClaim,
     output: &str,
     successor: Option<&str>,
     now: i64,
@@ -868,7 +872,7 @@ fn dispose(
 pub(crate) fn fail_rows(
     conn: &Connection,
     scope: Scope<'_>,
-    claim: &Claim,
+    claim: &StepClaim,
     reason: &str,
     now: i64,
 ) -> Result<Run, Error> {
@@ -907,7 +911,7 @@ fn wait_row(conn: &Connection, id: &str) -> Result<Wait, Error> {
 pub(crate) fn park_rows(
     conn: &Connection,
     scope: Scope<'_>,
-    claim: &Claim,
+    claim: &StepClaim,
     wait: WaitFor<'_>,
     now: i64,
 ) -> Result<Wait, Error> {

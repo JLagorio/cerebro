@@ -501,6 +501,14 @@ fn begin(
     run_id: &str,
     paused: impl FnOnce(&str) -> Result<(), String>,
 ) -> Result<(Plan, String), String> {
+    // Starts take turns. The scan below inspects the whole vault and refuses
+    // one whose folders changed meanwhile, which another start's first
+    // placeholder does; in turn, a second start for the same comment finds
+    // that placeholder and says so (CV-36).
+    static STARTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _turn = STARTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let entries = crate::vault::scan::scan_vault(vault)?;
     let plan = plan(vault, &entries, req)?;
     // The runtime pause, the same gate run_agent and hand_to pass, before

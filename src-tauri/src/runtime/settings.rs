@@ -174,6 +174,12 @@ pub fn global_pause(conn: &Connection) -> bool {
     flag(conn, GLOBAL_PAUSE, None, false)
 }
 
+/// The global pause as recorded, for the budget gate: an unreadable row is a
+/// refusal, never the not-paused default.
+pub fn global_pause_recorded(conn: &Connection) -> Result<bool, String> {
+    Ok(get(conn, GLOBAL_PAUSE, None)?.is_some_and(|value| value == "true"))
+}
+
 pub fn set_global_pause(conn: &Connection, paused: bool) -> Result<(), String> {
     set(
         conn,
@@ -314,14 +320,16 @@ pub fn refuse_if_agent_paused(
 /// number reach zero would give the app two ways to say "stopped" of which
 /// only one has a button.
 pub fn ambient_concurrency(conn: &Connection) -> usize {
-    match get(conn, AMBIENT_CONCURRENCY, None) {
-        Ok(Some(value)) => value
-            .parse::<usize>()
-            .ok()
-            .filter(|n| (AMBIENT_CONCURRENCY_DEFAULT..=AMBIENT_CONCURRENCY_MAX).contains(n))
-            .unwrap_or(AMBIENT_CONCURRENCY_DEFAULT),
-        _ => AMBIENT_CONCURRENCY_DEFAULT,
-    }
+    ambient_concurrency_recorded(conn).unwrap_or(AMBIENT_CONCURRENCY_DEFAULT)
+}
+
+/// The ceiling as recorded, for the budget gate: an absent or out-of-range
+/// value is the default, an unreadable row is a refusal.
+pub fn ambient_concurrency_recorded(conn: &Connection) -> Result<usize, String> {
+    Ok(get(conn, AMBIENT_CONCURRENCY, None)?
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|n| (AMBIENT_CONCURRENCY_DEFAULT..=AMBIENT_CONCURRENCY_MAX).contains(n))
+        .unwrap_or(AMBIENT_CONCURRENCY_DEFAULT))
 }
 
 /// Raise or lower the ceiling. Refused outside `1..=AMBIENT_CONCURRENCY_MAX`,

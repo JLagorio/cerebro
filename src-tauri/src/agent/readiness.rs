@@ -424,6 +424,10 @@ fn capture(command: &mut Command, deadline: &Deadline) -> Result<String, ProbeEr
 pub(super) mod test_support {
     use super::*;
 
+    /// Room for a toy probe to start and finish while the whole suite runs
+    /// at once. Only a timeout under test keeps a short budget (`HUNG`).
+    pub(crate) const ROOMY: Duration = Duration::from_secs(10);
+
     /// Observe only the provider-free fixture executable in its private PATH.
     pub(crate) fn fixture_observation(binary: &std::path::Path) -> Observation {
         let config = ProbeConfig {
@@ -431,9 +435,7 @@ pub(super) mod test_support {
             shell: None,
             fallbacks: Box::new(|| Ok(Vec::new())),
         };
-        observe_with(config, Duration::from_secs(2))
-            .unwrap()
-            .unwrap()
+        observe_with(config, ROOMY).unwrap().unwrap()
     }
 
     /// Invalid-option tests never reach the executable. Supply the test
@@ -452,6 +454,12 @@ pub(super) mod test_support {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use test_support::ROOMY;
+    /// A timeout under test: long enough for the toy to start and record its
+    /// pid on a loaded machine, far short of the 30 s it would sleep.
+    const HUNG: Duration = Duration::from_secs(2);
+    /// How long cleanup may take past a deadline before a child counts as kept.
+    const SETTLE: Duration = Duration::from_secs(3);
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
@@ -507,7 +515,7 @@ mod tests {
         unsafe { libc::kill(pid, 0) == 0 }
     }
     fn wait_gone(pid: i32) {
-        let until = Instant::now() + Duration::from_secs(1);
+        let until = Instant::now() + SETTLE;
         while alive(pid) && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -520,17 +528,13 @@ mod tests {
     #[test]
     fn complete_search_without_a_binary_is_missing() {
         let f = Fixture::new();
-        assert!(observe_with(f.config(), Duration::from_secs(1))
-            .unwrap()
-            .is_none());
+        assert!(observe_with(f.config(), ROOMY).unwrap().is_none());
     }
     #[test]
     fn available_observation_pairs_the_executable_version_and_path() {
         let f = Fixture::new();
         let binary = f.script("claude", "printf '2.1.250 (toy)\\n'");
-        let found = observe_with(f.config(), Duration::from_secs(1))
-            .unwrap()
-            .unwrap();
+        let found = observe_with(f.config(), ROOMY).unwrap().unwrap();
         assert_eq!(found.binary, binary);
         assert_eq!(found.version.as_deref(), Some("2.1.250 (toy)"));
         assert_eq!(found.path, f.0.as_os_str());
@@ -540,7 +544,7 @@ mod tests {
         let f = Fixture::new();
         fs::write(f.0.join("claude"), "no executable permission").unwrap();
         assert_eq!(
-            error(observe_with(f.config(), Duration::from_secs(1))),
+            error(observe_with(f.config(), ROOMY)),
             ProbeError::Permission
         );
     }
@@ -549,7 +553,7 @@ mod tests {
         let f = Fixture::new();
         f.script("claude", "exit 7");
         assert_eq!(
-            error(observe_with(f.config(), Duration::from_secs(1))),
+            error(observe_with(f.config(), ROOMY)),
             ProbeError::ProbeFailed
         );
     }
@@ -557,7 +561,7 @@ mod tests {
     fn a_blank_version_still_observes_the_executable_without_claiming_sign_in() {
         let f = Fixture::new();
         f.script("claude", "exit 0");
-        assert!(observe_with(f.config(), Duration::from_secs(1))
+        assert!(observe_with(f.config(), ROOMY)
             .unwrap()
             .unwrap()
             .version
@@ -572,11 +576,8 @@ mod tests {
             &format!("echo $$ > '{}'; exec /bin/sleep 30", pid.display()),
         );
         let started = Instant::now();
-        assert_eq!(
-            error(observe_with(config, Duration::from_millis(300))),
-            ProbeError::Timeout
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(error(observe_with(config, HUNG)), ProbeError::Timeout);
+        assert!(started.elapsed() < HUNG + SETTLE);
         wait_gone(read_pid(&pid));
     }
     #[test]
@@ -588,30 +589,28 @@ mod tests {
             &format!("echo $$ > '{}'; exec /bin/sleep 30", pid.display()),
         );
         let started = Instant::now();
-        assert_eq!(
-            error(observe_with(f.config(), Duration::from_millis(300))),
-            ProbeError::Timeout
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(error(observe_with(f.config(), HUNG)), ProbeError::Timeout);
+        assert!(started.elapsed() < HUNG + SETTLE);
         wait_gone(read_pid(&pid));
     }
     #[test]
     fn shell_and_version_share_one_deadline() {
         let f = Fixture::new();
-        f.script("claude", "/bin/sleep 0.25; printf '2.1.250\\n'");
+        // Each step alone fits the budget; together they cannot.
+        f.script("claude", "/bin/sleep 1; printf '2.1.250\\n'");
         let config = shell(
             &f,
             &format!(
-                "/bin/sleep 0.25; printf '__CEREBRO_PATH__%s\\n' '{}'",
+                "/bin/sleep 1; printf '__CEREBRO_PATH__%s\\n' '{}'",
                 f.0.display()
             ),
         );
         let started = Instant::now();
         assert_eq!(
-            error(observe_with(config, Duration::from_millis(400))),
+            error(observe_with(config, Duration::from_millis(1500))),
             ProbeError::Timeout
         );
-        assert!(started.elapsed() < Duration::from_millis(650));
+        assert!(started.elapsed() < Duration::from_millis(1500) + SETTLE);
     }
     #[test]
     fn stdout_flood_is_capped_and_the_child_is_reaped() {
@@ -619,7 +618,7 @@ mod tests {
         let pid = f.0.join("flood.pid");
         f.script("claude", &format!("echo $$ > '{}'; while :; do printf '0123456789012345678901234567890123456789'; done", pid.display()));
         assert_eq!(
-            error(observe_with(f.config(), Duration::from_secs(1))),
+            error(observe_with(f.config(), ROOMY)),
             ProbeError::OutputLimit
         );
         wait_gone(read_pid(&pid));
@@ -635,17 +634,14 @@ mod tests {
                 pid.display()
             ),
         );
-        assert_eq!(
-            error(observe_with(f.config(), Duration::from_millis(300))),
-            ProbeError::Timeout
-        );
+        assert_eq!(error(observe_with(f.config(), HUNG)), ProbeError::Timeout);
         wait_gone(read_pid(&pid));
     }
     #[test]
     fn login_shell_failure_is_unavailable_instead_of_install_advice() {
         let f = Fixture::new();
         assert_eq!(
-            error(observe_with(shell(&f, "exit 9"), Duration::from_secs(1))),
+            error(observe_with(shell(&f, "exit 9"), ROOMY)),
             ProbeError::ProbeFailed
         );
     }
@@ -662,16 +658,12 @@ mod tests {
                 f.0.display()
             ),
         );
-        let first = observe_with(config, Duration::from_secs(1))
-            .unwrap()
-            .unwrap();
+        let first = observe_with(config, ROOMY).unwrap().unwrap();
         let config = shell(
             &f,
             &format!("printf '__CEREBRO_PATH__%s\\n' '{}'", other.0.display()),
         );
-        let second = observe_with(config, Duration::from_secs(1))
-            .unwrap()
-            .unwrap();
+        let second = observe_with(config, ROOMY).unwrap().unwrap();
         assert_eq!(first.version.as_deref(), Some("2.1.249"));
         assert_eq!(second.version.as_deref(), Some("2.1.250"));
         assert!(!crate::agent::interaction::supports_gate(
@@ -686,13 +678,11 @@ mod tests {
     fn failure_does_not_poison_the_next_observation() {
         let f = Fixture::new();
         assert_eq!(
-            error(observe_with(shell(&f, "exit 9"), Duration::from_secs(1))),
+            error(observe_with(shell(&f, "exit 9"), ROOMY)),
             ProbeError::ProbeFailed
         );
         f.script("claude", "printf '2.1.250\\n'");
-        assert!(observe_with(f.config(), Duration::from_secs(1))
-            .unwrap()
-            .is_some());
+        assert!(observe_with(f.config(), ROOMY).unwrap().is_some());
     }
     #[test]
     fn fallback_install_is_checked_after_path_candidates() {
@@ -707,10 +697,7 @@ mod tests {
             ..f.config()
         };
         assert_eq!(
-            observe_with(config, Duration::from_secs(1))
-                .unwrap()
-                .unwrap()
-                .binary,
+            observe_with(config, ROOMY).unwrap().unwrap().binary,
             candidate
         );
     }
@@ -718,9 +705,7 @@ mod tests {
     fn changed_executable_cannot_reuse_an_observed_capability_version() {
         let f = Fixture::new();
         let binary = f.script("claude", "printf '2.1.250\\n'");
-        let found = observe_with(f.config(), Duration::from_secs(1))
-            .unwrap()
-            .unwrap();
+        let found = observe_with(f.config(), ROOMY).unwrap().unwrap();
         let replacement = f.script("replacement", "printf '2.1.249\\n'");
         fs::rename(replacement, &binary).unwrap();
         let mut command = crate::spawn::command(&binary);
@@ -737,7 +722,7 @@ mod tests {
             "printf '2.1.250\\n'; printf '# changed\\n' >> \"$0\"",
         );
         assert_eq!(
-            error(observe_with(f.config(), Duration::from_secs(1))),
+            error(observe_with(f.config(), ROOMY)),
             ProbeError::ProbeFailed
         );
     }
@@ -745,14 +730,12 @@ mod tests {
     fn actual_command_receives_the_observed_path_without_process_env_mutation() {
         let f = Fixture::new();
         f.script("claude", "printf '2.1.250\\n'");
-        let found = observe_with(f.config(), Duration::from_secs(1))
-            .unwrap()
-            .unwrap();
+        let found = observe_with(f.config(), ROOMY).unwrap().unwrap();
         let mut command = crate::spawn::command("/bin/sh");
         command.args(["-c", "printf '%s' \"$PATH\""]);
         found.configure_command(&mut command).unwrap();
         assert_eq!(
-            capture(&mut command, &Deadline::new(Duration::from_secs(1))).unwrap(),
+            capture(&mut command, &Deadline::new(ROOMY)).unwrap(),
             f.0.to_string_lossy()
         );
     }
@@ -774,10 +757,7 @@ mod tests {
         let f = Fixture::new();
         let path = std::env::join_paths((0..257).map(|at| f.0.join(at.to_string()))).unwrap();
         let config = ProbeConfig { path, ..f.config() };
-        assert_eq!(
-            error(observe_with(config, Duration::from_secs(1))),
-            ProbeError::OutputLimit
-        );
+        assert_eq!(error(observe_with(config, ROOMY)), ProbeError::OutputLimit);
     }
     #[test]
     fn a_stopped_login_shell_is_killed_and_reaped_within_budget() {
@@ -788,11 +768,8 @@ mod tests {
             &format!("echo $$ > '{}'; kill -STOP $$; exit 0", pid.display()),
         );
         let started = Instant::now();
-        assert_eq!(
-            error(observe_with(config, Duration::from_millis(300))),
-            ProbeError::Timeout
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(error(observe_with(config, HUNG)), ProbeError::Timeout);
+        assert!(started.elapsed() < HUNG + SETTLE);
         wait_gone(read_pid(&pid));
     }
     #[test]
@@ -810,7 +787,7 @@ mod tests {
             ),
         );
         assert_eq!(
-            error(observe_with(f.config(), Duration::from_secs(1))),
+            error(observe_with(f.config(), ROOMY)),
             ProbeError::OutputLimit
         );
         wait_gone(read_pid(&pid));
@@ -837,9 +814,7 @@ mod tests {
             }),
             ..f.config()
         };
-        let found = observe_with(config, Duration::from_secs(1))
-            .unwrap()
-            .unwrap();
+        let found = observe_with(config, ROOMY).unwrap().unwrap();
         assert!(found.binary.is_absolute());
         assert_eq!(
             fs::canonicalize(found.binary).unwrap(),
@@ -856,16 +831,14 @@ mod tests {
             shell: None,
             fallbacks: Box::new(|| Ok(Vec::new())),
         };
-        let found = observe_with(config, Duration::from_secs(1))
-            .unwrap()
-            .unwrap();
+        let found = observe_with(config, ROOMY).unwrap().unwrap();
         assert!(std::env::split_paths(&found.path).all(|entry| entry.is_absolute()));
         let mut command = crate::spawn::command("/bin/sh");
         command
             .args(["-c", "printf '%s' \"$PATH\""])
             .current_dir(&vault.0);
         found.configure_command(&mut command).unwrap();
-        let shown = capture(&mut command, &Deadline::new(Duration::from_secs(1))).unwrap();
+        let shown = capture(&mut command, &Deadline::new(ROOMY)).unwrap();
         assert_eq!(
             fs::canonicalize(shown).unwrap(),
             fs::canonicalize(&f.0).unwrap()
@@ -932,9 +905,7 @@ mod tests {
                 fallbacks: Box::new(move || Err(failure)),
                 ..f.config()
             };
-            let found = observe_with(config, Duration::from_secs(1))
-                .unwrap()
-                .unwrap();
+            let found = observe_with(config, ROOMY).unwrap().unwrap();
             assert_eq!(found.version.as_deref(), Some("2.1.250 (toy)"));
         }
     }
@@ -950,27 +921,28 @@ mod tests {
                 fallbacks: Box::new(move || Err(failure)),
                 ..f.config()
             };
-            assert_eq!(error(observe_with(config, Duration::from_secs(1))), failure);
+            assert_eq!(error(observe_with(config, ROOMY)), failure);
         }
     }
     #[test]
     fn lazy_fallback_enumeration_and_version_share_the_original_deadline() {
         let f = Fixture::new();
         let install = Fixture::new();
-        let binary = install.script("claude", "/bin/sleep 0.25; printf '2.1.250\\n'");
+        // Each step alone fits the budget; together they cannot.
+        let binary = install.script("claude", "/bin/sleep 1; printf '2.1.250\\n'");
         let config = ProbeConfig {
             fallbacks: Box::new(move || {
-                std::thread::sleep(Duration::from_millis(250));
+                std::thread::sleep(Duration::from_secs(1));
                 Ok(vec![binary])
             }),
             ..f.config()
         };
         let started = Instant::now();
         assert_eq!(
-            error(observe_with(config, Duration::from_millis(400))),
+            error(observe_with(config, Duration::from_millis(1500))),
             ProbeError::Timeout
         );
-        assert!(started.elapsed() < Duration::from_millis(650));
+        assert!(started.elapsed() < Duration::from_millis(1500) + SETTLE);
     }
     #[test]
     fn a_necessary_lazy_fallback_list_is_still_bounded() {
@@ -983,9 +955,6 @@ mod tests {
             }),
             ..f.config()
         };
-        assert_eq!(
-            error(observe_with(config, Duration::from_secs(1))),
-            ProbeError::OutputLimit
-        );
+        assert_eq!(error(observe_with(config, ROOMY)), ProbeError::OutputLimit);
     }
 }

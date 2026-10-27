@@ -133,7 +133,10 @@ pub(crate) fn note_files(vault: &Path) -> Result<NoteInventory, String> {
 pub(crate) fn read_content(
     file: &NoteFile,
 ) -> Result<std::io::Result<String>, crate::workspace_service::types::selected::AuthorityError> {
-    let mut source = file.boundary.open_file(&file.path)?;
+    let mut source = match file.boundary.open_file_or_io(&file.path)? {
+        Ok(source) => source,
+        Err(unreadable) => return Ok(Err(unreadable)),
+    };
     let read = (|| -> std::io::Result<String> {
         if !crate::files::kinds::is_whiteboard(&file.rel) {
             let mut text = String::new();

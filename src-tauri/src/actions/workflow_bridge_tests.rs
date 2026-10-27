@@ -95,7 +95,7 @@ impl F {
     fn counts(&self) -> (i64, i64, i64) {
         self.conn.query_row("SELECT (SELECT count(*) FROM action_invocations),(SELECT count(*) FROM action_output_handoffs),(SELECT count(*) FROM workflow_attempts)",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap()
     }
-    fn claim(&self, c: &Connection, run: &flow::Run) -> Claim {
+    fn claim(&self, c: &Connection, run: &flow::Run) -> StepClaim {
         flow::claim_rows(
             c,
             self.scope(),
