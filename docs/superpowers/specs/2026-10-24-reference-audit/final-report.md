@@ -140,7 +140,7 @@ Full list: [backlog](backlog.md#rejected--do-not-copy-merged-list-with-reasons).
 
 ## Owner decisions
 
-Top 10 of 90. Since 10-24, D43 was decided (opt-in archive, 2026-10-26) and the D16 inset half was decided (2026-10-25). D60 was ~~superseded by~~ overtaken by the build under a root amendment ("Root approved" in M98 docs is the orchestrating agent, not the owner), so it stays pending until the owner ratifies it. D75–D88 are new; D89 (cross-note sheet references: Defer) and D90 (item-key floor: host frontmatter plus git) are the critic's (rev. 2026-10-27, critic). All rows: [backlog](backlog.md#owner-decisions-deduplicated-each-with-its-options-and-a-recommendation).
+Top 10 of 90. Since 10-24, D43 was decided (opt-in archive, 2026-10-26) and the D16 inset half was decided (2026-10-25). **On 2026-10-27 the owner approved D36, D58, D59, D67, D78 and BL-11's 200% gate as recommended.** D60 was ~~superseded by~~ overtaken by the build under a root amendment ("Root approved" in M98 docs is the orchestrating agent, not the owner), so it stays pending until the owner ratifies it. D75–D88 are new; D89 (cross-note sheet references: Defer) and D90 (item-key floor: host frontmatter plus git) are the critic's (rev. 2026-10-27, critic). All rows: [backlog](backlog.md#owner-decisions-deduplicated-each-with-its-options-and-a-recommendation).
 
 | # | Decide | Recommendation | Status 2026-10-27 | Backlog |
 | --- | --- | --- | --- | --- |
