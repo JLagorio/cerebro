@@ -15,6 +15,7 @@ import {
   type LabSection,
   type LabState,
 } from './presets';
+import { SectionBoundary } from '@/components/ui/SectionBoundary';
 
 /**
  * The state lab (M64.1): every section in `./sections/`, each in its five
@@ -216,7 +217,11 @@ export function StateLab({ sections = labSections() }: { sections?: LabSection[]
           data-ready={ready ? '' : undefined}
           className="rounded-md border border-n-100 p-3"
         >
-          {ready ? <Fragment key={generation}>{section.render()}</Fragment> : null}
+          {ready ? (
+            <Fragment key={generation}>
+              <SectionBoundary label={section.title}>{section.render()}</SectionBoundary>
+            </Fragment>
+          ) : null}
         </div>
       </main>
     </div>

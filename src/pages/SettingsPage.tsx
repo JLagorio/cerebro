@@ -42,6 +42,7 @@ import type { ClaudeUserSettings } from '@/agent/types';
 import { parseShellCeiling, type ShellCeiling } from '@/lib/policy/toolApproval';
 import { asThemeMode, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { SectionBoundary } from '@/components/ui/SectionBoundary';
 
 const THEME_OPTIONS = [
   { value: 'light', label: 'Light', icon: 'sun', testId: 'theme-light' },
@@ -298,7 +299,8 @@ export function SettingsPage() {
         data-single={id !== 'general'}
         data-settings-panel={id}
       >
-        {children}
+        {/* M93.12: a section that throws keeps the rest of Settings, and its own retained controller. */}
+        <SectionBoundary label="This section">{children}</SectionBoundary>
       </div>
     );
   const vaultPath = useVaultStore((s) => s.vaultPath);
