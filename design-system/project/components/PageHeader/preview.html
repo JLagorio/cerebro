@@ -1,0 +1,127 @@
+<!-- @dsCard group="App shell" height=630 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>PageHeader</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .pane {
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        overflow: hidden;
+        background: var(--surface-app);
+        margin-bottom: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          h('span', { className: 'cap' }, 'workspace (default): a surface’s own head'),
+          h(
+            'div',
+            { className: 'pane' },
+            h(C.PageHeader, {
+              title: 'Studio',
+              icon: h(C.Icon, { name: 'pencil-ruler', size: 18 }),
+              metadata: '3 prototypes',
+              description: 'A place to build ideas with your assistant.',
+              actions: h(C.Button, { variant: 'primary' }, 'New prototype'),
+            }),
+          ),
+          h(
+            'span',
+            { className: 'cap' },
+            'compact: an open item under its surface, the icon its way back',
+          ),
+          h(
+            'div',
+            { className: 'pane' },
+            h(C.PageHeader, {
+              variant: 'compact',
+              title: 'Pick queue heatmap',
+              icon: h(
+                'button',
+                {
+                  type: 'button',
+                  'aria-label': 'All prototypes',
+                  className: 'flex h-8 w-8 items-center justify-center rounded-lg hover:bg-n-100',
+                },
+                h(C.Icon, { name: 'arrow-left', size: 16 }),
+              ),
+              metadata: 'Prototype',
+              description: 'Built from the Phoenix cutover PRD.',
+              actions: h(C.IconButton, {
+                icon: 'ellipsis',
+                label: 'Prototype options',
+                size: 'sm',
+              }),
+            }),
+          ),
+          h('span', { className: 'cap' }, 'tool: a file opened in its viewer'),
+          h(
+            'div',
+            { className: 'pane' },
+            h(C.PageHeader, {
+              variant: 'tool',
+              title: 'dock-layout.pdf',
+              icon: h(C.Icon, { name: 'file-type', size: 18 }),
+              metadata: '2.4 MB',
+              description: h(
+                'span',
+                { 'data-testid': 'file-crumb' },
+                'projects/phoenix-warehouse-rollout/attachments',
+              ),
+              actions: h(C.IconButton, {
+                icon: 'square-arrow-out-up-right',
+                label: 'Open with',
+                size: 'sm',
+              }),
+            }),
+          ),
+          h(
+            'span',
+            { className: 'cap' },
+            'composition="collection" inside a .cb-composition pane: insets follow the pane’s width',
+          ),
+          h(
+            'div',
+            { className: 'pane cb-composition' },
+            h(C.PageHeader, {
+              composition: 'collection',
+              title: 'My work',
+              metadata: '12 open',
+              description: 'Your open work, organized by when it needs you.',
+            }),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

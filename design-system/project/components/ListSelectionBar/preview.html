@@ -1,0 +1,61 @@
+<!-- @dsCard group="App shell" height=128 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ListSelectionBar</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+        padding-bottom: 16px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Col(cap, bar) {
+        return h('div', { className: 'col' }, h('span', { className: 'cap' }, cap), bar);
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          Col(
+            'My work, the Inbox and the Concepts table: Copy links',
+            h(C.ListSelectionBar, { count: 3, onCopy: function () {} }),
+          ),
+          Col(
+            'Home lanes: doneHint names the e key',
+            h(C.ListSelectionBar, { count: 2, doneHint: true }),
+          ),
+          Col('One row picked', h(C.ListSelectionBar, { count: 1, onCopy: function () {} })),
+        ),
+      );
+    </script>
+  </body>
+</html>

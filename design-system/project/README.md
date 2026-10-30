@@ -80,7 +80,7 @@ Every section that reads data has five states: ready, empty, not recorded, parti
 
 ## Logo
 
-The repository has no logo mark. The app icon is a flat graphite square (`#1a1d21`), and the product name is set in type: "Cerebro", Instrument Sans 600, `text-primary`. Do not draw or invent a mark.
+The mark is typographic: a lowercase **c** and a period, "c.", set in Instrument Sans 700 at 30/34px with −2px tracking, the c in `text-primary` and the period in `text-secondary`. It sits at the top of the icon rail as the Home button (`.m71-brand` in `src/app/shell.css`; see the AppRail card). The product name in running text is "Cerebro". The app icon is a flat graphite square (`#1a1d21`). Set the mark in type; never draw it as an image or invent another.
 
 ## Components
 

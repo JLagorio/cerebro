@@ -1,0 +1,361 @@
+<!-- @dsCard group="App shell" height=374 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>PageToolbar</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .page {
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        overflow: hidden;
+        background: var(--surface-app);
+        margin-bottom: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      /* The side panel under an open toolbar end (src/detail/inspector.css). */
+      .cb-inspector {
+        --fs-ui: 13px;
+        --lh-ui: 18px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--surface-app);
+        border-left: 1px solid var(--border-subtle);
+        color: var(--n-800);
+        font-size: var(--fs-ui);
+        line-height: var(--lh-ui);
+      }
+      .cb-inspector-title {
+        display: flex;
+        flex: none;
+        align-items: baseline;
+        gap: 6px;
+        padding: 6px 16px 10px;
+        border-bottom: 1px solid var(--n-100);
+      }
+      .cb-inspector-title h2 {
+        margin: 0;
+        color: var(--n-900);
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 20px;
+      }
+      .cb-inspector-title-count {
+        color: var(--text-meta);
+        font: 500 12px/16px var(--font-ui);
+        font-variant-numeric: tabular-nums;
+      }
+      .cb-inspector-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var SAVE_LABEL = {
+        dirty: 'Unsaved',
+        saving: 'Saving…',
+        saved: 'Saved',
+        failed: "Couldn't save",
+      };
+
+      // Crumb and CrumbSeparator (components/PageToolbar.tsx)
+      function Crumb(o) {
+        if (o.button) {
+          return h(
+            'button',
+            {
+              type: 'button',
+              className:
+                'motion-hover inline-flex min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-sm text-n-500 hover:bg-n-50 hover:text-n-800',
+            },
+            o.glyph || h(C.Icon, { name: o.icon, size: 13 }),
+            h('span', { className: 'truncate' }, o.label),
+          );
+        }
+        return h(
+          'span',
+          {
+            className: o.strong
+              ? 'inline-flex min-w-0 items-center gap-1.5 px-1 text-sm font-medium text-n-900'
+              : 'inline-flex min-w-0 items-center gap-1.5 px-1 text-sm text-n-500',
+          },
+          o.glyph || h(C.Icon, { name: o.icon, size: 13, color: 'var(--n-500)' }),
+          h('span', { className: 'truncate' }, o.label),
+        );
+      }
+      function Sep() {
+        return h(C.Icon, { name: 'chevron-right', size: 12, color: 'var(--n-300)' });
+      }
+
+      // DocPage's crumbs for delivery/how-we-schedule.md: Pages, its folder's page, the page.
+      function Crumbs() {
+        return [
+          h(Crumb, { key: 'root', label: 'Pages', icon: 'library' }),
+          h(
+            'span',
+            { key: 'delivery', className: 'flex min-w-0 items-center gap-0.5' },
+            h(Sep),
+            h(Crumb, {
+              label: 'Delivery',
+              button: true,
+              glyph: h(C.Icon, { name: 'rocket', size: 13, color: '#3D8BE8' }),
+            }),
+          ),
+          h(
+            'span',
+            {
+              key: 'title',
+              className: 'flex min-w-0 items-center gap-0.5',
+              'data-testid': 'doc-title',
+            },
+            h(Sep),
+            h(Crumb, { label: 'How we schedule', icon: 'file-text', strong: true }),
+          ),
+        ];
+      }
+
+      // SaveState
+      function Save(state) {
+        var cls =
+          state === 'failed'
+            ? 'cb-save-state mr-1 flex-none whitespace-nowrap text-xs font-medium text-danger-600 '
+            : state === 'saving'
+              ? 'cb-save-state mr-1 flex-none whitespace-nowrap text-xs text-[var(--text-meta)] cb-working-text'
+              : 'cb-save-state mr-1 flex-none whitespace-nowrap text-xs text-[var(--text-meta)] ';
+        return h(
+          'span',
+          {
+            key: state,
+            'data-testid': 'doc-save-state',
+            className: cls,
+            title:
+              state === 'failed'
+                ? undefined
+                : 'Saves automatically — ' + C.keycapText('page.save') + ' to save now',
+          },
+          SAVE_LABEL[state],
+        );
+      }
+
+      // PanelButtons
+      function PanelButtons(shown, comments, idBase) {
+        return h(
+          'span',
+          { className: 'cb-panel-buttons' },
+          h('span', { 'aria-hidden': 'true', className: 'cb-panel-buttons-rule' }),
+          h(C.IconButton, {
+            icon: 'history',
+            label: 'History',
+            size: 'sm',
+            active: shown === 'history',
+          }),
+          h(
+            C.Tooltip,
+            { label: comments > 0 ? 'Comments · ' + comments + ' open' : 'Comments' },
+            h(
+              'button',
+              {
+                type: 'button',
+                'aria-label': 'Comments',
+                'aria-pressed': shown === 'comments',
+                'aria-describedby': comments > 0 ? idBase : undefined,
+                className:
+                  shown === 'comments'
+                    ? 'cb-ibtn cb-panel-button cb-ibtn-active'
+                    : 'cb-ibtn cb-panel-button ',
+              },
+              h(C.Icon, { name: 'message-square', size: 14 }),
+              comments > 0 &&
+                h(
+                  'span',
+                  {
+                    key: comments,
+                    'data-testid': 'doc-panel-comment-count',
+                    'aria-hidden': 'true',
+                    className: 'cb-panel-button-count',
+                  },
+                  comments,
+                ),
+            ),
+          ),
+          comments > 0 && h('span', { id: idBase, hidden: true }, comments + ' open comments'),
+          h(C.IconButton, {
+            icon: 'panel-right',
+            label: 'Details',
+            size: 'sm',
+            active: shown === 'details',
+          }),
+        );
+      }
+
+      function Actions(shown, comments, idBase, starred) {
+        return [
+          h(
+            'button',
+            {
+              key: 'star',
+              type: 'button',
+              'data-testid': 'favorite-star',
+              'aria-pressed': starred,
+              'aria-label': starred ? 'Remove from favorites' : 'Add to favorites',
+              className:
+                'flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent hover:bg-n-100',
+            },
+            h(C.Icon, {
+              name: 'star',
+              size: 14,
+              color: starred ? 'var(--warn-500)' : 'var(--n-400)',
+            }),
+          ),
+          h(
+            'span',
+            {
+              key: 'open',
+              className: 'relative inline-flex flex-none',
+              'data-testid': 'open-with',
+            },
+            h(C.IconButton, { icon: 'square-arrow-out-up-right', label: 'Open with', size: 'sm' }),
+          ),
+          h(
+            'div',
+            { key: 'menu', className: 'inline-flex' },
+            h(C.IconButton, { icon: 'ellipsis', label: 'Page options', size: 'sm' }),
+          ),
+          h(React.Fragment, { key: 'panels' }, PanelButtons(shown, comments, idBase)),
+        ];
+      }
+
+      // PageToolbar
+      function Toolbar(o) {
+        return h(
+          'div',
+          { className: 'cb-document-toolbar' },
+          h(
+            'div',
+            { className: 'cb-document-start' },
+            h('div', { className: 'cb-document-breadcrumbs' }, Crumbs()),
+            Save(o.save),
+          ),
+          h(
+            'div',
+            { className: 'cb-document-end' },
+            o.panel &&
+              h(C.IconButton, {
+                icon: 'chevrons-right',
+                label: 'Close panel',
+                size: 'sm',
+                className: 'cb-panel-close',
+              }),
+            h(
+              'div',
+              { className: 'cb-document-actions' },
+              Actions(o.panel, o.comments, o.id, o.starred),
+            ),
+          ),
+        );
+      }
+
+      // In its page frame (components/pageFrame.css): docked, the panel's column is the toolbar end's.
+      function Frame(o) {
+        return h(
+          'div',
+          {
+            className: 'cb-document cb-page-frame flex-1',
+            'data-panel': o.panel ? 'docked' : undefined,
+            style: { '--frame-panel-w': '300px', '--frame-panel-min': '240px' },
+          },
+          Toolbar(o),
+          o.panel &&
+            h(
+              'aside',
+              {
+                'aria-label': 'Comments',
+                'data-panel': 'comments',
+                'data-state': 'open',
+                className: 'cb-inspector',
+              },
+              h(
+                'div',
+                { className: 'cb-inspector-title' },
+                h('h2', null, 'Comments'),
+                h(
+                  'span',
+                  { title: o.comments + ' open comments', className: 'cb-inspector-title-count' },
+                  o.comments,
+                ),
+              ),
+              h('div', { className: 'cb-inspector-body' }),
+            ),
+          h('div', { className: 'cb-page-frame-body', style: { height: o.panel ? 72 : 0 } }),
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          h(
+            'span',
+            { className: 'cap' },
+            'Panels closed: saved, favorited, two open comment threads',
+          ),
+          h(
+            'div',
+            { className: 'page' },
+            Frame({ save: 'saved', comments: 2, starred: true, id: 'c1' }),
+          ),
+          h(
+            'span',
+            { className: 'cap' },
+            'Comments open: Close panel leads the end, over the docked panel’s head',
+          ),
+          h(
+            'div',
+            { className: 'page' },
+            Frame({ save: 'saving', comments: 2, panel: 'comments', id: 'c2' }),
+          ),
+          h('span', { className: 'cap' }, 'Save state, as it follows the crumbs'),
+          h(
+            'div',
+            { className: 'row' },
+            Save('dirty'),
+            Save('saving'),
+            Save('saved'),
+            Save('failed'),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

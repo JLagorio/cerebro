@@ -1,0 +1,497 @@
+<!-- @dsCard group="App shell" height=658 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Sidebar</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 24px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 240px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      // `.cb-reveal` controls and an open context chevron, as a resting pointer
+      // over the heading shows them (group-hover), held still for the card.
+      var HELD = { opacity: 1 };
+
+      // rowClass (app/sidebarChrome.ts)
+      function rowClass(active) {
+        return active
+          ? 'cb-nav-row motion-hover cb-nav-row--selected font-medium text-n-900'
+          : 'cb-nav-row motion-hover bg-transparent font-normal text-n-700 hover:bg-n-100';
+      }
+
+      // SurfaceRow (app/Sidebar.tsx)
+      function SurfaceRow(o) {
+        var counted = o.count !== undefined && o.count > 0;
+        return h(
+          C.Tooltip,
+          { key: o.label, label: o.label, command: o.command },
+          h(
+            'button',
+            {
+              type: 'button',
+              'aria-label': counted ? o.label + ' (' + o.count + ')' : o.label,
+              'aria-current': o.active ? 'page' : undefined,
+              className: rowClass(o.active),
+            },
+            h(C.Icon, { name: o.icon, size: 15 }),
+            h('span', { className: 'overflow-hidden text-ellipsis whitespace-nowrap' }, o.label),
+            counted &&
+              h(
+                'span',
+                {
+                  'data-testid': 'nav-badge',
+                  className: o.hot
+                    ? 'ml-auto [font-family:var(--font-mono)] text-2xs tabular-nums text-cortex-600'
+                    : 'ml-auto [font-family:var(--font-mono)] text-2xs tabular-nums text-n-500',
+                },
+                o.count,
+              ),
+          ),
+        );
+      }
+
+      // SectionHeader (app/SectionHeader.tsx)
+      function Action(a, held) {
+        return h(
+          C.Tooltip,
+          { key: a.label, label: a.label, command: a.command },
+          h(
+            'button',
+            {
+              type: 'button',
+              tabIndex: 0,
+              'aria-label': a.label,
+              style: held ? HELD : undefined,
+              className:
+                'cb-reveal flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-500 opacity-0 hover:bg-n-100 hover:text-n-800 focus-visible:opacity-100 group-hover/sec:opacity-100',
+            },
+            h(C.Icon, { name: a.icon, size: 13 }),
+          ),
+        );
+      }
+      function Section(label, open, actions) {
+        return h(
+          'div',
+          { className: 'group/sec flex items-center gap-1 pb-1 pl-1.5 pr-1 pt-3' },
+          h(
+            'button',
+            {
+              type: 'button',
+              tabIndex: 0,
+              'aria-expanded': open,
+              className:
+                'motion-hover flex min-h-6 min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent p-0 text-left font-medium text-xs text-(--text-meta) hover:text-n-800',
+            },
+            h(
+              'span',
+              {
+                className: open
+                  ? 'inline-flex flex-none cb-chevron cb-chevron--open'
+                  : 'inline-flex flex-none cb-chevron',
+              },
+              h(C.Icon, { name: 'chevron-right', size: 13 }),
+            ),
+            label,
+          ),
+          (actions || []).map(function (a) {
+            return Action(a, false);
+          }),
+        );
+      }
+      function ContextHeading(label, open, actions, held) {
+        return h(
+          'div',
+          { className: 'm71-context-heading m71-context-heading--controls group/sec' },
+          h(
+            'button',
+            {
+              type: 'button',
+              tabIndex: 0,
+              'aria-expanded': open,
+              className:
+                'motion-hover flex min-h-6 min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent p-0 text-left font-medium text-ui text-n-900',
+            },
+            h('span', { className: 'truncate' }, label),
+            h(
+              'span',
+              {
+                style: held ? HELD : undefined,
+                className:
+                  'inline-flex flex-none cb-chevron cb-chevron--open text-n-400 opacity-0 group-hover/sec:opacity-100 group-focus-within/sec:opacity-100',
+              },
+              h(C.Icon, { name: 'chevron-right', size: 13 }),
+            ),
+          ),
+          actions.map(function (a) {
+            return Action(a, held);
+          }),
+        );
+      }
+
+      // FileTree rows (components/FileTree.tsx), folders-only in the sidebar.
+      function RowActions(label, folder) {
+        return h(
+          'span',
+          {
+            className:
+              'cb-reveal ml-auto inline-flex flex-none items-center gap-0.5 opacity-0 focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100',
+          },
+          folder &&
+            h(C.IconButton, { icon: 'file-plus', label: 'New page in ' + label, size: 'sm' }),
+          h(
+            'span',
+            { className: 'inline-flex' },
+            h(C.IconButton, { icon: 'ellipsis', label: 'Options for ' + label, size: 'sm' }),
+          ),
+        );
+      }
+      function TreeRow(depth, active, inner, label, folder) {
+        return h(
+          'div',
+          {
+            'data-testid': 'tree-row',
+            draggable: true,
+            style: { paddingLeft: depth * 14 },
+            className: active
+              ? 'cb-tree-row motion-hover group flex min-w-0 items-center gap-1 rounded-md pr-1 bg-n-200'
+              : 'cb-tree-row motion-hover group flex min-w-0 items-center gap-1 rounded-md pr-1 hover:bg-n-100',
+          },
+          inner,
+          RowActions(label, folder),
+        );
+      }
+      function Folder(label, depth, open, children) {
+        return h(
+          'li',
+          { key: label, className: 'list-none' },
+          TreeRow(
+            depth,
+            false,
+            h(
+              'button',
+              {
+                type: 'button',
+                'data-testid': 'tree-folder',
+                'aria-expanded': open,
+                className:
+                  'inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] text-left text-sm text-n-800',
+              },
+              h(C.Icon, {
+                name: 'chevron-right',
+                size: 13,
+                color: 'var(--n-400)',
+                className: open ? 'cb-chevron cb-chevron--open' : 'cb-chevron',
+              }),
+              h(C.Icon, { name: open ? 'folder-open' : 'folder', size: 14, color: 'var(--n-500)' }),
+              h('span', { className: 'truncate' }, label),
+            ),
+            label,
+            true,
+          ),
+          open && h('ul', { className: 'm-0 p-0 cb-fold-in' }, children),
+        );
+      }
+      function File(label, depth, active) {
+        return h(
+          'li',
+          { key: label, className: 'list-none' },
+          TreeRow(
+            depth,
+            active,
+            h(
+              'button',
+              {
+                type: 'button',
+                'data-testid': 'tree-file',
+                className:
+                  'inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] pl-[19px] text-left text-sm text-n-700',
+              },
+              h(C.Icon, { name: 'file-text', size: 14, color: 'var(--n-500)' }),
+              h(
+                'span',
+                { className: active ? 'truncate font-medium text-n-900' : 'truncate ' },
+                label,
+              ),
+            ),
+            label,
+            false,
+          ),
+        );
+      }
+
+      function Sync(icon, color, words) {
+        return h(
+          'div',
+          { className: 'm71-sidebar-footer' },
+          h(
+            'span',
+            { className: 'relative inline-flex' },
+            h(
+              'button',
+              {
+                type: 'button',
+                'data-testid': 'sync-badge',
+                'aria-expanded': false,
+                className:
+                  'cb-sync-badge cb-sync-badge--quiet inline-flex h-7 items-center gap-1.5 rounded-md border border-n-200 bg-n-0 px-2 text-xs text-n-600 hover:border-n-300',
+              },
+              h(C.Icon, { name: icon, size: 12, color: color }),
+              words,
+            ),
+          ),
+        );
+      }
+
+      function Sidebar(area, heading, body, footer) {
+        return h(
+          'div',
+          {
+            className: 'm71-shell flex overflow-hidden text-sm leading-5 text-n-900',
+            style: { height: 600 },
+          },
+          h(
+            'nav',
+            {
+              'aria-label': 'Sidebar',
+              'data-nav-area': area,
+              'data-key-neutral': true,
+              className: 'm71-sidebar flex flex-col overflow-hidden relative',
+              style: { width: 240, minWidth: 180 },
+            },
+            h(C.ResizeHandle, {
+              label: 'Resize sidebar',
+              side: 'right',
+              width: 240,
+              preferred: 240,
+              min: 180,
+              max: 460,
+              onResize: function () {},
+            }),
+            h(
+              'div',
+              { className: 'm71-sidebar-header' },
+              h(
+                'div',
+                { className: 'm71-workspace-name', title: 'demo-vault' },
+                h('span', { 'data-testid': 'vault-tile', className: 'm71-vault-tile' }, 'D'),
+                h('span', { className: 'min-w-0 truncate' }, 'demo-vault'),
+              ),
+              h(
+                C.Tooltip,
+                { label: 'Hide sidebar' },
+                h(
+                  'button',
+                  { type: 'button', 'aria-label': 'Hide sidebar', className: 'm71-icon-button' },
+                  h(C.Icon, { name: 'panel-left', size: 17 }),
+                ),
+              ),
+            ),
+            heading,
+            h('div', { className: 'm71-context-body flex-1 overflow-y-auto px-3 pb-4' }, body),
+            footer,
+          ),
+        );
+      }
+
+      function Favorite(label, icon, color) {
+        return h(
+          'button',
+          { key: label, type: 'button', 'data-testid': 'nav-favorite', className: rowClass(false) },
+          h(C.Icon, { name: icon, size: 15, color: color }),
+          h('span', { className: 'overflow-hidden text-ellipsis whitespace-nowrap' }, label),
+        );
+      }
+      function Agent(title, on, paused) {
+        return h(
+          'button',
+          {
+            key: title,
+            type: 'button',
+            'data-testid': 'nav-agent',
+            'aria-current': on ? 'page' : undefined,
+            className: paused && !on ? rowClass(on) + ' text-n-500' : rowClass(on),
+          },
+          h(C.Icon, {
+            name: 'bot',
+            size: 15,
+            color: paused ? 'var(--n-400)' : 'var(--synapse-500)',
+          }),
+          h('span', { className: 'overflow-hidden text-ellipsis whitespace-nowrap' }, title),
+          paused &&
+            h(
+              'span',
+              { className: 'ml-auto inline-flex text-n-400' },
+              h(C.Icon, { name: 'pause', size: 12 }),
+            ),
+        );
+      }
+
+      var home = Sidebar(
+        'home',
+        null,
+        [
+          h(
+            'div',
+            { key: 'rows', 'data-testid': 'nav-surfaces', className: 'cb-fold-in' },
+            SurfaceRow({ icon: 'inbox', label: 'Inbox', command: 'go.inbox', count: 6, hot: true }),
+            SurfaceRow({ icon: 'house', label: 'Home', command: 'go.home', active: true }),
+            SurfaceRow({
+              icon: 'circle-check',
+              label: 'My work',
+              command: 'go.my_work',
+              count: 12,
+            }),
+            SurfaceRow({ icon: 'pencil-ruler', label: 'Studio', command: 'go.studio' }),
+            SurfaceRow({ icon: 'activity', label: 'History', command: 'go.history' }),
+            SurfaceRow({ icon: 'blocks', label: 'Library', command: 'go.library' }),
+          ),
+          h(
+            'div',
+            { key: 'collections' },
+            Section('Collections', false, [{ icon: 'plus', label: 'New collection' }]),
+          ),
+          h(
+            'div',
+            { key: 'favorites' },
+            Section('Favorites', true),
+            h(
+              'div',
+              { className: 'cb-fold-in' },
+              Favorite('Phoenix cutover — go-live PRD', 'file-text', '#0EA5E9'),
+              Favorite('Release scout', 'bot', 'var(--synapse-500)'),
+              Favorite('How we schedule', 'file-text', 'var(--n-500)'),
+            ),
+          ),
+        ],
+        Sync('file-diff', 'var(--warn-600)', '3 uncommitted'),
+      );
+
+      var pages = Sidebar(
+        'pages',
+        h('div', { className: 'm71-context-heading' }, h('span', null, 'Pages')),
+        [
+          h(
+            'div',
+            { key: 'browser', 'data-section': 'nav-pages-browser' },
+            SurfaceRow({ icon: 'files', label: 'All pages', command: 'go.pages' }),
+            Section('Recents', true),
+            h(
+              'div',
+              { className: 'cb-fold-in' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: rowClass(true),
+                  'aria-current': 'page',
+                  title: 'Systems map',
+                },
+                h(C.Icon, { name: 'file-text', size: 15 }),
+                h('span', { className: 'truncate' }, 'Systems map'),
+              ),
+              h(
+                'button',
+                { type: 'button', className: rowClass(false), title: 'How we schedule' },
+                h(C.Icon, { name: 'file-text', size: 15 }),
+                h('span', { className: 'truncate' }, 'How we schedule'),
+              ),
+            ),
+          ),
+          h(
+            'div',
+            { key: 'collections' },
+            Section('Collections', false, [{ icon: 'plus', label: 'New collection' }]),
+          ),
+          h(
+            'div',
+            { key: 'folders' },
+            Section('Folders', true, [
+              { icon: 'folder-plus', label: 'New folder' },
+              { icon: 'file-plus', label: 'New page' },
+            ]),
+            h(
+              'div',
+              { 'data-testid': 'file-tree', className: 'flex min-w-0 max-w-[720px] flex-col' },
+              h(
+                'ul',
+                { className: 'm-0 p-0 cb-fold-in' },
+                Folder('Delivery', 0, false),
+                Folder('Inbox', 0, false),
+                Folder('Strategy', 0, true, [File('Systems map', 1, true)]),
+              ),
+            ),
+          ),
+          h('div', { key: 'favorites' }, Section('Favorites', false)),
+        ],
+        Sync('arrow-up', 'var(--cortex-600)', '1 to push'),
+      );
+
+      var agents = Sidebar(
+        'agents',
+        ContextHeading(
+          'Agents',
+          true,
+          [
+            { icon: 'arrow-up-right', label: 'Open all agents', command: 'go.agents' },
+            { icon: 'plus', label: 'New agent' },
+          ],
+          true,
+        ),
+        [
+          h(
+            'div',
+            { key: 'agents', 'data-section': 'nav-agents', className: 'cb-fold-in' },
+            Agent('Knowledge agent', false, false),
+            Agent('Release scout', true, false),
+            Agent('Task helper', false, true),
+            Agent('Weekly notes', false, true),
+          ),
+        ],
+        Sync('check', 'var(--n-400)', 'Up to date'),
+      );
+
+      function Col(cap, sidebar) {
+        return h('div', { className: 'col' }, sidebar, h('span', { className: 'cap' }, cap));
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'row' },
+          Col('Home: destination rows, Home selected', home),
+          Col('Pages: Folders open, the current page lit', pages),
+          Col('Agents: its heading under the pointer', agents),
+        ),
+      );
+    </script>
+  </body>
+</html>

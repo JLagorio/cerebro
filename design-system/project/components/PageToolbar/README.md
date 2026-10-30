@@ -1,0 +1,13 @@
+# PageToolbar
+
+A page's action bar: the way up and where the page stands on the left, the page's actions and its panels' buttons on the right.
+
+- Use it once at the top of every page frame (a document, a record's full page, an Inbox capture); each surface supplies its crumbs, status and actions, never a bar of its own. Props: `crumbs`, `status`, `actions`, `onClosePanel` (set while a side panel is open), `closeTooltip`, `actionsRef` (the panel's floor is fitted to the actions' width), `testId`.
+- Geometry: min 64px tall, 12px 20px padding, the two ends apart. In a `cb-page-frame` it is the frame's first row (`--page-toolbar-h` 64px) and its ends sit on the frame's two columns: the start inset 20px left, 12px right; the end 20px right.
+- The crumb track is a 34px pill on `surface-sunken`, 12px radius, 3px 6px padding. Crumbs are `text-sm` `n-500` with a 13px glyph (a page's own icon where it has one), split by 12px `chevron-right` in `n-300`; a crumb that leads somewhere is a button with an `n-50` wash; the current page is medium `n-900`.
+- Status follows the crumbs: the save state says "Unsaved", "Saving…" (a light passes through it), "Saved" or, in medium `danger-600`, "Couldn't save"; idle says nothing. `text-xs` in `text-meta`, each word fading in over the last; squeezed, it is the one status cut short.
+- The actions pill is `surface-raised` on `border-subtle`, 12px radius, a 3% `n-900` lift: Favorite (a `warn-500` star when pinned), Open with, Page options, a 16px `n-200` rule, then History, Comments and Details, each a 24px `IconButton`.
+- Panels open one at a time; the open one's button is `active` (`surface-selected`, `cortex-600`) and pressing it again closes it. Comments wears its open thread count on its corner (14px, `surface-raised`, 10px semibold, landing on `motion-spring`), said through `aria-describedby`; a page that takes no comments has no Comments button.
+- Open, Close panel (`chevrons-right`) leads the end at the docked panel's edge and the actions keep their corner. The panel's column is never narrower than the actions and up to `--frame-panel-w` (300px), its hairline the frame's full height; with no room it hangs as a drawer below the toolbar, and the buttons withhold their tooltips while it is up.
+- Under a 600px container the toolbar's insets drop to 12px.
+- This card is a composition of `src/components/PageToolbar.tsx`'s markup and classes (`pageToolbar.css`, `pageFrame.css`), with DocPage's crumbs and actions and the side panel's head from `src/detail/inspector.css`, using live `Icon`, `IconButton` and `Tooltip`, because the page around it reads app state.

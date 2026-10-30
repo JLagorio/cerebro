@@ -1,0 +1,245 @@
+<!-- @dsCard group="App shell" height=742 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>AppRail</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 24px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        width: 168px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+        text-align: center;
+      }
+      .frame {
+        display: flex;
+        height: 664px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var dark = document.documentElement.dataset.theme === 'dark';
+      var THEME_ICONS = { system: 'monitor', light: 'sun', dark: 'moon' };
+      // NAV_AREAS (app/shellNavigation.ts), with each destination's go command.
+      var AREAS = [
+        { id: 'home', label: 'Home', icon: 'house', command: 'go.home' },
+        { id: 'pages', label: 'Pages', icon: 'files', command: 'go.pages' },
+        { id: 'databases', label: 'Databases', icon: 'database' },
+        { id: 'knowledge', label: 'Knowledge', icon: 'brain', command: 'go.knowledge' },
+        { id: 'agents', label: 'Agents', icon: 'bot', command: 'go.agents' },
+        { id: 'work', label: 'Work', icon: 'folder-tree', command: 'go.work' },
+      ];
+      // `.m71-rail-button:hover` (app/shell.css), held still for the card.
+      var HOVER = {
+        background: 'color-mix(in srgb, var(--n-200) 55%, transparent)',
+        color: 'var(--n-900)',
+      };
+
+      function Rail(o) {
+        var pageArea = !o.settings;
+        return h(
+          'nav',
+          { 'aria-label': 'Application', 'data-key-neutral': true, className: 'm71-app-rail' },
+          h(
+            C.Tooltip,
+            { label: 'Cerebro · Home' },
+            h(
+              'button',
+              {
+                type: 'button',
+                tabIndex: 0,
+                'aria-label': 'Cerebro · Home',
+                className: 'm71-brand',
+              },
+              'c',
+              h('span', null, '.'),
+            ),
+          ),
+          h(
+            C.Tooltip,
+            { label: 'Search', command: 'palette.open' },
+            h(
+              'button',
+              { type: 'button', tabIndex: 0, 'aria-label': 'Search', className: 'm71-rail-button' },
+              h(C.Icon, { name: 'search', size: 19 }),
+            ),
+          ),
+          h(
+            C.Tooltip,
+            { label: 'New', command: 'create.launcher' },
+            h(
+              'button',
+              { type: 'button', tabIndex: 0, 'aria-label': 'New', className: 'm71-rail-button' },
+              h(C.Icon, { name: 'plus', size: 20 }),
+            ),
+          ),
+          h('div', { className: 'm71-rail-rule' }),
+          h(
+            'div',
+            { className: 'm71-rail-areas' },
+            h(
+              C.Tooltip,
+              { label: 'Assistant', command: 'assistant.toggle' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  tabIndex: 0,
+                  'aria-label': 'Assistant',
+                  'aria-pressed': !!o.assistant,
+                  className: 'm71-rail-button m71-rail-assistant',
+                  'data-active': o.assistant || undefined,
+                },
+                h(C.Icon, { name: 'sparkles', size: 20 }),
+              ),
+            ),
+            AREAS.map(function (item) {
+              var on = pageArea && o.area === item.id;
+              var held = o.hover === item.id;
+              return h(
+                C.Tooltip,
+                { key: item.id, label: item.label, command: item.command },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    tabIndex: 0,
+                    'aria-label': item.label,
+                    'aria-pressed': on,
+                    'data-active': on || undefined,
+                    'data-nav-area': item.id,
+                    'data-hold': held || undefined,
+                    className: 'm71-rail-button',
+                    style: held ? HOVER : undefined,
+                  },
+                  h(C.Icon, { name: item.icon, size: 20 }),
+                ),
+              );
+            }),
+          ),
+          h(
+            'div',
+            { className: 'm71-rail-footer' },
+            !o.expanded &&
+              h(
+                C.Tooltip,
+                { label: 'Show sidebar' },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    tabIndex: 0,
+                    'aria-label': 'Show sidebar',
+                    className: 'm71-rail-button m71-rail-arrive',
+                  },
+                  h(C.Icon, { name: 'panel-left', size: 19 }),
+                ),
+              ),
+            h(
+              C.Tooltip,
+              { label: 'Theme: ' + o.theme },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  tabIndex: 0,
+                  'aria-label': 'Theme: ' + o.theme,
+                  className: 'm71-rail-button',
+                },
+                h(C.Icon, {
+                  key: o.theme,
+                  name: THEME_ICONS[o.theme],
+                  size: 18,
+                  className: 'm71-theme-glyph',
+                }),
+              ),
+            ),
+            h(
+              C.Tooltip,
+              { label: 'Settings', command: 'go.settings' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  tabIndex: 0,
+                  'aria-label': 'Settings',
+                  'aria-current': o.settings ? 'page' : undefined,
+                  className: 'm71-rail-button',
+                },
+                h(C.Icon, { name: 'settings', size: 19 }),
+              ),
+            ),
+          ),
+        );
+      }
+
+      function Col(cap, rail) {
+        return h(
+          'div',
+          { className: 'col' },
+          h('div', { className: 'frame' }, rail),
+          h('span', { className: 'cap' }, cap),
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'row' },
+          Col('Resting: Home selected', Rail({ area: 'home', expanded: true, theme: 'system' })),
+          Col(
+            'Hover held on Knowledge while Pages is selected',
+            Rail({ area: 'pages', hover: 'knowledge', expanded: true, theme: 'system' }),
+          ),
+          Col(
+            'Assistant open, sidebar hidden',
+            Rail({
+              area: 'agents',
+              assistant: true,
+              expanded: false,
+              theme: dark ? 'dark' : 'light',
+            }),
+          ),
+          Col(
+            'Settings current: no area lit',
+            Rail({ area: 'home', settings: true, expanded: true, theme: dark ? 'dark' : 'light' }),
+          ),
+        ),
+      );
+
+      // Bring the pointer over the held button once, so its tooltip is up in the frame.
+      setTimeout(function () {
+        document.querySelectorAll('[data-hold]').forEach(function (el) {
+          el.dispatchEvent(
+            new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }),
+          );
+        });
+      }, 60);
+    </script>
+  </body>
+</html>

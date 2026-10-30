@@ -1,0 +1,718 @@
+<!-- @dsCard group="App shell" height=640 width=960 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>AppShell</title>
+    <style>
+      body {
+        margin: 0;
+        background: var(--surface-navigation);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      /* A document's reading column (src/pages/pages.css) and its title and
+     prose roles (src/editor/editor.css), which the page editor draws. */
+      .cb-document-content {
+        width: 100%;
+        max-width: var(--surface-readable, 880px);
+        margin-inline: auto;
+        padding: 40px var(--surface-inset, 32px) 120px;
+      }
+      .cb-document-content h1 {
+        margin: 0 0 16px;
+        font-size: var(--fs-page-title);
+        line-height: var(--lh-page-title);
+        font-weight: 600;
+        letter-spacing: -0.025em;
+      }
+      .cb-document-content p {
+        margin: 0;
+        padding-block: 4px 10px;
+        font-size: var(--fs-prose);
+        line-height: var(--lh-prose);
+      }
+      .cb-document-content h2 {
+        margin: var(--sp-5) 0 0;
+        padding-top: var(--sp-1);
+        padding-bottom: var(--sp-2);
+        font-size: 24px;
+        line-height: 32px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+      }
+      /* The resting assistant (src/agent/chat.css). */
+      .cb-chat {
+        background: var(--surface-app);
+        color: var(--text-primary);
+        min-height: 0;
+        flex: none;
+        border-left: 1px solid var(--border-subtle);
+        container-type: inline-size;
+      }
+      .cb-chat[data-presentation='floating'] {
+        max-height: 100%;
+        border: 1px solid var(--border-subtle);
+        border-radius: 24px;
+        overflow: hidden;
+      }
+      .cb-chat[data-minimized] {
+        height: 48px;
+        border-radius: 50%;
+        overflow: visible;
+        background: var(--surface-raised);
+        border: 1px solid var(--border-subtle);
+      }
+      .cb-chat-fab {
+        position: absolute;
+        inset: -1px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--text-ai);
+        cursor: pointer;
+        transition: background var(--motion-hover);
+      }
+      .cb-chat-fab:hover {
+        background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+      }
+      .cb-chat-fab:active {
+        background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+      }
+      .cb-chat-fab:focus-visible {
+        outline: 2px solid var(--border-focus);
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+
+      // ---- AppRail (src/app/AppRail.tsx), Pages selected ----
+      var AREAS = [
+        { id: 'home', label: 'Home', icon: 'house', command: 'go.home' },
+        { id: 'pages', label: 'Pages', icon: 'files', command: 'go.pages' },
+        { id: 'databases', label: 'Databases', icon: 'database' },
+        { id: 'knowledge', label: 'Knowledge', icon: 'brain', command: 'go.knowledge' },
+        { id: 'agents', label: 'Agents', icon: 'bot', command: 'go.agents' },
+        { id: 'work', label: 'Work', icon: 'folder-tree', command: 'go.work' },
+      ];
+      function RailButton(label, command, icon, size, extra) {
+        return h(
+          C.Tooltip,
+          { key: label, label: label, command: command },
+          h(
+            'button',
+            Object.assign(
+              { type: 'button', tabIndex: 0, 'aria-label': label, className: 'm71-rail-button' },
+              extra || {},
+            ),
+            h(C.Icon, { name: icon, size: size }),
+          ),
+        );
+      }
+      var rail = h(
+        'nav',
+        { 'aria-label': 'Application', 'data-key-neutral': true, className: 'm71-app-rail' },
+        h(
+          C.Tooltip,
+          { label: 'Cerebro · Home' },
+          h(
+            'button',
+            { type: 'button', tabIndex: 0, 'aria-label': 'Cerebro · Home', className: 'm71-brand' },
+            'c',
+            h('span', null, '.'),
+          ),
+        ),
+        RailButton('Search', 'palette.open', 'search', 19),
+        RailButton('New', 'create.launcher', 'plus', 20),
+        h('div', { className: 'm71-rail-rule' }),
+        h(
+          'div',
+          { className: 'm71-rail-areas' },
+          RailButton('Assistant', 'assistant.toggle', 'sparkles', 20, {
+            'aria-pressed': false,
+            className: 'm71-rail-button m71-rail-assistant',
+          }),
+          AREAS.map(function (a) {
+            var on = a.id === 'pages';
+            return RailButton(a.label, a.command, a.icon, 20, {
+              'aria-pressed': on,
+              'data-active': on || undefined,
+              'data-nav-area': a.id,
+            });
+          }),
+        ),
+        h(
+          'div',
+          { className: 'm71-rail-footer' },
+          h(
+            C.Tooltip,
+            { label: 'Theme: system' },
+            h(
+              'button',
+              {
+                type: 'button',
+                tabIndex: 0,
+                'aria-label': 'Theme: system',
+                className: 'm71-rail-button',
+              },
+              h(C.Icon, { name: 'monitor', size: 18, className: 'm71-theme-glyph' }),
+            ),
+          ),
+          RailButton('Settings', 'go.settings', 'settings', 19),
+        ),
+      );
+
+      // ---- Sidebar (src/app/Sidebar.tsx), the Pages area ----
+      function rowClass(active) {
+        return active
+          ? 'cb-nav-row motion-hover cb-nav-row--selected font-medium text-n-900'
+          : 'cb-nav-row motion-hover bg-transparent font-normal text-n-700 hover:bg-n-100';
+      }
+      function Section(label, open, actions) {
+        return h(
+          'div',
+          { className: 'group/sec flex items-center gap-1 pb-1 pl-1.5 pr-1 pt-3' },
+          h(
+            'button',
+            {
+              type: 'button',
+              tabIndex: 0,
+              'aria-expanded': open,
+              className:
+                'motion-hover flex min-h-6 min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent p-0 text-left font-medium text-xs text-(--text-meta) hover:text-n-800',
+            },
+            h(
+              'span',
+              {
+                className: open
+                  ? 'inline-flex flex-none cb-chevron cb-chevron--open'
+                  : 'inline-flex flex-none cb-chevron',
+              },
+              h(C.Icon, { name: 'chevron-right', size: 13 }),
+            ),
+            label,
+          ),
+          (actions || []).map(function (a) {
+            return h(
+              C.Tooltip,
+              { key: a.label, label: a.label },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  tabIndex: 0,
+                  'aria-label': a.label,
+                  className:
+                    'cb-reveal flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-500 opacity-0 hover:bg-n-100 hover:text-n-800 focus-visible:opacity-100 group-hover/sec:opacity-100',
+                },
+                h(C.Icon, { name: a.icon, size: 13 }),
+              ),
+            );
+          }),
+        );
+      }
+      function TreeRow(depth, active, inner, label, folder) {
+        return h(
+          'div',
+          {
+            'data-testid': 'tree-row',
+            draggable: true,
+            style: { paddingLeft: depth * 14 },
+            className: active
+              ? 'cb-tree-row motion-hover group flex min-w-0 items-center gap-1 rounded-md pr-1 bg-n-200'
+              : 'cb-tree-row motion-hover group flex min-w-0 items-center gap-1 rounded-md pr-1 hover:bg-n-100',
+          },
+          inner,
+          h(
+            'span',
+            {
+              className:
+                'cb-reveal ml-auto inline-flex flex-none items-center gap-0.5 opacity-0 focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100',
+            },
+            folder &&
+              h(C.IconButton, { icon: 'file-plus', label: 'New page in ' + label, size: 'sm' }),
+            h(
+              'span',
+              { className: 'inline-flex' },
+              h(C.IconButton, { icon: 'ellipsis', label: 'Options for ' + label, size: 'sm' }),
+            ),
+          ),
+        );
+      }
+      function Folder(label, open, children) {
+        return h(
+          'li',
+          { key: label, className: 'list-none' },
+          TreeRow(
+            0,
+            false,
+            h(
+              'button',
+              {
+                type: 'button',
+                'data-testid': 'tree-folder',
+                'aria-expanded': open,
+                className:
+                  'inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] text-left text-sm text-n-800',
+              },
+              h(C.Icon, {
+                name: 'chevron-right',
+                size: 13,
+                color: 'var(--n-400)',
+                className: open ? 'cb-chevron cb-chevron--open' : 'cb-chevron',
+              }),
+              h(C.Icon, { name: open ? 'folder-open' : 'folder', size: 14, color: 'var(--n-500)' }),
+              h('span', { className: 'truncate' }, label),
+            ),
+            label,
+            true,
+          ),
+          open && h('ul', { className: 'm-0 p-0 cb-fold-in' }, children),
+        );
+      }
+      function File(label, active) {
+        return h(
+          'li',
+          { key: label, className: 'list-none' },
+          TreeRow(
+            1,
+            active,
+            h(
+              'button',
+              {
+                type: 'button',
+                'data-testid': 'tree-file',
+                className:
+                  'inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] pl-[19px] text-left text-sm text-n-700',
+              },
+              h(C.Icon, { name: 'file-text', size: 14, color: 'var(--n-500)' }),
+              h(
+                'span',
+                { className: active ? 'truncate font-medium text-n-900' : 'truncate ' },
+                label,
+              ),
+            ),
+            label,
+            false,
+          ),
+        );
+      }
+      var sidebar = h(
+        'nav',
+        {
+          'aria-label': 'Sidebar',
+          'data-nav-area': 'pages',
+          'data-key-neutral': true,
+          className: 'm71-sidebar flex flex-col overflow-hidden relative',
+          style: { width: 240, minWidth: 180 },
+        },
+        h(C.ResizeHandle, {
+          label: 'Resize sidebar',
+          side: 'right',
+          width: 240,
+          preferred: 240,
+          min: 180,
+          max: 460,
+          onResize: function () {},
+        }),
+        h(
+          'div',
+          { className: 'm71-sidebar-header' },
+          h(
+            'div',
+            { className: 'm71-workspace-name', title: 'demo-vault' },
+            h('span', { 'data-testid': 'vault-tile', className: 'm71-vault-tile' }, 'D'),
+            h('span', { className: 'min-w-0 truncate' }, 'demo-vault'),
+          ),
+          h(
+            C.Tooltip,
+            { label: 'Hide sidebar' },
+            h(
+              'button',
+              { type: 'button', 'aria-label': 'Hide sidebar', className: 'm71-icon-button' },
+              h(C.Icon, { name: 'panel-left', size: 17 }),
+            ),
+          ),
+        ),
+        h('div', { className: 'm71-context-heading' }, h('span', null, 'Pages')),
+        h(
+          'div',
+          { className: 'm71-context-body flex-1 overflow-y-auto px-3 pb-4' },
+          h(
+            'div',
+            { 'data-section': 'nav-pages-browser' },
+            h(
+              C.Tooltip,
+              { label: 'All pages', command: 'go.pages' },
+              h(
+                'button',
+                { type: 'button', 'aria-label': 'All pages', className: rowClass(false) },
+                h(C.Icon, { name: 'files', size: 15 }),
+                h(
+                  'span',
+                  { className: 'overflow-hidden text-ellipsis whitespace-nowrap' },
+                  'All pages',
+                ),
+              ),
+            ),
+            Section('Recents', true),
+            h(
+              'div',
+              { className: 'cb-fold-in' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: rowClass(true),
+                  'aria-current': 'page',
+                  title: 'How we schedule',
+                },
+                h(C.Icon, { name: 'file-text', size: 15 }),
+                h('span', { className: 'truncate' }, 'How we schedule'),
+              ),
+              h(
+                'button',
+                { type: 'button', className: rowClass(false), title: 'Systems map' },
+                h(C.Icon, { name: 'file-text', size: 15 }),
+                h('span', { className: 'truncate' }, 'Systems map'),
+              ),
+            ),
+          ),
+          h(
+            'div',
+            null,
+            Section('Collections', false, [{ icon: 'plus', label: 'New collection' }]),
+          ),
+          h(
+            'div',
+            null,
+            Section('Folders', true, [
+              { icon: 'folder-plus', label: 'New folder' },
+              { icon: 'file-plus', label: 'New page' },
+            ]),
+            h(
+              'div',
+              { 'data-testid': 'file-tree', className: 'flex min-w-0 max-w-[720px] flex-col' },
+              h(
+                'ul',
+                { className: 'm-0 p-0 cb-fold-in' },
+                Folder('Delivery', true, [File('How we schedule', true)]),
+                Folder('Inbox', false),
+                Folder('Strategy', false),
+              ),
+            ),
+          ),
+          h('div', null, Section('Favorites', false)),
+        ),
+        h(
+          'div',
+          { className: 'm71-sidebar-footer' },
+          h(
+            'span',
+            { className: 'relative inline-flex' },
+            h(
+              'button',
+              {
+                type: 'button',
+                'data-testid': 'sync-badge',
+                'aria-expanded': false,
+                className:
+                  'cb-sync-badge cb-sync-badge--quiet inline-flex h-7 items-center gap-1.5 rounded-md border border-n-200 bg-n-0 px-2 text-xs text-n-600 hover:border-n-300',
+              },
+              h(C.Icon, { name: 'file-diff', size: 12, color: 'var(--warn-600)' }),
+              '2 uncommitted',
+            ),
+          ),
+        ),
+      );
+
+      // ---- A document in the canvas: DocPage's frame, toolbar and column ----
+      function Sep() {
+        return h(C.Icon, { name: 'chevron-right', size: 12, color: 'var(--n-300)' });
+      }
+      var toolbar = h(
+        'div',
+        { className: 'cb-document-toolbar' },
+        h(
+          'div',
+          { className: 'cb-document-start' },
+          h(
+            'div',
+            { className: 'cb-document-breadcrumbs' },
+            h(
+              'span',
+              { className: 'inline-flex min-w-0 items-center gap-1.5 px-1 text-sm text-n-500' },
+              h(C.Icon, { name: 'library', size: 13, color: 'var(--n-500)' }),
+              h('span', { className: 'truncate' }, 'Pages'),
+            ),
+            h(
+              'span',
+              { className: 'flex min-w-0 items-center gap-0.5' },
+              h(Sep),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className:
+                    'motion-hover inline-flex min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-sm text-n-500 hover:bg-n-50 hover:text-n-800',
+                },
+                h(C.Icon, { name: 'rocket', size: 13, color: '#3D8BE8' }),
+                h('span', { className: 'truncate' }, 'Delivery'),
+              ),
+            ),
+            h(
+              'span',
+              { className: 'flex min-w-0 items-center gap-0.5', 'data-testid': 'doc-title' },
+              h(Sep),
+              h(
+                'span',
+                {
+                  className:
+                    'inline-flex min-w-0 items-center gap-1.5 px-1 text-sm font-medium text-n-900',
+                },
+                h(C.Icon, { name: 'file-text', size: 13, color: 'var(--n-500)' }),
+                h('span', { className: 'truncate' }, 'How we schedule'),
+              ),
+            ),
+          ),
+          h(
+            'span',
+            {
+              'data-testid': 'doc-save-state',
+              title: 'Saves automatically — ' + C.keycapText('page.save') + ' to save now',
+              className:
+                'cb-save-state mr-1 flex-none whitespace-nowrap text-xs text-[var(--text-meta)] ',
+            },
+            'Saved',
+          ),
+        ),
+        h(
+          'div',
+          { className: 'cb-document-end' },
+          h(
+            'div',
+            { className: 'cb-document-actions' },
+            h(
+              'button',
+              {
+                type: 'button',
+                'data-testid': 'favorite-star',
+                'aria-pressed': false,
+                'aria-label': 'Add to favorites',
+                className:
+                  'flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent hover:bg-n-100',
+              },
+              h(C.Icon, { name: 'star', size: 14, color: 'var(--n-400)' }),
+            ),
+            h(
+              'span',
+              { className: 'relative inline-flex flex-none', 'data-testid': 'open-with' },
+              h(C.IconButton, {
+                icon: 'square-arrow-out-up-right',
+                label: 'Open with',
+                size: 'sm',
+              }),
+            ),
+            h(
+              'div',
+              { className: 'inline-flex' },
+              h(C.IconButton, { icon: 'ellipsis', label: 'Page options', size: 'sm' }),
+            ),
+            h(
+              'span',
+              { className: 'cb-panel-buttons' },
+              h('span', { 'aria-hidden': 'true', className: 'cb-panel-buttons-rule' }),
+              h(C.IconButton, { icon: 'history', label: 'History', size: 'sm', active: false }),
+              h(
+                C.Tooltip,
+                { label: 'Comments · 1 open' },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    'aria-label': 'Comments',
+                    'aria-pressed': false,
+                    'aria-describedby': 'shell-comments',
+                    className: 'cb-ibtn cb-panel-button ',
+                  },
+                  h(C.Icon, { name: 'message-square', size: 14 }),
+                  h(
+                    'span',
+                    {
+                      'data-testid': 'doc-panel-comment-count',
+                      'aria-hidden': 'true',
+                      className: 'cb-panel-button-count',
+                    },
+                    1,
+                  ),
+                ),
+              ),
+              h('span', { id: 'shell-comments', hidden: true }, '1 open comments'),
+              h(C.IconButton, { icon: 'panel-right', label: 'Details', size: 'sm', active: false }),
+            ),
+          ),
+        ),
+      );
+
+      var page = h(
+        'div',
+        { className: 'cb-document cb-page-frame flex-1', 'data-testid': 'doc-page' },
+        toolbar,
+        h(
+          'div',
+          { className: 'cb-page-frame-body' },
+          h(
+            'div',
+            { 'data-testid': 'doc-column', className: 'relative flex min-h-0 flex-1 flex-col' },
+            h(
+              'div',
+              {
+                className: 'min-h-0 flex-1 overflow-y-auto',
+                style: {
+                  paddingBottom: 'max(40px, var(--assistant-scroll-clearance, 0px))',
+                  scrollPaddingBottom: 'var(--assistant-scroll-clearance, 0px)',
+                },
+              },
+              h(
+                'div',
+                { 'data-testid': 'doc-content', className: 'cb-document-content' },
+                h('h1', null, 'How we schedule'),
+                h(
+                  'p',
+                  null,
+                  'A doc living inside a Collection, next to the Lists it describes — which is the point of the container.',
+                ),
+                h('h2', null, 'Windows, not deadlines'),
+                h(
+                  'p',
+                  null,
+                  h('code', null, 'due'),
+                  ' is a deadline — one day. ',
+                  h('code', null, 'window'),
+                  ' is a ',
+                  h('strong', null, 'daterange'),
+                  ', the span of actual work. The Gantt keys on ',
+                  h('code', null, 'window'),
+                  ' so a bar covers the work rather than sitting on the date it is owed.',
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // ---- The shell (src/App.tsx) ----
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          {
+            'data-chat-floating': true,
+            className: 'm71-shell flex overflow-hidden text-sm leading-5 text-n-900',
+            style: { height: 640 },
+          },
+          rail,
+          sidebar,
+          h(
+            'div',
+            {
+              'data-testid': 'main-column',
+              className: 'm71-main flex min-w-[var(--shell-floor)] flex-1 flex-col',
+              style: { '--shell-floor': '400px' },
+            },
+            h(
+              'div',
+              {
+                className:
+                  'm91-canvas-row @container/canvas relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-n-0',
+              },
+              h(
+                'main',
+                {
+                  id: 'main',
+                  tabIndex: -1,
+                  className: 'm71-page-canvas flex flex-1 outline-none',
+                  style: { minWidth: 400 },
+                },
+                h(
+                  'div',
+                  {
+                    'data-testid': 'pane-row',
+                    className: '@container/panes flex min-h-0 min-w-0 flex-1 overflow-hidden',
+                  },
+                  h(
+                    'section',
+                    {
+                      'data-testid': 'pane',
+                      'data-pane-index': 0,
+                      'data-active': true,
+                      'data-parked': false,
+                      tabIndex: -1,
+                      className:
+                        'flex min-h-0 min-w-[400px] flex-1 flex-col overflow-hidden outline-none  ',
+                    },
+                    page,
+                  ),
+                ),
+              ),
+              h(
+                'div',
+                {
+                  'data-testid': 'right-panel-slot',
+                  'data-floating': true,
+                  className: 'm71-panel-slot flex min-w-0 flex-none overflow-hidden',
+                },
+                h(
+                  'div',
+                  {
+                    'data-testid': 'ai-panel-frame',
+                    'data-presentation': 'floating',
+                    'data-minimized': true,
+                    className: 'm71-chat-frame flex min-w-0 flex-none ',
+                  },
+                  h(
+                    'aside',
+                    {
+                      'aria-label': 'AI panel',
+                      'data-testid': 'ai-panel',
+                      'data-presentation': 'floating',
+                      'data-minimized': true,
+                      className: 'cb-chat relative flex min-w-0 max-w-full flex-col',
+                      style: { width: '100%' },
+                    },
+                    h(
+                      C.Tooltip,
+                      { label: 'Open conversation', command: 'assistant.toggle' },
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          tabIndex: 0,
+                          className: 'cb-chat-fab',
+                          'data-testid': 'ai-panel-fab',
+                          'aria-expanded': false,
+                          'aria-label': 'Open conversation',
+                        },
+                        h(C.Icon, { name: 'sparkles', size: 22 }),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

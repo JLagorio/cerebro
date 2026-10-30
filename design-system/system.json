@@ -34,6 +34,12 @@
     "Grip",
     "ResizeHandle",
     "BlockDrag",
+    "AppShell",
+    "AppRail",
+    "Sidebar",
+    "PageToolbar",
+    "PageHeader",
+    "ListSelectionBar",
     "Chat",
     "MessageScroller",
     "Message",
@@ -66,7 +72,7 @@
     "Item",
     "Badge"
   ],
-  "extraModules": [],
+  "extraModules": ["src/components/PageHeader.tsx", "src/components/ListSelectionBar.tsx"],
   "uncarded": {},
   "fontNotices": [
     "Instrument Sans: Copyright 2022 The Instrument Sans Project Authors (https://github.com/Instrument/instrument-sans).",
