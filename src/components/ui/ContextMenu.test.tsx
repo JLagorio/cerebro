@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { ContextMenu } from './ContextMenu';
+import { useEscapeLayer } from './Popover';
 
 describe('ContextMenu', () => {
   afterEach(cleanup);
@@ -47,6 +48,44 @@ describe('ContextMenu', () => {
     expect(document.activeElement).toBe(first);
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // Escape belongs to the layer stack (CV-47, M100.3). Handled on the menu
+  // alone, it only worked while focus was inside the menu.
+  it('closes on Escape after focus has left the menu', () => {
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    try {
+      const { onClose } = renderMenu();
+      outside.focus();
+      fireEvent.keyDown(outside, { key: 'Escape' });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      outside.remove();
+    }
+  });
+
+  it('closes only itself when it opens over another layer', () => {
+    const closeBelow = vi.fn();
+    const closeMenu = vi.fn();
+    function Below() {
+      useEscapeLayer(closeBelow);
+      return null;
+    }
+    render(
+      <>
+        <Below />
+        <ContextMenu
+          x={40}
+          y={40}
+          items={[{ icon: 'pencil', label: 'Rename', onSelect: vi.fn() }]}
+          onClose={closeMenu}
+        />
+      </>,
+    );
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Rename' }), { key: 'Escape' });
+    expect(closeMenu).toHaveBeenCalledTimes(1);
+    expect(closeBelow).not.toHaveBeenCalled();
   });
 
   /**

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { useGhostOnUnmount } from '@/components/ui/motion';
+import { useEscapeLayer } from '@/components/ui/Popover';
 import { useFocusRestore } from '@/hooks/useFocusRestore';
 
 export interface ContextMenuItem {
@@ -15,6 +16,8 @@ const MENU_WIDTH = 200;
 /**
  * Right-click menu (M2 Task 14): fixed at the pointer, clamped to the
  * viewport. Backdrop click and Escape close it; arrows/Home/End move focus.
+ * Escape goes through the layer stack (M100.3), so it closes the menu wherever
+ * focus is and closes nothing beneath it.
  */
 export function ContextMenu({
   x,
@@ -37,6 +40,7 @@ export function ContextMenu({
   useFocusRestore();
   // Closed, a copy of it fades at the pointer (components/ui/motion.ts).
   useGhostOnUnmount(menuRef, 'cb-popover-leave', { strip: ['cb-menu-in'] });
+  useEscapeLayer(onClose, { contains: (node) => menuRef.current?.contains(node) === true });
 
   useEffect(() => {
     const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
@@ -50,10 +54,6 @@ export function ContextMenu({
     const index = buttons.findIndex((b) => b === document.activeElement);
     const focus = (i: number) => buttons[Math.max(0, Math.min(buttons.length - 1, i))]?.focus();
     switch (e.key) {
-      case 'Escape':
-        e.stopPropagation();
-        onClose();
-        break;
       case 'ArrowDown':
         e.preventDefault();
         focus(index + 1);
@@ -93,7 +93,7 @@ export function ContextMenu({
         role="menu"
         onKeyDown={onKeyDown}
         style={{ left, top, width: MENU_WIDTH }}
-        className="cb-menu-in cb-context-menu fixed z-50 rounded-lg border border-n-200 bg-n-0 py-1 shadow-[0_8px_24px_rgba(22,26,36,0.14)]"
+        className="cb-menu-in cb-context-menu fixed z-50 rounded-lg border border-n-200 bg-n-0 py-1 shadow-[var(--shadow-lg)]"
       >
         {items.map((item) => (
           <button
@@ -106,7 +106,9 @@ export function ContextMenu({
             }}
             className={[
               'motion-hover flex w-full items-center gap-2 border-0 bg-transparent px-2.5 py-[5px] text-left text-sm',
-              item.danger ? 'text-danger-600 hover:bg-danger-50' : 'text-n-700 hover:bg-n-50',
+              item.danger
+                ? 'text-danger-600 hover:bg-danger-50 focus-visible:bg-danger-50'
+                : 'text-n-700 hover:bg-n-50 focus-visible:bg-n-50',
             ].join(' ')}
           >
             <Icon name={item.icon} size={13} />
