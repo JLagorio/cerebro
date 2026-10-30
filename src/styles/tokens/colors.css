@@ -33,17 +33,20 @@
   --synapse-500: #8250dc;
   --synapse-600: #6c3bc2;
   --synapse-700: #5730a0;
-  /* semantic */
+  /* semantic. The 600 step is the hue's text ink on the neutral surfaces
+     (`text-warn-600`, `text-success-600`), so it holds AA on each of them
+     (contrast.test.ts, M100.2). Amber only reaches 4.5:1 near the 700 step,
+     so warn-600 and warn-700 sit close together on purpose. */
   --success-50: #e9f7f0;
   --success-500: #1f9d61;
-  --success-600: #17814f;
+  --success-600: #167c4c;
   --success-700: #126740;
   --warn-50: #fcf3e1;
   /* The only ramp step that existed solely as an inline `var(--warn-300, #f0c36d)`
      fallback; promoted to a real token in M15 so stripping dead fallbacks is safe. */
   --warn-300: #f0c36d;
   --warn-500: #de8f0a;
-  --warn-600: #b87404;
+  --warn-600: #996003;
   --warn-700: #925e04;
   --danger-50: #fdedef;
   /* Sibling of the --warn-300 promotion above, and the reason it was missed:
@@ -255,19 +258,27 @@
      The 600 step moves too (M52.3), and for the same reason: it is the LINK
      ink — every `text-cortex-600` in the app (concept links, source links,
      the update log, the Details panel) — and light-mode #2e48c2 on --n-0 is
-     2.4:1, under AA for the 12-13px it ships at. #7d93f0 sits between the 400
-     and 300 steps and measures 6.2:1 on --n-0, 5.9 on --n-25, 5.5 on --n-50,
-     5.0 on --n-100 and 5.2 on the dark 50 ground. It is too light to carry a
-     white label (2.9:1), so the filled controls REST on cortex-500 — the
+     2.4:1, under AA for the 12-13px it ships at. #899df1 sits between the 400
+     and 300 steps and measures 6.0:1 on --n-0, 5.6 on --n-25, 5.2 on --n-50,
+     4.6 on --n-100 (the raised surface) and 5.8 on the dark 50 ground
+     (M100.2). It is too light to carry a white label (2.6:1), so the filled
+     controls REST on cortex-500 — the
      accent, which holds white at 5.6:1 in both themes — and the hover fills
      that land on 600 (`hover:bg-cortex-600`) carry `text-n-0`, which is dark
      ink on it here, not white. */
   --cortex-50: #1b2547;
   --cortex-100: #223059;
-  --cortex-600: #7d93f0;
+  --cortex-600: #899df1;
   --cortex-700: #bcc9fb;
   --synapse-50: #241c3d;
   --synapse-100: #2f2450;
+  /* Synapse's ink steps follow cortex's, for the same reason (M100.2):
+     `text-synapse-600` and `text-synapse-700` are AI ink, and light-mode
+     #6c3bc2 on the raised dark surface is 1.7:1. 600 sits between the 400
+     and 300 steps (4.6:1 on --n-100, 6.0 on --n-0); 700 is the light ramp's
+     200 tint, 10.0:1 on the dark 50 ground. */
+  --synapse-600: #af92ed;
+  --synapse-700: #d5c4fa;
 
   /* semantic ramps invert the same way the neutrals do: 50 is the quiet
      ground, 700 the ink that reads on it. */

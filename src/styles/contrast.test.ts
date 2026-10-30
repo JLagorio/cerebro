@@ -47,3 +47,37 @@ it.each(['light', 'dark'])('keeps readable state ink and action labels at AA in 
     expect(ratio, `${theme}: ${ink} on ${ground}`).toBeGreaterThanOrEqual(4.5);
   }
 });
+
+// A hue's 600 step is its text ink on the neutral surfaces (`text-warn-600`,
+// the link ink `text-cortex-600`, AI ink `text-synapse-600`), and the brand
+// ramps pair 700 ink with their own 50 ground (M100.2).
+it.each(['light', 'dark'])('keeps every hue text step at AA on neutral surfaces in %s', (theme) => {
+  const tokens = palette(theme === 'dark' ? light + dark : light);
+  const pairs: [string, string][] = [
+    ['--cortex-700', '--cortex-50'],
+    ['--synapse-700', '--synapse-50'],
+  ];
+  for (const ink of [
+    '--warn-600',
+    '--success-600',
+    '--danger-600',
+    '--cortex-600',
+    '--synapse-600',
+  ]) {
+    for (const ground of [
+      '--surface-app',
+      '--surface-board',
+      '--surface-sunken',
+      '--surface-raised',
+      '--surface-navigation',
+      '--surface-selected',
+    ]) {
+      pairs.push([ink, ground]);
+    }
+  }
+  for (const [ink, ground] of pairs) {
+    const values = [luminance(resolve(tokens, ink)), luminance(resolve(tokens, ground))];
+    const ratio = (Math.max(...values) + 0.05) / (Math.min(...values) + 0.05);
+    expect(ratio, `${theme}: ${ink} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+  }
+});
