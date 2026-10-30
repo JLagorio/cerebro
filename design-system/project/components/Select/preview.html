@@ -1,0 +1,161 @@
+<!-- @dsCard group="Forms" height=302 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Select</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .cap {
+        min-width: 72px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      #root {
+        min-height: 270px;
+      }
+      .note {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var TYPES = [
+        { value: 'Decision', label: 'Decision', icon: 'gavel', color: '#0EA5E9' },
+        { value: 'Epic', label: 'Epic', icon: 'layers', color: '#8B5CF6' },
+        { value: 'Meeting', label: 'Meeting', icon: 'calendar-days', color: '#8B7CF6' },
+        {
+          value: 'Project',
+          label: 'Project',
+          icon: 'folder-kanban',
+          color: '#14B8A6',
+          hint: '14 records',
+        },
+        { value: 'Risk', label: 'Risk', icon: 'triangle-alert', color: '#DE3B4E' },
+        {
+          value: 'Work item',
+          label: 'Work item',
+          icon: 'square-check',
+          color: '#3D8BE8',
+          hint: '62 records',
+        },
+      ];
+      var REPEAT = [
+        { value: 'none', label: 'Does not repeat' },
+        { value: 'daily', label: 'Every day' },
+        { value: 'weekly', label: 'Every week on Monday' },
+        { value: 'monthly', label: 'Every month on the 28th' },
+        { value: 'custom', label: 'Custom…' },
+      ];
+      var VIEWS = [
+        { value: 'board', label: 'Board by status' },
+        { value: 'table', label: 'All work items' },
+        { value: 'mine', label: 'Assigned to me', disabled: true },
+      ];
+      function Row(cap, kids) {
+        return h('div', { className: 'row' }, h('span', { className: 'cap' }, cap), kids);
+      }
+      function Pick(props) {
+        var s = React.useState(props.initial),
+          v = s[0],
+          set = s[1];
+        return h(
+          C.Select,
+          Object.assign({}, props, { initial: undefined, value: v, onChange: set }),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row('outline', [
+            h(Pick, {
+              key: 'a',
+              ariaLabel: 'Repeat pattern',
+              options: REPEAT,
+              initial: 'none',
+              width: 220,
+            }),
+            h(Pick, {
+              key: 'b',
+              ariaLabel: 'Database',
+              options: TYPES,
+              initial: 'Project',
+              width: 180,
+              searchable: true,
+              searchPlaceholder: 'Search types…',
+            }),
+            h('span', { key: 'n', className: 'note' }, 'Click to open; the second searches'),
+          ]),
+          Row(
+            'ghost',
+            h(Pick, {
+              ariaLabel: 'Saved view',
+              options: VIEWS,
+              initial: 'board',
+              size: 'sm',
+              variant: 'ghost',
+              width: 160,
+            }),
+          ),
+          Row(
+            'placeholder',
+            h(Pick, {
+              ariaLabel: 'View of',
+              options: TYPES,
+              initial: '',
+              size: 'sm',
+              placeholder: 'Choose a database…',
+              width: 180,
+            }),
+          ),
+          Row('invalid, off', [
+            h(Pick, {
+              key: 'i',
+              ariaLabel: 'Repeat unit',
+              options: REPEAT,
+              initial: 'gone',
+              placeholder: 'Repeat rule not understood',
+              invalid: true,
+              width: 220,
+            }),
+            h(Pick, {
+              key: 'd',
+              ariaLabel: 'Database',
+              options: TYPES,
+              initial: 'Work item',
+              disabled: true,
+              width: 180,
+            }),
+          ]),
+        ),
+      );
+    </script>
+  </body>
+</html>

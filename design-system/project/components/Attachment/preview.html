@@ -1,0 +1,165 @@
+<!-- @dsCard group="AI conversation" height=386 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Attachment</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .gap {
+        height: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var start = [
+        {
+          data: {
+            id: 'f1',
+            label: 'cutover-prd.md',
+            path: 'projects/phoenix-warehouse-rollout/cutover-prd.md',
+            rootId: '0',
+            kind: 'markdown',
+            description: 'Markdown',
+          },
+          state: 'done',
+        },
+        {
+          data: {
+            id: 'f2',
+            label: 'rack-layout.png',
+            path: 'attachments/rack-layout.png',
+            rootId: '0',
+            kind: 'image',
+            description: 'Image',
+          },
+          state: 'done',
+        },
+        {
+          data: {
+            id: 'p1',
+            label: 'Q3 dock schedule.xlsx',
+            kind: 'spreadsheet',
+            description: 'Spreadsheet · copied in when you send',
+          },
+          state: 'idle',
+        },
+        {
+          data: {
+            id: 'p2',
+            label: 'carrier-contract.pdf',
+            kind: 'pdf',
+            description: 'Copying into attachments/…',
+          },
+          state: 'uploading',
+        },
+        {
+          data: {
+            id: 'p3',
+            label: 'site-walkthrough.mov',
+            kind: 'video',
+            description: 'Not copied: over 50 MB',
+          },
+          state: 'error',
+        },
+      ];
+      function Demo() {
+        var s = React.useState(start),
+          files = s[0],
+          setFiles = s[1];
+        function remove(id) {
+          setFiles(
+            files.filter(function (f) {
+              return f.data.id !== id;
+            }),
+          );
+        }
+        function list(size) {
+          return h(
+            C.Attachments,
+            { 'aria-label': 'Attached files' },
+            files.map(function (f) {
+              return h(
+                C.Attachment,
+                {
+                  key: f.data.id,
+                  data: f.data,
+                  state: f.state,
+                  size: size,
+                  onRemove: function () {
+                    remove(f.data.id);
+                  },
+                },
+                h(C.AttachmentPreview, null),
+                h(C.AttachmentInfo, null),
+                h(C.AttachmentRemove, {
+                  label: 'Remove ' + f.data.label + ' from context',
+                  disabled: f.state === 'uploading',
+                }),
+              );
+            }),
+          );
+        }
+        return h(
+          'div',
+          { className: 'col' },
+          h(
+            'span',
+            { className: 'cap' },
+            'default: done, done (image), idle (waits for the send), uploading, error',
+          ),
+          list('default'),
+          h('div', { className: 'gap' }),
+          h('span', { className: 'cap' }, 'sm: the composer’s chips above the text'),
+          list('sm'),
+          h('div', { className: 'gap' }),
+          h('span', { className: 'cap' }, 'read-only: no onRemove, no remove button'),
+          h(
+            C.Attachments,
+            { 'aria-label': 'Files on this message' },
+            h(C.Attachment, {
+              data: {
+                id: 'r1',
+                label: 'warehouse-cutover.md',
+                path: 'knowledge/playbooks/warehouse-cutover.md',
+                description: 'Markdown',
+              },
+            }),
+            h(C.Attachment, {
+              size: 'sm',
+              data: {
+                id: 'r2',
+                label: 'kickoff.md',
+                path: 'projects/phoenix-warehouse-rollout/meetings/kickoff.md',
+                description: 'Markdown',
+              },
+            }),
+          ),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(h(Demo));
+    </script>
+  </body>
+</html>

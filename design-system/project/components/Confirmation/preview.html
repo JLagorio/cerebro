@@ -1,0 +1,211 @@
+<!-- @dsCard group="AI conversation" height=467 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Confirmation</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px 24px;
+        align-items: start;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .target {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        font-family: var(--font-mono);
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--cortex-700);
+      }
+      .who {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function noop() {}
+      function Answered(props) {
+        var s = React.useState(props.state),
+          state = s[0],
+          setState = s[1];
+        var o = React.useState(props.outcome || null),
+          outcome = o[0],
+          setOutcome = o[1];
+        return h(
+          C.Confirmation,
+          {
+            state: state,
+            variant: props.variant,
+            icon: props.icon,
+            title: props.title,
+            summary: props.summary,
+            meta: props.meta,
+            notice: props.notice,
+            refusal: state === 'refused' ? props.refusal : null,
+            outcome: outcome,
+            'aria-label': props.ariaLabel,
+            approve: props.approve.map(function (label) {
+              return {
+                label: label,
+                onClick: function () {
+                  setState('answered');
+                  setOutcome(
+                    label === 'Allow once' || label === 'Allow'
+                      ? props.allowed
+                      : 'Allowed for this conversation',
+                  );
+                },
+              };
+            }),
+            deny: {
+              label: props.denyLabel,
+              reason: props.reason,
+              onDeny: function (why) {
+                setState('answered');
+                setOutcome(why === null ? 'Denied' : 'Denied: ' + why);
+              },
+            },
+          },
+          props.children,
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'pending: a permission the run waits on'),
+            h(
+              Answered,
+              {
+                state: 'pending',
+                icon: 'shield-question-mark',
+                title: 'Run this command?',
+                summary: 'The assistant is waiting for your answer.',
+                approve: ['Allow once', 'This conversation'],
+                denyLabel: 'Deny',
+                allowed: 'Allowed once',
+              },
+              h(
+                C.ConfirmationSubject,
+                null,
+                'git log --oneline -5 -- projects/phoenix-warehouse-rollout',
+              ),
+            ),
+            h(
+              'span',
+              { className: 'cap', style: { marginTop: 8 } },
+              'stale: answered too late, nothing to press',
+            ),
+            h(
+              Answered,
+              {
+                state: 'stale',
+                icon: 'shield-question-mark',
+                title: 'Change this file?',
+                summary: 'The assistant is waiting for your answer.',
+                notice: 'No longer waiting: this request was already answered or cancelled.',
+                approve: ['Allow once', 'This conversation'],
+                denyLabel: 'Deny',
+              },
+              h(C.ConfirmationSubject, null, 'projects/phoenix-warehouse-rollout/cutover-prd.md'),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h(
+              'span',
+              { className: 'cap' },
+              'refused: an ask-first write, waiting still, with a reason field',
+            ),
+            h(
+              Answered,
+              {
+                state: 'refused',
+                icon: 'hand',
+                title: 'Set record fields',
+                ariaLabel: 'Allow this page write?',
+                summary: 'Scout asks before writing',
+                refusal: 'The page changed since the agent read it. Nothing was written.',
+                approve: ['Allow'],
+                denyLabel: 'Deny',
+                allowed: 'Allowed',
+                reason: { label: 'Why not? (optional)' },
+              },
+              h(
+                'div',
+                { className: 'target' },
+                'projects/phoenix-warehouse-rollout/items/ops-4.md',
+              ),
+              h(
+                C.ConfirmationSubject,
+                null,
+                'status: in progress\nassignee: "[[marcus-webb]]"\ndue: 2026-11-06',
+              ),
+            ),
+            h(
+              'span',
+              { className: 'cap', style: { marginTop: 8 } },
+              'answered: Review’s queued write, outline, the outcome in place of the answers',
+            ),
+            h(
+              Answered,
+              {
+                state: 'answered',
+                variant: 'outline',
+                icon: 'file-pen-line',
+                title: 'Append to a note',
+                meta: h(
+                  'span',
+                  { className: 'who' },
+                  'Queued 2 hours ago by',
+                  h(C.Avatar, { name: 'Scout', size: 16 }),
+                  'Scout',
+                ),
+                outcome: 'Applied — inbox/dock-call-notes.md',
+                approve: ['Allow'],
+                denyLabel: 'Reject',
+              },
+              h(
+                C.ConfirmationSubject,
+                null,
+                '- Carrier confirmed the 22:00 dock slot for the cutover night.',
+              ),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

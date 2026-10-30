@@ -1,0 +1,120 @@
+<!-- @dsCard group="Forms" height=200 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Input</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .cap {
+        min-width: 72px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kids) {
+        return h('div', { className: 'row' }, h('span', { className: 'cap' }, cap), kids);
+      }
+      function Field(props) {
+        var s = React.useState(props.initial || ''),
+          v = s[0],
+          set = s[1];
+        return h(
+          C.Input,
+          Object.assign({}, props, {
+            initial: undefined,
+            value: v,
+            onChange: function (e) {
+              set(e.target.value);
+            },
+          }),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row(
+            'search',
+            h(Field, {
+              icon: 'search',
+              ariaLabel: 'Search records to link',
+              placeholder: 'Link or create a Project…',
+              width: 280,
+              suffix: h(C.Keycaps, { keys: 'mod+k', mac: true }),
+            }),
+          ),
+          Row(
+            'focused',
+            h(Field, {
+              ariaLabel: 'Page name',
+              initial: 'Quarterly planning',
+              width: 280,
+              autoFocus: true,
+            }),
+          ),
+          Row('sizes', [
+            h(Field, {
+              key: 'sm',
+              size: 'sm',
+              icon: 'search',
+              ariaLabel: 'Filter',
+              placeholder: 'Filter',
+              width: 160,
+            }),
+            h(Field, {
+              key: 'md',
+              ariaLabel: 'Folder name',
+              placeholder: 'Folder name',
+              width: 160,
+            }),
+            h(Field, {
+              key: 'lg',
+              size: 'lg',
+              ariaLabel: 'Property name',
+              placeholder: 'Relation name',
+              width: 180,
+            }),
+          ]),
+          Row(
+            'disabled',
+            h(C.Input, {
+              ariaLabel: 'Vault path',
+              value: 'demo-vault/projects',
+              disabled: true,
+              icon: 'folder',
+              width: 280,
+              onChange: function () {},
+            }),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

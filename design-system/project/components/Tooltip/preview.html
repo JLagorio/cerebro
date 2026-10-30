@@ -1,0 +1,116 @@
+<!-- @dsCard group="Overlays" height=170 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tooltip</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, 200px) 300px 140px;
+        grid-template-rows: 44px 32px 44px auto;
+        justify-items: center;
+        align-items: center;
+      }
+      .cap {
+        grid-row: 4;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+        text-align: center;
+      }
+      .t {
+        grid-row: 2;
+      }
+      .rail {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border: 0;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--n-600);
+        cursor: pointer;
+      }
+      .rail:hover {
+        background: var(--n-100);
+        color: var(--n-800);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Rail(label, icon, command, side) {
+        return h(
+          'div',
+          { className: 't' },
+          h(
+            C.Tooltip,
+            { label: label, command: command, side: side },
+            h(
+              'button',
+              { type: 'button', className: 'rail', 'aria-label': label, 'data-tip': '' },
+              h(C.Icon, { name: icon, size: 18 }),
+            ),
+          ),
+        );
+      }
+      function Cap(text, col, span) {
+        return h(
+          'span',
+          { className: 'cap', style: { gridColumn: span ? col + ' / span ' + span : col } },
+          text,
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          Rail('Search', 'search', 'palette.open'),
+          Rail('Close pane', 'x', 'pane.close'),
+          h(
+            'div',
+            { className: 't' },
+            h(
+              C.Tooltip,
+              { label: 'Copying into the vault needs the desktop app' },
+              h(
+                'span',
+                { 'data-tip': '', style: { display: 'inline-flex' } },
+                h(C.Button, { size: 'sm', icon: 'upload', disabled: true }, 'Upload a file…'),
+              ),
+            ),
+          ),
+          Rail('Hide sidebar', 'panel-left', undefined, 'bottom'),
+          Cap('label and the command’s keycaps', 1, 2),
+          Cap('explains a disabled control', 3),
+          Cap('side bottom', 4),
+        ),
+      );
+
+      // Bring the pointer over each trigger once, so every bubble is up in the frame.
+      setTimeout(function () {
+        document.querySelectorAll('[data-tip]').forEach(function (el) {
+          el.dispatchEvent(
+            new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }),
+          );
+        });
+      }, 60);
+    </script>
+  </body>
+</html>

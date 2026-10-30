@@ -1,0 +1,273 @@
+<!-- @dsCard group="Interaction" height=214 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>BlockDrag</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 40px;
+        flex-wrap: wrap;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .lane {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: 200px;
+        padding-left: 28px;
+      }
+      .block {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 44px;
+        padding: 0 12px;
+        border: 1px solid var(--n-200);
+        border-radius: var(--r-md);
+        background: var(--n-0);
+        font-size: var(--fs-ui);
+        color: var(--n-800);
+      }
+      .block .v {
+        margin-left: auto;
+        font-size: var(--fs-meta);
+        color: var(--text-meta);
+      }
+      .block .grip {
+        position: absolute;
+        left: -26px;
+        top: 9px;
+      }
+      .widgets {
+        position: relative;
+        display: flex;
+        gap: 12px;
+      }
+      .widget {
+        position: relative;
+        width: 96px;
+        height: 100px;
+        padding: 10px 12px;
+        border: 1px solid var(--n-200);
+        border-radius: var(--r-md);
+        background: var(--n-0);
+      }
+      .widget b {
+        display: block;
+        font-size: var(--fs-2xs);
+        font-weight: 500;
+        color: var(--text-meta);
+      }
+      .widget span {
+        display: block;
+        margin-top: 6px;
+        font-size: var(--fs-xl);
+        font-weight: 600;
+        color: var(--n-900);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var FIELDS = [
+        ['Status', 'loader', 'To do'],
+        ['Priority', 'circle-chevron-down', 'Medium'],
+        ['Assignee', 'circle-user', 'Sam Ito'],
+      ];
+      var GAPS = ['gap-0', 'gap-1', 'gap-2', 'gap-3'];
+      var HOSTS = C.lineHosts(GAPS);
+
+      function Block(f, i, lines, grip) {
+        return h(
+          'div',
+          { key: f[0], className: 'block', 'data-drag-id': 'field:' + f[0].toLowerCase() },
+          lines(HOSTS[i]),
+          grip && h(C.Grip, { kind: 'block', className: 'grip', 'aria-label': 'Drag ' + f[0] }),
+          h(C.Icon, { name: f[1], size: 15, color: 'var(--n-500)' }),
+          f[0],
+          h('span', { className: 'v' }, f[2]),
+        );
+      }
+
+      // At rest: every gap's line is mounted on the block that follows it, dark.
+      function Resting() {
+        return h(
+          'div',
+          { className: 'lane' },
+          FIELDS.map(function (f, i) {
+            return Block(
+              f,
+              i,
+              function (host) {
+                return [
+                  h(C.InsertionLine, { key: 'a', gap: host.above, side: 'top' }),
+                  host.below && h(C.InsertionLine, { key: 'b', gap: host.below, side: 'bottom' }),
+                ];
+              },
+              true,
+            );
+          }),
+        );
+      }
+
+      // Mid-drag: the source stays put at full strength, a 40% copy rides the pointer, and only the
+      // gap that would commit is lit. Move the pointer over the lane to choose another gap.
+      function Dragging() {
+        var lane = React.useRef(null),
+          clone = React.useRef(null);
+        var s = React.useState({ gap: 2, y: 86 }),
+          st = s[0],
+          set = s[1];
+        var r = React.useState(null),
+          rect = r[0],
+          setRect = r[1];
+        React.useLayoutEffect(function () {
+          var src = lane.current.querySelector('[data-drag-id="field:status"]');
+          setRect({
+            top: src.offsetTop,
+            left: src.offsetLeft,
+            width: src.offsetWidth,
+            height: src.offsetHeight,
+          });
+        }, []);
+        React.useEffect(
+          function () {
+            if (!rect || !clone.current) return;
+            var src = lane.current.querySelector('[data-drag-id="field:status"]');
+            var copy = src.cloneNode(true);
+            [copy].concat([].slice.call(copy.querySelectorAll('*'))).forEach(function (el) {
+              ['id', 'data-testid', 'data-drag-id', 'data-line'].forEach(function (a) {
+                el.removeAttribute(a);
+              });
+            });
+            copy.style.width = '100%';
+            copy.style.height = '100%';
+            copy.style.margin = '0';
+            clone.current.appendChild(copy);
+            return function () {
+              copy.remove();
+            };
+          },
+          [rect],
+        );
+        function move(e) {
+          var box = lane.current.getBoundingClientRect(),
+            y = e.clientY - box.top;
+          var gap = Math.max(0, Math.min(3, Math.round(y / 56)));
+          set({ gap: gap, y: Math.max(0, Math.min(box.height - 22, y - 22)) });
+        }
+        var layout = rect && C.ghostLayout(rect, { x: 10, y: st.y });
+        return h(
+          'div',
+          { className: 'lane', ref: lane, onPointerMove: move },
+          FIELDS.map(function (f, i) {
+            return Block(
+              f,
+              i,
+              function (host) {
+                return [
+                  h('span', {
+                    key: 'a',
+                    'data-lit': GAPS[st.gap] === host.above,
+                    className: C.insertionLineClass('top', GAPS[st.gap] === host.above),
+                  }),
+                  host.below &&
+                    h('span', {
+                      key: 'b',
+                      className: C.insertionLineClass('bottom', GAPS[st.gap] === host.below),
+                    }),
+                ];
+              },
+              i === 0,
+            );
+          }),
+          layout &&
+            h(
+              'div',
+              {
+                'aria-hidden': true,
+                style: { position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 },
+              },
+              h('div', { style: layout.wrapper }, h('div', { ref: clone, style: layout.clone })),
+            ),
+        );
+      }
+
+      // The column variant: a 4px rule on the leading edge of the target.
+      function Columns() {
+        var w = [
+          ['Open risks', '4'],
+          ['Due soon', '7'],
+          ['Done', '12'],
+        ];
+        return h(
+          'div',
+          { className: 'widgets' },
+          w.map(function (x, i) {
+            return h(
+              'div',
+              { key: x[0], className: 'widget' },
+              h('span', {
+                className: C.insertionLineClass('start', i === 1),
+                style: { display: 'block', margin: 0 },
+              }),
+              h('b', null, x[0]),
+              h('span', null, x[1]),
+            );
+          }),
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'row' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'at rest: lines mounted, dark'),
+            h(Resting),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'dragging Status (move the pointer over it)'),
+            h(Dragging),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'column variant: leading edge'),
+            h(Columns),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

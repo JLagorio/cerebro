@@ -1,0 +1,163 @@
+<!-- @dsCard group="Forms" height=320 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Dropdown</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      #root {
+        min-height: 288px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .cap {
+        min-width: 72px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .lbl {
+        width: 86px;
+        flex: none;
+        font-size: var(--fs-xs);
+        color: var(--n-500);
+      }
+      .note {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var CALCS = [
+        ['count', 'Count'],
+        ['sum', 'Sum'],
+        ['avg', 'Average'],
+        ['min', 'Min'],
+        ['max', 'Max'],
+        ['percent_done', 'Percent done'],
+        ['earliest', 'Earliest'],
+        ['latest', 'Latest'],
+        ['show', 'Show values'],
+      ].map(function (c) {
+        return { value: c[0], label: c[1] };
+      });
+      var FORMATS = [
+        ['plain', 'Plain number'],
+        ['percent', 'Percent'],
+        ['progress', 'Progress bar'],
+        ['currency', 'Currency'],
+      ].map(function (c) {
+        return { value: c[0], label: c[1] };
+      });
+      var STATUS = [
+        { value: '', label: 'Choose…' },
+        { value: 'todo', label: 'Not started' },
+        { value: 'doing', label: 'In progress' },
+        { value: 'done', label: 'Done' },
+      ];
+      var TEMPLATES = [
+        { value: 'none', label: 'Blank page', icon: 'file' },
+        { value: 'templates/meeting.md', label: 'Meeting', icon: 'calendar-days' },
+        { value: 'templates/prd.md', label: 'PRD', icon: 'file-text' },
+      ];
+      function Row(cap, kids) {
+        return h('div', { className: 'row' }, h('span', { className: 'cap' }, cap), kids);
+      }
+      function Pick(props) {
+        var s = React.useState(props.initial),
+          v = s[0],
+          set = s[1];
+        return h(
+          C.Dropdown,
+          Object.assign({}, props, { initial: undefined, value: v, onChange: set }),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row('sm', [
+            h('span', { key: 'l', className: 'lbl' }, 'Calculate'),
+            h(Pick, {
+              key: 'd',
+              size: 'sm',
+              label: 'Calculation',
+              width: 200,
+              options: CALCS,
+              initial: 'percent_done',
+            }),
+            h(Pick, {
+              key: 'f',
+              size: 'sm',
+              label: 'Display format',
+              width: 160,
+              options: FORMATS,
+              initial: 'progress',
+            }),
+            h('span', { key: 'n', className: 'note' }, 'Click to open'),
+          ]),
+          Row('placeholder', [
+            h('span', { key: 'l', className: 'lbl' }, 'Status is'),
+            h(Pick, {
+              key: 'd',
+              size: 'sm',
+              label: 'Filter value',
+              width: 200,
+              options: STATUS,
+              initial: 'archived',
+              placeholder: 'Choose…',
+            }),
+          ]),
+          Row('md, icons', [
+            h('span', { key: 'l', className: 'lbl' }, 'Template'),
+            h(Pick, {
+              key: 'd',
+              label: 'Template',
+              width: 200,
+              options: TEMPLATES,
+              initial: 'templates/meeting.md',
+            }),
+          ]),
+          Row('disabled', [
+            h('span', { key: 'l', className: 'lbl' }, 'Decimals'),
+            h(Pick, {
+              key: 'd',
+              size: 'sm',
+              label: 'Decimal places',
+              width: 200,
+              disabled: true,
+              initial: '0',
+              options: [0, 1, 2, 3].map(function (n) {
+                return { value: String(n), label: n + ' decimals' };
+              }),
+            }),
+          ]),
+        ),
+      );
+    </script>
+  </body>
+</html>

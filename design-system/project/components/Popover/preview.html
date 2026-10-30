@@ -1,0 +1,282 @@
+<!-- @dsCard group="Overlays" height=300 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Popover</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .stage {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        flex-wrap: wrap;
+        min-height: 268px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--n-0);
+        width: max-content;
+      }
+      .ttl {
+        font-size: var(--fs-ui);
+        font-weight: 600;
+        color: var(--n-900);
+      }
+      .grow {
+        flex: 1;
+      }
+      /* The caller's panel chrome, as PageChrome's cover picker draws it. */
+      .panel {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 292px;
+        padding: 8px;
+        border: 1px solid var(--n-200);
+        border-radius: var(--r-lg);
+        background: var(--n-0);
+        box-shadow: var(--shadow-lg);
+      }
+      .lbl {
+        font-size: var(--fs-2xs);
+        line-height: var(--lh-2xs);
+        font-weight: 500;
+        color: var(--n-500);
+      }
+      .sw {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .sw button {
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        border: 1px solid var(--n-200);
+        border-radius: var(--r-md);
+        cursor: pointer;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-weight: 400;
+      }
+      .field input {
+        height: 28px;
+        padding: 0 8px;
+        border: 1px solid var(--n-200);
+        border-radius: var(--r-md);
+        background: var(--n-0);
+        color: var(--n-800);
+        font: inherit;
+        font-size: var(--fs-sm);
+        outline: none;
+      }
+      .field input:focus {
+        border-color: var(--cortex-500);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function noop() {}
+      var COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
+
+      // A menu below its trigger: the panel grows from the side it opened on.
+      function RecordActions() {
+        var o = React.useState(true),
+          open = o[0],
+          setOpen = o[1];
+        var ref = React.useRef(null);
+        return h(
+          'div',
+          { className: 'bar' },
+          h('span', { className: 'ttl' }, 'Duplicate jobs after reconnect'),
+          h(
+            'span',
+            { style: { position: 'relative', display: 'inline-flex' } },
+            h(C.IconButton, {
+              ref: ref,
+              icon: 'ellipsis',
+              label: 'Record actions',
+              size: 'sm',
+              tooltip: !open,
+              onClick: function () {
+                setOpen(!open);
+              },
+            }),
+            open &&
+              h(
+                C.Popover,
+                {
+                  anchorRef: ref,
+                  role: 'menu',
+                  ariaLabel: 'Record actions',
+                  onClose: function () {
+                    setOpen(false);
+                  },
+                },
+                h(
+                  C.MenuSurface,
+                  { width: 216, autoFocus: false },
+                  h(C.MenuItem, {
+                    icon: 'link',
+                    label: 'Copy link',
+                    onSelect: function () {
+                      setOpen(false);
+                    },
+                  }),
+                  h(C.MenuItem, {
+                    icon: 'file-text',
+                    label: 'Copy path',
+                    onSelect: function () {
+                      setOpen(false);
+                    },
+                  }),
+                  h(C.MenuItem, {
+                    icon: 'copy',
+                    label: 'Duplicate',
+                    onSelect: function () {
+                      setOpen(false);
+                    },
+                  }),
+                  h(C.MenuSeparator),
+                  h(C.MenuItem, {
+                    icon: 'trash-2',
+                    label: 'Delete',
+                    danger: true,
+                    onSelect: function () {
+                      setOpen(false);
+                    },
+                  }),
+                ),
+              ),
+          ),
+        );
+      }
+
+      // A trapped dialog-role panel near the bottom edge flips above its anchor.
+      function CoverPicker() {
+        var o = React.useState(true),
+          open = o[0],
+          setOpen = o[1];
+        var ref = React.useRef(null);
+        return h(
+          'div',
+          {
+            style: {
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'flex-end',
+              height: '100%',
+            },
+          },
+          h(
+            'span',
+            { ref: ref, style: { display: 'inline-flex', alignSelf: 'flex-end' } },
+            h(
+              C.Button,
+              {
+                size: 'sm',
+                variant: 'ghost',
+                icon: 'image',
+                onClick: function () {
+                  setOpen(!open);
+                },
+              },
+              'Change cover',
+            ),
+          ),
+          open &&
+            h(
+              C.Popover,
+              {
+                anchorRef: ref,
+                role: 'dialog',
+                ariaLabel: 'Page cover',
+                trapFocus: true,
+                onClose: function () {
+                  setOpen(false);
+                },
+              },
+              h(
+                'div',
+                { className: 'panel' },
+                h('span', { className: 'lbl' }, 'Color'),
+                h(
+                  'div',
+                  { className: 'sw' },
+                  COLORS.map(function (c) {
+                    return h('button', {
+                      key: c,
+                      type: 'button',
+                      'aria-label': c,
+                      onClick: function () {
+                        setOpen(false);
+                      },
+                      style: { background: 'var(--opt-' + c + ')' },
+                    });
+                  }),
+                ),
+                h('span', { className: 'lbl' }, 'Image'),
+                h(
+                  'label',
+                  { className: 'lbl field' },
+                  'Vault path',
+                  h('input', { 'aria-label': 'Vault path', placeholder: 'attachments/cover.png' }),
+                ),
+              ),
+            ),
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'stage' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'role menu, opens below'),
+            h(RecordActions),
+          ),
+          h(
+            'div',
+            { className: 'col', style: { alignItems: 'flex-end' } },
+            h('span', { className: 'cap' }, 'role dialog, trapFocus, flipped above'),
+            h('div', { className: 'grow' }),
+            h(CoverPicker),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

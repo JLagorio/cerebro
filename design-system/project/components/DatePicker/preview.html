@@ -1,0 +1,107 @@
+<!-- @dsCard group="Forms" height=667 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DatePicker</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .cell {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var TODAY = '2026-07-28';
+      function base(start) {
+        return {
+          start: start,
+          end: null,
+          startTime: null,
+          endTime: null,
+          format: 'full',
+          timeFormat: '12',
+          remind: null,
+        };
+      }
+      function Picker(props) {
+        var s = React.useState(props.initial),
+          v = s[0],
+          set = s[1];
+        var cleared = v === null;
+        return h(
+          'div',
+          { className: 'cell' },
+          h('span', { className: 'cap' }, cleared ? props.cap + ' · cleared' : props.cap),
+          cleared
+            ? h(
+                C.Button,
+                {
+                  size: 'sm',
+                  icon: 'calendar',
+                  onClick: function () {
+                    set(props.initial);
+                  },
+                },
+                'Set a date',
+              )
+            : h(
+                C.DatePicker,
+                Object.assign({}, props.flags, {
+                  value: v,
+                  today: TODAY,
+                  onChange: set,
+                  onClear: function () {
+                    set(null);
+                  },
+                }),
+              ),
+        );
+      }
+      var single = Object.assign(base('2026-09-18'), { remind: '1d' });
+      var range = Object.assign(base('2026-08-28'), { end: '2026-09-18', format: 'short' });
+      var bound = Object.assign(base('2026-08-01'), { format: 'mdy' });
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'row' },
+          h(Picker, { cap: 'due date with reminder', initial: single }),
+          h(Picker, {
+            cap: 'range: click a box, then a day',
+            initial: range,
+            flags: { showRemind: false },
+          }),
+          h(Picker, {
+            cap: 'filter bound: one endpoint, no format',
+            initial: bound,
+            flags: { showEndToggle: false, showFormat: false, showRemind: false },
+          }),
+        ),
+      );
+    </script>
+  </body>
+</html>

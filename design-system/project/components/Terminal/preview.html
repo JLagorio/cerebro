@@ -1,0 +1,158 @@
+<!-- @dsCard group="AI work" height=809 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Terminal</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px 32px;
+        align-items: start;
+      }
+      .cell {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+      .full {
+        grid-column: 1 / -1;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .target {
+        font-family: var(--font-mono);
+        font-size: var(--fs-2xs);
+        color: var(--n-500);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro,
+        F = React.Fragment;
+      function Cell(cap) {
+        var kids = Array.prototype.slice.call(arguments, 1);
+        return h.apply(
+          null,
+          ['div', { className: 'cell' }, h('div', { className: 'cap' }, cap)].concat(kids),
+        );
+      }
+      // ShellRow's title: the call's phrase in its state's tense, then the command as its target.
+      function Title(words, command) {
+        return h(F, null, words + ' ', h('span', { className: 'target' }, command));
+      }
+      function shell(stdout, stderr, more) {
+        return Object.assign(
+          { type: 'shell', stdout: stdout, stderr: stderr, interrupted: false, truncated: false },
+          more || {},
+        );
+      }
+
+      var clippy = [
+        '    Checking cerebro v0.1.0',
+        'error: redundant clone',
+        '   --> src/vault/trash.rs:88:31',
+        '    |',
+        '88  |     let stamp = entry.stamp.clone();',
+        '    |                            ^^^^^^^^ help: remove this',
+        '    |',
+        '    = note: `-D clippy::redundant-clone` implied by `-D warnings`',
+        'error: could not compile `cerebro` (lib) due to 1 previous error',
+      ].join('\n');
+      var e2e = [
+        '  ✓  86 [chromium] › e2e/rail.spec.ts:61:3 › the rail docks at 960px (2.1s)',
+        '  ✓  87 [chromium] › e2e/rail.spec.ts:88:3 › below 960px it opens as a drawer (1.8s)',
+        '  ✓  88 [chromium] › e2e/agent-detach.spec.ts:31:3 › closing the panel mid-turn detaches (3.4s)',
+        '  ✓  89 [chromium] › e2e/state-lab.spec.ts:12:3 › every preset renders the state it names (6.0s)',
+      ].join('\n');
+
+      function Wide(cell) {
+        return h('div', { className: 'full' }, cell);
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          Cell(
+            'Done, opened onto the command and its output',
+            h(C.Terminal, {
+              status: 'done',
+              icon: 'terminal',
+              defaultOpen: true,
+              title: Title('Ran a command', 'pnpm format:check'),
+              description: '3.8s',
+              command: 'pnpm format:check',
+              result: shell(
+                '\n> cerebro format:check\n> prettier --check .\n\nChecking formatting...\nAll matched files use Prettier code style!\n',
+                '',
+              ),
+            }),
+          ),
+          Cell(
+            'Running: it opens by itself only once there is output to show',
+            h(C.Terminal, {
+              status: 'running',
+              statusText: null,
+              icon: 'terminal',
+              title: Title('Running a command', 'pnpm test:run'),
+              command: 'pnpm test:run',
+              result: null,
+            }),
+          ),
+          Wide(
+            Cell(
+              'Failed: the error output is ruled off in danger ink',
+              h(C.Terminal, {
+                status: 'failed',
+                icon: 'terminal',
+                defaultOpen: true,
+                title: Title(
+                  'Failed to run a command',
+                  'cargo clippy --all-targets -- -D warnings',
+                ),
+                description: '41s',
+                command: 'cargo clippy --all-targets -- -D warnings',
+                result: shell('', clippy),
+              }),
+            ),
+          ),
+          Wide(
+            Cell(
+              'Interrupted: the last part of the output, and why it ends',
+              h(C.Terminal, {
+                status: 'interrupted',
+                icon: 'terminal',
+                defaultOpen: true,
+                title: Title('Bash', 'pnpm e2e'),
+                description: '2m 5s',
+                command: 'pnpm e2e',
+                result: shell(e2e, '', { truncated: true, interrupted: true }),
+              }),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

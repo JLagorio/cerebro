@@ -24,6 +24,7 @@ server — no API key ever enters the app.
 | Toolchain  | `rust-toolchain.toml`               | Pins Rust; `package.json` `engines` + `packageManager` pin Node, pnpm. CI installs all three   |
 | Mac build  | `./scripts/mac-build.sh`            | Local build + install                                                                          |
 | State lab  | `pnpm dev`                          | Then `/state-lab.html?section=<id>&state=<state>`: one section in one of five states (CV-44)   |
+| Design sys | `pnpm ds:build`                     | Rebuilds the design-system artifact's files into `design-system/out/` (M100.1)                 |
 
 Hooks (husky): pre-commit lints; pre-push runs the full gate. **CV-01 Never
 `--no-verify`** — if a hook is wrong, fix the hook. The pre-push hook also
@@ -376,6 +377,12 @@ enforced: `.github/workflows/mac-app.yml`
   in the tracked milestone records; links to raw evidence are local-only and
   unavailable in a fresh checkout. Maintained tests, fixtures and runner source
   in `src/`, `src-tauri/`, `scripts/` and `conformance/` remain tracked.
+- `design-system/` — the published design system (M100): the brand book,
+  each component card's preview and guide, the token usage notes and the card
+  list (`system.json`). `scripts/design-system/build.ts` (`pnpm ds:build`)
+  takes every value from the app (tokens from `src/styles/tokens/`, a live
+  bundle of `src/components/ui/` and `ai/`, tsc's types, the Lucide icons) and
+  the words from here; the `design-system-sync` dev skill publishes it.
 - `scripts/` — seeders, mac packaging and repo-level guard tests. Typechecked
   via `tsconfig.tools.json`. `scripts/cli-record/` is the CLI recording kit
   (M56.1): it records Claude Code in an isolated config outside the repo
@@ -1031,3 +1038,4 @@ enforced: `scripts/dev-skills.test.ts::the list names exactly the skills on disk
 - `land-stacked-pr` — land a PR stacked on another PR so its commits reach main.
 - `dependabot-triage` — sort alerts and PRs into a bump, an override or a proposed dismissal.
 - `record-cli` — record Claude Code runs on the pinned CLI and sanitize them into real fixtures.
+- `design-system-sync` — rebuild the design-system artifact from the repo and publish it.

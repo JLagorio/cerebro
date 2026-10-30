@@ -1,0 +1,252 @@
+<!-- @dsCard group="Overlays" height=280 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>HoverCard</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .stage {
+        display: flex;
+        gap: 32px;
+        flex-wrap: wrap;
+        min-height: 248px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+        min-width: 300px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .prose {
+        margin: 0;
+        font-size: var(--fs-prose);
+        line-height: var(--lh-prose);
+        color: var(--n-800);
+        max-width: 440px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border: 0;
+        border-radius: var(--r-md);
+        padding: 1px 4px;
+        font: inherit;
+        font-size: 0.92em;
+        line-height: 1.35;
+        vertical-align: baseline;
+        cursor: pointer;
+      }
+      .chip.ok {
+        background: var(--cortex-50);
+        color: var(--cortex-600);
+        font-weight: 500;
+      }
+      .chip.ok:hover {
+        text-decoration: underline;
+      }
+      .chip.gone {
+        background: var(--n-50);
+        color: var(--n-500);
+        cursor: default;
+        text-decoration: underline dashed;
+        text-underline-offset: 2px;
+      }
+      /* PagePreview, the card body the editor's link chips hand it. */
+      .pv {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 12px;
+        font-size: var(--fs-sm);
+      }
+      .pv-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border: 0;
+        background: transparent;
+        padding: 0;
+        text-align: left;
+        font: inherit;
+        font-weight: 500;
+        color: var(--n-900);
+        cursor: pointer;
+      }
+      .pv-title:hover {
+        text-decoration: underline;
+      }
+      .pv-path {
+        font-size: var(--fs-2xs);
+        color: var(--n-500);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .pv-snip {
+        margin: 0;
+        font-size: var(--fs-xs);
+        line-height: 1.45;
+        color: var(--n-600);
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .pv-miss {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        font-size: var(--fs-sm);
+        color: var(--n-500);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+
+      function Resolved() {
+        return h(
+          'div',
+          { className: 'pv' },
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'pv-title',
+              'aria-label': 'Open Offline window is 72 hours, not indefinite',
+            },
+            h(C.Icon, { name: 'scale', size: 16, color: 'var(--n-500)' }),
+            h('span', null, 'Offline window is 72 hours, not indefinite'),
+          ),
+          h('div', { className: 'pv-path' }, 'records/decisions/dec-offline-window-72h.md'),
+          h('div', null, h(C.Tag, { color: 'var(--success-500)' }, 'Accepted')),
+          h(
+            'p',
+            { className: 'pv-snip' },
+            'Crews asked for “works offline” without a bound. An unbounded window means unbounded local state, and conflict probability that climbs with the age of the divergence.',
+          ),
+        );
+      }
+      function Missing() {
+        return h(
+          'div',
+          { className: 'pv-miss' },
+          h(C.Icon, { name: 'file-x', size: 16, color: 'var(--n-400)' }),
+          h('span', null, 'No page named "rural-deployments"'),
+        );
+      }
+
+      // The trigger is the caller's own element, handed a ref; only a real pointer move opens the card.
+      function Chip(props) {
+        return h(
+          C.HoverCard,
+          { label: 'Page preview', group: props.group, content: props.content },
+          function (t) {
+            return h(
+              'button',
+              {
+                ref: t.ref,
+                type: 'button',
+                tabIndex: -1,
+                'aria-describedby': t.describedBy,
+                'data-chip': props.id,
+                className: 'chip ' + props.tone,
+              },
+              h(C.Icon, { name: props.icon, size: 12 }),
+              props.label,
+            );
+          },
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'stage' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'resolved link: title, path, status, snippet'),
+            h(
+              'p',
+              { className: 'prose' },
+              'Implements the boundary from ',
+              h(Chip, {
+                id: 'a',
+                group: 'preview-a',
+                tone: 'ok',
+                icon: 'scale',
+                label: 'Offline window is 72 hours, not indefinite',
+                content: Resolved,
+              }),
+              '. The warning has to be honest without being alarming.',
+            ),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h(
+              'span',
+              { className: 'cap' },
+              'dangling link (each in its own group, so both stay open)',
+            ),
+            h(
+              'p',
+              { className: 'prose' },
+              'Multi-week deployments are out of scope; see ',
+              h(Chip, {
+                id: 'b',
+                group: 'preview-b',
+                tone: 'gone',
+                icon: 'file-text',
+                label: 'rural-deployments',
+                content: Missing,
+              }),
+              '.',
+            ),
+          ),
+        ),
+      );
+
+      // Rest the pointer on both chips once, the way a person would, so the cards open in the frame.
+      setTimeout(function () {
+        ['a', 'b'].forEach(function (id, i) {
+          var el = document.querySelector('[data-chip="' + id + '"]');
+          if (!el) return;
+          var r = el.getBoundingClientRect();
+          el.dispatchEvent(
+            new PointerEvent('pointermove', {
+              bubbles: true,
+              pointerType: 'mouse',
+              buttons: 0,
+              clientX: r.left + 8,
+              clientY: r.top + 6,
+              screenX: 4000 + i * 40,
+              screenY: 4000 + i * 40,
+            }),
+          );
+        });
+      }, 60);
+    </script>
+  </body>
+</html>

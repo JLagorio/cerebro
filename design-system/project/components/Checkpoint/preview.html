@@ -1,0 +1,80 @@
+<!-- @dsCard group="AI conversation" height=241 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Checkpoint</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .thread {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 640px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .prose {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function noop() {}
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'thread' },
+          h(
+            C.Message,
+            { from: 'assistant' },
+            h(
+              C.MessageContent,
+              null,
+              h(
+                'p',
+                { className: 'prose' },
+                'The PRD plans a four-hour window from 22:00. I added the rollback path to OPS-4 and noted that receiving stays frozen until the smoke set passes.',
+              ),
+            ),
+          ),
+          h(C.Checkpoint, { turn: 'your message “Plan the Phoenix cutover”', onBranch: noop }),
+          h(
+            C.Message,
+            { from: 'user' },
+            h(
+              C.MessageContent,
+              null,
+              h(
+                C.Bubble,
+                null,
+                h(C.BubbleContent, null, 'Now draft the rollback note for Marcus.'),
+              ),
+            ),
+          ),
+          h('span', { className: 'cap' }, 'disabled while a send in this thread is still starting'),
+          h(C.Checkpoint, {
+            turn: 'your message “Now draft the rollback note for Marcus.”',
+            onBranch: noop,
+            disabled: true,
+          }),
+        ),
+      );
+    </script>
+  </body>
+</html>

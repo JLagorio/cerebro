@@ -1,0 +1,118 @@
+<!-- @dsCard group="Forms" height=184 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SegmentedControl</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .cap {
+        min-width: 72px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .note {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kids) {
+        return h('div', { className: 'row' }, h('span', { className: 'cap' }, cap), kids);
+      }
+      function Seg(props) {
+        var s = React.useState(props.initial),
+          v = s[0],
+          set = s[1];
+        return h(
+          C.SegmentedControl,
+          Object.assign({}, props, { initial: undefined, value: v, onChange: set }),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row('icons', [
+            h(Seg, {
+              key: 's',
+              ariaLabel: 'View mode',
+              initial: 'board',
+              options: [
+                { value: 'table', label: 'Table', icon: 'table-2' },
+                { value: 'list', label: 'List', icon: 'list' },
+                { value: 'board', label: 'Board', icon: 'columns-3' },
+                { value: 'calendar', label: 'Calendar', icon: 'calendar-days' },
+                { value: 'gallery', label: 'Gallery', icon: 'layout-grid' },
+              ],
+            }),
+            h('span', { key: 'n', className: 'note' }, 'Click or use the arrows; the pill slides'),
+          ]),
+          Row(
+            'text',
+            h(Seg, {
+              ariaLabel: 'Calendar span',
+              initial: 'week',
+              options: [
+                { value: 'month', label: 'Month' },
+                { value: 'week', label: 'Week' },
+                { value: 'day', label: 'Day' },
+              ],
+            }),
+          ),
+          Row(
+            'md',
+            h(Seg, {
+              ariaLabel: 'Theme',
+              size: 'md',
+              initial: 'system',
+              options: [
+                { value: 'light', label: 'Light', icon: 'sun' },
+                { value: 'dark', label: 'Dark', icon: 'moon' },
+                { value: 'system', label: 'System', icon: 'monitor' },
+              ],
+            }),
+          ),
+          Row(
+            'setting',
+            h(Seg, {
+              ariaLabel: 'Shell commands',
+              initial: 'ask',
+              options: [
+                { value: 'off', label: 'Off' },
+                { value: 'ask', label: 'Ask' },
+                { value: 'on', label: 'On' },
+              ],
+            }),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

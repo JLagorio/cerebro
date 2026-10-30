@@ -1,0 +1,124 @@
+<!-- @dsCard group="Forms" height=308 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Calendar</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 32px;
+        flex-wrap: wrap;
+      }
+      .cell {
+        width: 260px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var TODAY = '2026-07-28';
+      function Single() {
+        var m = React.useState('2026-09'),
+          month = m[0],
+          setMonth = m[1];
+        var d = React.useState('2026-09-18'),
+          date = d[0],
+          setDate = d[1];
+        return h(
+          'div',
+          { className: 'cell' },
+          h('span', { className: 'cap' }, 'single date · due ' + date),
+          h(C.Calendar, {
+            month: month,
+            onMonthChange: setMonth,
+            start: date,
+            onPick: setDate,
+            onToday: function () {
+              setMonth(TODAY.slice(0, 7));
+              setDate(TODAY);
+            },
+          }),
+        );
+      }
+      function Range() {
+        var m = React.useState('2026-09'),
+          month = m[0],
+          setMonth = m[1];
+        var r = React.useState({ start: '2026-08-28', end: '2026-09-18', next: 'start' }),
+          v = r[0],
+          set = r[1];
+        function pick(day) {
+          var n = v.next === 'start' ? { start: day, end: v.end } : { start: v.start, end: day };
+          if (n.end < n.start) {
+            var t = n.start;
+            n.start = n.end;
+            n.end = t;
+          }
+          n.next = v.next === 'start' ? 'end' : 'start';
+          set(n);
+        }
+        return h(
+          'div',
+          { className: 'cell' },
+          h('span', { className: 'cap' }, 'range · window ' + v.start + ' to ' + v.end),
+          h(C.Calendar, {
+            month: month,
+            onMonthChange: setMonth,
+            start: v.start,
+            end: v.end,
+            onPick: pick,
+          }),
+        );
+      }
+      function Timed() {
+        var m = React.useState('2026-07'),
+          month = m[0],
+          setMonth = m[1];
+        var d = React.useState(TODAY),
+          date = d[0],
+          setDate = d[1];
+        return h(
+          'div',
+          { className: 'cell' },
+          h('span', { className: 'cap' }, 'with time · todayLabel "Now"'),
+          h(C.Calendar, {
+            month: month,
+            onMonthChange: setMonth,
+            start: date,
+            onPick: setDate,
+            todayLabel: 'Now',
+            onToday: function () {
+              setMonth(TODAY.slice(0, 7));
+              setDate(TODAY);
+            },
+          }),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h('div', { className: 'row' }, h(Single), h(Range), h(Timed)),
+      );
+    </script>
+  </body>
+</html>

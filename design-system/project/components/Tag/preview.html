@@ -1,0 +1,122 @@
+<!-- @dsCard group="Data display" height=180 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tag</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        min-height: 28px;
+      }
+      .cap {
+        min-width: 72px;
+        margin-right: 4px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .narrow {
+        width: 180px;
+        display: flex;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kids) {
+        return h('div', { className: 'row' }, h('span', { className: 'cap' }, cap), kids);
+      }
+      var FILTERS = ['Status: In progress', 'Assignee: Maya Chen', 'Priority: High'];
+      function Filters() {
+        var s = React.useState(FILTERS),
+          list = s[0],
+          set = s[1];
+        return h(
+          React.Fragment,
+          null,
+          list.map(function (f) {
+            return h(
+              C.Tag,
+              {
+                key: f,
+                icon: 'list-filter',
+                onRemove: function () {
+                  set(
+                    list.filter(function (x) {
+                      return x !== f;
+                    }),
+                  );
+                },
+              },
+              f,
+            );
+          }),
+          list.length < FILTERS.length
+            ? h(
+                C.Button,
+                {
+                  size: 'sm',
+                  variant: 'ghost',
+                  icon: 'rotate-ccw',
+                  onClick: function () {
+                    set(FILTERS);
+                  },
+                },
+                'Reset',
+              )
+            : null,
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row('dot', [
+            h(C.Tag, { key: 'a', color: 'var(--swatch-teal)' }, 'Guided onboarding GA'),
+            h(C.Tag, { key: 'b', color: 'var(--swatch-blue)' }, 'Offline sync hardening'),
+            h(C.Tag, { key: 'c', color: 'var(--swatch-amber)' }, 'Field app launch campaign'),
+          ]),
+          Row('icon, plain', [
+            h(C.Tag, { key: 'a', icon: 'square-check' }, 'FLD-1 First-run walkthrough GA'),
+            h(C.Tag, { key: 'b', icon: 'user' }, 'Ana Rios'),
+            h(C.Tag, { key: 'c' }, 'XL'),
+          ]),
+          Row('removable', h(Filters)),
+          Row(
+            'truncates',
+            h(
+              'span',
+              { className: 'narrow' },
+              h(
+                C.Tag,
+                { color: 'var(--swatch-violet)' },
+                'Phoenix warehouse rollout, phase two cutover',
+              ),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

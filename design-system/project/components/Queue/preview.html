@@ -1,0 +1,155 @@
+<!-- @dsCard group="AI work" height=350 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Queue</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px 32px;
+        align-items: start;
+      }
+      .cell {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .note {
+        margin: 0;
+        color: var(--text-meta);
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro,
+        F = React.Fragment;
+      function Cell(cap) {
+        var kids = Array.prototype.slice.call(arguments, 1);
+        return h.apply(
+          null,
+          ['div', { className: 'cell' }, h('div', { className: 'cap' }, cap)].concat(kids),
+        );
+      }
+      function Act(label, icon) {
+        return h(
+          C.QueueItemAction,
+          icon ? { 'aria-label': label } : null,
+          icon ? h(C.Icon, { name: icon, size: 10 }) : label,
+        );
+      }
+
+      var live = [
+        { content: 'Read the Phoenix cutover standup notes', status: 'completed' },
+        { content: 'Check PHX-421 for the rollback rehearsal date', status: 'completed' },
+        {
+          content: 'Update the pick queue drain concept',
+          status: 'in_progress',
+          activeForm: 'Updating the pick queue drain concept',
+        },
+        { content: 'File a risk for the scanner firmware freeze', status: 'pending' },
+        { content: 'Summarize what changed for Dana', status: 'pending' },
+      ];
+      var stopped = [
+        { content: 'Draft the offline window FAQ', status: 'completed' },
+        {
+          content: 'Link the FAQ from the field app launch page',
+          status: 'in_progress',
+          activeForm: 'Linking the FAQ from the field app launch page',
+        },
+        { content: 'Ask Maya to review the wording', status: 'in_review' },
+      ];
+
+      var upNext = h(
+        C.Queue,
+        { render: h('section', { 'aria-label': 'Up next' }) },
+        h(
+          C.QueueSection,
+          {
+            label: 'Up next',
+            collapsible: false,
+            headingLevel: 3,
+            actions: Act('Resume'),
+          },
+          h('p', { className: 'note' }, 'Up next is on hold because the last turn stopped.'),
+          h(
+            C.QueueList,
+            null,
+            h(C.QueueItem, {
+              icon: 'corner-down-right',
+              title: 'Also link the kickoff meeting notes from the cutover PRD',
+              actions: h(
+                F,
+                null,
+                Act('Run now'),
+                Act('Edit', 'pencil'),
+                Act('Remove from Up next', 'x'),
+              ),
+            }),
+            h(C.QueueItem, {
+              icon: 'corner-down-right',
+              title: 'Then tell me which OPS items still have no owner',
+              actions: h(
+                F,
+                null,
+                Act('Run now'),
+                Act('Edit', 'pencil'),
+                Act('Remove from Up next', 'x'),
+              ),
+            }),
+          ),
+        ),
+      );
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          Cell(
+            'Plan while the run is live: the step under way in its present tense',
+            h(C.TodoQueue, { todos: live, isStreaming: true }),
+          ),
+          h(
+            'div',
+            { className: 'stack' },
+            Cell('Up next on hold, actions beside each item', upNext),
+            Cell(
+              'Plan after the run stopped: no working light, a status the CLI named',
+              h(C.TodoQueue, { todos: stopped, isStreaming: false }),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

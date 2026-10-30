@@ -1,0 +1,398 @@
+{
+  "$comment": "Usage notes and type styles for the design system (M100.1). scripts/design-system/build.ts reads every value from src/styles/tokens/*.css; this file holds only what CSS cannot say. A token with no note fails the build.",
+  "color": {
+    "n-0": "Base neutral. App ground and raised cards (via surface-app / surface-raised), secondary-button and input fills. Dark: the darkest app surface.",
+    "n-25": "Board ground (surface-board), hover wash on select triggers.",
+    "n-50": "Sunken wells, hover washes on buttons and menu rows, code and kbd grounds, disabled inputs.",
+    "n-100": "Segmented-control track, pressed washes, empty-state icon-well border, quiet dividers. Dark: raised surfaces.",
+    "n-200": "Hairlines (border-subtle): cards, menus, tags, select triggers.",
+    "n-300": "Control borders (border-strong): inputs, secondary buttons, switch track off. Scrollbar thumb.",
+    "n-400": "Disabled ink, placeholder icons and chevrons. Not for readable text: 3.4:1 on n-0 in light.",
+    "n-500": "Icon strokes in menus and inputs; tag remove glyph.",
+    "n-600": "Readable secondary text, metadata and placeholders (text-secondary/meta). Ghost button and icon-button ink.",
+    "n-700": "Tag and status-chip labels; menu item text.",
+    "n-800": "Strong body ink: secondary-button label, dialog body, hovered ghost buttons.",
+    "n-900": "Primary text (text-primary); tooltip ground in light theme.",
+    "cortex-50": "Selected-row and selected-node ground (surface-selected). Pairs with cortex-700 ink.",
+    "cortex-100": "Text selection highlight; hover on an active icon button.",
+    "cortex-200": "Cortex ultramarine, step 200. The primary brand ramp: links, focus, selection and the accent.",
+    "cortex-300": "Dark theme link ink (text-link) and diagram selection ring.",
+    "cortex-400": "Dark theme focus border and accent hover.",
+    "cortex-500": "THE accent: focus border, links (light), switch on, filled cortex controls. Holds a white label at 5.6:1 in both themes.",
+    "cortex-600": "Link ink at 12–13px (concept and source links), active icon-button glyph, menu check marks; AA on every neutral surface in both themes. Dark: #899df1, too light for a white label, so hover fills on it carry n-0 ink.",
+    "cortex-700": "Ink on a cortex-50 ground (selected sidebar row, block chips). Dark: becomes the light 200 tint.",
+    "cortex-800": "Cortex ultramarine, step 800. The primary brand ramp: links, focus, selection and the accent.",
+    "cortex-900": "Cortex ultramarine, step 900. The primary brand ramp: links, focus, selection and the accent.",
+    "synapse-50": "AI surface ground (surface-ai): assistant cards, AI blocks. AI only.",
+    "synapse-100": "Synapse violet, step 100. AI surfaces ONLY: never for non-AI chrome.",
+    "synapse-200": "Synapse violet, step 200. AI surfaces ONLY: never for non-AI chrome.",
+    "synapse-300": "Dark theme AI ink (text-ai). AI only.",
+    "synapse-400": "Synapse violet, step 400. AI surfaces ONLY: never for non-AI chrome.",
+    "synapse-500": "AI tone icon (toasts, sparkles). AI only.",
+    "synapse-600": "AI ink (text-ai in light; text-synapse-600 in both themes); AA on every neutral surface. AI only.",
+    "synapse-700": "AI ink on a synapse-50 ground. AI only.",
+    "success-50": "Success banner and row ground; pairs with success-700 ink.",
+    "success-500": "Success icon and dot. Not for body text on white.",
+    "success-600": "Success text on every neutral surface, both themes (AA, contrast.test.ts).",
+    "success-700": "Success ink on success-50 (and on neutral surfaces).",
+    "warn-50": "Warning banner and row ground; pairs with warn-700 ink.",
+    "warn-300": "Warning hairline/border on warn-50 grounds.",
+    "warn-500": "Warning icon and dot. Not for body text on white.",
+    "warn-600": "Warning text on every neutral surface, both themes (AA). Amber only reaches 4.5:1 near the 700 step, so 600 and 700 sit close in light.",
+    "warn-700": "Warning ink on warn-50 (and on neutral surfaces).",
+    "danger-50": "Danger banner and row ground; pairs with danger-700 ink.",
+    "danger-200": "Error banner border on danger-50; unavailable-section border.",
+    "danger-500": "Danger icon and dot. Not for body text on white.",
+    "danger-600": "Destructive menu item text; danger text on every neutral surface (AA).",
+    "danger-700": "Danger ink on danger-50 (and on neutral surfaces).",
+    "ent-objective": "Entity identity colour for Objective records: icons and dots, never text.",
+    "ent-keyresult": "Entity identity colour for Key result records: icons and dots, never text.",
+    "ent-initiative": "Entity identity colour for Initiative records: icons and dots, never text.",
+    "ent-feature": "Entity identity colour for Feature records: icons and dots, never text.",
+    "ent-subfeature": "Entity identity colour for Sub-feature records: icons and dots, never text.",
+    "ent-product": "Entity identity colour for Product records: icons and dots, never text.",
+    "ent-component": "Entity identity colour for Component records: icons and dots, never text.",
+    "ent-release": "Entity identity colour for Release records: icons and dots, never text.",
+    "ent-releasegroup": "Entity identity colour for Release group records: icons and dots, never text.",
+    "ent-company": "Entity identity colour for Company records: icons and dots, never text.",
+    "ent-user": "Entity identity colour for User records: icons and dots, never text.",
+    "swatch-amber": "User-assignable swatch (amber): type icons, kanban cards, timeline bars, tag dots. A fill, never text on white.",
+    "swatch-blue": "User-assignable swatch (blue): type icons, kanban cards, timeline bars, tag dots. A fill, never text on white.",
+    "swatch-teal": "User-assignable swatch (teal): type icons, kanban cards, timeline bars, tag dots. A fill, never text on white.",
+    "swatch-green": "User-assignable swatch (green): type icons, kanban cards, timeline bars, tag dots. A fill, never text on white.",
+    "swatch-violet": "User-assignable swatch (violet): type icons, kanban cards, timeline bars, tag dots. A fill, never text on white.",
+    "swatch-magenta": "User-assignable swatch (magenta): type icons, kanban cards, timeline bars, tag dots. A fill, never text on white.",
+    "swatch-vermilion": "User-assignable swatch (vermilion): type icons, kanban cards, timeline bars, tag dots. A fill, never text on white.",
+    "swatch-sky": "User-assignable swatch (sky): type icons, kanban cards, timeline bars, tag dots. A fill, never text on white.",
+    "opt-gray": "Option colour gray: the dot / solid fill of a select option, tag or workflow status.",
+    "opt-gray-bg": "Pill ground behind a gray tag (about 13% of the hue).",
+    "opt-gray-ink": "Text on opt-gray-bg; holds at least 4.5:1 on it in both themes.",
+    "opt-brown": "Option colour brown: the dot / solid fill of a select option, tag or workflow status.",
+    "opt-brown-bg": "Pill ground behind a brown tag (about 13% of the hue).",
+    "opt-brown-ink": "Text on opt-brown-bg; holds at least 4.5:1 on it in both themes.",
+    "opt-orange": "Option colour orange: the dot / solid fill of a select option, tag or workflow status.",
+    "opt-orange-bg": "Pill ground behind a orange tag (about 13% of the hue).",
+    "opt-orange-ink": "Text on opt-orange-bg; holds at least 4.5:1 on it in both themes.",
+    "opt-yellow": "Option colour yellow: the dot / solid fill of a select option, tag or workflow status.",
+    "opt-yellow-bg": "Pill ground behind a yellow tag (about 13% of the hue).",
+    "opt-yellow-ink": "Text on opt-yellow-bg; holds at least 4.5:1 on it in both themes.",
+    "opt-green": "Option colour green: the dot / solid fill of a select option, tag or workflow status.",
+    "opt-green-bg": "Pill ground behind a green tag (about 13% of the hue).",
+    "opt-green-ink": "Text on opt-green-bg; holds at least 4.5:1 on it in both themes.",
+    "opt-blue": "Option colour blue: the dot / solid fill of a select option, tag or workflow status.",
+    "opt-blue-bg": "Pill ground behind a blue tag (about 13% of the hue).",
+    "opt-blue-ink": "Text on opt-blue-bg; holds at least 4.5:1 on it in both themes.",
+    "opt-purple": "Option colour purple: the dot / solid fill of a select option, tag or workflow status.",
+    "opt-purple-bg": "Pill ground behind a purple tag (about 13% of the hue).",
+    "opt-purple-ink": "Text on opt-purple-bg; holds at least 4.5:1 on it in both themes.",
+    "opt-pink": "Option colour pink: the dot / solid fill of a select option, tag or workflow status.",
+    "opt-pink-bg": "Pill ground behind a pink tag (about 13% of the hue).",
+    "opt-pink-ink": "Text on opt-pink-bg; holds at least 4.5:1 on it in both themes.",
+    "opt-red": "Option colour red: the dot / solid fill of a select option, tag or workflow status.",
+    "opt-red-bg": "Pill ground behind a red tag (about 13% of the hue).",
+    "opt-red-ink": "Text on opt-red-bg; holds at least 4.5:1 on it in both themes.",
+    "action-primary": "Filled primary button. Graphite in light, near-white in dark.",
+    "action-primary-hover": "Primary button hover.",
+    "action-primary-press": "Primary button pressed.",
+    "on-action-primary": "Label on action-primary (and its hover/press), both themes.",
+    "action-danger": "Filled destructive button.",
+    "action-danger-hover": "Destructive button hover.",
+    "action-danger-press": "Destructive button pressed.",
+    "on-action-danger": "Label on action-danger, both themes.",
+    "avatar-1": "Avatar ground #1, picked by a hash of the name. White initials clear 4.5:1.",
+    "avatar-2": "Avatar ground #2, picked by a hash of the name. White initials clear 4.5:1.",
+    "avatar-3": "Avatar ground #3, picked by a hash of the name. White initials clear 4.5:1.",
+    "avatar-4": "Avatar ground #4, picked by a hash of the name. White initials clear 4.5:1.",
+    "avatar-5": "Avatar ground #5, picked by a hash of the name. White initials clear 4.5:1.",
+    "avatar-6": "Avatar ground #6, picked by a hash of the name. White initials clear 4.5:1.",
+    "avatar-7": "Avatar ground #7, picked by a hash of the name. White initials clear 4.5:1.",
+    "avatar-8": "Avatar ground #8, picked by a hash of the name. White initials clear 4.5:1.",
+    "status-idea": "Workflow status flag fill: New idea. Glyph colour only; the label carries the meaning.",
+    "status-planned": "Workflow status flag fill: Planned. Glyph colour only; the label carries the meaning.",
+    "status-progress": "Workflow status flag fill: In progress. Glyph colour only; the label carries the meaning.",
+    "status-validation": "Workflow status flag fill: Validation. Glyph colour only; the label carries the meaning.",
+    "status-released": "Workflow status flag fill: Released. Glyph colour only; the label carries the meaning.",
+    "status-wontdo": "Workflow status flag fill: Won't do. Glyph colour only; the label carries the meaning.",
+    "health-on": "Health dot: on track. Always paired with a word.",
+    "health-risk": "Health dot: at risk. Always paired with a word.",
+    "health-off": "Health dot: off track. Always paired with a word.",
+    "health-none": "Health dot: not set.",
+    "surface-frame": "Window frame and the icon rail: a step darker than navigation.",
+    "surface-navigation": "Context sidebar background; the canvas’s rounded corner rests on it.",
+    "surface-app": "Main canvas and page background.",
+    "surface-board": "Whiteboard and board views; a breath off surface-app.",
+    "surface-sunken": "Sunken wells: state messages, code, inset panels.",
+    "surface-raised": "Cards, menus, popovers, dialogs. Light: white on a tinted ground; dark: lighter than the ground.",
+    "surface-selected": "Selected row or item ground.",
+    "surface-ai": "AI-authored surface ground. AI only.",
+    "canvas-dot": "Whiteboard dot grid: 1px dots on a 24px pitch over surface-board.",
+    "canvas-1": "JSON Canvas preset colour 1 (red); files store only the digit.",
+    "canvas-2": "JSON Canvas preset colour 2 (orange); files store only the digit.",
+    "canvas-3": "JSON Canvas preset colour 3 (yellow); files store only the digit.",
+    "canvas-4": "JSON Canvas preset colour 4 (green); files store only the digit.",
+    "canvas-5": "JSON Canvas preset colour 5 (cyan); files store only the digit.",
+    "canvas-6": "JSON Canvas preset colour 6 (purple); files store only the digit.",
+    "text-primary": "Body and title text on every surface-* ground, both themes.",
+    "text-secondary": "Secondary text on every neutral surface, both themes (≥4.5:1).",
+    "text-muted": "Muted helper text; same value as text-secondary so it stays readable.",
+    "text-meta": "Metadata (timestamps, counts) on every neutral surface.",
+    "text-disabled": "Disabled labels only. Deliberately below 4.5:1: never for content.",
+    "text-placeholder": "Input placeholders; readable, not dimmed.",
+    "text-inverse": "Always white: labels on accent, cortex-500 fills and avatar grounds, both themes. Replaces text-white. Not for tooltips (they use n-0 on n-900).",
+    "text-link": "Links on surface-app, surface-raised and surface-sunken.",
+    "text-ai": "AI-attributed text on surface-app and surface-ai. AI only.",
+    "border-subtle": "Default hairline: cards, menus, tags, dividers.",
+    "border-strong": "Control borders: inputs, secondary buttons.",
+    "border-focus": "Focus border on every control; paired with the ring shadow.",
+    "diagram-selection-ring": "Ring around a selected diagram node (on cortex-50).",
+    "accent": "Brand accent: switch on, focus, filled cortex controls. White label on it.",
+    "accent-hover": "Accent hover; link hover.",
+    "accent-press": "Accent pressed.",
+    "scrim": "Veil behind dialogs and drawers."
+  },
+  "spacing": {
+    "sp-05": "Hairline gaps: segmented-control padding.",
+    "sp-1": "Icon-to-label nudges; state-message description gap.",
+    "sp-2": "Default gap between inline controls and nav-row parts.",
+    "sp-3": "State-message gap and compact padding.",
+    "sp-4": "Card and state-message padding; narrow composition inset.",
+    "sp-5": "Dialog header right inset.",
+    "sp-6": "Dialog body inset; composition inset from 600px.",
+    "sp-8": "Page inset (surface-inset); composition inset from 960px.",
+    "sp-10": "Data-page header top padding.",
+    "sp-12": "Bottom breathing room under page content.",
+    "sp-16": "Largest step: section separation on Home."
+  },
+  "radius": {
+    "r-xs": "kbd and inline code.",
+    "r-sm": "Tags, status chips, icon buttons, menu rows, segments, tooltips.",
+    "r-md": "Buttons, inputs, selects, nav rows, segmented track, state messages.",
+    "r-lg": "Menus, toasts, empty-state icon well.",
+    "r-xl": "Dialogs.",
+    "r-full": "Switch track, scrollbar thumb, pills."
+  },
+  "shadow": {
+    "shadow-xs": "Selected segment pill, switch knob.",
+    "shadow-sm": "Resting cards that lift off the ground.",
+    "shadow-md": "Popovers and hover cards.",
+    "shadow-lg": "Menus, toasts, dialogs, tooltips.",
+    "ring": "Focus ring: 3px of accent at 25% (45% in dark), with border-focus."
+  },
+  "size": {
+    "rail-w": "Width of the persistent icon rail.",
+    "sidebar-w": "Default width of the resizable context sidebar.",
+    "surface-inset": "Page side inset.",
+    "surface-readable": "Readable measure for documents.",
+    "surface-broad": "Broad measure for databases and Home.",
+    "nav-row-h": "Sidebar navigation row height.",
+    "control-h": "Default control height: buttons md, inputs, selects.",
+    "control-h-sm": "Small controls: toolbars, property rows.",
+    "control-h-lg": "Large controls."
+  },
+  "fontWeight": {
+    "w-regular": "Body and UI text.",
+    "w-medium": "Buttons, tags, segment labels, state-message titles.",
+    "w-semibold": "Titles, toast titles, dialog heads.",
+    "w-bold": "Avatar initials only."
+  },
+  "letterSpacing": {
+    "track-tight": "Dialog and section titles, empty-state headlines.",
+    "track-display": "Display and workspace titles.",
+    "track-caps": "Uppercase labels (menu groups, AI section labels)."
+  },
+  "type": {
+    "fonts": [
+      {
+        "family": "Instrument Sans",
+        "file": "fonts/InstrumentSans-Variable.ttf",
+        "weight": "400 700",
+        "style": "normal"
+      },
+      {
+        "family": "Instrument Sans",
+        "file": "fonts/InstrumentSans-Italic-Variable.ttf",
+        "weight": "400 700",
+        "style": "italic"
+      },
+      {
+        "family": "IBM Plex Mono",
+        "file": "fonts/IBMPlexMono-Regular.ttf",
+        "weight": "400",
+        "style": "normal"
+      },
+      {
+        "family": "IBM Plex Mono",
+        "file": "fonts/IBMPlexMono-Medium.ttf",
+        "weight": "500",
+        "style": "normal"
+      },
+      {
+        "family": "IBM Plex Mono",
+        "file": "fonts/IBMPlexMono-SemiBold.ttf",
+        "weight": "600",
+        "style": "normal"
+      }
+    ],
+    "groups": [
+      {
+        "name": "Roles",
+        "family": "ui",
+        "styles": [
+          {
+            "name": "page-title",
+            "fontWeight": 600,
+            "letterSpacing": "-0.025em",
+            "sample": "Quarterly planning",
+            "usage": "The page title above a document body (first H1). Compact panes drop to workspace-title.",
+            "size": "fs-page-title",
+            "line": "lh-page-title"
+          },
+          {
+            "name": "workspace-title",
+            "fontWeight": 600,
+            "letterSpacing": "-0.02em",
+            "sample": "Knowledge",
+            "usage": "Peek and workspace titles; page titles in compact panes.",
+            "size": "fs-workspace-title",
+            "line": "lh-workspace-title"
+          },
+          {
+            "name": "section-title",
+            "fontWeight": 600,
+            "letterSpacing": "-0.01em",
+            "sample": "Waiting on you",
+            "usage": "Section heads, dialog titles, empty-state headlines.",
+            "size": "fs-section-title",
+            "line": "lh-section-title"
+          },
+          {
+            "name": "prose",
+            "fontWeight": 400,
+            "sample": "Captures land here untyped. Giving a note a type is what takes it out of the Inbox.",
+            "usage": "Document body text in the editor.",
+            "size": "fs-prose",
+            "line": "lh-prose"
+          },
+          {
+            "name": "ui",
+            "fontWeight": 400,
+            "sample": "Every change in this vault is saved to history.",
+            "usage": "Standard UI text: controls, menus, dialogs, nav rows.",
+            "size": "fs-ui",
+            "line": "lh-ui"
+          },
+          {
+            "name": "meta",
+            "fontWeight": 400,
+            "sample": "Edited 3 hours ago · not recorded",
+            "usage": "Metadata, small controls, toast descriptions.",
+            "size": "fs-meta",
+            "line": "lh-meta"
+          }
+        ]
+      },
+      {
+        "name": "Scale",
+        "family": "ui",
+        "styles": [
+          {
+            "name": "text-4xl",
+            "fontWeight": 600,
+            "letterSpacing": "-0.02em",
+            "sample": "Editorial display",
+            "usage": "Editorial display, kept for authored content only.",
+            "size": "fs-4xl",
+            "line": "lh-4xl"
+          },
+          {
+            "name": "text-3xl",
+            "fontWeight": 600,
+            "letterSpacing": "-0.02em",
+            "sample": "Display",
+            "usage": "Display step.",
+            "size": "fs-3xl",
+            "line": "lh-3xl"
+          },
+          {
+            "name": "text-2xl",
+            "fontWeight": 600,
+            "sample": "Heading 1",
+            "usage": "Document H1 inside a body.",
+            "size": "fs-2xl",
+            "line": "lh-2xl"
+          },
+          {
+            "name": "text-xl",
+            "fontWeight": 600,
+            "sample": "Heading 2",
+            "usage": "Document H2; compact page titles.",
+            "size": "fs-xl",
+            "line": "lh-xl"
+          },
+          {
+            "name": "text-lg",
+            "fontWeight": 600,
+            "sample": "Dialog title",
+            "usage": "Dialog titles (600, tracking-tight).",
+            "size": "fs-lg",
+            "line": "lh-lg"
+          },
+          {
+            "name": "text-md",
+            "fontWeight": 400,
+            "sample": "Large button label",
+            "usage": "Large button labels.",
+            "size": "fs-md",
+            "line": "lh-md"
+          },
+          {
+            "name": "text-sm",
+            "fontWeight": 400,
+            "sample": "The base UI size of the app body",
+            "usage": "Base UI: the body default, switches, sidebar rows.",
+            "size": "fs-sm",
+            "line": "lh-sm"
+          },
+          {
+            "name": "text-xs",
+            "fontWeight": 500,
+            "sample": "Tag label",
+            "usage": "Tags, status chips, small buttons, segmented labels.",
+            "size": "fs-xs",
+            "line": "lh-xs"
+          },
+          {
+            "name": "text-2xs",
+            "fontWeight": 400,
+            "sample": "Shortcut hint · Table",
+            "usage": "Menu hints and current values; uppercase group labels (500).",
+            "size": "fs-2xs",
+            "line": "lh-2xs"
+          }
+        ]
+      },
+      {
+        "name": "Mono",
+        "family": "mono",
+        "styles": [
+          {
+            "name": "code",
+            "fontSize": "12px",
+            "lineHeight": "16px",
+            "fontWeight": 400,
+            "sample": "expect_hash: 9f8e7d6",
+            "usage": "Inline code, paths, hashes, ids."
+          },
+          {
+            "name": "kbd",
+            "fontSize": "11px",
+            "lineHeight": "16px",
+            "fontWeight": 500,
+            "sample": "⌘K",
+            "usage": "Keycaps in tooltips, menus and Settings."
+          }
+        ]
+      }
+    ]
+  }
+}

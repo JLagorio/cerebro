@@ -1,0 +1,129 @@
+<!-- @dsCard group="Forms" height=300 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>IconPicker</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 24px;
+        flex-wrap: wrap;
+      }
+      .cell {
+        width: 290px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .preview {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border: 1px solid var(--n-200);
+        border-radius: var(--r-lg);
+        background: var(--n-25);
+        font-size: var(--fs-sm);
+        color: var(--n-800);
+      }
+      .preview span:last-child {
+        margin-left: auto;
+        font-size: var(--fs-2xs);
+        color: var(--n-400);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      // Types a starting search into the picker's own field, as a person would.
+      function Searched(props) {
+        var ref = React.useRef(null);
+        React.useEffect(function () {
+          if (!props.query) return;
+          var input = ref.current.querySelector('input');
+          var set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+          set.call(input, props.query);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }, []);
+        return h('div', { ref: ref }, props.children);
+      }
+      function TypeIcon() {
+        var s = React.useState('folder-kanban'),
+          icon = s[0],
+          set = s[1];
+        return h(
+          'div',
+          { className: 'cell' },
+          h('span', { className: 'cap' }, 'type icon, tinted · searched "folder"'),
+          h(
+            Searched,
+            { query: 'folder' },
+            h(C.IconPicker, { value: icon, onChange: set, color: '#14B8A6' }),
+          ),
+          h(
+            'div',
+            { className: 'preview' },
+            h(C.Icon, { name: icon, size: 16, color: '#14B8A6' }),
+            h('span', null, 'Project'),
+            h('span', null, 'Preview'),
+          ),
+        );
+      }
+      function TabIcon() {
+        var s = React.useState(null),
+          icon = s[0],
+          set = s[1];
+        return h(
+          'div',
+          { className: 'cell' },
+          h('span', { className: 'cap' }, 'view tab · clear tile chosen'),
+          h(C.IconPicker, {
+            value: icon,
+            onChange: set,
+            clear: {
+              label: 'Use the board icon',
+              icon: 'columns-3',
+              onClear: function () {
+                set(null);
+              },
+            },
+          }),
+        );
+      }
+      function Empty() {
+        return h(
+          'div',
+          { className: 'cell', style: { width: 240 } },
+          h('span', { className: 'cap' }, 'no match · 6 columns'),
+          h(
+            Searched,
+            { query: 'roadmapp' },
+            h(C.IconPicker, { value: null, onChange: function () {}, columns: 6, maxHeight: 120 }),
+          ),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h('div', { className: 'row' }, h(TypeIcon), h(TabIcon), h(Empty)),
+      );
+    </script>
+  </body>
+</html>

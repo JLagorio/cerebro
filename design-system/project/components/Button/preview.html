@@ -1,0 +1,64 @@
+<!-- @dsCard group="Actions" height=132 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Button</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .cap {
+        min-width: 72px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kids) {
+        return h('div', { className: 'row' }, h('span', { className: 'cap' }, cap), kids);
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row('variants', [
+            h(C.Button, { key: 'p', variant: 'primary' }, 'Publish'),
+            h(C.Button, { key: 's' }, 'Cancel'),
+            h(C.Button, { key: 'g', variant: 'ghost' }, 'Show table'),
+            h(C.Button, { key: 'd', variant: 'danger', icon: 'trash-2' }, 'Delete'),
+          ]),
+          Row('sizes', [
+            h(C.Button, { key: 'sm', size: 'sm', icon: 'plus' }, 'New'),
+            h(C.Button, { key: 'md', icon: 'plus' }, 'New'),
+            h(C.Button, { key: 'lg', size: 'lg', icon: 'plus' }, 'New'),
+            h(C.Button, { key: 'x', variant: 'primary', disabled: true }, 'Import'),
+          ]),
+        ),
+      );
+    </script>
+  </body>
+</html>

@@ -1,0 +1,143 @@
+<!-- @dsCard group="AI work" height=326 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Trace</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 780px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+      }
+      .cap {
+        padding-top: 1px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kid) {
+        return h(
+          'div',
+          { className: 'row' },
+          h('span', { className: 'cap' }, cap),
+          h('div', null, kid),
+        );
+      }
+      function I(name) {
+        return h(C.TraceIcon, null, h(C.Icon, { name: name, size: 16 }));
+      }
+      function Line(props, icon, title, desc) {
+        return h(
+          C.TraceLine,
+          props,
+          I(icon),
+          h(C.TraceTitle, null, title),
+          desc === undefined ? null : h(C.TraceDescription, null, desc),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row(
+            'lines',
+            h(
+              C.Trace,
+              null,
+              Line({}, 'file-text', 'Read cutover-prd.md', '417ms'),
+              Line(
+                { status: 'running', statusText: null },
+                'search',
+                'Searching notes for rollback',
+              ),
+              Line({ status: 'error', statusText: null }, 'circle-x', 'Failed to read ops-12.md'),
+              Line({ status: 'pending' }, 'circle', 'Rehearse the rollback in staging'),
+            ),
+          ),
+          Row(
+            'indicator',
+            h(
+              C.Trace,
+              null,
+              h(
+                C.TraceLine,
+                null,
+                I('forward'),
+                h(C.TraceTitle, null, 'Handed to release-scout'),
+                I('arrow-up-right'),
+              ),
+            ),
+          ),
+          Row(
+            'row, opened',
+            h(
+              C.Trace,
+              null,
+              h(
+                C.TraceCollapsible,
+                { defaultOpen: true },
+                h(C.TraceCollapsibleTrigger, null, Line({}, 'brain', 'Thought for 12s')),
+                h(
+                  C.TraceCollapsibleContent,
+                  null,
+                  'The cutover PRD puts go-live on 30 July, but OPS-9 has no date and the rollback risk says it has never been rehearsed. Check what else blocks a rehearsal before suggesting dates.',
+                ),
+              ),
+            ),
+          ),
+          Row(
+            'row, closed',
+            h(
+              C.Trace,
+              null,
+              h(
+                C.TraceCollapsible,
+                null,
+                h(C.TraceCollapsibleTrigger, null, Line({}, 'file-text', 'Read 5 notes', '2.1s')),
+                h(C.TraceCollapsibleContent, null, 'Five notes.'),
+              ),
+              h(
+                C.TraceCollapsible,
+                null,
+                h(
+                  C.TraceCollapsibleTrigger,
+                  null,
+                  Line(
+                    { status: 'error', statusText: null },
+                    'circle-x',
+                    'Failed to search the web',
+                  ),
+                ),
+                h(C.TraceCollapsibleContent, null, 'Request timed out.'),
+              ),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

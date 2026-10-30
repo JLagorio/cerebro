@@ -1,0 +1,168 @@
+<!-- @dsCard group="AI work" height=745 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tool</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 780px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+      }
+      .cap {
+        padding-top: 1px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .target {
+        font-family: var(--font-mono);
+        font-size: var(--fs-2xs);
+        color: var(--n-500);
+      }
+      .target.write {
+        color: var(--cortex-700);
+      }
+      .act {
+        padding: 2px 6px;
+        border: 1px solid var(--n-200);
+        border-radius: var(--r-md);
+        background: var(--n-0);
+        color: var(--n-600);
+        font: inherit;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        cursor: pointer;
+      }
+      .act:hover {
+        border-color: var(--n-400);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro,
+        F = React.Fragment;
+      var theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+      function Target(text, write) {
+        return h('span', { className: write ? 'target write' : 'target' }, text);
+      }
+      function Row(cap, kid) {
+        return h(
+          'div',
+          { className: 'row' },
+          h('span', { className: 'cap' }, cap),
+          h('div', null, kid),
+        );
+      }
+      var OPS9 = 'projects/phoenix-warehouse-rollout/items/ops-9.md';
+      var OPS4 = 'projects/phoenix-warehouse-rollout/items/ops-4.md';
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row(
+            'running',
+            h(C.Tool, {
+              status: 'running',
+              icon: 'file-text',
+              title: h(
+                F,
+                null,
+                'get note ',
+                Target('projects/phoenix-warehouse-rollout/cutover-prd.md'),
+              ),
+              input: '{"path":"projects/phoenix-warehouse-rollout/cutover-prd.md"}',
+              theme: theme,
+            }),
+          ),
+          Row(
+            'done, opened',
+            h(C.Tool, {
+              status: 'done',
+              icon: 'replace',
+              defaultOpen: true,
+              theme: theme,
+              title: h(F, null, 'Edited a note ', Target(OPS9, true)),
+              input: JSON.stringify({
+                path: OPS9,
+                edits: [
+                  {
+                    old: 'Rehearse once before go-live.',
+                    new: 'Rehearse twice in staging before go-live: on 24 and 29 July.',
+                  },
+                ],
+                expect_hash: '5f1c0a7d9e3b42c8a1f06e95b7d2c4a38e10f9b6d5a27c3e8f4b19d0a6c2e7f1',
+              }),
+              output:
+                'Edited ' +
+                OPS9 +
+                ': 1 edit; nothing outside the quoted text changed.\n  1. now at line 14\nHash: fb3d39b0742fc250a926dabd072a0833abe0d65efc88b3bcd3291996ad88133d',
+              actions: h(
+                F,
+                null,
+                h('button', { type: 'button', className: 'act' }, 'Open'),
+                h('button', { type: 'button', className: 'act' }, 'View diff'),
+              ),
+            }),
+          ),
+          Row(
+            'failed, opened',
+            h(C.Tool, {
+              status: 'failed',
+              icon: 'replace',
+              defaultOpen: true,
+              theme: theme,
+              title: h(F, null, 'Failed to edit a note ', Target(OPS4, true)),
+              output:
+                'stale_content: ' +
+                OPS4 +
+                ' changed since you read it, so nothing was written. Read it again with get_note and decide whether your change still applies.',
+            }),
+          ),
+          Row(
+            'connector',
+            h(C.Tool, {
+              status: 'done',
+              icon: 'plug',
+              title: 'list issues',
+              server: 'linear',
+              description: '1.4s',
+              theme: theme,
+              input: '{"team":"OPS","state":"In Progress"}',
+              output:
+                '[{"id":"OPS-212","title":"Scanner firmware 4.2 rollout"},{"id":"OPS-219","title":"Dock door labels"}]',
+            }),
+          ),
+          Row(
+            'denied',
+            h(C.Tool, {
+              status: 'denied',
+              icon: 'terminal',
+              title: h(F, null, 'Denied: Bash ', Target('git push origin main')),
+            }),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

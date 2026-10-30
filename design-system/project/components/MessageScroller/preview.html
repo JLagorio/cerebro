@@ -1,0 +1,182 @@
+<!-- @dsCard group="AI conversation" height=388 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MessageScroller</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px;
+        align-items: start;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 28px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .frame {
+        height: 320px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-lg);
+        background: var(--surface-app);
+        overflow: hidden;
+      }
+      .pad {
+        padding: 16px 16px 48px;
+      }
+      .prose {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var seed = [
+        [
+          'q1',
+          'What is at risk on the Phoenix cutover?',
+          'Two things. The pick queue drain time is above the 20-minute line the playbook sets, and OPS-4 still has no rollback owner.',
+        ],
+        [
+          'q2',
+          'Is the four-hour window realistic?',
+          'Only if the smoke set runs in parallel. The kickoff notes timed it at 95 minutes on its own, which leaves under an hour for the unfreeze.',
+        ],
+        [
+          'q3',
+          'Draft the rollback note for Marcus.',
+          'Drafted below. It names the freeze point, the three checks before receiving unfreezes, and who calls the rollback.',
+        ],
+      ];
+      var more = [
+        [
+          'Which concepts back the drain-time threshold?',
+          'Pick queue drain time, verified last week, and the warehouse cutover playbook. Both cite the pilot’s numbers.',
+        ],
+        [
+          'Add the window to OPS-4.',
+          'Done: OPS-4 now carries the 22:00 to 02:00 window and links the PRD.',
+        ],
+      ];
+      function Rows(turns) {
+        return turns.flatMap(function (t) {
+          return [
+            h(
+              C.MessageScrollerItem,
+              { key: t[0] + 'q', messageId: t[0] + 'q', scrollAnchor: true },
+              h(
+                C.Message,
+                { from: 'user' },
+                h(C.MessageContent, null, h(C.Bubble, null, h(C.BubbleContent, null, t[1]))),
+              ),
+            ),
+            h(
+              C.MessageScrollerItem,
+              { key: t[0] + 'a', messageId: t[0] + 'a' },
+              h(
+                C.Message,
+                { from: 'assistant' },
+                h(C.MessageContent, null, h('p', { className: 'prose' }, t[2])),
+              ),
+            ),
+          ];
+        });
+      }
+      function Frame(props) {
+        return h(
+          'div',
+          { className: 'frame' },
+          h(
+            C.MessageScrollerProvider,
+            { autoScroll: props.autoScroll, defaultScrollPosition: props.position },
+            h(
+              C.MessageScroller,
+              null,
+              h(
+                C.MessageScrollerViewport,
+                { 'aria-label': 'Messages' },
+                h(C.MessageScrollerContent, { className: 'pad' }, Rows(props.turns)),
+              ),
+              h(C.MessageScrollerButton, { direction: props.jump }),
+            ),
+          ),
+        );
+      }
+      function Live() {
+        var s = React.useState(seed),
+          turns = s[0],
+          setTurns = s[1];
+        var next = more[(turns.length - seed.length) % more.length];
+        return h(
+          'div',
+          { className: 'col' },
+          h(
+            'div',
+            { className: 'head' },
+            h('span', { className: 'cap' }, 'end, following: a new question settles near the top'),
+            h(
+              C.Button,
+              {
+                size: 'sm',
+                icon: 'arrow-up',
+                onClick: function () {
+                  setTurns(turns.concat([['n' + turns.length, next[0], next[1]]]));
+                },
+              },
+              'Ask another',
+            ),
+          ),
+          h(Frame, { turns: turns, position: 'end', autoScroll: true, jump: 'start' }),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          h(
+            'div',
+            { className: 'col' },
+            h(
+              'div',
+              { className: 'head' },
+              h(
+                'span',
+                { className: 'cap' },
+                'start, released: Jump to latest shows while there is more below',
+              ),
+            ),
+            h(Frame, { turns: seed, position: 'start', autoScroll: false, jump: 'end' }),
+          ),
+          h(Live),
+        ),
+      );
+    </script>
+  </body>
+</html>

@@ -1,0 +1,233 @@
+<!-- @dsCard group="AI layout" height=784 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Rail</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        gap: 24px;
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+      .pane {
+        width: 300px;
+        flex: none;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-lg);
+        background: var(--surface-app);
+      }
+      .cap {
+        display: block;
+        margin: 0 0 8px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .figure {
+        margin: 0 0 8px;
+        color: var(--text-primary);
+        font-size: var(--fs-xs);
+        line-height: var(--lh-xs);
+      }
+      .steps {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var categories = [
+        { key: 'sp', name: 'System prompt', tokens: 6797, kind: 'used' },
+        { key: 'st', name: 'System tools', tokens: 11840, kind: 'used' },
+        { key: 'mcp', name: 'MCP tools', tokens: 412, kind: 'used' },
+        { key: 'mem', name: 'Memory files', tokens: 1630, kind: 'used' },
+        { key: 'msg', name: 'Messages', tokens: 103321, kind: 'used' },
+        { key: 'def', name: 'MCP tools (deferred)', tokens: 438, kind: 'deferred' },
+        { key: 'buf', name: 'Autocompact buffer', tokens: 33000, kind: 'buffer' },
+        { key: 'free', name: 'Free space', tokens: 43000, kind: 'free' },
+      ];
+      function Todo(status, title) {
+        return h(C.QueueItem, { key: title, status: status, title: title });
+      }
+
+      var ready = h(
+        'div',
+        null,
+        h('span', { className: 'cap' }, 'Mid-turn: what waits, what is planned, what happened'),
+        h(
+          'div',
+          { className: 'pane' },
+          h(
+            C.Rail,
+            { title: 'Conversation details' },
+            h(
+              C.RailSection,
+              { key: 'w', title: 'Waiting on you', icon: 'clock', state: 'ready' },
+              h(
+                C.Trace,
+                null,
+                h(C.StepHead, {
+                  status: 'waiting',
+                  icon: 'square-terminal',
+                  title: 'Run this command?',
+                  progress: 'Asked by the cerebro-researcher subagent: Check the smoke set',
+                }),
+              ),
+            ),
+            h(
+              C.RailSection,
+              { key: 'p', title: 'Plan', icon: 'route', state: 'ready', count: '2 of 5 done' },
+              h(
+                C.Queue,
+                { isStreaming: true },
+                h(
+                  C.QueueSection,
+                  {
+                    label: 'to do',
+                    count: 3,
+                    icon: 'list-todo',
+                    collapsible: false,
+                    headingLevel: 4,
+                  },
+                  h(
+                    C.QueueList,
+                    null,
+                    Todo('in_progress', 'Check the smoke set against the PRD'),
+                    Todo('pending', 'Draft the rollback note'),
+                    Todo('pending', 'Update OPS-4 with the window'),
+                  ),
+                ),
+                h(
+                  C.QueueSection,
+                  {
+                    label: 'done',
+                    count: 2,
+                    icon: 'list-checks',
+                    collapsible: false,
+                    headingLevel: 4,
+                  },
+                  h(
+                    C.QueueList,
+                    null,
+                    Todo('completed', 'Read the cutover PRD'),
+                    Todo('completed', 'Find the pick queue drain metric'),
+                  ),
+                ),
+              ),
+            ),
+            h(
+              C.RailSection,
+              {
+                key: 's',
+                title: 'Subagents',
+                icon: 'bot',
+                state: 'ready',
+                count: '1 running · 1 done',
+              },
+              h(
+                C.Trace,
+                { className: 'steps' },
+                h(C.StepHead, {
+                  status: 'running',
+                  title: 'Check the smoke set',
+                  after: h(C.Badge, { variant: 'secondary' }, 'cerebro-researcher'),
+                }),
+                h(C.StepHead, {
+                  status: 'done',
+                  statusText: 'Done',
+                  title: 'Find the drain time metric',
+                  after: h(C.Badge, { variant: 'secondary' }, 'cerebro-researcher'),
+                }),
+              ),
+            ),
+            h(C.RailSection, { key: 'c', title: 'Changes', icon: 'file-diff', state: 'empty' }),
+          ),
+        ),
+      );
+
+      var states = h(
+        'div',
+        null,
+        h('span', { className: 'cap' }, 'Then the setup: each card says its own state'),
+        h(
+          'div',
+          { className: 'pane' },
+          h(
+            C.Rail,
+            { title: 'Conversation details' },
+            h(
+              C.RailSection,
+              {
+                key: 'h',
+                title: 'Handed off',
+                icon: 'forward',
+                state: 'ready',
+                count: '1 done',
+                defaultOpen: false,
+              },
+              h('p', null, 'Folded: kept mounted, reads nothing new.'),
+            ),
+            h(
+              C.RailSection,
+              { key: 'x', title: 'Context', icon: 'gauge', state: 'ready', count: '62%' },
+              h('p', { className: 'figure' }, '124,000 of 200,000 tokens'),
+              h(C.ContextCategories, { categories: categories, window: 200000 }),
+            ),
+            h(
+              C.RailSection,
+              { key: 'so', title: 'Sources', icon: 'book-open', state: 'not-recorded' },
+              h(C.StateMessage, {
+                compact: true,
+                state: 'not-recorded',
+                title: 'Sources not recorded',
+              }),
+            ),
+            h(
+              C.RailSection,
+              { key: 'co', title: 'Connectors', icon: 'plug', state: 'partial', count: '1 loaded' },
+              h(C.StateMessage, {
+                compact: true,
+                state: 'partial',
+                title:
+                  'Couldn’t read connector status, so these rows don’t say whether each connector works.',
+              }),
+            ),
+            h(
+              C.RailSection,
+              { key: 'e', title: 'Environment', icon: 'monitor', state: 'unavailable' },
+              h(
+                C.StateMessage,
+                {
+                  compact: true,
+                  state: 'unavailable',
+                  title: 'Couldn’t read this vault’s history',
+                },
+                'git: not a repository',
+              ),
+            ),
+          ),
+        ),
+      );
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h('div', { className: 'row' }, ready, states),
+      );
+    </script>
+  </body>
+</html>

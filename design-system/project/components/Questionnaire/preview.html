@@ -1,0 +1,144 @@
+<!-- @dsCard group="AI conversation" height=669 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Questionnaire</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px;
+        align-items: start;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var questions = [
+        {
+          header: 'Cutover window',
+          question: 'Which window should the PRD plan for?',
+          multiSelect: false,
+          options: [
+            {
+              label: 'Four hours from 22:00',
+              description: 'What the PRD says now; the smoke set runs in parallel',
+              preview: '## Cutover window\n\nWe are planning a four-hour window starting at 22:00.',
+            },
+            {
+              label: 'Six hours from 20:00',
+              description: 'Room for the smoke set to run on its own',
+              preview: null,
+            },
+          ],
+        },
+        {
+          header: 'Owners',
+          question: 'Who should own the rollback steps?',
+          multiSelect: true,
+          options: [
+            { label: 'Marcus Webb', description: 'Owns the PRD', preview: null },
+            { label: 'Priya Nair', description: 'Ran the offline window pilot', preview: null },
+            { label: 'Dana Fox', description: 'On call that night', preview: null },
+          ],
+        },
+      ];
+      function Card(props) {
+        var s = React.useState(null),
+          sent = s[0],
+          setSent = s[1];
+        return h(
+          C.Confirmation,
+          {
+            state: sent === null ? 'pending' : 'answered',
+            icon: 'message-circle-question-mark',
+            title: 'A question for you',
+            outcome: sent,
+          },
+          h(C.Questionnaire, {
+            questions: questions,
+            submitLabel: 'Send answers',
+            declineLabel: 'Don’t answer',
+            onSubmit: function (answers) {
+              setSent('Sent ' + answers.length + ' answers');
+            },
+            onDecline: function () {
+              setSent('Declined');
+            },
+          }),
+        );
+      }
+      function Answered() {
+        var ref = React.useRef(null);
+        React.useEffect(function () {
+          // A person's picks: the first option, then two owners.
+          var root = ref.current;
+          if (!root) return;
+          var picks = root.querySelectorAll('[data-testid="question-option"]');
+          // One pick per tick, as a person's clicks come.
+          var order = [0, 2, 4],
+            timers = [];
+          order.forEach(function (i, n) {
+            timers.push(
+              setTimeout(function () {
+                if (picks[i]) picks[i].click();
+              }, n * 30),
+            );
+          });
+          var preview = root.querySelector('[data-testid="question-preview"]');
+          if (preview) preview.open = true;
+          return function () {
+            timers.forEach(clearTimeout);
+          };
+        }, []);
+        return h('div', { ref: ref }, h(Card));
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          h(
+            'div',
+            { className: 'col' },
+            h(
+              'span',
+              { className: 'cap' },
+              'fresh: each question says what it still needs; Send waits',
+            ),
+            h(Card),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'answered, a preview unfolded: Send answers is ready'),
+            h(Answered),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

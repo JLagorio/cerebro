@@ -1,0 +1,381 @@
+<!-- @dsCard group="Overlays" height=328 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DrawerScrim</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        gap: 16px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      /* Each frame is the box the drawer and its scrim cover. */
+      .frame {
+        position: relative;
+        height: 270px;
+        overflow: hidden;
+        transform: translateZ(0);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--surface-navigation);
+        display: flex;
+      }
+      .rail {
+        width: 48px;
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding-top: 10px;
+        color: var(--n-500);
+      }
+      .rail button {
+        width: 32px;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 0;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+      .rail button[aria-pressed='true'] {
+        background: var(--surface-selected);
+        color: var(--cortex-600);
+      }
+      .canvas {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+        background: var(--n-0);
+        border-top-left-radius: var(--r-lg);
+        margin-top: 6px;
+        padding: 16px 20px;
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        margin-bottom: 12px;
+      }
+      .bar .ttl {
+        flex: 1;
+        font-size: var(--fs-ui);
+        font-weight: 600;
+        color: var(--n-900);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .prose {
+        margin: 0 0 8px;
+        font-size: var(--fs-sm);
+        line-height: 1.6;
+        color: var(--n-700);
+      }
+      /* The drawers: panels drawn over the content beside them, marked data-overlay. */
+      .drawer {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        z-index: 20;
+        display: flex;
+        flex-direction: column;
+        background: var(--surface-app);
+        box-shadow: var(--shadow-lg);
+        outline: none;
+      }
+      .drawer.left {
+        left: 48px;
+        width: 200px;
+        border-right: 1px solid var(--border-subtle);
+        background: var(--surface-navigation);
+        padding: 10px 8px;
+      }
+      .drawer.right {
+        right: 0;
+        width: min(280px, 85%);
+        border-left: 1px solid var(--border-subtle);
+        padding: 12px 16px;
+      }
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        padding: 0 8px;
+        border-radius: var(--r-sm);
+        font-size: var(--fs-ui);
+        color: var(--n-700);
+      }
+      .nav.on {
+        background: var(--n-100);
+        color: var(--n-900);
+      }
+      .head {
+        font-size: var(--fs-2xs);
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: var(--track-caps);
+        color: var(--n-400);
+        padding: 6px 8px 4px;
+      }
+      .prop {
+        display: grid;
+        grid-template-columns: 88px 1fr;
+        align-items: center;
+        min-height: 30px;
+        font-size: 13px;
+      }
+      .prop span:first-child {
+        color: var(--text-meta);
+      }
+      .prop span:last-child {
+        color: var(--n-800);
+      }
+      /* Demo only: the scrim is transparent, so the card traces the box it covers. */
+      .cover {
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+      }
+      .traced {
+        outline: 1.5px dashed var(--cortex-300);
+        outline-offset: -5px;
+      }
+      .tag {
+        position: absolute;
+        z-index: 15;
+        pointer-events: none;
+        font-size: var(--fs-2xs);
+        color: var(--cortex-600);
+        background: var(--n-0);
+        padding: 0 4px;
+        border-radius: var(--r-xs);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+
+      function Drawer(props) {
+        var ref = C.useDrawerFocus(true);
+        return h(
+          'aside',
+          {
+            ref: ref,
+            tabIndex: -1,
+            'data-overlay': true,
+            'aria-label': props.label,
+            className: 'drawer ' + props.side,
+          },
+          props.children,
+        );
+      }
+
+      // The sidebar, opened from its rail over the canvas.
+      function Sidebar() {
+        var o = React.useState(true),
+          open = o[0],
+          setOpen = o[1];
+        var rows = [
+          ['Home', 'house'],
+          ['Pages', 'file-text'],
+          ['Databases', 'database'],
+          ['Knowledge', 'brain'],
+          ['Agents', 'bot'],
+        ];
+        return h(
+          'div',
+          { className: 'frame' },
+          h(
+            'div',
+            { className: 'rail' },
+            h(
+              'button',
+              {
+                type: 'button',
+                'aria-label': 'Show sidebar',
+                'aria-pressed': open,
+                onClick: function () {
+                  setOpen(!open);
+                },
+              },
+              h(C.Icon, { name: 'panel-left', size: 18 }),
+            ),
+            rows.map(function (r) {
+              return h(
+                'button',
+                { key: r[0], type: 'button', 'aria-label': r[0] },
+                h(C.Icon, { name: r[1], size: 18 }),
+              );
+            }),
+          ),
+          h(
+            'div',
+            { className: 'canvas' },
+            h(
+              'div',
+              { className: 'bar' },
+              h('span', { className: 'ttl' }, 'Offline sync hardening'),
+            ),
+            h(
+              'p',
+              { className: 'prose' },
+              'Make offline work trustworthy: no duplicate jobs after reconnect, a clear warning past the 72-hour window, and conflicts a person can resolve.',
+            ),
+          ),
+          open &&
+            h(C.DrawerScrim, {
+              label: 'Close the sidebar',
+              className: 'cover traced',
+              onDismiss: function () {
+                setOpen(false);
+              },
+            }),
+          open &&
+            h(
+              'span',
+              { className: 'tag', style: { right: 12, bottom: 10 } },
+              'DrawerScrim: press to close',
+            ),
+          open &&
+            h(
+              Drawer,
+              { side: 'left', label: 'Sidebar' },
+              h('div', { className: 'head' }, 'Folders'),
+              ['projects', 'records', 'knowledge', 'strategy', 'inbox'].map(function (f, i) {
+                return h(
+                  'div',
+                  { key: f, className: 'nav' + (i === 0 ? ' on' : '') },
+                  h(C.Icon, { name: 'folder', size: 14, color: 'var(--n-500)' }),
+                  f,
+                );
+              }),
+            ),
+        );
+      }
+
+      // A page's side panel, folded into a drawer over a narrow reading column.
+      function SidePanel() {
+        var o = React.useState(true),
+          open = o[0],
+          setOpen = o[1];
+        var props = [
+          ['Status', 'To do'],
+          ['Priority', 'Medium'],
+          ['Assignee', 'Sam Ito'],
+          ['Due', 'Aug 29, 2026'],
+          ['Estimate', 'S'],
+        ];
+        return h(
+          'div',
+          { className: 'frame', style: { background: 'var(--n-0)', flexDirection: 'column' } },
+          h(
+            'div',
+            { className: 'bar', style: { padding: '8px 12px 0 20px', margin: 0, height: 36 } },
+            h('span', { className: 'ttl' }, 'Warn past the 72-hour offline window'),
+            h(C.IconButton, {
+              icon: 'panel-right',
+              label: 'Details',
+              size: 'sm',
+              active: open,
+              tooltip: !open,
+              onClick: function () {
+                setOpen(!open);
+              },
+            }),
+          ),
+          h(
+            'div',
+            { style: { position: 'relative', flex: 1, minHeight: 0 } },
+            h(
+              'div',
+              { style: { padding: '12px 20px' } },
+              h(
+                'p',
+                { className: 'prose' },
+                'Implements the boundary from the offline window decision. The warning has to be honest without being alarming — crews work long weekends routinely.',
+              ),
+            ),
+            open &&
+              h(C.DrawerScrim, {
+                label: 'Close the panel',
+                className: 'cover traced',
+                onDismiss: function () {
+                  setOpen(false);
+                },
+              }),
+            open &&
+              h(
+                'span',
+                { className: 'tag', style: { left: 12, bottom: 10 } },
+                'DrawerScrim: press to close',
+              ),
+            open &&
+              h(
+                Drawer,
+                { side: 'right', label: 'Details' },
+                h('div', { className: 'head', style: { padding: '0 0 6px' } }, 'Properties'),
+                props.map(function (p) {
+                  return h(
+                    'div',
+                    { key: p[0], className: 'prop' },
+                    h('span', null, p[0]),
+                    h('span', null, p[1]),
+                  );
+                }),
+              ),
+          ),
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'row' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'the sidebar behind its rail'),
+            h(Sidebar),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'a page’s side panel folded into a drawer'),
+            h(SidePanel),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

@@ -20,6 +20,7 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "e2e": "playwright test",
+    "ds:build": "tsx scripts/design-system/build.ts",
     "tauri": "tauri",
     "prepare": "husky"
   },

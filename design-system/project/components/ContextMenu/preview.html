@@ -1,0 +1,254 @@
+<!-- @dsCard group="Overlays" height=284 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ContextMenu</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 24px;
+        flex-wrap: wrap;
+        min-height: 252px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .tree {
+        width: 240px;
+        padding: 6px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--surface-navigation);
+      }
+      .node {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 8px;
+        border-radius: var(--r-sm);
+        color: var(--n-700);
+        font-size: var(--fs-ui);
+        cursor: default;
+        user-select: none;
+      }
+      .node.on {
+        background: var(--n-100);
+        color: var(--n-900);
+      }
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 4px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--n-0);
+      }
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 10px;
+        border-radius: var(--r-sm);
+        color: var(--n-600);
+        font-size: var(--fs-ui);
+        cursor: default;
+        user-select: none;
+      }
+      .tab.on {
+        background: var(--n-100);
+        color: var(--n-900);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function noop() {}
+
+      var TREE = [
+        { label: 'projects', icon: 'folder', depth: 0 },
+        { label: 'offline-sync-hardening', icon: 'folder-open', depth: 1 },
+        { label: 'items', icon: 'folder', depth: 2 },
+        { label: 'Duplicate jobs after reconnect', icon: 'file-text', depth: 3 },
+        { label: 'Kickoff', icon: 'file-text', depth: 2 },
+      ];
+      function treeItems(node) {
+        return [
+          { icon: 'file-plus', label: 'New page', onSelect: noop },
+          { icon: 'folder-plus', label: 'New folder', onSelect: noop },
+          { icon: 'pencil', label: 'Rename', onSelect: noop },
+          { icon: 'folder-input', label: 'Move to folder…', onSelect: noop },
+          { icon: 'trash-2', label: 'Move to Trash', danger: true, onSelect: noop },
+        ];
+      }
+      var VIEWS = [
+        { label: 'Board', icon: 'square-kanban' },
+        { label: 'Table', icon: 'table-2' },
+        { label: 'Timeline', icon: 'chart-gantt' },
+      ];
+      function viewItems(view) {
+        return [
+          { icon: 'pencil', label: 'Rename', onSelect: noop },
+          { icon: view.icon, label: 'Change layout…', onSelect: noop },
+          { icon: 'settings-2', label: 'View settings…', onSelect: noop },
+          { icon: 'copy', label: 'Duplicate', onSelect: noop },
+          { icon: 'file-down', label: 'Export as CSV…', onSelect: noop },
+          { icon: 'trash-2', label: 'Delete view', danger: true, onSelect: noop },
+        ];
+      }
+
+      // A right-click opens it at the pointer; a press on the backdrop, the wheel or Escape closes it.
+      function Surface(props) {
+        var s = React.useState(null),
+          menu = s[0],
+          setMenu = s[1];
+        var first = React.useRef(null);
+        React.useLayoutEffect(function () {
+          var r = first.current.getBoundingClientRect();
+          setMenu({
+            x: Math.round(r.left + props.dx),
+            y: Math.round(r.top + props.dy),
+            at: props.start,
+          });
+        }, []);
+        function open(i) {
+          return function (e) {
+            e.preventDefault();
+            setMenu({ x: e.clientX, y: e.clientY, at: i });
+          };
+        }
+        return h(
+          React.Fragment,
+          null,
+          props.draw(menu, open, first),
+          menu &&
+            h(C.ContextMenu, {
+              x: menu.x,
+              y: menu.y,
+              items: props.items(menu.at),
+              onClose: function () {
+                setMenu(null);
+              },
+            }),
+        );
+      }
+
+      function Tree() {
+        return h(Surface, {
+          start: 1,
+          dx: 150,
+          dy: 18,
+          items: function (i) {
+            return treeItems(TREE[i]);
+          },
+          draw: function (menu, open, first) {
+            return h(
+              'div',
+              { className: 'tree' },
+              TREE.map(function (n, i) {
+                return h(
+                  'div',
+                  {
+                    key: i,
+                    ref: i === 1 ? first : undefined,
+                    onContextMenu: open(i),
+                    className: 'node' + (menu && menu.at === i ? ' on' : ''),
+                    style: { paddingLeft: 8 + n.depth * 14 },
+                  },
+                  h(C.Icon, { name: n.icon, size: 14, color: 'var(--n-500)' }),
+                  h(
+                    'span',
+                    {
+                      style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                    },
+                    n.label,
+                  ),
+                );
+              }),
+            );
+          },
+        });
+      }
+
+      function Tabs() {
+        return h(Surface, {
+          start: 1,
+          dx: 24,
+          dy: 32,
+          items: function (i) {
+            return viewItems(VIEWS[i]);
+          },
+          draw: function (menu, open, first) {
+            return h(
+              'div',
+              { className: 'tabs' },
+              VIEWS.map(function (v, i) {
+                return h(
+                  'div',
+                  {
+                    key: i,
+                    ref: i === 1 ? first : undefined,
+                    onContextMenu: open(i),
+                    className: 'tab' + (menu && menu.at === i ? ' on' : ''),
+                  },
+                  h(C.Icon, { name: v.icon, size: 14 }),
+                  v.label,
+                );
+              }),
+            );
+          },
+        });
+      }
+
+      // Opened from a right-click, focus lands on the first item without a visible ring; a page load
+      // has no pointer history, so drop the programmatic focus to show the menus at rest.
+      setTimeout(function () {
+        if (document.activeElement) document.activeElement.blur();
+      }, 200);
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'row' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'file tree row: danger last'),
+            h(Tree),
+          ),
+          h(
+            'div',
+            { className: 'col', style: { marginLeft: 180 } },
+            h(
+              'span',
+              { className: 'cap' },
+              'view tab (right-click a row or tab to move a menu there)',
+            ),
+            h(Tabs),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

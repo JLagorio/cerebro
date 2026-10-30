@@ -1,0 +1,197 @@
+<!-- @dsCard group="AI work" height=372 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Sources</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px 32px;
+        align-items: start;
+      }
+      .cell {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Cell(cap) {
+        var kids = Array.prototype.slice.call(arguments, 1);
+        return h.apply(
+          null,
+          ['div', { className: 'cell' }, h('div', { className: 'cap' }, cap)].concat(kids),
+        );
+      }
+      function open() {}
+      // The preview never leaves its page: a web source's link is drawn, not followed.
+      document.addEventListener(
+        'click',
+        function (e) {
+          if (e.target instanceof Element && e.target.closest('a[href]')) e.preventDefault();
+        },
+        true,
+      );
+
+      var turn = [
+        {
+          kind: 'url',
+          url: 'https://en.wikipedia.org/wiki/Cutover',
+          title: 'Cutover',
+          via: 'fetch',
+        },
+        {
+          kind: 'url',
+          url: 'https://www.mhi.org/fundamentals/warehouse-management',
+          via: 'search',
+        },
+        {
+          kind: 'vault',
+          path: 'sources/web/en.wikipedia.org-cutover.md',
+          title: 'Cutover (cached web page)',
+          via: 'read',
+        },
+        {
+          kind: 'vault',
+          path: 'knowledge/systems/pick-queue-drain.md',
+          title: 'Pick queue drain time',
+          via: 'read',
+        },
+        { kind: 'vault', path: 'inbox/phoenix-cutover-standup.md', via: 'read' },
+      ];
+      var prs = [
+        {
+          kind: 'url',
+          url: 'https://github.com/northwind/field-app/pull/418',
+          title: 'northwind/field-app#418',
+          via: 'text',
+        },
+        {
+          kind: 'url',
+          url: 'https://github.com/northwind/field-app/pull/421',
+          title: 'northwind/field-app#421',
+          via: 'text',
+        },
+      ];
+      var knowledge = [
+        {
+          ref: {
+            kind: 'vault',
+            path: 'knowledge/systems/offline-guarantee.md',
+            title: 'The offline guarantee',
+            via: 'read',
+          },
+          standing: null,
+        },
+        {
+          ref: {
+            kind: 'vault',
+            path: 'knowledge/systems/pick-queue-drain.md',
+            title: 'Pick queue drain time',
+            via: 'read',
+          },
+          standing: '· unreviewed',
+        },
+        {
+          ref: {
+            kind: 'vault',
+            path: 'knowledge/systems/offline-window-pilot.md',
+            title: 'The offline window',
+            via: 'read',
+          },
+          standing: '· replaced',
+        },
+      ];
+
+      var carried = h(
+        C.TraceCollapsible,
+        { defaultOpen: true },
+        h(
+          C.TraceCollapsibleTrigger,
+          null,
+          h(
+            C.TraceLine,
+            null,
+            h(
+              C.TraceIcon,
+              null,
+              h(C.Icon, { name: 'brain', size: 16, color: 'var(--synapse-500)' }),
+            ),
+            h(C.TraceTitle, null, 'Knowledge · 2'),
+          ),
+        ),
+        h(
+          C.TraceCollapsibleContent,
+          { keepMounted: true },
+          h.apply(
+            null,
+            [C.Trace, { 'data-slot': 'sources-list' }].concat(
+              knowledge.map(function (row) {
+                return h(C.Source, {
+                  key: row.ref.path,
+                  source: row.ref,
+                  description: row.standing,
+                  onOpenPath: open,
+                });
+              }),
+            ),
+          ),
+        ),
+      );
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          Cell(
+            'A reply’s sources, opened: web pages link out, vault pages open in the app',
+            h(C.Sources, { sources: turn, onOpenPath: open, defaultOpen: true }),
+          ),
+          h(
+            'div',
+            { className: 'cell', style: { gap: '24px' } },
+            Cell(
+              'Closed, as it starts',
+              h(C.Sources, { sources: turn.slice(0, 3), onOpenPath: open }),
+            ),
+            Cell(
+              'Its own line and icon: the pull requests a session opened',
+              h(C.Sources, {
+                sources: prs,
+                title: 'Opened 2 pull requests',
+                icon: 'git-pull-request',
+                defaultOpen: true,
+              }),
+            ),
+            Cell('Single rows with words after the name: the Knowledge a turn carries', carried),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

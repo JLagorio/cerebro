@@ -1,0 +1,243 @@
+<!-- @dsCard group="Interaction" height=192 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Grip</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 32px;
+        flex-wrap: wrap;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      /* Property rows: the grip takes the type icon's slot while the row is lit. */
+      .props {
+        width: 260px;
+      }
+      .prop {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 30px;
+        padding: 0 6px;
+        border-radius: var(--r-sm);
+        font-size: var(--fs-ui);
+        color: var(--n-600);
+      }
+      .prop .v {
+        margin-left: auto;
+        color: var(--n-800);
+      }
+      .slot {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 24px;
+        flex: none;
+      }
+      .slot .grip {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+      }
+      .prop:hover,
+      .prop.lit {
+        background: var(--n-50);
+      }
+      .prop:hover .slot .ic,
+      .prop.lit .slot .ic {
+        opacity: 0;
+      }
+      .prop:hover .slot .grip,
+      .prop.lit .slot .grip {
+        opacity: 1;
+      }
+      /* Layout canvas blocks: the handle stands in the gutter. */
+      .blocks {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding-left: 28px;
+        width: 250px;
+      }
+      .block {
+        position: relative;
+        padding: 10px 12px;
+        border: 1px solid var(--n-200);
+        border-radius: var(--r-md);
+        background: var(--n-0);
+        font-size: var(--fs-ui);
+        color: var(--n-800);
+      }
+      .block .grip {
+        position: absolute;
+        left: -26px;
+        top: 8px;
+      }
+      .block small {
+        display: block;
+        font-size: var(--fs-2xs);
+        color: var(--text-meta);
+      }
+      /* Record tabs: the grip lives in the tab's own 10px of leading padding. */
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 4px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--n-0);
+      }
+      .tab {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 10px;
+        border-radius: var(--r-sm);
+        font-size: var(--fs-ui);
+        color: var(--n-600);
+      }
+      .tab.on {
+        background: var(--n-100);
+        color: var(--n-900);
+      }
+      .tab .grip {
+        position: absolute;
+        top: 4px;
+        bottom: 4px;
+        left: 0;
+        opacity: 0;
+      }
+      .tab:hover .grip,
+      .tab.lit .grip {
+        opacity: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+
+      function Prop(icon, label, value, lit) {
+        return h(
+          'div',
+          { key: label, className: 'prop' + (lit ? ' lit' : '') },
+          h(
+            'span',
+            { className: 'slot' },
+            h(C.Icon, { name: icon, size: 16, color: 'var(--n-400)', className: 'ic' }),
+            h(C.Grip, {
+              className: 'grip',
+              tabIndex: 0,
+              role: 'button',
+              'aria-label': 'Drag ' + label,
+            }),
+          ),
+          label,
+          h('span', { className: 'v' }, value),
+        );
+      }
+      function Block(name, kind, hover) {
+        return h(
+          'div',
+          { key: name, className: 'block' },
+          h(C.Grip, {
+            kind: 'block',
+            className: 'grip',
+            tabIndex: 0,
+            role: 'button',
+            'aria-label': 'Drag ' + name,
+            // The handle's hover wash, held on so the card shows it.
+            style: hover ? { background: 'var(--n-100)', color: 'var(--n-500)' } : undefined,
+          }),
+          name,
+          h('small', null, kind),
+        );
+      }
+      function Tab(label, on, lit) {
+        return h(
+          'div',
+          { key: label, className: 'tab' + (on ? ' on' : '') + (lit ? ' lit' : '') },
+          h(C.Grip, {
+            kind: 'tab',
+            className: 'grip',
+            tabIndex: 0,
+            role: 'button',
+            'aria-label': 'Drag ' + label,
+          }),
+          label,
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'row' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'row: takes the type icon’s slot (hover a row)'),
+            h(
+              'div',
+              { className: 'props' },
+              Prop('loader', 'Status', 'To do', true),
+              Prop('circle-chevron-down', 'Priority', 'Medium'),
+              Prop('circle-user', 'Assignee', 'Sam Ito'),
+              Prop('calendar', 'Due', 'Aug 29, 2026'),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'block: in the gutter, resting and hovered'),
+            h(
+              'div',
+              { className: 'blocks' },
+              Block('Status', 'Status', false),
+              Block('Assignee', 'Person', true),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'tab: in 10px of leading padding'),
+            h(
+              'div',
+              { className: 'tabs' },
+              Tab('Tasks', true, true),
+              Tab('Docs'),
+              Tab('Agents'),
+              Tab('Runs'),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

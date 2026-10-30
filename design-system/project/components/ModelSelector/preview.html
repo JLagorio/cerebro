@@ -1,0 +1,227 @@
+<!-- @dsCard group="AI conversation" height=498 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ModelSelector</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 220px 300px 1fr;
+        gap: 24px;
+        align-items: start;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .mono {
+        font-family: var(--font-mono);
+      }
+      .static {
+        position: static;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function noop() {}
+      var DEFAULT = 'Claude Code default';
+      var models = [
+        { value: '', label: DEFAULT },
+        { value: 'fable', label: 'Fable' },
+        { value: 'opus', label: 'Opus' },
+        { value: 'sonnet', label: 'Sonnet' },
+        { value: 'haiku', label: 'Haiku' },
+      ];
+      var efforts = [
+        { value: '', label: DEFAULT },
+        { value: 'low', label: 'Low' },
+        { value: 'medium', label: 'Medium' },
+        { value: 'high', label: 'High' },
+        { value: 'xhigh', label: 'Extra high' },
+        { value: 'max', label: 'Max' },
+      ];
+      var labels = {
+        '': null,
+        fable: 'Fable',
+        opus: 'Opus',
+        sonnet: 'Sonnet',
+        haiku: 'Haiku',
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
+        xhigh: 'Extra high',
+        max: 'Max',
+      };
+      function words(model, effort) {
+        if (!model && !effort) return DEFAULT;
+        var m = model ? labels[model] || model : 'Default model';
+        return effort ? m + ' · ' + labels[effort] : m;
+      }
+      function refusal(name) {
+        return /^[A-Za-z0-9][A-Za-z0-9._\-:@\/\[\]]*$/.test(name) && name.length <= 128
+          ? null
+          : 'model "' +
+              name +
+              '" is not a model name Claude Code can take — use an alias (fable, opus, sonnet, haiku) or a full model name, or remove it for Claude Code’s default. Nothing was started.';
+      }
+
+      function Open() {
+        var m = React.useState('opus'),
+          model = m[0],
+          setModel = m[1];
+        var e = React.useState('high'),
+          effort = e[0],
+          setEffort = e[1];
+        var o = React.useState(true),
+          open = o[0],
+          setOpen = o[1];
+        return h(
+          'div',
+          { className: 'bar' },
+          h(C.ModelSelector, {
+            label: words(model, effort),
+            models: models,
+            model: model,
+            onModelChange: setModel,
+            efforts: efforts,
+            effort: effort,
+            onEffortChange: setEffort,
+            other: { validate: refusal, onUse: setModel },
+            open: open,
+            onOpenChange: setOpen,
+            tabIndex: 0,
+            note: h(
+              'span',
+              null,
+              'Last answered by ',
+              h('span', { className: 'mono' }, 'claude-opus-5-5'),
+            ),
+          }),
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'closed: the pick in words'),
+            h(
+              'div',
+              { className: 'bar' },
+              h(C.ModelSelector, {
+                label: DEFAULT,
+                models: models,
+                model: '',
+                onModelChange: noop,
+                efforts: efforts,
+                effort: '',
+                onEffortChange: noop,
+                open: false,
+                onOpenChange: noop,
+                tabIndex: 0,
+              }),
+            ),
+            h('span', { className: 'cap' }, 'icon: the composer’s toolbar'),
+            h(
+              'div',
+              { className: 'bar' },
+              h(C.ModelSelector, {
+                label: 'Sonnet · Low',
+                appearance: 'icon',
+                models: models,
+                model: 'sonnet',
+                onModelChange: noop,
+                efforts: efforts,
+                effort: 'low',
+                onEffortChange: noop,
+                open: false,
+                onOpenChange: noop,
+                tabIndex: 0,
+              }),
+            ),
+            h('span', { className: 'cap' }, 'disabled while a turn streams'),
+            h(
+              'div',
+              { className: 'bar' },
+              h(C.ModelSelector, {
+                label: 'Opus · High',
+                disabled: true,
+                models: models,
+                model: 'opus',
+                onModelChange: noop,
+                efforts: efforts,
+                effort: 'high',
+                onEffortChange: noop,
+                open: false,
+                onOpenChange: noop,
+              }),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'open: one panel, two radio groups, stays open'),
+            h(Open),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h(
+              'span',
+              { className: 'cap' },
+              'Other refused: no radio checked, the reason under the field',
+            ),
+            h(
+              'div',
+              {
+                className: 'cb-ai-model-selector static',
+                role: 'group',
+                'aria-label': 'Model and effort',
+              },
+              h(
+                C.ModelSelectorGroup,
+                { label: 'Model', choices: models, value: null, onValueChange: noop },
+                h(C.ModelSelectorInput, { defaultValue: 'opus 5', validate: refusal, onUse: noop }),
+              ),
+              h(C.ModelSelectorGroup, {
+                label: 'Effort',
+                choices: efforts,
+                value: '',
+                onValueChange: noop,
+              }),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

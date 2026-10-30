@@ -1,0 +1,152 @@
+<!-- @dsCard group="Data display" height=235 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Keycaps</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .cap {
+        min-width: 72px;
+        padding-top: 6px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .list {
+        display: grid;
+        grid-template-columns: auto auto;
+        column-gap: 24px;
+        row-gap: 6px;
+        align-items: center;
+        color: var(--n-800);
+      }
+      .list .k {
+        color: var(--n-500);
+      }
+      .pair {
+        display: flex;
+        gap: 24px;
+        align-items: center;
+        color: var(--n-500);
+        padding-top: 4px;
+      }
+      .foot {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: var(--fs-xs);
+        white-space: pre;
+      }
+      .pair b {
+        font-weight: 500;
+        font-size: var(--fs-meta);
+        color: var(--text-meta);
+        margin-right: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kids) {
+        return h('div', { className: 'row' }, h('span', { className: 'cap' }, cap), kids);
+      }
+      function List(items) {
+        return h(
+          'div',
+          { className: 'list' },
+          items.reduce(function (out, it) {
+            out.push(h('span', { key: it[0] + 'l' }, it[0]));
+            out.push(
+              h(
+                'span',
+                { key: it[0] + 'k', className: 'k' },
+                h(C.Keycaps, Object.assign({ mac: true }, it[1])),
+              ),
+            );
+            return out;
+          }, []),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row(
+            'command',
+            List([
+              ['Open the command palette', { command: 'palette.open' }],
+              ['Show or hide conversation details', { command: 'assistant.rail' }],
+              ['Pages', { command: 'go.pages' }],
+              ['Focus an editor group', { command: 'work.focusGroup' }],
+              ['Redo in whiteboard', { command: 'whiteboard.redo' }],
+            ]),
+          ),
+          Row(
+            'local keys',
+            h(
+              'div',
+              { className: 'pair' },
+              h(
+                'span',
+                { className: 'foot' },
+                h(C.Keycaps, { keys: 'arrowdown', mac: true }),
+                ' Navigate · ',
+                h(C.Keycaps, { keys: 'enter', mac: true }),
+                ' Open · ',
+                h(C.Keycaps, { command: 'list.openBeside', mac: true }),
+                ' Open beside',
+              ),
+              h(
+                'span',
+                { className: 'foot' },
+                h(C.Keycaps, { keys: 'mod+enter', mac: true }),
+                ' Comment',
+              ),
+            ),
+          ),
+          Row(
+            'platform',
+            h(
+              'div',
+              { className: 'pair' },
+              h(
+                'span',
+                null,
+                h('b', null, 'macOS'),
+                h(C.Keycaps, { command: 'capture.new', mac: true }),
+              ),
+              h(
+                'span',
+                null,
+                h('b', null, 'Windows, Linux'),
+                h(C.Keycaps, { command: 'capture.new', mac: false }),
+              ),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

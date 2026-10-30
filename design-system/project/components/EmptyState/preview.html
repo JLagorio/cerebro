@@ -1,0 +1,93 @@
+<!-- @dsCard group="Feedback" height=367 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>EmptyState</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .box {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--n-0);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Col(cap, kid) {
+        return h(
+          'div',
+          { className: 'col' },
+          h('span', { className: 'cap' }, cap),
+          h('div', { className: 'box' }, kid),
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'row' },
+          Col(
+            'with its one action',
+            h(C.EmptyState, {
+              icon: 'inbox',
+              title: 'Inbox zero',
+              description:
+                'Captures land here untyped. Giving a note a type is what takes it out of the Inbox.',
+              action: h(C.Button, { icon: 'plus' }, 'Capture a note'),
+            }),
+          ),
+          Col(
+            'a filtered view',
+            h(C.EmptyState, {
+              icon: 'table-2',
+              title: 'Nothing matches these filters',
+              description: 'Adjust the filters in view settings to widen the query.',
+            }),
+          ),
+          Col(
+            'compact, in a panel',
+            h(C.EmptyState, {
+              compact: true,
+              icon: 'folder-plus',
+              title: 'No folders yet',
+              description: 'Mount a repository to browse its files and docs.',
+            }),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

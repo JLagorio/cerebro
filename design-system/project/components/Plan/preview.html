@@ -1,0 +1,92 @@
+<!-- @dsCard group="AI work" height=448 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Plan</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 780px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+      }
+      .cap {
+        padding-top: 1px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kid) {
+        return h(
+          'div',
+          { className: 'row' },
+          h('span', { className: 'cap' }, cap),
+          h('div', null, kid),
+        );
+      }
+      var TODOS = [
+        {
+          content: 'Read the cutover PRD and its open risks',
+          status: 'completed',
+          activeForm: 'Reading the cutover PRD and its open risks',
+        },
+        {
+          content: 'Check which work items block go-live',
+          status: 'completed',
+          activeForm: 'Checking which work items block go-live',
+        },
+        {
+          content: 'Draft a rehearsal plan for the rollback',
+          status: 'in_progress',
+          activeForm: 'Drafting a rehearsal plan for the rollback',
+        },
+        {
+          content: 'Add the rehearsal dates to OPS-9',
+          status: 'pending',
+          activeForm: 'Adding the rehearsal dates to OPS-9',
+        },
+        {
+          content: 'Summarize what is still unowned',
+          status: 'pending',
+          activeForm: 'Summarizing what is still unowned',
+        },
+      ];
+      var DONE = TODOS.map(function (t) {
+        return { content: t.content, status: 'completed', activeForm: t.activeForm };
+      });
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row('live, half done', h(C.Plan, { todos: TODOS, isStreaming: true })),
+          Row('stopped', h(C.Plan, { todos: TODOS, defaultOpen: true })),
+          Row('done', h(C.Plan, { todos: DONE })),
+          Row('left empty', h(C.Plan, { todos: [] })),
+        ),
+      );
+    </script>
+  </body>
+</html>

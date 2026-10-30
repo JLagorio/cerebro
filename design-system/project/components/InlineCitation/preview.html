@@ -1,0 +1,254 @@
+<!-- @dsCard group="AI work" height=530 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>InlineCitation</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px 32px;
+        align-items: start;
+      }
+      .cell {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .prose {
+        margin: 0;
+        font-size: var(--fs-prose, 16px);
+        line-height: var(--lh-prose, 28px);
+        color: var(--text-primary);
+        max-width: 420px;
+      }
+      .room {
+        height: var(--room);
+      }
+      .link {
+        color: var(--cortex-600);
+        text-decoration: underline;
+        text-decoration-color: var(--cortex-200);
+        text-underline-offset: 2px;
+      }
+      .cite {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 15px;
+        min-width: 15px;
+        margin: 0 1px;
+        padding: 0 4px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--cortex-50);
+        color: var(--cortex-600);
+        font-family: var(--font-mono);
+        font-size: var(--fs-2xs);
+        font-weight: 600;
+        vertical-align: super;
+        line-height: 15px;
+        cursor: pointer;
+      }
+      .cite:hover {
+        background: var(--cortex-100);
+      }
+      .pill {
+        display: inline;
+        padding: 1px 4px;
+        border: 0;
+        border-radius: var(--r-xs);
+        background: var(--cortex-50);
+        color: var(--cortex-700);
+        font: inherit;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Cell(cap, room) {
+        var kids = Array.prototype.slice.call(arguments, 2);
+        return h(
+          'div',
+          { className: 'cell' },
+          h('div', { className: 'cap' }, cap),
+          h.apply(null, ['div', null].concat(kids)),
+          h('div', { className: 'room', style: { '--room': room + 'px' } }),
+        );
+      }
+      function open() {}
+      // The preview never leaves its page: a source's link is drawn, not followed.
+      document.addEventListener(
+        'click',
+        function (e) {
+          if (e.target instanceof Element && e.target.closest('a[href]')) e.preventDefault();
+        },
+        true,
+      );
+
+      var web = [
+        {
+          kind: 'url',
+          url: 'https://en.wikipedia.org/wiki/Cutover',
+          title: 'Cutover',
+          via: 'text',
+        },
+      ];
+      var footnote = [
+        {
+          kind: 'vault',
+          path: 'records/decisions/dec-offline-window-72h.md',
+          title: 'Decision: offline window is 72 hours',
+          via: 'read',
+          description:
+            'Crews keep working through a three-day outage; past 72 hours the app warns before it syncs.',
+        },
+      ];
+      var outside = [
+        {
+          kind: 'vault',
+          path: '../handbook/escalation.md',
+          title: 'Escalation handbook',
+          via: 'text',
+        },
+      ];
+      var several = [
+        {
+          kind: 'vault',
+          path: 'knowledge/systems/pick-queue-drain.md',
+          title: 'Pick queue drain time',
+          via: 'read',
+          description: 'The queue drained in 38 minutes during the second rehearsal.',
+        },
+        { kind: 'vault', path: 'inbox/phoenix-cutover-standup.md', via: 'read' },
+        {
+          kind: 'url',
+          url: 'https://www.mhi.org/fundamentals/warehouse-management',
+          via: 'search',
+        },
+      ];
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          Cell(
+            'A link in a reply: the link stays the way in, the card names where it goes',
+            128,
+            h(
+              'p',
+              { className: 'prose' },
+              h(
+                C.InlineCitation,
+                { sources: web, group: 'reply' },
+                h(
+                  'a',
+                  {
+                    href: 'https://en.wikipedia.org/wiki/Cutover',
+                    target: '_blank',
+                    rel: 'noreferrer noopener',
+                    className: 'link',
+                    'data-open': 'reply',
+                  },
+                  'Cutover',
+                ),
+              ),
+              ' weekend starts August 9.',
+            ),
+          ),
+          Cell(
+            'A concept\u2019s footnote: the number opens its source and what the definition says',
+            128,
+            h(
+              'p',
+              { className: 'prose' },
+              'Crews may stay offline',
+              h(
+                C.InlineCitation,
+                { sources: footnote, group: 'concept', onOpenPath: open },
+                h('button', { type: 'button', className: 'cite', 'data-open': 'concept' }, '1'),
+              ),
+              ' for three days.',
+            ),
+          ),
+          Cell(
+            'Several sources, each ruled off; an untitled one is named by its address',
+            212,
+            h(
+              'p',
+              { className: 'prose' },
+              h(
+                C.InlineCitation,
+                { sources: several, group: 'pill', onOpenPath: open },
+                h(
+                  'button',
+                  { type: 'button', className: 'pill', 'data-open': 'pill' },
+                  'pick-queue-drain',
+                ),
+              ),
+              ' records the drain time.',
+            ),
+          ),
+          Cell(
+            'A path outside this vault: its address stays words, with nothing to open',
+            212,
+            h(
+              'p',
+              { className: 'prose' },
+              'Page the on-call lead, per the ',
+              h(
+                C.InlineCitation,
+                { sources: outside, group: 'outside', onOpenPath: open },
+                h(
+                  'button',
+                  { type: 'button', className: 'pill', 'data-open': 'outside' },
+                  'handbook',
+                ),
+              ),
+              '.',
+            ),
+          ),
+        ),
+      );
+
+      // Open each card as a resting pointer would: a real move over its trigger.
+      setTimeout(function () {
+        ['reply', 'concept', 'pill', 'outside'].forEach(function (name, i) {
+          var el = document.querySelector('[data-open="' + name + '"]');
+          if (el)
+            el.dispatchEvent(
+              new PointerEvent('pointermove', {
+                bubbles: true,
+                pointerType: 'mouse',
+                screenX: 40 + i * 20,
+                screenY: 40 + i * 20,
+              }),
+            );
+        });
+      }, 30);
+    </script>
+  </body>
+</html>

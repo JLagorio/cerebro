@@ -1,0 +1,99 @@
+<!-- @dsCard group="Data display" height=156 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>StatusFlag</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .cap {
+        min-width: 72px;
+        margin-right: 4px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .group {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-right: 16px;
+        font-size: var(--fs-sm);
+        font-weight: 600;
+        color: var(--n-800);
+      }
+      .count {
+        font-weight: 400;
+        color: var(--n-400);
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kids) {
+        return h('div', { className: 'row' }, h('span', { className: 'cap' }, cap), kids);
+      }
+      var ALL = ['idea', 'planned', 'progress', 'validation', 'released', 'wontdo'];
+      function Group(status, label, n) {
+        return h(
+          'span',
+          { key: status, className: 'group' },
+          h(C.StatusFlag, { status: status, bare: true }),
+          label,
+          h('span', { className: 'count' }, n),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row(
+            'md',
+            ALL.map(function (s) {
+              return h(C.StatusFlag, { key: s, status: s });
+            }),
+          ),
+          Row(
+            'sm',
+            ALL.map(function (s) {
+              return h(C.StatusFlag, { key: s, status: s, size: 'sm' });
+            }),
+          ),
+          Row('custom', [
+            h(C.StatusFlag, { key: 'b', label: 'Backlog', color: '#A8AFC2' }),
+            h(C.StatusFlag, { key: 'r', label: 'Review', color: '#38BDF8' }),
+            h(C.StatusFlag, { key: 'd', label: 'Done', color: '#1F9D61' }),
+          ]),
+          Row('bare', [
+            Group('progress', 'In progress', 4),
+            Group('validation', 'Validation', 2),
+            Group('released', 'Released', 7),
+          ]),
+        ),
+      );
+    </script>
+  </body>
+</html>

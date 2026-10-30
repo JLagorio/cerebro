@@ -1,0 +1,148 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cerebro</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        overflow: hidden;
+      }
+      .cover {
+        position: relative;
+        width: 960px;
+        height: 288px;
+        overflow: hidden;
+      }
+      .art {
+        position: absolute;
+        top: 0;
+        left: 480px;
+        width: 480px;
+        height: 288px;
+        overflow: hidden;
+      }
+      .art svg {
+        display: block;
+        width: 480px;
+        height: 288px;
+      }
+      .rail {
+        fill: var(--n-900);
+      }
+      .brand {
+        fill: var(--cortex-500);
+      }
+      .canvas {
+        fill: var(--cortex-200);
+        rx: var(--r-xl);
+      }
+      .side {
+        rx: var(--r-md);
+      }
+      .dot {
+        fill: var(--cortex-500);
+      }
+      .ai {
+        fill: var(--synapse-500);
+      }
+      .words {
+        position: absolute;
+        left: var(--sp-8);
+        bottom: var(--sp-8);
+        max-width: 440px;
+      }
+      .name {
+        margin: 0;
+        font-size: 104px;
+        line-height: 0.92;
+        font-weight: 600;
+        letter-spacing: -0.025em;
+        color: var(--text-primary);
+      }
+      .tag {
+        margin: var(--sp-3) 0 0 4px;
+        font-size: 14px;
+        line-height: 20px;
+        color: var(--text-secondary);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="cover">
+      <div class="art" aria-hidden="true">
+        <svg viewBox="0 0 480 288" width="480" height="288">
+          <!--
+  blocks      n-900 rail rail-w (54) wide, full height · cortex-500 slab 144 wide (sp-12 x3) bleeding off the bottom · cortex-200 canvas filling the rest, bleeding right and bottom · synapse-500 disc 48 across (the assistant's resting button) · about 40% of 960x288
+  arrangement the app shell itself: rail, sidebar, then the canvas whose one rounded top-left corner rests beside the sidebar; sp-4 gutters
+  pattern     the whiteboard's dot grid ("1px dots on a 24px pitch", canvas-dot): 9x5 dots at sp-6 pitch on the canvas, chosen because Cerebro is precise and grid-built and the dot grid is its own canvas texture
+  scales      rail rail-w; gutters sp-4; slab sp-12 multiples; pitch sp-6; canvas corner r-xl; slab corners r-md; disc = 48px (half-side radius)
+-->
+          <rect class="rail" x="0" y="-8" width="54" height="304" />
+          <rect class="brand side" x="70" y="32" width="144" height="272" rx="8" />
+          <rect class="canvas" x="230" y="16" width="300" height="300" rx="14" />
+          <g class="dots">
+            <circle class="dot" cx="254" cy="40" r="2" />
+            <circle class="dot" cx="278" cy="40" r="2" />
+            <circle class="dot" cx="302" cy="40" r="2" />
+            <circle class="dot" cx="326" cy="40" r="2" />
+            <circle class="dot" cx="350" cy="40" r="2" />
+            <circle class="dot" cx="374" cy="40" r="2" />
+            <circle class="dot" cx="398" cy="40" r="2" />
+            <circle class="dot" cx="422" cy="40" r="2" />
+            <circle class="dot" cx="446" cy="40" r="2" />
+            <circle class="dot" cx="254" cy="64" r="2" />
+            <circle class="dot" cx="278" cy="64" r="2" />
+            <circle class="dot" cx="302" cy="64" r="2" />
+            <circle class="dot" cx="326" cy="64" r="2" />
+            <circle class="dot" cx="350" cy="64" r="2" />
+            <circle class="dot" cx="374" cy="64" r="2" />
+            <circle class="dot" cx="398" cy="64" r="2" />
+            <circle class="dot" cx="422" cy="64" r="2" />
+            <circle class="dot" cx="446" cy="64" r="2" />
+            <circle class="dot" cx="254" cy="88" r="2" />
+            <circle class="dot" cx="278" cy="88" r="2" />
+            <circle class="dot" cx="302" cy="88" r="2" />
+            <circle class="dot" cx="326" cy="88" r="2" />
+            <circle class="dot" cx="350" cy="88" r="2" />
+            <circle class="dot" cx="374" cy="88" r="2" />
+            <circle class="dot" cx="398" cy="88" r="2" />
+            <circle class="dot" cx="422" cy="88" r="2" />
+            <circle class="dot" cx="446" cy="88" r="2" />
+            <circle class="dot" cx="254" cy="112" r="2" />
+            <circle class="dot" cx="278" cy="112" r="2" />
+            <circle class="dot" cx="302" cy="112" r="2" />
+            <circle class="dot" cx="326" cy="112" r="2" />
+            <circle class="dot" cx="350" cy="112" r="2" />
+            <circle class="dot" cx="374" cy="112" r="2" />
+            <circle class="dot" cx="398" cy="112" r="2" />
+            <circle class="dot" cx="422" cy="112" r="2" />
+            <circle class="dot" cx="446" cy="112" r="2" />
+            <circle class="dot" cx="254" cy="136" r="2" />
+            <circle class="dot" cx="278" cy="136" r="2" />
+            <circle class="dot" cx="302" cy="136" r="2" />
+            <circle class="dot" cx="326" cy="136" r="2" />
+            <circle class="dot" cx="350" cy="136" r="2" />
+            <circle class="dot" cx="374" cy="136" r="2" />
+            <circle class="dot" cx="398" cy="136" r="2" />
+            <circle class="dot" cx="422" cy="136" r="2" />
+            <circle class="dot" cx="446" cy="136" r="2" />
+          </g>
+          <circle class="ai" cx="424" cy="232" r="24" />
+        </svg>
+      </div>
+      <div class="words">
+        <h1 class="name">Cerebro</h1>
+        <p class="tag">A files-first markdown workspace.</p>
+      </div>
+    </div>
+  </body>
+</html>

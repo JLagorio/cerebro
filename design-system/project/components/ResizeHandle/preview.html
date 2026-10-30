@@ -1,0 +1,188 @@
+<!-- @dsCard group="Interaction" height=258 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ResizeHandle</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .cap {
+        display: block;
+        margin-bottom: 8px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .shell {
+        display: flex;
+        height: 200px;
+        overflow: hidden;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--surface-navigation);
+      }
+      .side {
+        position: relative;
+        flex: none;
+        padding: 10px 8px;
+      }
+      .panel {
+        position: relative;
+        flex: none;
+        padding: 12px 16px;
+        background: var(--surface-app);
+        border-left: 1px solid var(--border-subtle);
+      }
+      .canvas {
+        flex: 1;
+        min-width: 120px;
+        padding: 16px 20px;
+        background: var(--n-0);
+        border-left: 1px solid var(--border-subtle);
+      }
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        padding: 0 8px;
+        border-radius: var(--r-sm);
+        font-size: var(--fs-ui);
+        color: var(--n-700);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .nav.on {
+        background: var(--n-100);
+        color: var(--n-900);
+      }
+      .w {
+        font-family: var(--font-mono);
+        font-size: var(--fs-2xs);
+        color: var(--text-meta);
+      }
+      h2 {
+        margin: 0 0 8px;
+        font-size: var(--fs-ui);
+        font-weight: 600;
+        color: var(--n-900);
+      }
+      p {
+        margin: 0;
+        font-size: var(--fs-sm);
+        line-height: 1.6;
+        color: var(--n-700);
+      }
+      .prop {
+        display: grid;
+        grid-template-columns: 80px 1fr;
+        min-height: 28px;
+        align-items: center;
+        font-size: 13px;
+      }
+      .prop span:first-child {
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+
+      function Shell() {
+        var a = React.useState(220),
+          side = a[0],
+          setSide = a[1];
+        var b = React.useState(260),
+          panel = b[0],
+          setPanel = b[1];
+        return h(
+          'div',
+          null,
+          h(
+            'span',
+            { className: 'cap' },
+            'Drag either edge, or focus it and use the arrow keys (Shift for 48px). Escape mid-drag puts the width back.',
+          ),
+          h(
+            'div',
+            { className: 'shell' },
+            h(
+              'div',
+              { className: 'side', style: { width: side } },
+              h('div', { className: 'w' }, 'sidebar ' + side + 'px (180 to 360)'),
+              ['projects', 'records', 'knowledge', 'strategy'].map(function (f, i) {
+                return h(
+                  'div',
+                  { key: f, className: 'nav' + (i === 0 ? ' on' : '') },
+                  h(C.Icon, { name: 'folder', size: 14, color: 'var(--n-500)' }),
+                  f,
+                );
+              }),
+              h(C.ResizeHandle, {
+                label: 'Resize sidebar',
+                side: 'right',
+                width: side,
+                min: 180,
+                max: 360,
+                onResize: setSide,
+              }),
+            ),
+            h(
+              'div',
+              { className: 'canvas' },
+              h('h2', null, 'Warn past the 72-hour offline window'),
+              h(
+                'p',
+                null,
+                'Implements the boundary from the offline window decision. The warning has to be honest without being alarming.',
+              ),
+            ),
+            h(
+              'div',
+              { className: 'panel', style: { width: panel } },
+              h(C.ResizeHandle, {
+                label: 'Resize detail panel',
+                side: 'left',
+                width: panel,
+                min: 220,
+                max: 340,
+                onResize: setPanel,
+              }),
+              h(
+                'div',
+                { className: 'w', style: { marginBottom: 6 } },
+                'details ' + panel + 'px (220 to 340)',
+              ),
+              [
+                ['Status', 'To do'],
+                ['Priority', 'Medium'],
+                ['Assignee', 'Sam Ito'],
+                ['Due', 'Aug 29, 2026'],
+              ].map(function (p) {
+                return h(
+                  'div',
+                  { key: p[0], className: 'prop' },
+                  h('span', null, p[0]),
+                  h('span', null, p[1]),
+                );
+              }),
+            ),
+          ),
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(h(Shell));
+    </script>
+  </body>
+</html>

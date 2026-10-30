@@ -1,0 +1,210 @@
+<!-- @dsCard group="AI conversation" height=522 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>PromptInput</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-width: 640px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+        margin-top: 6px;
+      }
+      .status {
+        margin: 0 16px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function noop() {}
+      var models = [
+        { value: '', label: 'Claude Code default' },
+        { value: 'fable', label: 'Fable' },
+        { value: 'opus', label: 'Opus' },
+        { value: 'sonnet', label: 'Sonnet' },
+        { value: 'haiku', label: 'Haiku' },
+      ];
+      var efforts = [
+        { value: '', label: 'Claude Code default' },
+        { value: 'low', label: 'Low' },
+        { value: 'medium', label: 'Medium' },
+        { value: 'high', label: 'High' },
+        { value: 'xhigh', label: 'Extra high' },
+        { value: 'max', label: 'Max' },
+      ];
+      function Tools(props) {
+        return h(
+          C.PromptInputTools,
+          null,
+          h(C.ModelSelector, {
+            label: 'Opus · High',
+            models: models,
+            model: 'opus',
+            onModelChange: noop,
+            efforts: efforts,
+            effort: 'high',
+            onEffortChange: noop,
+            open: false,
+            onOpenChange: noop,
+            appearance: 'icon',
+            disabled: props.busy,
+            tabIndex: 0,
+          }),
+          h(C.Context, { usage: props.usage, tabIndex: 0 }),
+        );
+      }
+      function Composer(props) {
+        var s = React.useState(props.draft || ''),
+          draft = s[0],
+          setDraft = s[1];
+        var f = React.useState(props.files || []),
+          files = f[0],
+          setFiles = f[1];
+        var busy = props.status === 'streaming' || props.status === 'stopping';
+        return h(
+          C.PromptInput,
+          {
+            onSubmit: function () {
+              if (draft.trim() !== '') setDraft('');
+            },
+          },
+          h(C.PromptInputButton, { icon: 'plus', label: 'Add context', size: 'lg' }),
+          files.length > 0 &&
+            h(
+              C.PromptInputHeader,
+              null,
+              h(
+                C.Attachments,
+                { 'aria-label': 'Attached files' },
+                files.map(function (file) {
+                  return h(
+                    C.Attachment,
+                    {
+                      key: file.id,
+                      data: file,
+                      size: 'sm',
+                      onRemove: function () {
+                        setFiles(
+                          files.filter(function (x) {
+                            return x.id !== file.id;
+                          }),
+                        );
+                      },
+                    },
+                    h(C.AttachmentPreview, null),
+                    h(C.AttachmentInfo, null),
+                    h(C.AttachmentRemove, { label: 'Remove ' + file.label + ' from context' }),
+                  );
+                }),
+              ),
+            ),
+          h(
+            C.PromptInputBody,
+            null,
+            h(C.PromptInputTextarea, {
+              'aria-label': 'Message the assistant',
+              placeholder: props.placeholder,
+              value: draft,
+              onChange: function (e) {
+                setDraft(e.target.value);
+              },
+            }),
+          ),
+          h(
+            C.PromptInputFooter,
+            null,
+            h(Tools, { usage: props.usage, busy: busy }),
+            busy
+              ? [
+                  h(C.PromptInputButton, {
+                    key: 'q',
+                    icon: 'list-plus',
+                    label: 'Add to Up next',
+                    size: 'sm',
+                    disabled: draft.trim() === '',
+                  }),
+                  h(
+                    C.PromptInputSubmit,
+                    { key: 's', status: props.status, onStop: noop },
+                    h(C.Icon, { name: 'square', size: 13 }),
+                  ),
+                ]
+              : h(C.PromptInputSubmit, { disabled: draft.trim() === '' }),
+          ),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          h('span', { className: 'cap' }, 'ready, empty: Send waits for words'),
+          h(Composer, { placeholder: 'Ask anything…', usage: { state: 'not_recorded' } }),
+          h('span', { className: 'cap' }, 'ready, with files and a draft'),
+          h(Composer, {
+            placeholder: 'Work with this page…',
+            draft:
+              'Check the smoke set in the PRD against the dock schedule, and flag anything that pushes past the four-hour window.',
+            usage: { state: 'recorded', used: 41200, window: 200000, model: 'claude-opus-5-5' },
+            files: [
+              {
+                id: 'a',
+                label: 'cutover-prd.md',
+                path: 'projects/phoenix-warehouse-rollout/cutover-prd.md',
+                rootId: '0',
+                kind: 'markdown',
+                description: 'Markdown',
+              },
+              {
+                id: 'b',
+                label: 'Q3 dock schedule.xlsx',
+                kind: 'spreadsheet',
+                description: 'Spreadsheet · copied in when you send',
+              },
+            ],
+          }),
+          h(
+            'span',
+            { className: 'cap' },
+            'streaming: Send becomes Stop; a new message queues for Up next',
+          ),
+          h(Composer, {
+            placeholder: 'Add to Up next…',
+            status: 'streaming',
+            draft: 'Then update OPS-4',
+            usage: { state: 'recorded', used: 172000, window: 200000 },
+          }),
+          h('p', { className: 'status' }, 'Working for 1m 5s'),
+          h('span', { className: 'cap' }, 'stopping: the button waits'),
+          h(Composer, {
+            placeholder: 'Ask anything…',
+            status: 'stopping',
+            usage: { state: 'unavailable' },
+          }),
+        ),
+      );
+    </script>
+  </body>
+</html>

@@ -1,0 +1,368 @@
+<!-- @dsCard group="AI conversation" height=578 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Chat</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px;
+        align-items: start;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .frame {
+        height: 520px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-lg);
+        background: var(--surface-app);
+        overflow: hidden;
+      }
+      .thread {
+        padding: 16px 16px 24px;
+      }
+      .dock {
+        padding: 0 12px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .foot {
+        margin: 0 12px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .welcome {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        padding: 0 20px;
+        gap: 0;
+        width: 100%;
+      }
+      .eyebrow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 12px;
+        color: var(--text-muted);
+        font-size: var(--fs-xs);
+      }
+      .eyebrow svg {
+        color: var(--text-ai);
+      }
+      .welcome h2 {
+        margin: 0;
+        font-size: var(--fs-xl);
+        line-height: var(--lh-xl);
+        font-weight: var(--w-medium);
+        text-wrap: balance;
+      }
+      .copy {
+        margin: 8px 0 16px;
+        color: var(--text-secondary);
+        text-wrap: balance;
+      }
+      .note {
+        margin: 10px 0 0;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-muted);
+      }
+      .prose {
+        margin: 0;
+      }
+      .working {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function noop() {}
+      var models = [
+        { value: '', label: 'Claude Code default' },
+        { value: 'opus', label: 'Opus' },
+        { value: 'sonnet', label: 'Sonnet' },
+      ];
+      var efforts = [
+        { value: '', label: 'Claude Code default' },
+        { value: 'high', label: 'High' },
+      ];
+      function Composer(props) {
+        var s = React.useState(''),
+          draft = s[0],
+          setDraft = s[1];
+        return h(
+          C.PromptInput,
+          {
+            onSubmit: function () {
+              if (draft.trim() !== '' && props.onSend) {
+                props.onSend(draft);
+                setDraft('');
+              }
+            },
+          },
+          h(C.PromptInputButton, { icon: 'plus', label: 'Add context', size: 'lg' }),
+          h(
+            C.PromptInputBody,
+            null,
+            h(C.PromptInputTextarea, {
+              'aria-label': 'Message the assistant',
+              placeholder: props.placeholder,
+              value: draft,
+              onChange: function (e) {
+                setDraft(e.target.value);
+              },
+            }),
+          ),
+          h(
+            C.PromptInputFooter,
+            null,
+            h(
+              C.PromptInputTools,
+              null,
+              h(C.ModelSelector, {
+                label: 'Opus · High',
+                appearance: 'icon',
+                models: models,
+                model: 'opus',
+                onModelChange: noop,
+                efforts: efforts,
+                effort: 'high',
+                onEffortChange: noop,
+                open: false,
+                onOpenChange: noop,
+                disabled: props.busy,
+                tabIndex: 0,
+              }),
+              h(C.Context, { usage: props.usage, tabIndex: 0 }),
+            ),
+            props.busy
+              ? h(
+                  C.PromptInputSubmit,
+                  { status: 'streaming', onStop: noop },
+                  h(C.Icon, { name: 'square', size: 13 }),
+                )
+              : h(C.PromptInputSubmit, { disabled: draft.trim() === '' }),
+          ),
+        );
+      }
+      function Empty() {
+        var s = React.useState([]),
+          rows = s[0],
+          setRows = s[1];
+        function ask(text) {
+          setRows(
+            rows.concat([
+              h(
+                C.MessageScrollerItem,
+                { key: 'q' + rows.length, messageId: 'q' + rows.length, scrollAnchor: true },
+                h(
+                  C.Message,
+                  { from: 'user' },
+                  h(C.MessageContent, null, h(C.Bubble, null, h(C.BubbleContent, null, text))),
+                ),
+              ),
+              h(
+                C.MessageScrollerItem,
+                { key: 'a' + rows.length },
+                h(
+                  C.Message,
+                  { from: 'assistant' },
+                  h(C.MessageContent, null, h('span', { className: 'working' }, 'Thinking…')),
+                ),
+              ),
+            ]),
+          );
+        }
+        return h(
+          C.Chat,
+          {
+            label: 'Conversation',
+            contentClassName: 'thread',
+            empty: h(
+              'div',
+              { className: 'welcome' },
+              h(
+                'p',
+                { className: 'eyebrow' },
+                h(C.Icon, { name: 'sparkles', size: 14 }),
+                'Your workspace, in conversation',
+              ),
+              h('h2', null, 'What would you like to work on?'),
+              h(
+                'p',
+                { className: 'copy' },
+                'Find a connection, shape an idea, or work through what comes next.',
+              ),
+              h(
+                C.Suggestions,
+                { 'aria-label': 'Conversation starters' },
+                h(C.Suggestion, { suggestion: 'What is at risk right now?', onClick: ask }),
+                h(C.Suggestion, { suggestion: 'Help me clear the Inbox', onClick: ask }),
+                h(C.Suggestion, { suggestion: 'What do you know about this vault?', onClick: ask }),
+              ),
+              h('p', { className: 'note' }, 'Knowledge stays yours to verify.'),
+            ),
+            composer: h(
+              'div',
+              { className: 'dock' },
+              h(Composer, {
+                placeholder: 'Ask anything…',
+                usage: { state: 'not_recorded' },
+                onSend: ask,
+              }),
+            ),
+          },
+          rows,
+        );
+      }
+      var answer =
+        'Two things. The pick queue drain time is above the 20-minute line the playbook sets, and OPS-4 still has no rollback owner.';
+      function Busy() {
+        return h(
+          C.Chat,
+          {
+            label: 'Conversation',
+            contentClassName: 'thread',
+            busy: true,
+            composer: h(
+              'div',
+              { className: 'dock' },
+              h(Composer, {
+                placeholder: 'Add to Up next…',
+                usage: { state: 'recorded', used: 41200, window: 200000 },
+                busy: true,
+              }),
+              h('p', { className: 'foot' }, 'Working for 12s'),
+            ),
+          },
+          h(
+            C.MessageScrollerItem,
+            { key: 'q1', messageId: 'q1', scrollAnchor: true },
+            h(
+              C.Message,
+              { from: 'user' },
+              h(
+                C.MessageContent,
+                null,
+                h(
+                  C.Bubble,
+                  null,
+                  h(C.BubbleContent, null, 'What is at risk on the Phoenix cutover?'),
+                ),
+              ),
+            ),
+          ),
+          h(
+            C.MessageScrollerItem,
+            { key: 'a1', messageId: 'a1' },
+            h(
+              C.Message,
+              { from: 'assistant' },
+              h(
+                C.MessageContent,
+                null,
+                h('p', { className: 'prose' }, answer),
+                h(C.MessageToolbar, { copy: answer, onRetry: noop, onBranch: noop }),
+              ),
+            ),
+          ),
+          h(
+            C.MessageScrollerItem,
+            { key: 'cp' },
+            h(C.Checkpoint, {
+              turn: 'your message “What is at risk on the Phoenix cutover?”',
+              onBranch: noop,
+            }),
+          ),
+          h(
+            C.MessageScrollerItem,
+            { key: 'q2', messageId: 'q2', scrollAnchor: true },
+            h(
+              C.Message,
+              { from: 'user' },
+              h(
+                C.MessageContent,
+                null,
+                h(C.Bubble, null, h(C.BubbleContent, null, 'Draft the rollback note for Marcus.')),
+              ),
+            ),
+          ),
+          h(
+            C.MessageScrollerItem,
+            { key: 'a2', messageId: 'a2' },
+            h(
+              C.Message,
+              { from: 'assistant' },
+              h(
+                C.MessageContent,
+                null,
+                h(
+                  'p',
+                  { className: 'prose' },
+                  'Reading the cutover playbook and OPS-4 first, then drafting under inbox/.',
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          h(
+            'div',
+            { className: 'col' },
+            h(
+              'span',
+              { className: 'cap' },
+              'empty: the welcome in the thread’s place, the composer under it',
+            ),
+            h('div', { className: 'frame' }, h(Empty)),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h(
+              'span',
+              { className: 'cap' },
+              'a turn at work: busy holds the log\u2019s news; Stop in the composer',
+            ),
+            h('div', { className: 'frame' }, h(Busy)),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

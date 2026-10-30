@@ -1,0 +1,165 @@
+<!-- @dsCard group="AI work" height=500 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ChainOfThought</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        max-width: 780px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+      }
+      .cap {
+        padding-top: 1px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .turn {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .target {
+        font-family: var(--font-mono);
+        font-size: var(--fs-2xs);
+        color: var(--n-500);
+      }
+      .target.write {
+        color: var(--cortex-700);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro,
+        F = React.Fragment;
+      function Target(text, write) {
+        return h('span', { className: write ? 'target write' : 'target' }, text);
+      }
+      function Row(cap, kid) {
+        return h(
+          'div',
+          { className: 'row' },
+          h('span', { className: 'cap' }, cap),
+          h('div', null, kid),
+        );
+      }
+      function Get(path, status) {
+        return h(C.Tool, {
+          key: path,
+          status: status || 'done',
+          icon: 'file-text',
+          title: h(F, null, 'get note ', Target(path)),
+        });
+      }
+      var P = 'projects/phoenix-warehouse-rollout/';
+      var THOUGHT =
+        'Go-live is 30 July and OPS-9 has no date. Read the rollback risk and the items that block it before suggesting rehearsal dates.';
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row(
+            'working',
+            h(
+              C.ChainOfThought,
+              { summary: { running: true, total: 3, failed: 0 } },
+              h(C.Reasoning, { text: THOUGHT, durationMs: 4200 }),
+              h(
+                C.Task,
+                { title: 'Reading 3 notes', status: 'running', statusText: null },
+                Get(P + 'cutover-prd.md'),
+                Get('records/risks/risk-rollback-unrehearsed.md'),
+                Get(P + 'items/ops-9.md', 'running'),
+              ),
+            ),
+          ),
+          Row(
+            'latest turn',
+            h(
+              C.ChainOfThought,
+              {
+                summary: { running: false, total: 6, failed: 0 },
+                title:
+                  'Worked for ' +
+                  C.formatDuration(65000) +
+                  ' · ' +
+                  C.chainTitle({ running: false, total: 6, failed: 0 }),
+                defaultOpen: true,
+              },
+              h(C.Reasoning, { text: THOUGHT, durationMs: 9000 }),
+              h(
+                C.Task,
+                { title: 'Read 5 notes', icon: 'file-text' },
+                Get(P + 'cutover-prd.md'),
+                Get(P + 'items/ops-9.md'),
+              ),
+              h(C.Reasoning, {
+                text: 'Two rehearsals leave room for a fix between them.',
+                durationMs: 3100,
+              }),
+            ),
+          ),
+          Row(
+            'a step failed',
+            h(
+              'div',
+              { className: 'turn' },
+              h(
+                C.ChainOfThought,
+                {
+                  summary: { running: false, total: 3, failed: 1 },
+                  title:
+                    'Worked for 22s · ' + C.chainTitle({ running: false, total: 3, failed: 1 }),
+                },
+                h(C.Reasoning, { text: THOUGHT, durationMs: 2600 }),
+                h(
+                  C.Task,
+                  { title: 'Read 2 notes', icon: 'file-text' },
+                  Get(P + 'items/ops-4.md'),
+                  Get(P + 'items/ops-9.md'),
+                ),
+              ),
+              h(C.Tool, {
+                status: 'failed',
+                icon: 'replace',
+                title: h(F, null, 'Failed to edit a note ', Target(P + 'items/ops-4.md', true)),
+              }),
+            ),
+          ),
+          Row(
+            'older turn',
+            h(
+              C.ChainOfThought,
+              {
+                summary: { running: false, total: 4, failed: 0 },
+                title: 'Worked for 48s · ' + C.chainTitle({ running: false, total: 4, failed: 0 }),
+              },
+              h(C.Reasoning, { text: THOUGHT, durationMs: 5000 }),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

@@ -1,0 +1,143 @@
+<!-- @dsCard group="AI work" height=539 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Task</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 780px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+      }
+      .cap {
+        padding-top: 1px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .target {
+        font-family: var(--font-mono);
+        font-size: var(--fs-2xs);
+        color: var(--n-500);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro,
+        F = React.Fragment;
+      function Target(text) {
+        return h('span', { className: 'target' }, text);
+      }
+      function Row(cap, kid) {
+        return h(
+          'div',
+          { className: 'row' },
+          h('span', { className: 'cap' }, cap),
+          h('div', null, kid),
+        );
+      }
+      function Get(path, status) {
+        return h(C.Tool, {
+          key: path,
+          status: status || 'done',
+          icon: 'file-text',
+          title: h(F, null, 'get note ', Target(path)),
+        });
+      }
+      var P = 'projects/phoenix-warehouse-rollout/';
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row(
+            'running',
+            h(
+              C.Task,
+              { title: 'Reading 4 notes', status: 'running', statusText: null },
+              Get(P + 'cutover-prd.md'),
+              Get('records/risks/risk-rollback-unrehearsed.md'),
+              Get(P + 'items/ops-9.md'),
+              Get('records/risks/risk-scanner-delivery.md', 'running'),
+            ),
+          ),
+          Row(
+            'done, opened',
+            h(
+              C.Task,
+              { title: 'Read 4 notes', icon: 'file-text', defaultOpen: true },
+              Get(P + 'cutover-prd.md'),
+              Get('records/risks/risk-rollback-unrehearsed.md'),
+              Get(P + 'items/ops-9.md'),
+              Get('records/risks/risk-scanner-delivery.md'),
+            ),
+          ),
+          Row(
+            'done',
+            h(
+              C.Task,
+              { title: 'Searched notes 3 times', icon: 'search', description: '1.2s' },
+              ['rollback', 'staging', 'scanner'].map(function (q) {
+                return h(C.Tool, {
+                  key: q,
+                  status: 'done',
+                  icon: 'search',
+                  title: h(F, null, 'search notes ', Target(q)),
+                });
+              }),
+            ),
+          ),
+          Row(
+            'items',
+            h(
+              C.Task,
+              {
+                title: 'Checked what blocks the rehearsal',
+                icon: 'list-checks',
+                defaultOpen: true,
+              },
+              h(
+                C.TaskItem,
+                { icon: 'file-text' },
+                'Read ',
+                h(C.TaskItemFile, null, 'risk-rollback-unrehearsed.md'),
+              ),
+              h(C.TaskItem, { icon: 'search' }, 'Searched notes for staging'),
+              h(
+                C.TaskItem,
+                { status: 'failed' },
+                'Failed to read ',
+                h(C.TaskItemFile, null, 'ops-12.md'),
+              ),
+              h(
+                C.TaskItem,
+                { status: 'not_run', icon: 'file-pen' },
+                'Append the dates to ',
+                h(C.TaskItemFile, null, 'ops-9.md'),
+              ),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

@@ -1,0 +1,150 @@
+<!-- @dsCard group="AI work" height=474 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Subagent</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 780px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+      }
+      .cap {
+        padding-top: 1px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .target {
+        font-family: var(--font-mono);
+        font-size: var(--fs-2xs);
+        color: var(--n-500);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro,
+        F = React.Fragment;
+      function Target(text) {
+        return h('span', { className: 'target' }, text);
+      }
+      function Row(cap, kid) {
+        return h(
+          'div',
+          { className: 'row' },
+          h('span', { className: 'cap' }, cap),
+          h('div', null, kid),
+        );
+      }
+      function Call(icon, name, target, status) {
+        return h(C.Tool, {
+          key: name + target,
+          status: status || 'done',
+          icon: icon,
+          title: h(F, null, name + ' ', Target(target)),
+        });
+      }
+      var ASK = 'Find every open risk on the Phoenix cutover';
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row(
+            'running',
+            h(
+              C.Subagent,
+              {
+                run: {
+                  type: 'cerebro-researcher',
+                  description: ASK,
+                  status: 'running',
+                  toolUses: 3,
+                  progress: 'Reading records/risks/risk-scanner-delivery.md',
+                },
+              },
+              Call('search', 'search notes', 'cutover risk'),
+              Call('file-text', 'get note', 'records/risks/risk-rollback-unrehearsed.md'),
+              Call('file-text', 'get note', 'records/risks/risk-scanner-delivery.md', 'running'),
+            ),
+          ),
+          Row(
+            'done, opened',
+            h(
+              C.Subagent,
+              {
+                defaultOpen: true,
+                run: {
+                  type: 'cerebro-researcher',
+                  description: ASK,
+                  status: 'done',
+                  toolUses: 9,
+                  durationMs: 48000,
+                  model: 'claude-sonnet-5',
+                  summary:
+                    'Two open risks touch the cutover: the rollback has never been rehearsed (OPS-9 has no date), and scanner hardware delivery is slipping toward 27 July. Neither has an owner.',
+                },
+              },
+              Call('search', 'search notes', 'cutover risk'),
+              h(
+                C.Task,
+                { key: 'read', title: 'Read 6 notes', icon: 'file-text' },
+                Call('file-text', 'get note', 'records/risks/risk-rollback-unrehearsed.md'),
+              ),
+            ),
+          ),
+          Row(
+            'failed',
+            h(C.Subagent, {
+              run: {
+                type: 'cerebro-researcher',
+                description: ASK,
+                status: 'failed',
+                toolUses: 2,
+                durationMs: 6100,
+              },
+              error: 'API Error: 529 overloaded\nTry again later.',
+            }),
+          ),
+          Row(
+            'hand-off',
+            h(
+              C.Trace,
+              null,
+              h(C.SubagentHandoff, {
+                agent: 'release-scout',
+                status: 'done',
+                onOpenRun: function () {},
+              }),
+              h(C.SubagentHandoff, {
+                agent: 'release-scout',
+                status: 'failed',
+                refusal:
+                  'Release scout is paused. A paused agent cannot be called, and the chain that would have reached it stops with it.',
+              }),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

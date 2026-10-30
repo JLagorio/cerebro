@@ -1,0 +1,190 @@
+<!-- @dsCard group="Overlays" height=304 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Menu</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 20px;
+        flex-wrap: wrap;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .foot {
+        border-top: 1px solid var(--n-100);
+        padding: 6px 8px 2px;
+        font-size: var(--fs-2xs);
+        line-height: 1.35;
+        color: var(--n-400);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function noop() {}
+      function Col(cap, kid) {
+        return h('div', { className: 'col' }, h('span', { className: 'cap' }, cap), kid);
+      }
+
+      function RecordActions() {
+        return h(
+          C.MenuSurface,
+          { width: 216, autoFocus: false },
+          h(C.MenuItem, { icon: 'link', label: 'Copy link', onSelect: noop }),
+          h(C.MenuItem, { icon: 'file-text', label: 'Copy path', onSelect: noop }),
+          h(C.MenuItem, { icon: 'copy', label: 'Duplicate', onSelect: noop }),
+          h(C.MenuItem, { icon: 'layout', label: 'Customize layout', onSelect: noop }),
+          h(C.MenuSeparator),
+          h(C.MenuItem, { icon: 'trash-2', label: 'Delete', danger: true, onSelect: noop }),
+        );
+      }
+
+      var VIS = [
+        { value: 'show', label: 'Always show', icon: 'eye' },
+        { value: 'hide_when_empty', label: 'Hide when empty', icon: 'eye-off' },
+        { value: 'hide', label: 'Always hide', icon: 'ban' },
+      ];
+
+      // The property menu drills into its visibility step and back, as PropertyMenu does.
+      function PropertyMenu() {
+        var s = React.useState('menu'),
+          step = s[0],
+          setStep = s[1];
+        var v = React.useState('show'),
+          vis = v[0],
+          setVis = v[1];
+        var n = React.useState('Status'),
+          name = n[0],
+          setName = n[1];
+        if (step === 'visibility') {
+          return h(
+            C.MenuSurface,
+            { width: 232 },
+            h(C.MenuBack, {
+              title: 'Property visibility',
+              onBack: function () {
+                setStep('menu');
+              },
+            }),
+            VIS.map(function (o) {
+              return h(C.MenuItem, {
+                key: o.value,
+                icon: o.icon,
+                label: o.label,
+                checked: vis === o.value,
+                onSelect: function () {
+                  setVis(o.value);
+                  setStep('menu');
+                },
+              });
+            }),
+            h(
+              'div',
+              { className: 'foot' },
+              'Hidden properties fold into an expander — they are still on the record.',
+            ),
+          );
+        }
+        return h(
+          C.MenuSurface,
+          { width: 232 },
+          h(
+            'div',
+            { style: { padding: '2px 4px 4px' } },
+            h(C.Input, {
+              size: 'sm',
+              ariaLabel: 'Rename ' + name,
+              value: name,
+              width: '100%',
+              onChange: function (e) {
+                setName(e.target.value);
+              },
+            }),
+          ),
+          h(C.MenuItem, {
+            icon: 'settings-2',
+            label: 'Edit property',
+            hint: 'Status',
+            submenu: true,
+            onSelect: noop,
+          }),
+          h(C.MenuItem, {
+            icon: 'eye',
+            label: 'Property visibility',
+            submenu: true,
+            hint: VIS.filter(function (o) {
+              return o.value === vis;
+            })[0].label,
+            onSelect: function () {
+              setStep('visibility');
+            },
+          }),
+          h(C.MenuItem, { icon: 'copy', label: 'Duplicate property', onSelect: noop }),
+          h(C.MenuSeparator),
+          h(C.MenuItem, {
+            icon: 'trash-2',
+            label: 'Delete property',
+            danger: true,
+            onSelect: noop,
+          }),
+          h(C.MenuSeparator),
+          h(C.MenuItem, { icon: 'layout', label: 'Customize layout', onSelect: noop }),
+          h('div', { className: 'foot' }, 'Changes Work item — 32 records'),
+        );
+      }
+
+      function BulkSet() {
+        return h(
+          C.MenuSurface,
+          { width: 216, autoFocus: false },
+          h(C.MenuLabel, null, 'Set on 3 records'),
+          h(C.MenuItem, { icon: 'loader', label: 'Status', onSelect: noop }),
+          h(C.MenuItem, { icon: 'circle-chevron-down', label: 'Priority', onSelect: noop }),
+          h(C.MenuItem, { icon: 'circle-user', label: 'Assignee', onSelect: noop }),
+          h(C.MenuItem, { icon: 'calendar', label: 'Due', onSelect: noop }),
+          h(C.MenuSeparator),
+          h(C.MenuItem, {
+            icon: 'upload',
+            label: 'Upload a file…',
+            disabled: true,
+            onSelect: noop,
+          }),
+          h(C.MenuItem, { icon: 'link', label: 'Link a path or URL…', onSelect: noop }),
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'row' },
+          Col('actions, danger last', h(RecordActions)),
+          Col('value hints and drill-in (click Property visibility)', h(PropertyMenu)),
+          Col('group label, disabled item', h(BulkSet)),
+        ),
+      );
+    </script>
+  </body>
+</html>

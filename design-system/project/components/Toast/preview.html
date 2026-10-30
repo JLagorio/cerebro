@@ -1,0 +1,132 @@
+<!-- @dsCard group="Feedback" height=420 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Toast</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 24px;
+        flex-wrap: wrap;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 360px;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+
+      var HOST = [
+        { id: 'trash', title: 'Moved “Duplicate jobs after reconnect” to Trash', action: 'Undo' },
+        { id: 'copy', title: 'Link copied' },
+        { id: 'save', title: 'Changes saved, but the view could not be refreshed.' },
+      ];
+      var TONES = [
+        { id: 'ok', tone: 'success', title: 'Restored “Duplicate jobs after reconnect”' },
+        {
+          id: 'warn',
+          tone: 'warn',
+          title: 'Not saved yet',
+          description: 'Another writer changed this file.',
+          action: 'Load the new version',
+        },
+        {
+          id: 'err',
+          tone: 'danger',
+          title: 'Couldn’t move “Weekly review” to Trash',
+          description: 'Resolve this page’s unsaved changes before moving it to Trash.',
+        },
+        {
+          id: 'ai',
+          tone: 'ai',
+          title: 'Release scout finished',
+          description: '“Release watch” is waiting for you to verify it.',
+          action: 'Review',
+        },
+      ];
+
+      // Toasts render inline here; in the app ToastHost stacks them and owns the one live region.
+      function Stack(props) {
+        var s = React.useState([]),
+          gone = s[0],
+          setGone = s[1];
+        function drop(id) {
+          return function () {
+            setGone(gone.concat(id));
+          };
+        }
+        var shown = props.items.filter(function (t) {
+          return gone.indexOf(t.id) < 0;
+        });
+        return h(
+          'div',
+          { className: 'col' },
+          h('span', { className: 'cap' }, props.cap),
+          shown.map(function (t) {
+            return h(C.Toast, {
+              key: t.id,
+              className: 'cb-toast',
+              tone: t.tone,
+              title: t.title,
+              description: t.description,
+              action: t.action ? { label: t.action, onClick: drop(t.id) } : undefined,
+              onDismiss: drop(t.id),
+            });
+          }),
+          gone.length > 0 &&
+            h(
+              'div',
+              null,
+              h(
+                C.Button,
+                {
+                  size: 'sm',
+                  variant: 'ghost',
+                  icon: 'rotate-ccw',
+                  onClick: function () {
+                    setGone([]);
+                  },
+                },
+                'Show them again',
+              ),
+            ),
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'row' },
+          h(Stack, { cap: 'as the app raises them: a title, at most one action', items: HOST }),
+          h(Stack, {
+            cap: 'tones, with a description (the API; the host draws neutral)',
+            items: TONES,
+          }),
+        ),
+      );
+    </script>
+  </body>
+</html>

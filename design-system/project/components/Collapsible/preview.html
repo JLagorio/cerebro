@@ -1,0 +1,198 @@
+<!-- @dsCard group="AI work" height=298 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Collapsible</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 640px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+      }
+      .cap {
+        padding-top: 9px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .cap.bare {
+        padding-top: 5px;
+      }
+      .card {
+        max-width: 320px;
+      }
+      .own {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--surface-raised);
+        color: var(--text-secondary);
+        font: inherit;
+        cursor: pointer;
+      }
+      .own[aria-expanded='true'] svg {
+        rotate: 90deg;
+      }
+      .own:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .region {
+        margin-top: 8px;
+        color: var(--text-secondary);
+      }
+      .commits {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .commits .cb-ai-trace-line {
+        color: var(--text-secondary);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kid, bare) {
+        return h(
+          'div',
+          { className: 'row' },
+          h('span', { className: bare ? 'cap bare' : 'cap' }, cap),
+          h('div', null, kid),
+        );
+      }
+      function I(name) {
+        return h(C.TraceIcon, null, h(C.Icon, { name: name, size: 16 }));
+      }
+      // A rail card's fold, as RailSection composes it: Collapsible, a trace trigger in its heading, a kept region.
+      function Section(icon, title, count, open, body) {
+        return h(
+          'section',
+          { className: 'cb-ai-rail-section card' },
+          h(
+            C.Collapsible,
+            { defaultOpen: open },
+            h(
+              'h3',
+              { className: 'cb-ai-rail-section-heading' },
+              h(
+                C.TraceCollapsibleTrigger,
+                { tabIndex: 0, className: 'cb-ai-rail-section-trigger' },
+                h(
+                  C.TraceLine,
+                  null,
+                  I(icon),
+                  h(C.TraceTitle, { className: 'cb-ai-rail-section-title' }, title),
+                  h(C.TraceDescription, null, count),
+                ),
+              ),
+            ),
+            h(
+              C.CollapsibleContent,
+              { keepMounted: true, className: 'cb-ai-rail-section-body' },
+              body,
+            ),
+          ),
+        );
+      }
+      function Commit(title, files) {
+        return h(
+          'li',
+          { key: title },
+          h(
+            C.TraceLine,
+            null,
+            I('git-commit-horizontal'),
+            h(C.TraceTitle, null, title),
+            h(C.TraceDescription, null, files),
+          ),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row(
+            'open',
+            Section(
+              'git-compare',
+              'Changes',
+              '2 commits',
+              true,
+              h(
+                'ul',
+                { className: 'commits' },
+                Commit('Rehearse the rollback twice', '1 file'),
+                Commit('Add rollback concept', '2 files'),
+              ),
+            ),
+          ),
+          Row(
+            'closed',
+            Section('link', 'Sources', '4 sources', false, 'Four pages this conversation read.'),
+          ),
+          Row(
+            'bare, open',
+            h(
+              C.Collapsible,
+              { defaultOpen: true },
+              h(
+                C.CollapsibleTrigger,
+                { className: 'own' },
+                h(C.Icon, { name: 'chevron-right', size: 14 }),
+                'Details',
+              ),
+              h(
+                C.CollapsibleContent,
+                { className: 'region' },
+                'OPS-9 moves to 24 and 29 July; the cutover stays on 30 July.',
+              ),
+            ),
+            true,
+          ),
+          Row(
+            'disabled',
+            h(
+              C.Collapsible,
+              { disabled: true },
+              h(
+                C.CollapsibleTrigger,
+                { className: 'own' },
+                h(C.Icon, { name: 'chevron-right', size: 14 }),
+                'Details',
+              ),
+              h(C.CollapsibleContent, null, 'Hidden.'),
+            ),
+            true,
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

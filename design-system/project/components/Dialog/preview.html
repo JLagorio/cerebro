@@ -1,0 +1,214 @@
+<!-- @dsCard group="Overlays" height=348 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Dialog</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        gap: 16px;
+      }
+      /* Each frame is the window its dialog fills: a transform makes it the box the fixed scrim covers. */
+      .frame {
+        position: relative;
+        height: 290px;
+        overflow: hidden;
+        transform: translateZ(0);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--n-0);
+      }
+      .page {
+        padding: 20px 24px;
+      }
+      .page h1 {
+        margin: 0 0 12px;
+        font-size: var(--fs-xl);
+        line-height: var(--lh-xl);
+        font-weight: 600;
+        color: var(--n-900);
+      }
+      .line {
+        height: 10px;
+        margin: 10px 0;
+        border-radius: var(--r-full);
+        background: var(--n-100);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .lbl {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: var(--fs-xs);
+        color: var(--n-600);
+      }
+      .lede {
+        margin: 0 0 12px;
+        font-size: var(--fs-sm);
+        line-height: 19px;
+        color: var(--n-600);
+      }
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.92em;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+
+      function Page(title, cap, reopen) {
+        return h(
+          'div',
+          { className: 'page' },
+          h('h1', null, title),
+          h('div', { className: 'line', style: { width: '82%' } }),
+          h('div', { className: 'line', style: { width: '64%' } }),
+          h('div', { className: 'line', style: { width: '74%' } }),
+          h(
+            'div',
+            { style: { marginTop: 16 } },
+            h(C.Button, { size: 'sm', onClick: reopen }, 'Open the dialog again'),
+          ),
+        );
+      }
+
+      function NewDatabase() {
+        var o = React.useState(true),
+          open = o[0],
+          setOpen = o[1];
+        var n = React.useState(''),
+          name = n[0],
+          setName = n[1];
+        function close() {
+          setOpen(false);
+          setName('');
+        }
+        return h(
+          'div',
+          { className: 'col' },
+          h('span', { className: 'cap' }, 'form: the primary waits for a name'),
+          h(
+            'div',
+            { className: 'frame' },
+            Page('Databases', '', function () {
+              setOpen(true);
+            }),
+            h(
+              C.Dialog,
+              {
+                open: open,
+                onClose: close,
+                title: 'New database',
+                width: 440,
+                primaryAction: { label: 'Create', onClick: close, disabled: name.trim() === '' },
+                secondaryAction: { label: 'Cancel', onClick: close },
+              },
+              h(
+                'p',
+                { className: 'lede' },
+                'A database is a schema for records: notes with its ',
+                h('code', null, 'type:'),
+                ' inherit its properties and styling.',
+              ),
+              h(
+                'label',
+                { className: 'lbl' },
+                'Database name',
+                h(C.Input, {
+                  autoFocus: true,
+                  testId: 'db-name',
+                  placeholder: 'e.g. Recipe, Book, Habit…',
+                  value: name,
+                  width: '100%',
+                  onChange: function (e) {
+                    setName(e.target.value);
+                  },
+                }),
+              ),
+            ),
+          ),
+        );
+      }
+
+      function DeleteRecord() {
+        var o = React.useState(true),
+          open = o[0],
+          setOpen = o[1];
+        function close() {
+          setOpen(false);
+        }
+        return h(
+          'div',
+          { className: 'col' },
+          h('span', { className: 'cap' }, 'destructive confirm with a footer note'),
+          h(
+            'div',
+            { className: 'frame' },
+            Page('Duplicate jobs after reconnect', '', function () {
+              setOpen(true);
+            }),
+            h(
+              C.Dialog,
+              {
+                open: open,
+                onClose: close,
+                title: 'Delete “Duplicate jobs after reconnect”?',
+                width: 420,
+                footerNote: 'Restore from Settings → Recently deleted for 30 days.',
+                secondaryAction: { label: 'Cancel', onClick: close },
+                primaryAction: { label: 'Delete', onClick: close },
+              },
+              h(
+                'p',
+                {
+                  style: {
+                    margin: 0,
+                    fontSize: 'var(--fs-sm)',
+                    lineHeight: 1.6,
+                    color: 'var(--n-600)',
+                  },
+                },
+                'It moves to the Trash. One record links here, and those links will point at nothing.',
+              ),
+            ),
+          ),
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h('div', { className: 'row' }, h(NewDatabase), h(DeleteRecord)),
+      );
+
+      // Both dialogs claim focus as they open; hand it to the form's field, as a lone one would keep it.
+      setTimeout(function () {
+        var f = document.querySelector('[data-testid="db-name"]');
+        if (f) f.focus();
+      }, 120);
+    </script>
+  </body>
+</html>

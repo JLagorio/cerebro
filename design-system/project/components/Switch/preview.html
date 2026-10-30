@@ -1,0 +1,89 @@
+<!-- @dsCard group="Forms" height=148 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Switch</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .cap {
+        min-width: 72px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .prop {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: var(--fs-xs);
+        color: var(--n-600);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kids) {
+        return h('div', { className: 'row' }, h('span', { className: 'cap' }, cap), kids);
+      }
+      function Sw(props) {
+        var s = React.useState(!!props.initial),
+          v = s[0],
+          set = s[1];
+        return h(
+          C.Switch,
+          Object.assign({}, props, { initial: undefined, checked: v, onChange: set }),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row('on', [
+            h(Sw, { key: 'a', label: 'Show weekends', initial: true }),
+            h(Sw, { key: 'b', label: 'Show empty properties', initial: true }),
+          ]),
+          Row('off', [
+            h(Sw, { key: 'a', label: 'Only related to this record' }),
+            h(Sw, { key: 'b', label: 'Color columns' }),
+          ]),
+          Row(
+            'no label',
+            h(
+              'span',
+              { className: 'prop' },
+              'Limit to 1 record',
+              h(Sw, { ariaLabel: 'Limit to 1 record' }),
+            ),
+          ),
+          Row('disabled', [
+            h(C.Switch, { key: 'a', label: 'Show body', checked: true, disabled: true }),
+            h(C.Switch, { key: 'b', label: 'Fit media', disabled: true }),
+          ]),
+        ),
+      );
+    </script>
+  </body>
+</html>

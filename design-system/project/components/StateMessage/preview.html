@@ -1,0 +1,122 @@
+<!-- @dsCard group="Feedback" height=368 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>StateMessage</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 24px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .rail {
+        padding: 4px 14px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-lg);
+        background: var(--n-0);
+      }
+      .rail h3 {
+        margin: 8px 0 0;
+        font-size: var(--fs-xs);
+        font-weight: 600;
+        color: var(--n-700);
+      }
+      .rail + .rail {
+        margin-top: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+
+      function Card(title, kid) {
+        return h('div', { className: 'rail' }, h('h3', null, title), kid);
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'row' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'in a page: the sunken well'),
+            h(
+              C.StateMessage,
+              {
+                state: 'unavailable',
+                title: 'Pages couldn’t be loaded',
+                action: h(C.Button, { size: 'sm' }, 'Try again'),
+              },
+              'The vault folder could not be read: permission denied.',
+            ),
+            h(
+              C.StateMessage,
+              { state: 'empty', title: 'Pick up where you left off' },
+              'Pages you open will appear here.',
+            ),
+            h(C.StateMessage, { state: 'loading', title: 'Loading pages…' }),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'compact: in a card, no well'),
+            Card(
+              'Connectors',
+              h(
+                C.StateMessage,
+                {
+                  compact: true,
+                  state: 'not-recorded',
+                  title: 'What this conversation reaches is not recorded',
+                },
+                'A turn records it as it starts.',
+              ),
+            ),
+            Card(
+              'Handed off',
+              h(C.StateMessage, {
+                compact: true,
+                state: 'partial',
+                title: 'Some of these runs couldn’t be read',
+              }),
+            ),
+            Card(
+              'Context',
+              h(
+                C.StateMessage,
+                { compact: true, state: 'unavailable', title: 'Context use unavailable' },
+                'Cerebro could not read it.',
+              ),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

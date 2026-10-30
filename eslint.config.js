@@ -169,6 +169,8 @@ export default tseslint.config(
       'test-results/**',
       'playwright-report/**',
       'coverage/**',
+      // `pnpm ds:build` output (M100.1): the generated design-system bundle.
+      'design-system/out/**',
       // Only the closed builder-owned entry/chunk outputs are generated.
       // Authored fixture sources, including web/smoke.js, remain linted.
       'conformance/native-read-smoke/web/quit.js',

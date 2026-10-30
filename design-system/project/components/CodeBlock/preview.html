@@ -1,0 +1,176 @@
+<!-- @dsCard group="AI work" height=768 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CodeBlock</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px 32px;
+        align-items: start;
+      }
+      .full {
+        grid-column: 1 / -1;
+      }
+      .cell {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      var theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+      function Cell(cap) {
+        var kids = Array.prototype.slice.call(arguments, 1);
+        return h.apply(
+          null,
+          ['div', { className: 'cell' }, h('div', { className: 'cap' }, cap)].concat(kids),
+        );
+      }
+
+      var ts = [
+        '/** A status in words: this build’s, or the CLI’s own word, made readable. */',
+        'export function todoStatusWords(status: string): string {',
+        '  const known = todoStatusOf(status);',
+        '  if (known !== null) return TODO_STATUS_WORDS[known];',
+        "  const words = status.replace(/[_-]+/g, ' ').trim();",
+        "  return words === '' ? TODO_STATUS_WORDS.pending : words[0].toUpperCase() + words.slice(1);",
+        '}',
+      ].join('\n');
+      var diff = [
+        '@@ -101,9 +101,10 @@ export function PlanCard({ todos, working }: PlanCardProps) {',
+        '   return (',
+        '-    <Queue>',
+        '+    <Queue isStreaming={working}>',
+        '       {left.length > 0 && (',
+        '-        <QueueSection label="to do" count={left.length}>',
+        '+        <QueueSection data-section="todo" label="to do" count={left.length} icon="list-todo">',
+        '           <QueueList>{items(left)}</QueueList>',
+        '         </QueueSection>',
+        '       )}',
+      ].join('\n');
+      var input = [
+        '{',
+        '  "path": "knowledge/systems/pick-queue-drain.md",',
+        '  "expect_hash": "9f2c41e7b03d",',
+        '  "edits": [{ "old": "52 minutes", "new": "38 minutes" }]',
+        '}',
+      ].join('\n');
+      var refusal =
+        'stale_content: knowledge/systems/pick-queue-drain.md changed since you read it, so nothing was written. Read it again with get_note and decide whether your change still applies.';
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          h(
+            'div',
+            { className: 'full' },
+            Cell(
+              'Code in a reply: highlighted for the theme it is handed, its copy button over the corner on hover or focus',
+              h(
+                C.CodeBlock,
+                { 'data-language': 'typescript' },
+                h(
+                  C.CodeBlockActions,
+                  null,
+                  h(C.CodeBlockCopyButton, { value: ts, label: 'Copy the code' }),
+                ),
+                h(C.CodeBlockContent, { code: ts, language: 'typescript', theme: theme }),
+              ),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'full' },
+            Cell(
+              'A diff: added and removed lines tinted, with a header for the file',
+              h(
+                C.CodeBlock,
+                null,
+                h(
+                  C.CodeBlockHeader,
+                  null,
+                  h(
+                    C.CodeBlockTitle,
+                    null,
+                    h(C.Icon, { name: 'file-diff', size: 14 }),
+                    'src/agent/rail/PlanCard.tsx',
+                  ),
+                  h(
+                    C.CodeBlockActions,
+                    null,
+                    h(C.CodeBlockCopyButton, { value: diff, label: 'Copy the diff' }),
+                  ),
+                ),
+                h(C.CodeBlockContent, { code: diff, language: 'diff', theme: theme }),
+              ),
+            ),
+          ),
+          Cell(
+            'A tool call’s input, small, in a trace',
+            h(
+              C.CodeBlock,
+              { size: 'sm' },
+              h(
+                C.CodeBlockHeader,
+                null,
+                h(C.CodeBlockTitle, null, 'Input'),
+                h(
+                  C.CodeBlockActions,
+                  null,
+                  h(C.CodeBlockCopyButton, { value: input, label: 'Copy the input' }),
+                ),
+              ),
+              h(C.CodeBlockContent, { code: input, language: 'json', theme: theme }),
+            ),
+          ),
+          Cell(
+            'Destructive: a refused call’s error, wrapped',
+            h(
+              C.CodeBlock,
+              { size: 'sm', variant: 'destructive' },
+              h(
+                C.CodeBlockHeader,
+                null,
+                h(C.CodeBlockTitle, null, 'Error'),
+                h(
+                  C.CodeBlockActions,
+                  null,
+                  h(C.CodeBlockCopyButton, { value: refusal, label: 'Copy the error' }),
+                ),
+              ),
+              h(C.CodeBlockContent, { wrap: true }, refusal),
+              h(C.CodeBlockFooter, null, 'Nothing was written.'),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

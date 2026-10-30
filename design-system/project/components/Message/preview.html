@@ -1,0 +1,170 @@
+<!-- @dsCard group="AI conversation" height=437 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Message</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 32px;
+        align-items: start;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .prose {
+        margin: 0;
+      }
+      .prose + .prose {
+        margin-top: 8px;
+      }
+      .prose code {
+        font-family: var(--font-mono);
+        font-size: var(--fs-xs);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function noop() {}
+      var question = 'What is at risk on the Phoenix cutover?\nKeep it to the next two weeks.';
+      var answer =
+        'Two things. The pick queue drain time is above the 20-minute line the playbook sets, and OPS-4 still has no rollback owner.';
+
+      var panel = h(
+        'div',
+        { className: 'col' },
+        h(
+          'span',
+          { className: 'cap' },
+          'In the assistant: the person’s bubble at the end, the reply as prose',
+        ),
+        h(
+          C.Message,
+          { from: 'user' },
+          h(
+            C.MessageContent,
+            null,
+            h(C.Bubble, null, h(C.BubbleContent, null, question)),
+            h(C.MessageToolbar, { 'aria-label': 'Question actions', copy: question }),
+          ),
+        ),
+        h(
+          C.Message,
+          { from: 'assistant' },
+          h(
+            C.MessageContent,
+            null,
+            h(
+              'div',
+              null,
+              h('p', { className: 'prose' }, answer),
+              h(
+                'p',
+                { className: 'prose' },
+                'I would move the cutover review up to Thursday and ask Marcus to own ',
+                h('code', null, 'ops-4.md'),
+                '.',
+              ),
+            ),
+            h(
+              C.MessageFooter,
+              null,
+              h(C.MessageToolbar, {
+                copy: answer,
+                onRetry: noop,
+                onSave: noop,
+                onBranch: noop,
+                branchLabel: 'Branch the conversation from this reply',
+              }),
+              h('span', null, 'Worked for 1m 5s'),
+            ),
+          ),
+        ),
+      );
+
+      var thread = h(
+        'div',
+        { className: 'col' },
+        h('span', { className: 'cap' }, 'With avatars and headers: a comment thread’s @agent turn'),
+        h(
+          C.MessageGroup,
+          null,
+          h(
+            C.Message,
+            { from: 'user', align: 'start' },
+            h(C.MessageAvatar, { name: 'Maya Chen' }),
+            h(
+              C.MessageContent,
+              null,
+              h(C.MessageHeader, null, 'Maya Chen · 10:42'),
+              h(
+                C.Bubble,
+                { variant: 'muted', align: 'start' },
+                h(C.BubbleContent, null, '@scout is the four-hour window still realistic?'),
+              ),
+            ),
+          ),
+          h(
+            C.Message,
+            { from: 'assistant' },
+            h(C.MessageAvatar, null, h(C.Icon, { name: 'bot', size: 16 })),
+            h(
+              C.MessageContent,
+              null,
+              h(C.MessageHeader, null, 'Scout · 10:43'),
+              h(
+                C.Bubble,
+                { variant: 'ghost' },
+                h(
+                  C.BubbleContent,
+                  null,
+                  'Only if the smoke set runs in parallel. The kickoff notes timed it at 95 minutes on its own.',
+                ),
+              ),
+              h(
+                C.MessageFooter,
+                null,
+                h(C.MessageToolbar, { copy: 'Only if the smoke set runs in parallel.' }),
+              ),
+            ),
+          ),
+        ),
+        h('span', { className: 'cap' }, 'Bubble variants: default, muted, ghost'),
+        h(
+          'div',
+          { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+          h(C.Bubble, { align: 'end' }, h(C.BubbleContent, null, 'Learn from this page')),
+          h(C.Bubble, { variant: 'muted' }, h(C.BubbleContent, null, 'Queued for after this turn')),
+          h(C.Bubble, { variant: 'ghost' }, h(C.BubbleContent, null, 'Stopped before it replied.')),
+        ),
+      );
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h('div', { className: 'grid' }, panel, thread),
+      );
+    </script>
+  </body>
+</html>

@@ -1,0 +1,125 @@
+<!-- @dsCard group="Data display" height=158 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Icon</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .cap {
+        min-width: 72px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--n-800);
+      }
+      .px {
+        font-size: var(--fs-2xs);
+        color: var(--n-400);
+        font-family: var(--font-mono);
+      }
+      .ink {
+        color: var(--n-600);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kids) {
+        return h('div', { className: 'row' }, h('span', { className: 'cap' }, cap), kids);
+      }
+      function Item(icon, label, props) {
+        return h(
+          'span',
+          { key: label, className: 'item' },
+          h(C.Icon, Object.assign({ name: icon }, props)),
+          h('span', null, label),
+        );
+      }
+      var TYPES = [
+        ['folder-kanban', 'Project', '#14B8A6'],
+        ['square-check', 'Work item', '#3D8BE8'],
+        ['gavel', 'Decision', '#0EA5E9'],
+        ['triangle-alert', 'Risk', '#DE3B4E'],
+        ['calendar-days', 'Meeting', '#8B7CF6'],
+        ['dice-5', 'Bet', '#F59E0B'],
+        ['user', 'Person', '#38BDF8'],
+      ];
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row(
+            'sizes',
+            [12, 14, 16, 20, 24].map(function (s) {
+              return h(
+                'span',
+                { key: s, className: 'item ink' },
+                h(C.Icon, { name: 'target', size: s }),
+                h('span', { className: 'px' }, s),
+              );
+            }),
+          ),
+          Row(
+            'type colour',
+            TYPES.map(function (t) {
+              return Item(t[0], t[1], { color: t[2] });
+            }),
+          ),
+          Row(
+            'stroke',
+            [1.25, 1.75, 2.25].map(function (w) {
+              return h(
+                'span',
+                { key: w, className: 'item ink' },
+                h(C.Icon, { name: 'history', size: 20, strokeWidth: w }),
+                h('span', { className: 'px' }, w),
+              );
+            }),
+          ),
+          Row('fallbacks', [
+            h(
+              'span',
+              { key: 'a', className: 'item ink' },
+              h(C.Icon, { name: 'check-square' }),
+              h('span', null, 'check-square, aliased'),
+            ),
+            h(
+              'span',
+              { key: 'u', className: 'item ink' },
+              h(C.Icon, { name: 'roadmapp' }),
+              h('span', null, 'roadmapp, unknown'),
+            ),
+          ]),
+        ),
+      );
+    </script>
+  </body>
+</html>

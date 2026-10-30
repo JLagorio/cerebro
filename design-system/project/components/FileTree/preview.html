@@ -1,0 +1,261 @@
+<!-- @dsCard group="AI work" height=537 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>FileTree</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+        gap: 24px 32px;
+        align-items: start;
+      }
+      .cell {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .changeset {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+      }
+      .hash {
+        font-family: var(--font-mono);
+      }
+      .act {
+        display: inline-flex;
+        flex: none;
+        padding: 2px;
+        border: 0;
+        border-radius: var(--r-xs);
+        background: transparent;
+        color: var(--n-400);
+        cursor: pointer;
+      }
+      .act:hover {
+        color: var(--n-800);
+      }
+      .also {
+        font-size: var(--fs-2xs);
+        line-height: var(--lh-2xs);
+        color: var(--n-500);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro,
+        F = React.Fragment;
+      function Cell(cap) {
+        var kids = Array.prototype.slice.call(arguments, 1);
+        return h.apply(
+          null,
+          ['div', { className: 'cell' }, h('div', { className: 'cap' }, cap)].concat(kids),
+        );
+      }
+      function open() {}
+      function file(path, kind, additions, deletions, previousPath) {
+        var f = {
+          type: 'file',
+          name: path.split('/').pop(),
+          path: path,
+          kind: kind,
+          additions: additions,
+          deletions: deletions,
+        };
+        if (previousPath) f.previousPath = previousPath;
+        return f;
+      }
+      function folder(name, path, children, files, additions, deletions, uncounted) {
+        return {
+          type: 'folder',
+          name: name,
+          path: path,
+          children: children,
+          files: files,
+          additions: additions,
+          deletions: deletions,
+          uncounted: uncounted,
+        };
+      }
+
+      // A run's committed changeset, as engine/ai/fileTree.ts builds it: folders first, a
+      // folder with one folder inside collapsed into one row, a binary file counted in no sum.
+      var tree = [
+        folder(
+          'inbox',
+          'inbox',
+          [file('inbox/phoenix-cutover-standup.md', 'deleted', 0, 18)],
+          1,
+          0,
+          18,
+          0,
+        ),
+        folder(
+          'knowledge',
+          'knowledge',
+          [
+            folder(
+              'playbooks',
+              'knowledge/playbooks',
+              [file('knowledge/playbooks/warehouse-cutover.md', 'modified', 6, 2)],
+              1,
+              6,
+              2,
+              0,
+            ),
+            folder(
+              'systems',
+              'knowledge/systems',
+              [
+                file('knowledge/systems/offline-guarantee.md', 'modified', 1, 1),
+                file('knowledge/systems/pick-queue-drain.md', 'modified', 14, 3),
+              ],
+              2,
+              15,
+              4,
+              0,
+            ),
+          ],
+          3,
+          21,
+          6,
+          0,
+        ),
+        folder(
+          'projects/phoenix-warehouse-rollout',
+          'projects/phoenix-warehouse-rollout',
+          [
+            folder(
+              'items',
+              'projects/phoenix-warehouse-rollout/items',
+              [file('projects/phoenix-warehouse-rollout/items/ops-13.md', 'added', 22, 0)],
+              1,
+              22,
+              0,
+              0,
+            ),
+            file('projects/phoenix-warehouse-rollout/cutover-prd.md', 'modified', 9, 4),
+            file('projects/phoenix-warehouse-rollout/cutover-timeline.png', 'added', null, null),
+          ],
+          3,
+          31,
+          4,
+          1,
+        ),
+        folder(
+          'strategy',
+          'strategy',
+          [file('strategy/systems-map.md', 'renamed', 2, 1, 'strategy/systems-overview.md')],
+          1,
+          2,
+          1,
+          0,
+        ),
+      ];
+      var notRecorded = [
+        folder(
+          'records/risks',
+          'records/risks',
+          [
+            file('records/risks/risk-firmware-freeze.md', 'added', null, null),
+            file('records/risks/risk-pick-queue-backlog.md', 'modified', 3, 1),
+          ],
+          2,
+          3,
+          1,
+          1,
+        ),
+      ];
+
+      function actions(f) {
+        var binary = f.additions === null;
+        return h(
+          F,
+          null,
+          !binary &&
+            h(
+              'button',
+              { type: 'button', className: 'act', 'aria-label': 'Show the changes to ' + f.path },
+              h(C.Icon, { name: 'chevron-right', size: 12 }),
+            ),
+          h(
+            'button',
+            { type: 'button', className: 'act', 'aria-label': 'View diff of ' + f.path },
+            h(C.Icon, { name: 'maximize-2', size: 12 }),
+          ),
+        );
+      }
+      function detail(f) {
+        return f.path === 'knowledge/systems/pick-queue-drain.md'
+          ? h('span', { className: 'also' }, 'also edited by you')
+          : null;
+      }
+
+      var changeset = h(
+        'div',
+        { className: 'changeset' },
+        h(
+          C.TraceLine,
+          null,
+          h(C.TraceIcon, null, h(C.Icon, { name: 'file-diff', size: 16 })),
+          h(C.TraceTitle, null, 'Changed 8 files · +54 −29 · 1 binary'),
+          h(C.TraceDescription, { className: 'hash' }, 'a3f9c1e'),
+        ),
+        h(C.FileTree, {
+          tree: tree,
+          onOpenPath: open,
+          actions: actions,
+          detail: detail,
+          selectedPath: 'knowledge/systems/pick-queue-drain.md',
+          defaultExpanded: new Set([
+            'inbox',
+            'knowledge',
+            'knowledge/playbooks',
+            'knowledge/systems',
+            'projects/phoenix-warehouse-rollout',
+            'strategy',
+          ]),
+        }),
+      );
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          Cell(
+            'A turn’s changeset: each change in words and lines, a closed folder, the open file in full ink',
+            changeset,
+          ),
+          Cell(
+            'Counts nobody kept read “not recorded”, never 0',
+            h(C.FileTree, { tree: notRecorded, missingCounts: 'not_recorded', onOpenPath: open }),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

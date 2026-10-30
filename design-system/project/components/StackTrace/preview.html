@@ -1,0 +1,112 @@
+<!-- @dsCard group="AI work" height=600 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>StackTrace</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px 32px;
+        align-items: start;
+      }
+      .full {
+        grid-column: 1 / -1;
+      }
+      .cell {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Cell(cap) {
+        var kids = Array.prototype.slice.call(arguments, 1);
+        return h.apply(
+          null,
+          ['div', { className: 'cell' }, h('div', { className: 'cap' }, cap)].concat(kids),
+        );
+      }
+      function open() {}
+
+      var rust = [
+        "thread 'vault::trash::tests::restore_refuses_to_overwrite' (48213) panicked at src/vault/trash.rs:212:9:",
+        'assertion `left == right` failed: restore wrote over a page that stands',
+        '  left: Restored',
+        ' right: Refused(Occupied)',
+        'stack backtrace:',
+        '   0: __rustc::rust_begin_unwind',
+        '   1: core::panicking::panic_fmt',
+        '   2: core::panicking::assert_failed_inner',
+        '   3: cerebro_lib::vault::trash::restore',
+        '             at ./src/vault/trash.rs:141:13',
+        '   4: cerebro_lib::vault::trash::tests::restore_refuses_to_overwrite',
+        '             at ./src/vault/trash.rs:212:9',
+        '   5: core::ops::function::FnOnce::call_once',
+        '             at /rustc/4d91de4e48198da2e33413efdcd9cd2cc0c46688/library/core/src/ops/function.rs:250:5',
+        'note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.',
+      ].join('\n');
+      var node = [
+        "TypeError: Cannot read properties of undefined (reading 'path')",
+        '    at sourceKey (src/engine/ai/sources.ts:57:24)',
+        '    at railSources (src/agent/elements/railSources.ts:48:22)',
+        '    at SourcesCard (src/agent/rail/SourcesCard.tsx:150:41)',
+        '    at renderWithHooks (node_modules/react-dom/cjs/react-dom-client.development.js:5654:22)',
+        '    at Array.map (<anonymous>)',
+      ].join('\n');
+      var bare = 'Error: spawn claude ENOENT\nThe Claude Code CLI was not found on this PATH.';
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          h(
+            'div',
+            { className: 'full' },
+            Cell(
+              'Rust panic, opened: the whole error, the frames you can fix, then the runtime frames as printed',
+              h(C.StackTrace, { trace: rust, defaultOpen: true, onOpenPath: open }),
+            ),
+          ),
+          Cell(
+            'Closed, as it starts: the error is the title',
+            h(C.StackTrace, { trace: node, onOpenPath: open }),
+          ),
+          Cell(
+            'Text with no frames is shown as the error it is',
+            h(C.StackTrace, { trace: bare, defaultOpen: true }),
+          ),
+        ),
+      );
+      // Unfold the runtime and library frames, as a reader's click would.
+      setTimeout(function () {
+        var fold = document.querySelector('[data-slot="stack-trace-library"] button');
+        if (fold) fold.click();
+      }, 30);
+    </script>
+  </body>
+</html>

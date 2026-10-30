@@ -1,0 +1,140 @@
+<!-- @dsCard group="AI conversation" height=258 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Suggestion</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 32px;
+        align-items: start;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .note {
+        margin: 4px 12px 0;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .sent {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-secondary);
+        margin: 4px 12px 0;
+        min-height: 18px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Demo() {
+        var s = React.useState(null),
+          sent = s[0],
+          setSent = s[1];
+        return h(
+          'div',
+          { className: 'grid' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'Where nothing is open'),
+            h(
+              C.Suggestions,
+              { 'aria-label': 'Conversation starters' },
+              h(C.Suggestion, { suggestion: 'What is at risk right now?', onClick: setSent }),
+              h(C.Suggestion, { suggestion: 'Help me clear the Inbox', onClick: setSent }),
+              h(C.Suggestion, {
+                suggestion: 'What do you know about this vault?',
+                onClick: setSent,
+              }),
+            ),
+            h('p', { className: 'note' }, 'Knowledge stays yours to verify.'),
+            h(
+              'p',
+              { className: 'sent', role: 'status' },
+              sent === null ? 'Press a row: it sends its prompt.' : 'Sent: ' + sent,
+            ),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h(
+              'span',
+              { className: 'cap' },
+              'On a page: the label shows, the structured prompt sends',
+            ),
+            h(
+              C.Suggestions,
+              { 'aria-label': 'Conversation starters' },
+              h(
+                C.Suggestion,
+                {
+                  suggestion:
+                    'What in this vault supports or contradicts the page at projects/phoenix-warehouse-rollout/cutover-prd.md? Cite the pages.',
+                  onClick: setSent,
+                },
+                'What does Knowledge say about this?',
+              ),
+              h(
+                C.Suggestion,
+                {
+                  suggestion:
+                    'What is missing from projects/phoenix-warehouse-rollout/cutover-prd.md?',
+                  onClick: setSent,
+                },
+                'What’s missing?',
+              ),
+              h(
+                C.Suggestion,
+                {
+                  suggestion: 'Learn from projects/phoenix-warehouse-rollout/cutover-prd.md',
+                  description: 'Drafts concepts for Review',
+                  onClick: setSent,
+                },
+                'Learn from this page',
+              ),
+              h(
+                C.Suggestion,
+                {
+                  suggestion: 'Recheck this concept',
+                  description: 'Disabled: not due for a recheck',
+                  disabled: true,
+                  icon: 'refresh-cw',
+                },
+                'Recheck this concept',
+              ),
+            ),
+          ),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(h(Demo));
+    </script>
+  </body>
+</html>

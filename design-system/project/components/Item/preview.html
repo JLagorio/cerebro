@@ -1,0 +1,182 @@
+<!-- @dsCard group="AI layout" height=387 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Item</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px;
+        align-items: start;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .link {
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--text-link);
+        font: inherit;
+        font-size: var(--fs-xs);
+        cursor: pointer;
+      }
+      .body {
+        margin: 0;
+        color: var(--text-secondary);
+      }
+      .meta {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Connector(name, icon, status, facts, signIn) {
+        return h(
+          C.Item,
+          { key: name, size: 'xs' },
+          h(C.ItemMedia, { variant: 'icon' }, h(C.Icon, { name: icon, size: 16 })),
+          h(
+            C.ItemContent,
+            null,
+            h(C.ItemTitle, null, name),
+            h(C.ItemDescription, null, facts ? status + ' \u00b7 ' + facts : status),
+          ),
+          signIn &&
+            h(
+              C.ItemActions,
+              null,
+              h(
+                'button',
+                { type: 'button', className: 'link', 'aria-label': 'Sign in to ' + name },
+                'Sign in…',
+              ),
+            ),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'ItemGroup · xs (the rail’s connectors)'),
+            h(
+              C.ItemGroup,
+              null,
+              Connector('Gmail', 'plug', 'Loaded in the latest turn', '2 calls · 1 draft written'),
+              Connector('Linear', 'unplug', 'Not loaded: needs sign-in', null, true),
+              Connector(
+                'Google Calendar',
+                'plug',
+                'Loaded in the latest turn',
+                'No calls this turn',
+              ),
+            ),
+            h(
+              'span',
+              { className: 'cap', style: { marginTop: 8 } },
+              'muted · default, with actions',
+            ),
+            h(
+              C.Item,
+              { variant: 'muted' },
+              h(C.ItemMedia, { variant: 'icon' }, h(C.Icon, { name: 'file-text', size: 16 })),
+              h(
+                C.ItemContent,
+                null,
+                h(C.ItemTitle, null, 'Phoenix cutover — go-live PRD'),
+                h(
+                  C.ItemDescription,
+                  null,
+                  'projects/phoenix-warehouse-rollout/cutover-prd.md · cited in two replies',
+                ),
+              ),
+              h(C.ItemActions, null, h(C.Button, { size: 'sm' }, 'Open')),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'outline · sm, with header and footer'),
+            h(
+              C.Item,
+              {
+                variant: 'outline',
+                size: 'sm',
+                role: 'region',
+                'aria-label': 'Review what happened',
+                style: { flexDirection: 'column', alignItems: 'stretch' },
+              },
+              h(
+                C.ItemHeader,
+                null,
+                h(C.ItemTitle, null, 'This reply stopped.'),
+                h(C.Button, { size: 'sm', variant: 'ghost' }, 'Close'),
+              ),
+              h(
+                C.ItemContent,
+                null,
+                h(
+                  'p',
+                  { className: 'body' },
+                  'Some actions may already have happened. The records shown here may be incomplete.',
+                ),
+                h(
+                  C.ItemDescription,
+                  null,
+                  'File-change receipts are not available for this reply.',
+                ),
+              ),
+              h(C.ItemSeparator, null),
+              h(
+                C.ItemFooter,
+                null,
+                h('span', { className: 'meta' }, 'Run 4f2a · Claude Code 2.1.250'),
+                h(C.Badge, { variant: 'outline' }, 'not recorded'),
+              ),
+            ),
+            h('span', { className: 'cap', style: { marginTop: 8 } }, 'outline · xs, as a link'),
+            h(
+              C.Item,
+              { variant: 'outline', size: 'xs', render: h('a', { href: '#warehouse-cutover' }) },
+              h(C.ItemMedia, { variant: 'icon' }, h(C.Icon, { name: 'book-open', size: 16 })),
+              h(
+                C.ItemContent,
+                null,
+                h(C.ItemTitle, null, 'Warehouse cutover: go-live and rollback'),
+                h(C.ItemDescription, null, 'knowledge/playbooks/warehouse-cutover.md'),
+              ),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

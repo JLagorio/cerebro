@@ -1,0 +1,157 @@
+<!-- @dsCard group="AI work" height=742 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>TestResults</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px 32px;
+        align-items: start;
+      }
+      .full {
+        grid-column: 1 / -1;
+      }
+      .cell {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Cell(cap) {
+        var kids = Array.prototype.slice.call(arguments, 1);
+        return h.apply(
+          null,
+          ['div', { className: 'cell' }, h('div', { className: 'cap' }, cap)].concat(kids),
+        );
+      }
+      function open() {}
+
+      // What engine/ai/testReport.ts reads from each runner's own summary.
+      var vitest = {
+        runner: 'vitest',
+        totals: {
+          passed: 2184,
+          failed: 2,
+          skipped: 6,
+          total: 2192,
+          durationMs: 48300,
+          files: { passed: 311, failed: 1, total: 312 },
+        },
+        failures: [
+          {
+            name: 'ConversationRail > keeps a folded rail mounted and reads nothing',
+            message: 'AssertionError: expected 1 to be +0 // Object.is equality',
+            location: { file: 'src/agent/rail/ConversationRail.test.tsx', line: 214, column: 27 },
+          },
+          {
+            name: 'ConversationRail > opens as a drawer below 960px',
+            message:
+              'TestingLibraryElementError: Unable to find role="dialog" and name "Conversation details"',
+            location: { file: 'src/agent/rail/ConversationRail.test.tsx', line: 251, column: 11 },
+          },
+        ],
+        suites: [
+          {
+            name: 'src/agent/rail/PlanCard.test.tsx',
+            cases: [
+              { name: 'shows what is left, then what is done', status: 'passed', durationMs: 38 },
+              {
+                name: 'carries the working light only while the run is live',
+                status: 'passed',
+                durationMs: 22,
+              },
+            ],
+          },
+          {
+            name: 'src/agent/rail/ConversationRail.test.tsx',
+            cases: [
+              { name: 'wires its cards in one order', status: 'passed', durationMs: 41 },
+              {
+                name: 'keeps a folded rail mounted and reads nothing',
+                status: 'failed',
+                durationMs: 12,
+                message: 'AssertionError: expected 1 to be +0',
+              },
+              { name: 'opens as a drawer below 960px', status: 'failed', durationMs: 208 },
+              { name: 'docks when the chat frame is 960px wide', status: 'passed', durationMs: 96 },
+              { name: 'remembers cerebro.chatRailOpen across reloads', status: 'skipped' },
+            ],
+          },
+        ],
+        cut: false,
+      };
+      var cargo = {
+        runner: 'cargo',
+        totals: { passed: 1286, failed: 0, skipped: 4, total: 1290, durationMs: 41200 },
+        failures: [],
+        cut: false,
+      };
+      var playwright = {
+        runner: 'playwright',
+        totals: { passed: 118, failed: 5, skipped: 1, total: 124, durationMs: 73000 },
+        failures: [
+          {
+            name: '[chromium] › e2e/rail.spec.ts:88:3 › below 960px it opens as a drawer',
+            message: 'Error: expect(locator).toBeVisible() failed',
+            location: { file: 'e2e/rail.spec.ts', line: 97, column: 41 },
+          },
+          {
+            name: '[chromium] › e2e/agent-detach.spec.ts:31:3 › closing the panel mid-turn detaches',
+            message: 'Error: Timed out 5000ms waiting for expect(locator).toHaveText(expected)',
+          },
+        ],
+        cut: true,
+      };
+
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'grid' },
+          h(
+            'div',
+            { className: 'full' },
+            Cell(
+              'A failing run opens by itself: totals, then each failure and where it was raised, then the suites',
+              h(C.TestResults, { report: vitest, onOpenPath: open }),
+            ),
+          ),
+          Cell(
+            'A passing run stays closed, its counts in its line',
+            h(C.TestResults, { report: cargo, onOpenPath: open }),
+          ),
+          Cell(
+            'Output cut short: it says how many failures it still shows',
+            h(C.TestResults, { report: playwright, onOpenPath: open }),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

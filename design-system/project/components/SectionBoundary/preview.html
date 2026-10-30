@@ -1,0 +1,184 @@
+<!-- @dsCard group="Feedback" height=262 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SectionBoundary</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+      }
+      .cap {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .box {
+        padding: 12px 14px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-lg);
+        background: var(--n-0);
+      }
+      .box h3 {
+        margin: 0 0 4px;
+        font-size: var(--fs-xs);
+        font-weight: 600;
+        color: var(--n-700);
+      }
+      .step {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 26px;
+        font-size: var(--fs-ui);
+        color: var(--n-800);
+      }
+      .step.done {
+        color: var(--text-meta);
+      }
+      .note {
+        font-size: var(--fs-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+
+      function Plan() {
+        var steps = [
+          ['Read the open Risk records', true],
+          ['Read slipping work items', true],
+          ['Update the Release watch concept', false],
+        ];
+        return h(
+          React.Fragment,
+          null,
+          steps.map(function (s) {
+            return h(
+              'div',
+              { key: s[0], className: 'step' + (s[1] ? ' done' : '') },
+              h(C.Icon, {
+                name: s[1] ? 'circle-check' : 'circle',
+                size: 14,
+                color: s[1] ? 'var(--success-500)' : 'var(--n-400)',
+              }),
+              s[0],
+            );
+          }),
+        );
+      }
+      // A child that fails every time it draws.
+      function Broken() {
+        throw new Error('This section could not draw.');
+      }
+
+      function Healthy() {
+        return h(
+          'div',
+          { className: 'box' },
+          h('h3', null, 'Plan'),
+          h(C.SectionBoundary, { label: 'Plan', compact: true }, h(Plan)),
+        );
+      }
+      function FirstFault() {
+        var s = React.useState(0),
+          back = s[0],
+          setBack = s[1];
+        return h(
+          'div',
+          { className: 'box' },
+          h('h3', null, 'Details'),
+          h(
+            C.SectionBoundary,
+            {
+              label: 'This panel',
+              compact: true,
+              onBack: function () {
+                setBack(back + 1);
+              },
+            },
+            h(Broken),
+          ),
+          back > 0 &&
+            h('div', { className: 'note' }, 'Back pressed: the owner decides where it goes.'),
+        );
+      }
+      function SecondFault() {
+        var s = React.useState(0),
+          key = s[0],
+          setKey = s[1];
+        return h(
+          'div',
+          { className: 'box', 'data-again': '' },
+          h(
+            C.SectionBoundary,
+            {
+              label: 'This page’s editor',
+              resetKey: key,
+              onBack: function () {
+                setKey(key + 1);
+              },
+            },
+            h(Broken),
+          ),
+        );
+      }
+
+      // A render fault here is deliberate: the root swallows the caught report instead of logging it.
+      ReactDOM.createRoot(document.getElementById('root'), {
+        onCaughtError: function () {},
+      }).render(
+        h(
+          'div',
+          { className: 'row' },
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'healthy: draws its children'),
+            h(Healthy),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'a fault, compact: Retry draws it again'),
+            h(FirstFault),
+          ),
+          h(
+            'div',
+            { className: 'col' },
+            h('span', { className: 'cap' }, 'faulted again after Retry: stays down'),
+            h(SecondFault),
+          ),
+        ),
+      );
+
+      // Press Retry once in the third section, so its child faults a second time.
+      setTimeout(function () {
+        var b = document.querySelector('[data-again] [data-testid="section-retry"]');
+        if (b) b.click();
+      }, 60);
+    </script>
+  </body>
+</html>

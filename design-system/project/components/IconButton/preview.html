@@ -1,0 +1,152 @@
+<!-- @dsCard group="Actions" height=180 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>IconButton</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--surface-app);
+        color: var(--text-primary);
+        font-family: var(--font-ui);
+        font-size: var(--fs-sm);
+        line-height: var(--lh-sm);
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .grp {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+      }
+      .cap {
+        min-width: 72px;
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+      .note {
+        font-size: var(--fs-meta);
+        line-height: var(--lh-meta);
+        color: var(--text-meta);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      var h = React.createElement,
+        C = window.Cerebro;
+      function Row(cap, kids) {
+        return h('div', { className: 'row' }, h('span', { className: 'cap' }, cap), kids);
+      }
+      function Panels() {
+        var s = React.useState('details'),
+          shown = s[0],
+          set = s[1];
+        function t(p) {
+          set(shown === p ? null : p);
+        }
+        return h(
+          'span',
+          { className: 'grp' },
+          h(C.IconButton, {
+            icon: 'history',
+            label: 'History',
+            size: 'sm',
+            active: shown === 'history',
+            onClick: function () {
+              t('history');
+            },
+          }),
+          h(C.IconButton, {
+            icon: 'message-square',
+            label: 'Comments',
+            size: 'sm',
+            active: shown === 'comments',
+            onClick: function () {
+              t('comments');
+            },
+          }),
+          h(C.IconButton, {
+            icon: 'panel-right',
+            label: 'Details',
+            size: 'sm',
+            active: shown === 'details',
+            onClick: function () {
+              t('details');
+            },
+          }),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        h(
+          'div',
+          { className: 'col' },
+          Row('sizes', [
+            h(C.IconButton, { key: 'sm', icon: 'x', label: 'Close', size: 'sm' }),
+            h(C.IconButton, { key: 'md', icon: 'ellipsis', label: 'Record actions' }),
+            h(C.IconButton, {
+              key: 'lg',
+              icon: 'maximize-2',
+              label: 'Open in full page',
+              size: 'lg',
+            }),
+            h('span', { key: 'n', className: 'note' }, 'sm 24 · md 28 · lg 32'),
+          ]),
+          Row('outline', [
+            h(C.IconButton, {
+              key: 'a',
+              icon: 'plus',
+              label: 'Add status to In progress',
+              variant: 'outline',
+              size: 'sm',
+            }),
+            h(C.IconButton, {
+              key: 'b',
+              icon: 'search',
+              label: 'Search pages',
+              variant: 'outline',
+            }),
+            h(C.IconButton, {
+              key: 'c',
+              icon: 'layout-grid',
+              label: 'Grid',
+              variant: 'outline',
+              size: 'lg',
+            }),
+          ]),
+          Row('active', [
+            h(Panels, { key: 'p' }),
+            h('span', { key: 'n', className: 'note' }, 'Click to toggle the page panel'),
+          ]),
+          Row(
+            'disabled',
+            h(
+              'span',
+              { className: 'grp' },
+              h(C.IconButton, {
+                icon: 'chevron-up',
+                label: 'No previous record',
+                size: 'sm',
+                disabled: true,
+              }),
+              h(C.IconButton, { icon: 'chevron-down', label: 'Next record', size: 'sm' }),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>
